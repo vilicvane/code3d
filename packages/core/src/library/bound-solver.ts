@@ -7,17 +7,56 @@ import {
   origin,
   rotateVector,
   rotation,
-  transformsAreEquivalent,
   type Quaternion,
   type RigidTransform,
   type Vec3,
 } from './spatial.js';
 
 export type Bounds = readonly [minimum: Vec3, maximum: Vec3];
-export type BodyRotation =
-  | Readonly<{local: RigidTransform}>
-  | Readonly<{axis: RigidTransform; body: number; angle: number}>;
+export type ExternalRotation =
+  | Readonly<{axis: RigidTransform; body: number; angle: number}>
+  | Readonly<{
+      point: Vec3;
+      body: number;
+      rotation: Quaternion;
+      displacement: Vec3;
+    }>;
+export type BodyRotation = Readonly<{local: RigidTransform}> | ExternalRotation;
 
+/** External center relative to its owning body; point references retain self's axes. */
+export function externalRotationFrame(
+  action: ExternalRotation,
+  self: Quaternion,
+  reference: Quaternion,
+  inverse = false,
+): {center: Vec3; quaternion: Quaternion} {
+  if ('axis' in action) {
+    const axis = composeTransforms(rotation(reference), action.axis);
+    return {
+      center: axis.position,
+      quaternion: axisRotation(axis, inverse ? -action.angle : action.angle)
+        .quaternion,
+    };
+  }
+  const local = inverse
+    ? invertTransform(rotation(action.rotation))
+    : rotation(action.rotation);
+  const before = inverse
+    ? composeTransforms(rotation(self), local)
+    : rotation(self);
+  return {
+    center: addVectors(
+      rotateVector(action.point, reference),
+      rotateVector(action.displacement, before.quaternion),
+    ),
+    quaternion: composeTransforms(
+      composeTransforms(before, local),
+      invertTransform(before),
+    ).quaternion,
+  };
+}
+
+export type BodyAction = BodyRotation | Readonly<{offset: Vec3}>;
 export type BodyRelation = Readonly<{
   id: string;
   source: Readonly<{
@@ -26,11 +65,16 @@ export type BodyRelation = Readonly<{
     bounds: (orientation: Quaternion) => Bounds;
   }>;
   target: Readonly<{body: number; transform: RigidTransform; facing: 1 | -1}>;
-  offset: Vec3 | undefined;
-  rotations: readonly BodyRotation[];
 }>;
 
-export type Body = Readonly<{name: string; relations: readonly BodyRelation[]}>;
+export type Body = Readonly<{
+  name: string;
+  relations: readonly BodyRelation[];
+  /** Pose inherited from the preceding placement segment. */
+  initial?: RigidTransform;
+  /** Independent actions apply after the joint constraint solution. */
+  transformations?: readonly BodyAction[];
+}>;
 type AffinePoint = {constant: Vec3; columns: Vec3[]};
 type AffinePose = {position: AffinePoint; quaternion: Quaternion};
 type Equation = {id: string; coefficients: number[]; value: number};
@@ -74,37 +118,21 @@ export function solveBodies(
         'Cyclic external rotation axes cannot determine an authored orientation.',
       );
     visiting.add(index);
-    const candidates = bodies[index].relations
-      .filter(r => r.rotations.length)
-      .map(relation => {
-        let pose = identityRigidTransform;
-        for (const action of relation.rotations) {
-          pose =
-            'local' in action
-              ? composeTransforms(pose, action.local)
-              : composeTransforms(
-                  axisRotation(
-                    composeTransforms(seed(action.body), action.axis),
-                    action.angle,
-                  ),
-                  pose,
-                );
-        }
-        return pose;
-      });
-    const pose = candidates[0] ?? identityRigidTransform;
-    if (
-      candidates.some(
-        candidate =>
-          !transformsAreEquivalent(
-            rotation(candidate.quaternion),
-            rotation(pose.quaternion),
-          ),
-      )
-    ) {
-      throw new Error(
-        `Conflicting explicit rotations for ${bodies[index].name}.`,
-      );
+    let pose = bodies[index].initial ?? identityRigidTransform;
+    for (const action of bodies[index].transformations ?? []) {
+      if ('offset' in action) continue;
+      pose =
+        'local' in action
+          ? composeTransforms(pose, action.local)
+          : 'point' in action
+            ? composeTransforms(pose, rotation(action.rotation))
+            : composeTransforms(
+                axisRotation(
+                  composeTransforms(seed(action.body), action.axis),
+                  action.angle,
+                ),
+                pose,
+              );
     }
     visiting.delete(index);
     seeds.set(index, pose);
@@ -120,19 +148,18 @@ export function solveBodies(
     const known = positioned.get(index);
     if (known) return known;
     let pose: AffinePose = {
-      quaternion: identityRigidTransform.quaternion,
+      quaternion: (bodies[index].initial ?? identityRigidTransform).quaternion,
       position: {
-        constant: origin,
+        constant: (bodies[index].initial ?? identityRigidTransform).position,
         columns: variables.flatMap(body =>
           axes.map(axis => (body === index ? axis : origin)),
         ),
       },
     };
-    const actions =
-      bodies[index].relations.find(relation => relation.rotations.length)
-        ?.rotations ?? [];
-    for (const action of actions) {
-      if ('local' in action) {
+    for (const action of bodies[index].transformations ?? []) {
+      if ('offset' in action) {
+        pose = {...pose, position: shiftPoint(pose.position, action.offset)};
+      } else if ('local' in action) {
         pose = {
           position: shiftPoint(
             pose.position,
@@ -145,12 +172,12 @@ export function solveBodies(
         };
       } else {
         const axisPose = positionBody(action.body);
-        const axis = composeTransforms(
-          rotation(axisPose.quaternion),
-          action.axis,
+        const {center, quaternion: q} = externalRotationFrame(
+          action,
+          pose.quaternion,
+          axisPose.quaternion,
         );
-        const q = axisRotation(axis, action.angle).quaternion;
-        const axisPoint = shiftPoint(axisPose.position, axis.position);
+        const axisPoint = shiftPoint(axisPose.position, center);
         const rotatedAxis = rotatePoint(axisPoint, q);
         pose = {
           position: addPoints(
@@ -173,16 +200,19 @@ export function solveBodies(
   const preferences = new Map<string, Equation>();
   bodies.forEach((body, owner) =>
     body.relations.forEach(relation => {
-      // A chain describes contact followed by its explicit rotations. Invert only
-      // this chain; every other relation still sees and constrains the final pose.
-      const baseline = undoRotations(poses[owner], relation.rotations, poses);
-      // All authored contact stages contribute equally to the free-position
-      // choice. Deduplicate identical stages so repeated conditions add no bias.
+      // Every contact constrains the joint result before independent transforms.
+      const baseline = undoActions(
+        poses[owner],
+        body.transformations ?? [],
+        poses,
+      );
       for (let axis = 0; axis < 3; axis++) {
         const preference = {
           id: relation.id,
           coefficients: baseline.position.columns.map(column => column[axis]),
-          value: -baseline.position.constant[axis],
+          value:
+            (body.initial?.position[axis] ?? 0) -
+            baseline.position.constant[axis],
         };
         preferences.set(
           JSON.stringify([preference.coefficients, preference.value]),
@@ -212,14 +242,8 @@ export function solveBodies(
         source.position,
         rotateVector(center, targetFrame.quaternion),
       );
-      const targetPoint = shiftPoint(
-        target.position,
-        addVectors(
-          targetFrame.position,
-          rotateVector(relation.offset ?? origin, targetFrame.quaternion),
-        ),
-      );
-      for (const localAxis of relation.offset ? axes : [axes[1]]) {
+      const targetPoint = shiftPoint(target.position, targetFrame.position);
+      for (const localAxis of [axes[1]]) {
         const normal = rotateVector(localAxis, targetFrame.quaternion);
         equations.push({
           id: relation.id,
@@ -272,13 +296,18 @@ function addPoints(left: AffinePoint, right: AffinePoint): AffinePoint {
   };
 }
 
-function undoRotations(
+function undoActions(
   pose: AffinePose,
-  actions: readonly BodyRotation[],
+  actions: readonly BodyAction[],
   poses: readonly AffinePose[],
 ): AffinePose {
   for (const action of [...actions].reverse()) {
-    if ('local' in action) {
+    if ('offset' in action) {
+      pose = {
+        ...pose,
+        position: shiftPoint(pose.position, negateVector(action.offset)),
+      };
+    } else if ('local' in action) {
       const inverse = invertTransform(action.local);
       pose = {
         position: shiftPoint(
@@ -292,12 +321,13 @@ function undoRotations(
       };
     } else {
       const axisPose = poses[action.body];
-      const axis = composeTransforms(
-        rotation(axisPose.quaternion),
-        action.axis,
+      const {center, quaternion: q} = externalRotationFrame(
+        action,
+        pose.quaternion,
+        axisPose.quaternion,
+        true,
       );
-      const q = axisRotation(axis, -action.angle).quaternion;
-      const axisPoint = shiftPoint(axisPose.position, axis.position);
+      const axisPoint = shiftPoint(axisPose.position, center);
       const rotatedAxis = rotatePoint(axisPoint, q);
       pose = {
         position: addPoints(
@@ -316,7 +346,7 @@ function undoRotations(
 }
 
 /** Solve Ax=b, then minimize contact-stage displacement in its nullspace. */
-function solveTranslations(
+export function solveTranslations(
   equations: readonly Equation[],
   preferences: readonly Equation[],
   dimension: number,

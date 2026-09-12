@@ -494,7 +494,7 @@ test(
     const page = await fixture(t);
     const latin = new Uint8Array(
       await readFile(
-        new URL('../../examples/fonts/DejaVuSans.ttf', import.meta.url),
+        new URL('../../../core/test/fonts/DejaVuSans.ttf', import.meta.url),
       ),
     );
     const chinese = new Uint8Array(
@@ -550,7 +550,7 @@ test(
   async t => {
     const {createServer} = await import('node:http');
     const latin = await readFile(
-      new URL('../../examples/fonts/DejaVuSans.ttf', import.meta.url),
+      new URL('../../../core/test/fonts/DejaVuSans.ttf', import.meta.url),
     );
     const chinese = await readFile(
       new URL(

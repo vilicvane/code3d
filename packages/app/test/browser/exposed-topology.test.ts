@@ -42,9 +42,9 @@ test(
         onTopologySelection() {},
         sourceDecorationProviders: [elementSourceDecoration],
       });
-      const source = `import {box, group, point} from '@code3d/core';
+      const source = `import {offset, box, group, point} from '@code3d/core';
 const part = box(10, 20, 30);
-const shifted = group([part]).expose({body: part}).relate(self => self.body.center.on(point([40, 50, 60]).up).offset(0, 0, 0));
+const shifted = group([part]).expose({body: part}).relate(self => [self.body.center.on(point([40, 50, 60]).up), offset(0, 0, 0)]);
 const assembly = group([shifted]).expose({mount: shifted.body.surface(1), body: shifted.body});
 const outline = assembly.mount.edges();
 const ends = assembly.mount.edge(1).vertices();
@@ -66,7 +66,7 @@ export default assembly;`;
             '/main.ts',
             source.indexOf(expression) + expression.length - 1,
           );
-          const {evaluation, target} = viewport.sourceEvaluation()!;
+          const {evaluation, target} = viewport.sourceContext!;
           const selection = evaluation.selection;
           if (!selection || selection.kind === 'edges')
             throw new Error(`No selection for ${expression} (${target.kind})`);
@@ -122,7 +122,7 @@ export default assembly;`;
           '/main.ts',
           source.indexOf('const outline') + 'const out'.length,
         );
-        const outlineEvaluation = viewport.sourceEvaluation()!.evaluation;
+        const outlineEvaluation = viewport.sourceContext!.evaluation;
         const owner = [...viewport['occurrences'].values()].find(
           occurrence =>
             occurrence.node.nodeId ===
@@ -137,7 +137,7 @@ export default assembly;`;
             'assembly.mount.center'.length -
             1,
         );
-        const center = viewport.sourceEvaluation()!.evaluation.element;
+        const center = viewport.sourceContext!.evaluation.element;
         const markers =
           viewport['decorationLayers'].get('source-context:named-element')
             ?.length ?? 0;

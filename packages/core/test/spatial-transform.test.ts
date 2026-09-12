@@ -4,6 +4,7 @@ import type {Model} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
+  rotate,
   box,
   circle,
   line,
@@ -200,9 +201,10 @@ test('line coordinates retain model XYZ independently of the tangent anchor fram
     [0, 1, 0],
   );
   const direct = segment.rotate(0, 90, 0);
-  const related = segment.relate(self =>
-    self.start.align(point()).rotate(0, 90, 0),
-  );
+  const related = segment.relate(self => [
+    self.start.align(point()),
+    rotate(0, 90, 0),
+  ]);
   // An explicit first reference retains the frame in which we inspect rotation.
   const scene = snapshot(group([point(), related])).children[1];
   const end = defined(modelElementReference(related.end)).transform;

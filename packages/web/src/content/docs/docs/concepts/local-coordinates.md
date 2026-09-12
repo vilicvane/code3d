@@ -20,8 +20,8 @@ displacements, and angles:
 | `line([10, 0, 0])`             | A line from zero to the supplied endpoint            |
 | `line([10, 0, 0], [20, 0, 0])` | A line between two local positions                   |
 | `originOffset(10, 0, 0)`       | Move the origin by a local displacement              |
-| `constraint.pivot([10, 0, 0])` | Choose a rotation center in self's local coordinates |
-| `constraint.offset(10, 0, 0)`  | Set a relation offset in the target reference axes   |
+| `pivot([10, 0, 0])`            | Choose a rotation center in self's local coordinates |
+| `offset(10, 0, 0)`             | Move a relate result along fixed composition axes    |
 | `rotate(0, 90, 0)`             | Rotate geometry by 90° around local Y                |
 
 Curve control points use the returned model's local coordinates too. A common

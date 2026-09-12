@@ -1,5 +1,12 @@
 import {
   arc,
+  offset,
+  rotate,
+  pivot,
+  pivotVertex,
+  pivotPoint,
+  axisEdge,
+  axisLine,
   bezier,
   box,
   circle,
@@ -29,6 +36,8 @@ import {
   type Anchor,
   type CanonicalElements,
   type Constraint,
+  type Transformation,
+  type Relation,
   type CurveElements,
   type Edge,
   type EdgeId,
@@ -68,6 +77,32 @@ import type {Shape3D as RootShape3D} from '@code3d/core';
 import type {ModelObject as InternalModelObject} from '@code3d/core/bld/library/runtime.js';
 
 const solid = box(10, 5, 8);
+const movement: Transformation = offset(10, 0, 0);
+const placement: readonly Relation[] = [
+  movement,
+  pivot([2, 0, 0]).rotate(0, 0, 30),
+  pivotVertex(1).rotate(0, 20, 0),
+  axisLine(solid.axis).rotate(20),
+];
+solid.relate(self => [
+  self.axis.align(box(20, 2, 20).axis),
+  ...placement,
+  rotate(10, 20, 30),
+]);
+// @ts-expect-error Independent transformations still belong inside relate().
+solid.offset(10, 0, 0);
+// @ts-expect-error A pivot selection must be completed with rotate().
+solid.relate(() => pivot([1, 0, 0]));
+// @ts-expect-error Completed offset cannot start another operation.
+movement.rotate(0, 20, 0);
+// @ts-expect-error Completed rotation cannot append displacement.
+rotate(10, 20, 30).offset(1, 2, 3);
+// @ts-expect-error A completed pivot rotation cannot append another pivot.
+pivot([1, 0, 0]).rotate(0, 0, 30).pivot([0, 0, 0]);
+// @ts-expect-error A completed axis rotation cannot rotate again.
+axisLine(solid.axis).rotate(20).rotate(30);
+// @ts-expect-error A completed offset cannot append another offset.
+offset(1, 2, 3).offset(4, 5, 6);
 // Runtime defaults do not make authored dimensions optional in TypeScript.
 // @ts-expect-error Box dimensions remain required.
 box();
@@ -164,7 +199,7 @@ sketch([['point', 1, [0, 0]], 2]);
 sketch([['line', 3, [1, 2, 4]]]);
 const related = solid.relate(self => self.center.on(solid.up.flip()));
 const exposed = related.expose({mount: related.down});
-const constraint: Constraint = exposed.mount.on(solid.up).offset(1, 2, 3);
+const constraint: Constraint = exposed.mount.on(solid.up);
 const anchor: Anchor = exposed.mount;
 const vertex: Vertex = solid.vertex(1);
 const edge: Edge = solid.edge(1);
@@ -314,10 +349,15 @@ intersect([solid, exposed]);
 loft([faceModel, faceModel.relate(self => self.on(solid.down))], {
   spine: edgeModel,
 });
+// @ts-expect-error Constraints do not expose transformation methods.
 constraint.pivot([1, 2, 3]).rotate(0, 45, 0);
+// @ts-expect-error Constraints do not expose transformation methods.
 constraint.pivotVertex(1).rotate(0, 0, 90);
+// @ts-expect-error Constraints do not expose transformation methods.
 constraint.pivotVertex([1, 3]).rotate(0, 0, 90);
-constraint.around(solid.axis).rotate(45);
+// @ts-expect-error Constraints do not expose transformation methods.
+constraint.axisLine(solid.axis).rotate(45);
+// @ts-expect-error Constraints do not expose transformation methods.
 constraint.rotate(0, 45, 90);
 // Runtime editing defaults do not relax required public method arguments.
 // @ts-expect-error Rotation still requires three angles.
@@ -336,24 +376,24 @@ solid.fillet();
 solid.chamfer();
 // @ts-expect-error Shells still require a thickness.
 solid.shell();
-// @ts-expect-error Relation offsets still require three displacements.
-constraint.offset();
-// @ts-expect-error Relation rotations still require three angles.
-constraint.rotate();
+// @ts-expect-error Offsets still require three displacements.
+offset();
+// @ts-expect-error Rotations still require three angles.
+rotate();
 // @ts-expect-error Pivot coordinates remain required.
-constraint.pivot();
-// @ts-expect-error Pivot-chain rotations still require three angles.
-constraint.pivot([0, 0, 0]).rotate();
-// @ts-expect-error Vertex-pivot rotations still require three angles.
-constraint.pivotVertex(1).rotate();
+pivot();
+// @ts-expect-error Pivot rotations still require three angles.
+pivot([0, 0, 0]).rotate();
+// @ts-expect-error Vertex rotations still require three angles.
+pivotVertex(1).rotate();
 // @ts-expect-error Axis rotations still require one angle.
-constraint.around(solid.axis).rotate();
+axisLine(solid.axis).rotate();
 // @ts-expect-error on only accepts directional bounds.
 solid.on(solid.center);
 // @ts-expect-error on does not accept a whole target model.
 solid.on(solid);
 // @ts-expect-error unfinished pivot selection is not a Constraint.
-solid.relate(self => self.on(solid.up).pivot([1, 2, 3]));
+solid.relate(self => [self.on(solid.up), pivot([1, 2, 3])]);
 // @ts-expect-error Constraint no longer has flip.
 constraint.flip();
 
@@ -543,9 +583,11 @@ const alignCurve: Constraint = line([0, 0, 0], [0, 1, 0])
 const alignSurface: Constraint = rectangle(2, 3)
   .flip()
   .align(circle(2).plane.flip());
-box(2, 2, 2).relate(self =>
-  self.center.align(point()).offset(1, 2, 3).pivotVertex(1).rotate(20, 30, 40),
-);
+box(2, 2, 2).relate(self => [
+  self.center.align(point()),
+  offset(1, 2, 3),
+  pivotVertex(1).rotate(20, 30, 40),
+]);
 // @ts-expect-error Solids do not describe one point, curve, or surface.
 box(1, 1, 1).align(point());
 // @ts-expect-error Select a solid's geometry before using it as an align target.
@@ -560,13 +602,11 @@ point(1, 2, 3);
 line(10, 0, 0);
 // @ts-expect-error Model origin is always local zero and has no setter.
 box(1, 2, 3).origin(1, 2, 3);
-box(1, 2, 3).relate(self =>
-  self
-    .on(box(4, 5, 6).up)
-    // @ts-expect-error A pivot is a position array.
-    .pivot(1, 2, 3)
-    .rotate(0, 0, 90),
-);
+box(1, 2, 3).relate(self => [
+  self.on(box(4, 5, 6).up),
+  // @ts-expect-error Pivot coordinates use an array.
+  pivot(1, 2, 3).rotate(0, 0, 90),
+]);
 
 const double = cached((value: number) => value * 2);
 const doubled: number = double(2);
@@ -582,3 +622,49 @@ cached(async (value: number) => value);
 // @ts-expect-error Argument types are preserved.
 double('2');
 void [doubled, decodedValue];
+
+box(2, 2, 2).relate(() =>
+  pivotVertex(1).pivotOffset(1, 2, 3).rotate(10, 20, 30),
+);
+box(2, 2, 2).relate(() =>
+  axisLine(line([0, 1, 0]))
+    .axisOffset(1, 2, 3)
+    .rotate(30),
+);
+// @ts-expect-error Pivot offsets keep an unfinished selection.
+box(2, 2, 2).relate(() => pivotVertex(1).pivotOffset(1, 2, 3));
+// @ts-expect-error Pivot selection has no axis displacement.
+pivotVertex(1).axisOffset(1, 2, 3);
+// @ts-expect-error Axis selection has no pivot displacement.
+axisLine(line([0, 1, 0])).pivotOffset(1, 2, 3);
+// @ts-expect-error One reference displacement is edited in place.
+pivotVertex(1).pivotOffset(1, 2, 3).pivotOffset(4, 5, 6);
+axisLine(line([0, 1, 0]))
+  .axisOffset(1, 2, 3)
+  .rotate(30)
+  // @ts-expect-error Completed transformations have no reference modifiers.
+  .axisOffset(4, 5, 6);
+
+box(2, 2, 2).relate(self => [
+  pivotPoint(self.center).pivotOffset(1, 2, 3).rotate(10, 20, 30),
+  pivotPoint(solid.center).rotate(10, 20, 30),
+  axisEdge(1).axisOffset(1, 2, 3).rotate(30),
+  axisLine(self.axis).rotate(30),
+]);
+// @ts-expect-error Constraints do not expose transformation methods.
+constraint.pivotPoint(solid.center).rotate(10, 20, 30);
+// @ts-expect-error Constraints do not expose transformation methods.
+constraint.axisEdge(1).rotate(30);
+// @ts-expect-error point reference, not a topology ID
+pivotPoint(1);
+// @ts-expect-error edge ID, not a line reference
+axisEdge(solid.axis);
+// @ts-expect-error line reference, not a topology ID
+axisLine(1);
+// @ts-expect-error selectors need their final rotation
+box(2, 2, 2).relate(() => pivotPoint(solid.center));
+// @ts-expect-error axis offsets do not expose pivot offsets
+axisEdge(1).pivotOffset(1, 2, 3);
+
+// @ts-expect-error Constraints cannot be translated by a method.
+constraint.offset(1, 2, 3);

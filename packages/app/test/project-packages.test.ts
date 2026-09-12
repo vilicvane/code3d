@@ -497,13 +497,13 @@ test('runs a zero-install screw model, retains its runtime on edits, and switche
       {
         path: '/model.ts',
         source: [
-          'import {box, group} from "@code3d/core";',
+          'import {box, group, offset} from "@code3d/core";',
           'import {ISO4762} from "@code3d/screws";',
           'import {paint} from "@code3d/materials";',
           'import {MeshPhysicalMaterial, type Material} from "@code3d/core/three";',
           'const material: Material = paint({color: "#ff8800", clearcoat: 1});',
           `const plate = box(40, 10, 30).fillet(${radius}).material(material);`,
-          'const screw = ISO4762.screw("M6", 18).relate(part => part.center.on(plate.up).offset(30, 0, 0));',
+          'const screw = ISO4762.screw("M6", 18).relate(part => [part.center.on(plate.up), offset(30, 0, 0)]);',
           'export default group([plate, screw]);',
         ].join('\n'),
       },

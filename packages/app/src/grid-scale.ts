@@ -1,3 +1,6 @@
+/** The rendered grid, legend and coarse translation snap share this interval. */
+export const majorGridCells = 5;
+
 /** Scale is measured in CSS pixels per model unit; minor cells span 8–20px. */
 export function gridStep(scale: number): number {
   const minimum = 8 / scale;

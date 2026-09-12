@@ -78,4 +78,8 @@ See also [native materials](../core/#materials) and
 The App includes this package for projects using its built-in Core. For Node or
 a project with its own Core installation, install `@code3d/core` and
 `@code3d/materials` together. The peer dependency keeps a shared Three.js instance.
-See `/examples/material-presets.ts` in the App for all ten presets.
+See the [screw box source](https://github.com/vilicvane/code3d/blob/main/packages/app/examples/assemblies/screw-box/model.ts) for a compact example using plastic and steel, and the [Materials package README](../../packages/materials.md) for the available presets.
+
+The App uses neutral white studio lighting and a shared reflection environment.
+This keeps metal surfaces readable from different directions without adding a
+blue or purple cast. The same environment is used for viewport and PNG output.

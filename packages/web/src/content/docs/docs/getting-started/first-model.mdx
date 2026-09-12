@@ -1,77 +1,42 @@
 ---
 title: Your first model
-description: Make a rounded base and a cylindrical post, then inspect and adjust them.
+description: Change the width and lean of a one-piece phone stand.
 ---
 
 import ModelExample from '../../../../components/ModelExample.astro';
-import ArrowIcon from '../../../../components/ArrowIcon.astro';
-import {appUrl} from '../../../../lib/site';
 
-<p>
-  <a href={appUrl('website/first-model.ts')} target="_blank" rel="noopener">
-    {'Open this example in Code3D '}
-    <ArrowIcon />
-  </a>
-  {'. The App opens the same source shown below.'}
-</p>
-
-<ModelExample id="first-model" />
+<ModelExample id="desktop-stand" />
 
 ## Read the model
 
-`box(36, baseHeight, 24)` creates a box with dimensions along X, Y, and Z.
-`.fillet(1)` rounds all its edges with radius 1. Both the box and the cylinder
-start centered at their local origin.
+The stand needs no package installation, font download or agent connection.
+Its side profile contains a foot, leaning back and retaining lip. Extrusion
+sets its width; one box cuts the charging opening, and a small fillet softens
+the edges. The result is one solid.
 
-`originOffset(dx, dy, dz)` subtracts the offset from every point's coordinates.
-For the base, `baseHeight / 2` moves its geometry down so its top is at Y = 0.
-For the post, `-postHeight / 2` moves its geometry up so its bottom is at Y = 0,
-and the X offset of `10` places its axis at X = −10.
+The main function comes first. The `sideProfile` helper at the end contains the
+outline coordinates, so you can read the modeling steps before their details.
 
-`group([base, post])` combines the parts with their origins coincident. That
-shared zero point is also the group's origin. Grouping keeps separate parts;
-it does not fuse them into one solid.
+## Change the dimensions
 
-## Follow the source
+Select the `phoneStand()` call to change width and angle using the parameter
+tools. Inspect the function's Arguments presets to compare 70 mm / 20° with
+85 mm / 25°. Edits update the source and geometry together; Undo restores both.
+Select the charging-opening box to adjust its dimensions directly.
 
-Place the cursor on `base` in the final `group` call to inspect the base.
-Move to `post` to inspect the cylinder. Other parts may stay dimmed to provide
-context. Move into the
-`group` call to see the assembly.
+## Inspect the construction
 
-A part viewed alone appears in its own local frame, including the geometry
-coordinates set by `originOffset()`. In this assembly, those local origins
-coincide, so grouping needs no further placement.
-
-## Change a dimension
-
-Change the box's first dimension from `36` to `44`. The model recompiles as
-you type. The source is the durable model, so the new dimension is already saved
-to your workspace.
-
-Place the cursor in the `box` arguments to explore the parameter tool.
-Parameters that can be traced to editable source can also be changed there.
-
-Change `baseHeight` or `postHeight` to change a part's height. The same value
-sets its origin offset, so the contact plane stays at Y = 0.
-
-## Adjust the origin
-
-Place the cursor in `originOffset(10, -postHeight / 2, 0)`. Use the position tool
-to adjust the post's origin visually. Increasing the X offset moves its
-geometry toward negative X. Watch the numeric source change with your adjustment.
-The App writes the edit back to TypeScript and formats it.
-
-Use Undo to revert an edit. During a position drag, Escape cancels the temporary
-preview.
+Select `sideProfile(angle)` to inspect the input sketch, `extrude` to see the
+width being added, or `cut` to inspect the opening and its input body.
+`originOffset` centers the extrusion across its width; the rotation presents
+the stand upright. The profile itself remains in its local sketch plane.
 
 ## Keep your own copy
 
-The file you opened lives under `/examples`. That directory is managed by
-Code3D and can be reset or refreshed with a new version of the application.
-Create a file outside `/examples` and paste the source there to keep a model
-you want to develop.
+The `/examples` directory is managed by Code3D. A new browser project's
+`model.ts` imports the canonical stand function rather than copying the example.
+Copy the stand source outside `/examples` and update that import before keeping
+your own design changes across example updates.
 
-Continue with [the App guide](../app/) or use
-[relations](../../guides/relations/) to place parts by geometric contacts and
-alignment.
+Continue with [reusable models](../../guides/reusable-models/),
+[model tools](../../guides/model-tools/) or [the App guide](../app/).

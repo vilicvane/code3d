@@ -105,11 +105,13 @@ they do not implement GB/T 152 hole tables.
 The hole is a model used with `cut(stock, [hole])` and provides named mounting
 references.
 
-<ModelExample id="fastener" />
+<ModelExample id="screw-box" />
 
-The hole's `shaftBottom` positions it against the plate. The screw's
-`headBottom` relates to the hole's `counterboreBottom`. This example lifts the
-screw away from its seat to show the connection.
+The lid exposes four seats from the holes' `counterboreBottom` references.
+Each screw's `headBottom` meets one seat, and the lid's `mountingFace` meets
+the box's `lidSeat`. Set `gap` to 0 to close the box or lift the lid and screws
+together to inspect the holes. The box models blind tapping pilots; internal
+thread geometry is omitted.
 
 ISO 4762 includes a counterbore by default; ISO 10642 includes a countersink.
 Use `counterbore: false` or `countersink: false` respectively for a plain hole.

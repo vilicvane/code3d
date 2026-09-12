@@ -49,6 +49,28 @@ angles use degrees. Read [local coordinates](../web/src/content/docs/docs/concep
 and [relations](../web/src/content/docs/docs/guides/relations.mdx) before mixing
 origin changes, alignment, and rotation.
 
+Constraints express `on` and `align` only. Put relative `offset` and `rotate`
+transformations in the `relate` array after the constraints. Zero values add no
+centering or orientation condition; use point or axis alignment to center a part.
+The App's gizmos edit or insert independent array entries.
+
+Choose a
+center with `pivot([x,y,z])`, self topology with `pivotVertex(id)`/`axisEdge(id)`,
+or references with `pivotPoint(pointRef)`/`axisLine(lineRef)`; finish each selector
+with `rotate`. Point rotations retain self XYZ axes, including external centers. Consecutive constraints solve jointly; transformations
+then act on that result in order. A later constraint starts a new segment using
+the preceding pose. Independent offsets use fixed composition axes, and rotations
+default to self's current origin. Each completed transformation is one array item,
+for example `[offset(0, 8, 0), rotate(0, 25, 0)]`. Only pivot/axis selections
+chain into `rotate`; completed transformations cannot chain into another operation.
+Keep a selected reference while moving it with
+`pivotVertex(id).pivotOffset(dx, dy, dz).rotate(x, y, z)` or
+`axisLine(axis).axisOffset(dx, dy, dz).rotate(angle)`. Point offsets use self local
+axes; axis offsets use the selected axis frame and preserve its direction.
+Each selector accepts one matching offset, followed by `rotate`.
+See the [transformation example](../app/examples/constraints/transformations.ts)
+and [placement guide](../web/src/content/docs/docs/guides/relations.mdx#transform-a-joint-result).
+
 Build readable models from named intermediate values and public operations. A
 profile followed by extrusion, or solids combined with Boolean operations,
 keeps the construction understandable and editable by both people and agents.
@@ -71,7 +93,7 @@ Dimension-based primitives and numeric modeling methods retain required TypeScri
 signatures while providing runtime defaults for omitted or `undefined` values.
 Rotations and displacements default to zero, scaling to one, extrusion distance
 to ten, and fillet radius, chamfer distance and shell thickness to one. Relation
-rotation chains use the same angle defaults; `pivot()` defaults to local zero.
+rotation selectors use the same angle defaults; `pivot()` defaults to local zero.
 Explicit invalid values retain their normal errors. These defaults work in
 ordinary JavaScript execution as well as App previews.
 
@@ -148,7 +170,7 @@ const draft = sketch().relate(s => s.plane.align(host.surface(2)));
 ```
 
 The target may be a named plane or a planar `host.surface(id)`. The sketch plane
-normal is local `+Y`; alignment uses the same directed-plane, target-frame offset
+normal is local `+Y`; alignment uses the same directed-plane alignment, composition-axis offset
 and rotation semantics as model relations. It does not implicitly center the
 sketch on a trimmed surface. An unbounded sketch plane cannot use `on()` to place
 finite geometry against a bound; use `align()`. Topology-only pivots such as
@@ -168,7 +190,7 @@ of that geometry are not separate authoring definitions. Context outlines are
 visual references only, not snapping targets or imported geometry constraints.
 The select-surface-and-create UI is tracked separately within
 [#114](https://github.com/vilicvane/code3d/issues/114).
-Try [sketch-on-surface.ts](../app/examples/sketch-on-surface.ts).
+Try [mounting-plate.ts](../app/examples/sketches/mounting-plate.ts).
 
 ## Cached computations and custom primitives
 

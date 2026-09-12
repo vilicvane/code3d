@@ -5,11 +5,18 @@ import ArrowIcon from './ArrowIcon.astro';
 import {modelImage} from '../lib/images';
 import {sitePath} from '../lib/site';
 import {renderSamples} from '../../../app/render-samples/catalog';
-const examples = await getCollection('examples');
-examples.sort(
-  (a, b) =>
-    renderSamples.findIndex(s => s.id === a.id) -
-    renderSamples.findIndex(s => s.id === b.id),
+interface Props {
+  ids?: string[];
+}
+const {ids} = Astro.props;
+const examples = (await getCollection('examples')).filter(
+  example => !ids || ids.includes(example.id),
+);
+examples.sort((a, b) =>
+  ids
+    ? ids.indexOf(a.id) - ids.indexOf(b.id)
+    : renderSamples.findIndex(s => s.id === a.id) -
+      renderSamples.findIndex(s => s.id === b.id),
 );
 ---
 

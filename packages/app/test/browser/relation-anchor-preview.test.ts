@@ -50,10 +50,10 @@ test(
           ['self.vertex(2)', 'base.up'],
           ['self.up', 'base.down'],
         ] as const) {
-          const source = `import {box, group} from '@code3d/core';
+          const source = `import {offset, box, group} from '@code3d/core';
           const base = box(10, 10, 10);
           const part = box(20, 20, 20).relate(self => ${sourceAnchor}.on(${targetAnchor}));
-          const peer = box(3, 3, 3).relate(self => self.down.on(base.up).offset(20, 0, 0));
+          const peer = box(3, 3, 3).relate(self => [self.down.on(base.up), offset(20, 0, 0)]);
           export default group([base, part, peer]);`;
           const module = await client.compile(
             {files: [{path: '/main.ts', source}]},
@@ -66,7 +66,7 @@ test(
               '/main.ts',
               source.indexOf(anchor) + anchor.length - 1,
             );
-            const {target, evaluation} = viewport.sourceEvaluation()!;
+            const {target, evaluation} = viewport.sourceContext!;
             const selected = viewport.getSelected();
             const rendered = [
               ...viewport['occurrences'].values(),
@@ -153,7 +153,7 @@ test(
               ],
             ] as const) {
               viewport.selectBySourceOffset('/main.ts', start + offset);
-              const {target, evaluation} = viewport.sourceEvaluation()!;
+              const {target, evaluation} = viewport.sourceContext!;
               const rendered = [
                 ...viewport['occurrences'].values(),
                 ...viewport['contextOccurrences'].values(),
@@ -168,7 +168,7 @@ test(
                   viewport.getSelected()!.node.nodeId ===
                   (site === 'anchor'
                     ? evaluation.element!.nodeId
-                    : evaluation.constraintOwnerNodeId),
+                    : evaluation.relationOwnerNodeId),
                 correctPlacements: rendered.every(
                   ({node, object, placement}) =>
                     placement === 'composition' &&

@@ -27,6 +27,7 @@ export class ModelPreviewState {
     state: 'busy' | 'ready' | 'error';
     label?: string;
     compilation?: {member?: string};
+    continuous?: boolean;
   }> = {state: 'busy', label: 'Loading editor'};
   file: string | undefined;
   status: 'ready' | 'error' = 'ready';
@@ -80,6 +81,7 @@ export class ModelPreviewState {
       observeTarget: action,
       editSource: action,
       showStatus: action,
+      queueUpdate: action,
       beginCompilation: action,
     });
   }
@@ -99,14 +101,26 @@ export class ModelPreviewState {
       state: this.activity.state,
       label: phase
         ? `${compilationPhaseLabels[phase]}${compilation?.member ? ` · ${compilation.member}` : ''}`
-        : this.activity.label,
+        : this.activity.continuous
+          ? 'Updating model'
+          : this.activity.label,
       description: phase ? compilationPhaseDescriptions[phase] : undefined,
-      delay: phase === 'preparing-preview' ? 200 : 0,
+      delay:
+        phase === 'preparing-preview' && !this.activity.continuous ? 200 : 0,
     };
   }
 
   beginCompilation(member?: string): void {
-    this.activity = {state: 'busy', compilation: {member}};
+    this.activity = {
+      state: 'busy',
+      compilation: {member},
+      continuous: this.activity.continuous,
+    };
+  }
+
+  /** Tool edits keep feedback visible until their replacement is presented. */
+  queueUpdate(interactive = false): void {
+    this.activity = {state: 'busy', continuous: interactive};
   }
 
   get statusDiagnostic(): ModelDiagnostic | undefined {

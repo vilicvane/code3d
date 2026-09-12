@@ -1,5 +1,12 @@
 import type {ToolDragPreview} from '../ui/tool-drag-preview';
-import {action, autorun, computed, makeObservable, observableRef} from 'mobx';
+import {
+  action,
+  autorun,
+  computed,
+  makeObservable,
+  observableRef,
+  reaction,
+} from 'mobx';
 import * as THREE from 'three';
 import {
   TransformControls,
@@ -9,17 +16,20 @@ import type {
   ParameterKind,
   ParameterTarget,
   Transform,
+  Vec3,
 } from '@code3d/core/tooling';
 import {spatialAxisColors} from '../spatial-axis-colors';
+import {majorGridCells} from '../grid-scale';
 import {snapNumericValue} from './parameter-policy';
-import type {SourceAnchor} from './tool-system';
 import type {ModelSpatialBinding} from './model-spatial-tool';
 import type {CallArgumentDefaults} from './source-expression';
 import {worldUnitsPerPixel} from '../rendering/screen-space';
 
 const handleLengthPixels = 100;
+const coarseRotationStep = 15;
 
 export type TransformAxis = 'x' | 'y' | 'z';
+export type SpatialTool = 'translate' | 'rotate-point' | 'rotate-axis';
 
 /** A drag owns a fixed grid interval; numeric input policies remain independent. */
 export type TranslationGrid = {
@@ -43,11 +53,6 @@ type TransformBindingBase = Readonly<{
 export type TransformGizmoBinding = TransformBindingBase &
   (
     | Readonly<{kind: 'parameter'; target: ParameterTarget}>
-    | Readonly<{
-        kind: 'expression';
-        receiver: SourceAnchor;
-        occurrenceKeys: readonly string[];
-      }>
     | Readonly<{
         kind: 'spatial';
         spatial: ModelSpatialBinding;
@@ -93,10 +98,16 @@ export class TransformGizmo {
   private hovered?: AxisControl;
   private pointerId?: number;
   private cancelling = false;
-  private bypassSnap = false;
   private altHeld = false;
+  private shiftHeld = false;
+  private selectedTool?: Readonly<{
+    context: string | undefined;
+    tool: SpatialTool;
+  }>;
+  private sourceTool?: SpatialTool;
   private bindings: readonly TransformGizmoBinding[] = [];
   private readonly disposeMode: () => void;
+  private readonly disposeContext: () => void;
 
   get dragPreview(): ToolDragPreview | undefined {
     if (!this.active) return undefined;
@@ -106,9 +117,13 @@ export class TransformGizmo {
         binding.mode === 'rotate'
           ? 'Rotate'
           : binding.kind === 'spatial'
-            ? binding.spatial.operation === 'pivot'
+            ? ['pivot', 'pivotOffset'].includes(binding.spatial.operation)
               ? 'Pivot'
-              : 'Origin'
+              : binding.spatial.operation === 'axisOffset'
+                ? 'Axis'
+                : binding.spatial.operation === 'offset'
+                  ? 'Move'
+                  : 'Origin'
             : 'Offset',
       values: [
         {
@@ -126,14 +141,111 @@ export class TransformGizmo {
     };
   }
 
+  get currentBindings(): readonly TransformGizmoBinding[] {
+    return this.bindings;
+  }
+
+  get availableTools(): readonly SpatialTool[] {
+    const tools = new Set(this.bindings.map(bindingTool));
+    if (this.sourceTool) tools.add(this.sourceTool);
+    if (
+      this.bindings.some(
+        binding =>
+          binding.kind === 'spatial' &&
+          binding.mode === 'rotate' &&
+          binding.spatial.objects.some(object => object.spatial.reference),
+      )
+    ) {
+      tools.add('rotate-point');
+      tools.add('rotate-axis');
+    }
+    return [...tools];
+  }
+
+  get tool(): SpatialTool | undefined {
+    return this.selectedTool?.context === this.context() &&
+      this.selectedTool &&
+      this.availableTools.includes(this.selectedTool.tool)
+      ? this.selectedTool.tool
+      : this.sourceTool;
+  }
+
+  /** The authored operation represented by the active tool, excluding Alt handles. */
+  get toolBinding(): TransformGizmoBinding | undefined {
+    return this.bindings.find(
+      binding =>
+        bindingTool(binding) === this.tool && !referenceBinding(binding),
+    );
+  }
+
+  selectTool(tool: SpatialTool): void {
+    this.cancel();
+    this.selectedTool = {context: this.context(), tool};
+  }
+
+  get rotationBinding():
+    Extract<TransformGizmoBinding, {kind: 'spatial'}> | undefined {
+    const rotations = this.bindings.filter(
+      (binding): binding is Extract<TransformGizmoBinding, {kind: 'spatial'}> =>
+        binding.kind === 'spatial' && binding.mode === 'rotate',
+    );
+    // A missing variant uses the existing rotation only as its insertion anchor.
+    return (
+      rotations.find(binding => bindingTool(binding) === this.tool) ??
+      rotations[0]
+    );
+  }
+
+  get reference() {
+    const binding = this.rotationBinding;
+    return binding?.spatial.objects.find(
+      object => object.nodeId === binding.spatial.ownerNodeId,
+    )?.spatial.reference;
+  }
+
+  get referencePicking(): Exclude<SpatialTool, 'translate'> | undefined {
+    const tool = this.tool;
+    return !this.active &&
+      tool &&
+      tool !== 'translate' &&
+      (this.reference || this.sourceTool)
+      ? tool
+      : undefined;
+  }
+
+  private get displayedBindings(): readonly TransformGizmoBinding[] {
+    if (!this.isAvailable()) return [];
+    const available = this.bindings.filter(binding => this.canEdit(binding));
+    if (this.active) {
+      const active = this.active.binding;
+      return available.filter(
+        binding =>
+          bindingTool(binding) === bindingTool(active) &&
+          referenceBinding(binding) === referenceBinding(active),
+      );
+    }
+    let tool = this.tool;
+    let reference = false;
+    if (this.altHeld && tool !== 'translate') {
+      reference = this.bindings.some(
+        binding => bindingTool(binding) === tool && referenceBinding(binding),
+      );
+    }
+    const matching = available.filter(binding => bindingTool(binding) === tool);
+    if (
+      matching.every(referenceBinding) &&
+      !matching.some(
+        binding =>
+          binding.kind === 'spatial' &&
+          binding.spatial.source.kind === 'reference-offset',
+      )
+    )
+      reference = true;
+    return matching.filter(binding => referenceBinding(binding) === reference);
+  }
+
   private get displayedMode(): TransformGizmoBinding['mode'] | undefined {
-    if (this.active) return this.active.binding.mode;
-    const modes = new Set(this.bindings.map(binding => binding.mode));
-    return modes.size > 1
-      ? this.altHeld
-        ? 'rotate'
-        : 'translate'
-      : this.bindings[0]?.mode;
+    return this.displayedBindings[0]?.mode;
   }
 
   constructor(
@@ -143,23 +255,45 @@ export class TransformGizmo {
     private readonly setNavigationEnabled: (enabled: boolean) => void,
     private readonly translationGrid: TranslationGrid,
     private readonly onEvent: (event: TransformGizmoEvent) => void,
+    private readonly isAvailable: () => boolean = () => true,
+    private readonly canEdit: (
+      binding: TransformGizmoBinding,
+    ) => boolean = () => true,
+    private readonly context: () => string | undefined = () => undefined,
   ) {
     makeObservable<
       this,
+      | 'selectedTool'
+      | 'sourceTool'
+      | 'displayedBindings'
       | 'altHeld'
+      | 'shiftHeld'
       | 'bindings'
       | 'active'
       | 'displayedMode'
       | 'setAltHeld'
+      | 'setShiftHeld'
       | 'beginDrag'
       | 'finishDrag'
       | 'applyDrag'
     >(this, {
+      selectedTool: observableRef,
+      sourceTool: observableRef,
+      availableTools: computed,
+      tool: computed,
+      toolBinding: computed,
+      reference: computed,
+      referencePicking: computed,
+      rotationBinding: computed,
+      selectTool: action,
+      displayedBindings: computed,
       altHeld: observableRef,
+      shiftHeld: observableRef,
       bindings: observableRef,
       active: observableRef,
       displayedMode: computed,
       setAltHeld: action,
+      setShiftHeld: action,
       beginDrag: action,
       finishDrag: action,
       applyDrag: action,
@@ -169,6 +303,13 @@ export class TransformGizmo {
       cancel: action,
     });
     this.previousTouchAction = domElement.style.touchAction;
+    this.disposeContext = reaction(
+      context,
+      action(context => {
+        if (this.selectedTool?.context !== context)
+          this.selectedTool = undefined;
+      }),
+    );
     this.createAxis = axis => {
       const proxy = new THREE.Object3D();
       scene.add(proxy);
@@ -206,10 +347,10 @@ export class TransformGizmo {
     };
     this.axes = [];
     this.disposeMode = autorun(() => {
-      const mode = this.displayedMode;
+      const bindings = this.displayedBindings;
       this.bindings;
       for (const control of this.axes) {
-        const visible = !!control.binding && control.binding.mode === mode;
+        const visible = !!control.binding && bindings.includes(control.binding);
         control.controls.getHelper().visible = visible;
         control.controls.enabled = visible;
         if (!visible && this.hovered === control) this.setHovered(undefined);
@@ -229,10 +370,14 @@ export class TransformGizmo {
     );
     domElement.ownerDocument.addEventListener(
       'keydown',
-      this.onSnapKey,
+      this.onModifierKey,
       options,
     );
-    domElement.ownerDocument.addEventListener('keyup', this.onSnapKey, options);
+    domElement.ownerDocument.addEventListener(
+      'keyup',
+      this.onModifierKey,
+      options,
+    );
     domElement.ownerDocument.defaultView?.addEventListener(
       'blur',
       this.onBlur,
@@ -243,9 +388,11 @@ export class TransformGizmo {
   attach(
     object: THREE.Object3D,
     bindings: readonly TransformGizmoBinding[],
+    sourceTool?: SpatialTool,
   ): void {
     this.detach();
     this.attachedObject = object;
+    this.sourceTool = sourceTool;
     while (this.axes.length > bindings.length) {
       const control = this.axes.pop()!;
       control.controls.getHelper().removeFromParent();
@@ -260,6 +407,14 @@ export class TransformGizmo {
       control.controls.showZ = binding.axis === 'z';
       control.binding = binding;
       if (!binding) continue;
+      const axisRotation =
+        binding.mode === 'rotate' && bindingTool(binding) === 'rotate-axis';
+      control.controls.setColors(
+        axisRotation ? '#ffad4d' : spatialAxisColors.x,
+        axisRotation ? '#ffad4d' : spatialAxisColors.y,
+        axisRotation ? '#ffad4d' : spatialAxisColors.z,
+        '#d8ff3e',
+      );
       control.controls.setMode(binding.mode);
       control.controls.setSize(binding.mode === 'rotate' ? 0.95 : 0.72);
       control.controls.attach(control.proxy);
@@ -282,11 +437,13 @@ export class TransformGizmo {
     }
     this.attachedObject = undefined;
     this.bindings = [];
+    this.sourceTool = undefined;
   }
 
   dispose(): void {
     this.detach();
     this.disposeMode();
+    this.disposeContext();
     this.pointerListeners.abort();
     for (const {controls, proxy} of this.axes) {
       controls.getHelper().removeFromParent();
@@ -369,17 +526,6 @@ export class TransformGizmo {
     };
   }
 
-  commitParameterValue(targetId: string, value: number): void {
-    for (const control of this.axes) {
-      if (
-        control.binding?.kind === 'parameter' &&
-        control.binding.target.id === targetId
-      ) {
-        control.binding = {...control.binding, value};
-      }
-    }
-  }
-
   cancel(): boolean {
     const active = this.active;
     if (!active) return false;
@@ -399,7 +545,7 @@ export class TransformGizmo {
   }
 
   private beginDrag(control: AxisControl): void {
-    if (this.active || !control.binding) return;
+    if (this.active || !control.binding || !this.isAvailable()) return;
     this.active = {
       control,
       binding: control.binding,
@@ -445,15 +591,21 @@ export class TransformGizmo {
       binding.axis === 'y' ? 1 : 0,
       binding.axis === 'z' ? 1 : 0,
     );
-    // Quantize spatial distance before reversing the source parameter mapping.
+    // Quantize physical distance/angle before reversing the parameter mapping.
     // Keep the gesture's starting value, so off-grid inputs do not jump on grab.
+    const step =
+      active.gridStep !== undefined
+        ? active.gridStep * (this.shiftHeld ? majorGridCells : 1)
+        : this.shiftHeld
+          ? coarseRotationStep
+          : undefined;
     const delta =
-      active.gridStep === undefined || this.bypassSnap
+      step === undefined
         ? active.delta
-        : Math.round(active.delta / active.gridStep) * active.gridStep;
+        : Math.round(active.delta / step) * step;
     const candidate = binding.value + delta / binding.sensitivity;
     const value =
-      binding.mode === 'rotate'
+      step === undefined
         ? snapNumericValue(
             {
               value: binding.value,
@@ -518,29 +670,37 @@ export class TransformGizmo {
 
   private endTranslation(active: ActiveDrag): void {
     if (active.gridStep !== undefined) this.translationGrid.unlock();
-    this.bypassSnap = false;
   }
 
   private setAltHeld(value: boolean): void {
     this.altHeld = value;
   }
 
+  private setShiftHeld(value: boolean): boolean {
+    if (this.shiftHeld === value) return false;
+    this.shiftHeld = value;
+    return true;
+  }
+
   private onBlur = (): void => {
-    this.setAltHeld(false);
     this.cancel();
+    this.setAltHeld(false);
+    this.setShiftHeld(false);
   };
 
-  private onSnapKey = (event: KeyboardEvent): void => {
+  private onModifierKey = (event: KeyboardEvent): void => {
+    if (event.key === 'Shift') {
+      if (this.setShiftHeld(event.shiftKey) && this.active) this.applyDrag();
+      return;
+    }
     if (event.key !== 'Alt') return;
     this.setAltHeld(event.type === 'keydown');
-    if (new Set(this.bindings.map(binding => binding.mode)).size > 1)
+    if (
+      this.tool &&
+      this.tool !== 'translate' &&
+      (this.reference || this.sourceTool)
+    )
       event.preventDefault();
-    if (this.active?.gridStep === undefined) return;
-    const bypass = event.type === 'keydown';
-    if (bypass === this.bypassSnap) return;
-    this.bypassSnap = bypass;
-    event.preventDefault();
-    this.applyDrag();
   };
 
   private prepareRay(event: PointerEvent): THREE.Raycaster {
@@ -560,7 +720,7 @@ export class TransformGizmo {
     const raycaster = this.prepareRay(event);
     let nearest: {control: AxisControl; distance: number} | undefined;
     for (const control of this.axes) {
-      if (!control.binding || control.binding.mode !== this.displayedMode)
+      if (!control.binding || !this.displayedBindings.includes(control.binding))
         continue;
       control.controls.getHelper().updateMatrixWorld(true);
       const hit = raycaster
@@ -591,21 +751,21 @@ export class TransformGizmo {
   private onPointerDown = (event: PointerEvent): void => {
     if (this.active || event.button !== 0) return;
     this.setAltHeld(event.altKey);
+    this.setShiftHeld(event.shiftKey);
     const control = this.pickAxis(event);
     this.setHovered(control);
     if (!control) return;
     this.pointerId = event.pointerId;
     this.domElement.setPointerCapture(event.pointerId);
-    this.bypassSnap = event.altKey;
     control.controls.getHelper().updateMatrixWorld(true);
     control.controls.pointerDown(null);
   };
 
   private onPointerMove = (event: PointerEvent): void => {
+    if (this.active && event.pointerId !== this.pointerId) return;
     this.setAltHeld(event.altKey);
+    this.setShiftHeld(event.shiftKey);
     if (this.active) {
-      if (event.pointerId !== this.pointerId) return;
-      this.bypassSnap = event.altKey;
       this.prepareRay(event);
       this.active.control.controls.pointerMove(null);
     } else if (event.pointerType === 'mouse' || event.pointerType === 'pen') {
@@ -615,6 +775,8 @@ export class TransformGizmo {
 
   private onPointerUp = (event: PointerEvent): void => {
     if (event.pointerId !== this.pointerId || event.button !== 0) return;
+    this.setAltHeld(event.altKey);
+    if (this.setShiftHeld(event.shiftKey) && this.active) this.applyDrag();
     this.active?.control.controls.pointerUp(null);
   };
 
@@ -625,4 +787,24 @@ export class TransformGizmo {
   private onPointerCancel = (event: PointerEvent): void => {
     if (event.pointerId === this.pointerId) this.cancel();
   };
+}
+
+function referenceBinding(binding: TransformGizmoBinding): boolean {
+  return (
+    binding.kind === 'spatial' &&
+    ['pivot', 'pivotOffset', 'axisOffset'].includes(binding.spatial.operation)
+  );
+}
+
+export function bindingTool(binding: TransformGizmoBinding): SpatialTool {
+  if (binding.kind === 'spatial') {
+    if (
+      binding.spatial.operation === 'axisOffset' ||
+      (binding.mode === 'rotate' &&
+        binding.spatial.objects[0]?.spatial.axisOnly)
+    )
+      return 'rotate-axis';
+    if (referenceBinding(binding)) return 'rotate-point';
+  }
+  return binding.mode === 'rotate' ? 'rotate-point' : 'translate';
 }

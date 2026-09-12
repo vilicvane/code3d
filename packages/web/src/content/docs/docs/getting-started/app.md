@@ -208,8 +208,10 @@ evaluated before it failed.
 
 Inside `relate(part => ...)`, the parameter declaration and uses of `part`
 show the related model alongside the other participants. Named elements and
-topology references share that context. Each call in the relation chain shows
-its own stage, before later offsets or rotations. The current pair's markers
+topology references share that context. Selecting the bare parameter shows its
+completed placement segment so its tools can edit the nearest following offset or rotation.
+Each independent transformation shows its own stage, before later steps in the array. The other
+constraints in the same continuous segment remain active and are solved together in each preview. Independent transformations separate successive segments. The current pair's markers
 distinguish the selected side from its counterpart and the dimmed surrounding
 objects. See
 [inspecting relation scope](../../guides/relations/#inspect-the-right-scope).
@@ -256,20 +258,62 @@ an offset can offer a position tool. Empty topology calls such as `vertex()`,
 `edge()`, `surface()`, `originVertex()`, and `pivotVertex()` still show their
 selection controls when the input model is available. Pick a candidate to fill
 the missing argument; simply opening the tool leaves the source unchanged.
-The missing-argument diagnostic remains until the call is corrected.
-Origin operations offer a pivot marker
+The missing-argument diagnostic remains until the call is corrected. An unfinished independent
+`pivotVertex()` inside `relate` also keeps self and its completed placement prefix
+available for vertex selection; finish the selector with `rotate(...)` to complete
+the transformation.
+Origin operations offer an origin marker
 and arrows, while `rotate` offers angle inputs and rotation rings. Try the
 [origin and rotation guide](../../guides/origins-and-rotation/).
 In a composition preview, selecting a member or subgroup positioned with
-`relate()` shows translation arrows by default. Hold `Alt` to show rotation rings
-when both tools are available, and release it to restore translation. The tool
-stays fixed during a drag; `Alt` during a translation drag still temporarily
-disables grid snapping. Dragging a ring
-edits the latest `.rotate(...)` in its relation, preserving its pivot or axis.
+`relate()` shows translation arrows by default. The toolbar above the parameter
+panel provides **Translate**, **Rotate about point**, and **Rotate about axis**;
+the rotation button remembers its selected variant. Translation does not change
+when Alt is held. Translate shows the part’s origin at the current placement;
+pivot and axis markers belong to the corresponding rotation tool. Axis rotation
+rings use orange for any selected axis; reference translation arrows keep XYZ colors.
+Within `relate`, tools act on the current self. Selecting an `align` or `on`
+relation highlights that relation's axes or faces. Selecting self, offset, or a
+rotation keeps its own controls without markers from other jointly solved relations.
+
+Switching tools alone leaves the source unchanged. Choosing a reference for a
+different rotation tool appends a new rotation after the current operation; it
+retains the existing rotation and its parameters. The editor follows the newly added operation and shows its panel. Blank space in a returned `relate` array, including an empty array, also opens tools for self.
+
+The toolbar highlights the tool for the current source call. A manual tool choice stays active within that rotation chain, including its selector and angle fields; moving to another call selects its corresponding tool.
+
+After a viewport tool edit, the status stays visible until the updated model is ready or reports an error. The Modeling / Render controls keep the same height when the status appears or disappears.
+
+XYZ distance fields use the current minor grid spacing as their step, matching translation drags. Arrow keys add or subtract one step from the current value. Zooming updates the step while keeping the input you are editing. Source highlighting applies only within a parameter list; placing the cursor on a method name still opens its tool without highlighting an input.
+
+A pivot or axis selector shows the full rotation panel immediately, including its reference, authored displacement, and angles. Before `rotate(...)` is written, the angle fields show zero defaults. Merely opening the panel leaves the source unchanged; editing an angle or picking a reference completes the rotation in a source edit that can be undone.
+
+A pivot or axis selector and its final `rotate(...)` form one tool: moving the
+cursor between them retains the same rotation controls and a panel containing
+both reference and angle parameters. An unfinished `pivotVertex()`, `axisEdge()`, `pivotPoint()`, or `axisLine()`
+still offers references on self. Picking a self vertex/straight edge writes `pivotVertex(id)`/`axisEdge(id)`, completes a missing `rotate` with zero
+angles and activates its gizmo. Existing angles and `pivotOffset`/`axisOffset` are
+preserved; selection and completion undo together. Coordinate `pivot` selectors
+use the same point picker, including before their final rotation is written.
+Point/axis candidates appear while the
+corresponding rotation tool is active; selecting them does not require Alt. Click a vertex,
+or straight edge of self to choose the reference, or drag an arrow
+to move it while holding `Alt`. Alt switches between object rotation and
+reference translation; releasing it retains candidates. A drag
+keeps the operation it started with even if Alt is released before the pointer.
+Gizmo handles take priority over nearby candidates; snapping stays enabled.
+
+Moving a coordinate `pivot([x, y, z])` changes those coordinates directly.
+Moving a referenced center (`pivotVertex`/`pivotPoint`) or axis (`axisEdge`/`axisLine`) adds `pivotOffset` or
+`axisOffset`, retaining the reference; an existing offset is edited in place.
+Dragging a ring
+edits the nearest following `.rotate(...)` when self is selected, preserving its
+pivot or axis. On a selected offset/rotate, the matching tool edits that call
+and the other tool inserts its operation immediately after it.
 A point marker shows that rotation’s pivot when the member is selected and
 remains visible while dragging.
 If none exists, it adds a rotation about that member's origin and local axes.
-Translation likewise reuses the latest `.offset(...)`, so alternating between
+Translation likewise reuses the nearest following `offset(...)`, so alternating between
 the tools does not keep appending calls. These tools remain available when
 `.material(...)` follows `relate(...)`. Press `Escape` to cancel or use Undo after committing.
 While dragging a translation arrow, rotation ring, sketch point, or circular
@@ -279,10 +323,14 @@ when decreasing). Field names match the parameter panel labels, including JSDoc
 `@code3d.param` labels. The readout has the same width as the tool panel. It also appears when there is no parameter
 panel or the drag will add a new offset or rotation call. Values follow snapping
 and the tool's coordinates; sketch values reflect the solved geometry. Releasing
-or cancelling the drag hides the readout.
+or cancelling the drag hides the readout. After a tool edit is committed, the
+existing spatial values with an accurate preview and valid source remain
+editable from the committed pose while the model updates. New calls or arguments
+wait for the replacement model before their handles become available.
+Cancelling a drag or releasing it without a change leaves the handles available.
 
-Coupled constraints that cannot be previewed accurately keep their existing
-editing restrictions.
+Constraints expose only `on` and `align`. All relative transformations are independent
+array entries, including transforms after a group of jointly solved constraints.
 
 When a parameter has a unique editable source, the panel follows TypeScript
 definitions to update it. Otherwise, an evaluated expression appears as
@@ -307,6 +355,15 @@ argument becomes available as each earlier one is added.
 
 Your own functions can offer the same dimension inputs. See
 [adding tools to model functions](../../guides/model-tools/).
+
+For multiple constraints, select self to move their joint result. The App edits
+or inserts an independent `offset`/`rotate` in the returned array and adds its
+Core import when needed. On an independent offset or rotation, switching tools
+inserts a new array item immediately after it; it does not chain methods onto the
+completed transformation. The tool stays within the current placement segment.
+Editing a shared callback changes every runtime instance, including a `map` of
+screws; their previews use each instance's own frame. [Try independent
+transformations](../../guides/relations/#transform-a-joint-result).
 
 ## Understand feedback
 
@@ -385,9 +442,8 @@ Changes already committed to source stay in place; use Undo to revert them.
 
 Position handles, including origin and relationship offsets, move in increments
 of the current minor grid spacing. Each drag keeps its starting grid and reference
-frame. Hold `Alt` to move freely and release it to resume snapping, even without
-moving the pointer. This affects viewport position drags only: numeric inputs keep
-their own adjustment steps, and rotation handles keep their angle steps.
+frame, with snapping always enabled. XYZ distance inputs use the current minor
+grid step and accept exact values; rotation inputs and handles keep their angle steps.
 
 See [selecting topology](../../guides/topology/) for a complete tool workflow.
 

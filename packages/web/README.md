@@ -24,7 +24,7 @@ browser. The renderer closes its own pages and leaves that browser running.
 
 ## Agent documentation and local prompts
 
-[The human introduction](src/content/docs/docs/guides/agents.md) explains
+[The human introduction](src/content/docs/docs/guides/agents.mdx) explains
 collaboration features at `/docs/guides/agents/`. Agent prompts instead open
 [the required Markdown entry](../../docs/agents.md) at `/docs/agents.md`.
 [Detailed topics](../../docs/agents/) cover operations, modeling and recovery;
@@ -78,14 +78,16 @@ See the [project documentation maintenance rules](../../.agents/skills/code3d-pr
 - User documentation: `src/content/docs/docs/` (the inner directory is the
   `/docs/` URL prefix).
 - Executable examples: `../app/examples/`. The shared catalog stores paths
-  relative to this directory, including both website examples and existing
-  App examples; do not copy a model just to add it to the gallery.
+  relative to this directory, grouped by modeling topic, shared by the website and
+  App; do not copy a model just to add it to the gallery.
 - Example metadata and source contexts: `../app/render-samples/catalog.ts`.
   `sourceContextSets` supplies the tabs, highlighted source tokens, and image
   names for the homepage and interactive example pages. The final context is
   selected initially. Each context must identify one occurrence in its source,
   with a unique token inside that context. The renderer selects the same catalog
-  entry by context ID, retaining the full source context even when identical
+  entry by context ID. Optional `view` metadata fixes camera direction and up
+  for thin parts or assemblies whose working details need a particular angle.
+  The renderer retains the full source context even when identical
   method calls occur elsewhere in the file.
 - Generated model images: `src/assets/models/`. Regenerate after changing
   examples, source contexts, or the renderer; CI regenerates them on every build.
@@ -162,3 +164,32 @@ Finish building before starting `npx wrangler dev` to preview the production
 artifact. Rebuilding Astro while this preview runs can leave Wrangler's local
 asset index pointing at the intermediate empty output directory; reload its
 configuration after the build if necessary. For source changes, use Astro dev.
+
+Keep each example focused on one learning goal. Group basic operations under
+`operations/`, relations under `constraints/`, and shape constructors under
+`primitives/`. Keep standalone text, expose, materials and topology-paths files at the example
+root; do not wrap one file in a directory of the same name.
+The primitive overview is a visual vocabulary of the built-in shapes, with each
+shape exported separately and no positioning transforms. Keep cut, union and
+intersect in separate files; names describe the API topic rather than preview
+behavior. The npm directory explicitly teaches third-party package installation. Name basic examples for the
+operation they teach, and complete projects for the thing being modeled. Put
+supporting material, texture and geometry builders after the main model when
+they would distract from that goal. Reuse a canonical component through imports;
+link to package READMEs for catalogs of options instead of repeating them in App.
+Include matching `default` values in parameter-tool annotations when the function
+has optional defaults. Prefer explicit, editable sketch entries for drawn profiles;
+reserve generated geometry for examples whose purpose is a pattern or algorithm.
+Google Fonts examples require network access; test fonts belong in test fixtures,
+not in the managed examples directory.
+
+## Example verification
+
+`packages/app/render-samples/catalog.ts` registers every runnable example.
+The native example tests check catalog coverage, exported geometry and Arguments
+presets; website focus tokens must resolve uniquely. App smoke tests open every
+registered path in a fresh browser storage workspace. Run them locally against
+the reserved task server with `CODE3D_TEST_URL=http://127.0.0.1:<port>/ npm run
+test:examples:browser --workspace @code3d/app`; they use the host Chrome CDP session.
+CI starts its own test server and browser. Include new example entries and their
+geometry/interaction assertions in the same change as the source.

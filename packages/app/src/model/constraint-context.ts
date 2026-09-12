@@ -9,8 +9,8 @@ export function evaluatedConstraint(
   evaluation: SourceTargetEvaluation,
 ): ConstraintSnapshot | undefined {
   const owner =
-    evaluation.constraintPreview ??
-    objects.get(evaluation.constraintOwnerNodeId ?? '');
+    evaluation.relationPreview ??
+    objects.get(evaluation.relationOwnerNodeId ?? '');
   return owner?.constraints.find(
     constraint => constraint.id === evaluation.constraintId,
   );
@@ -23,9 +23,10 @@ export function evaluatedConstraints(
   if (evaluation.relationContext) {
     const ids = new Set(evaluation.relationContext.constraintIds);
     return (
-      objects
-        .get(evaluation.constraintOwnerNodeId ?? '')
-        ?.constraints.filter(constraint => ids.has(constraint.id)) ?? []
+      (
+        evaluation.relationPreview ??
+        objects.get(evaluation.relationOwnerNodeId ?? '')
+      )?.constraints.filter(constraint => ids.has(constraint.id)) ?? []
     );
   }
   const constraint = evaluatedConstraint(objects, evaluation);
@@ -38,7 +39,7 @@ export function focusedConstraintSide(
 ): 'source' | 'target' {
   const focus = evaluation.constraintFocus ?? 'self';
   return focus === 'self'
-    ? constraint.source.nodeId === evaluation.constraintOwnerNodeId
+    ? constraint.source.nodeId === evaluation.relationOwnerNodeId
       ? 'source'
       : 'target'
     : focus;

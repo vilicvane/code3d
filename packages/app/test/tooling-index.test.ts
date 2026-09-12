@@ -269,7 +269,7 @@ const primitiveSource = [
   ');',
 ].join('\n');
 
-test('published method defaults retain required numeric parameters across model and constraint receivers', () => {
+test('published method defaults retain required numeric parameters across model and independent transformation calls', () => {
   const cases = [
     ['body.rotate()', [0, 0, 0]],
     ['body.originOffset()', [0, 0, 0]],
@@ -281,15 +281,15 @@ test('published method defaults retain required numeric parameters across model 
     ['body.fillet()', [1]],
     ['body.chamfer()', [1]],
     ['body.shell()', [1]],
-    ['body.on(target.up).offset()', [0, 0, 0]],
-    ['body.on(target.up).rotate()', [0, 0, 0]],
-    ['body.on(target.up).pivot()', [0, 0, 0]],
-    ['body.on(target.up).pivot([1, 2, 3]).rotate()', [0, 0, 0]],
-    ['body.on(target.up).pivotVertex(1).rotate()', [0, 0, 0]],
-    ['body.on(target.up).around(target.axis).rotate()', [0]],
+    ['offset()', [0, 0, 0]],
+    ['rotate()', [0, 0, 0]],
+    ['pivot()', [0, 0, 0]],
+    ['pivot([1, 2, 3]).rotate()', [0, 0, 0]],
+    ['pivotVertex(1).rotate()', [0, 0, 0]],
+    ['axisLine(target.axis).rotate()', [0]],
   ] as const;
   const source = [
-    'import {box, group, rectangle, extrude} from "@code3d/core";',
+    'import {box, group, rectangle, extrude, offset, rotate, pivot, pivotVertex, axisLine} from "@code3d/core";',
     'const body = box(20, 30, 40), target = box(40, 20, 30);',
     'const assembly = group([body]), face = rectangle(20, 30);',
     ...cases.map(([call]) => `${call};`),
@@ -531,7 +531,8 @@ function toolSchemaAt(
   source: string,
   call: string,
 ) {
-  const start = source.indexOf(call);
+  const line = source.indexOf('\n' + call + ';');
+  const start = line >= 0 ? line + 1 : source.indexOf(call);
   assert.notEqual(start, -1, `missing call fixture: ${call}`);
   return calls?.get(sourceNodeKey(start, start + call.length));
 }

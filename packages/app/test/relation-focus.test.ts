@@ -48,9 +48,7 @@ function at(module: ModelModule, source: string, token: string) {
     ),
   );
   const evaluation = target.evaluations[0];
-  const constraint = defined(
-    context.evaluatedConstraint(module.objects, evaluation),
-  );
+  const constraint = context.evaluatedConstraint(module.objects, evaluation)!;
   return {module, target, evaluation, constraint};
 }
 
@@ -65,33 +63,38 @@ for (const method of ['on', 'align'] as const) {
           ? 'self'
           : 'self.axis';
       const argument = `${reverse ? 'self' : 'base'}.${method === 'on' ? 'up.flip()' : 'axis.reverse()'}`;
-      const source = `import {box, group} from '@code3d/core';
+      const source = `import {box, group, offset, axisLine} from '@code3d/core';
         const base = box(20,10,30); const axis = box(2,2,2);
-        const part = box(8,6,4).relate(self => ${receiver}.${method}(
+        const part = box(8,6,4).relate(self => [${receiver}.${method}(
           /* target-start */ ${argument} /* target-end */
-        ).offset(1,2,3).around(axis.axis).rotate(20)); export default group([base,part]);`;
+        ), offset(1,2,3), axisLine(axis.axis).rotate(20)]); export default group([base,part]);`;
       const module = await compile(source);
       for (const token of [
         `${method}(`,
         'offset(',
         '1,2,3',
-        'around(',
+        'axisLine(',
         'axis.axis',
         'rotate(',
         '20)',
       ]) {
         const scope = at(module, source, token);
-        assert.equal(scope.evaluation.constraintFocus, 'self', token);
         assert.deepEqual(
           scope.evaluation.focusNodeIds,
-          [scope.evaluation.constraintOwnerNodeId],
+          [scope.evaluation.relationOwnerNodeId],
           token,
         );
-        assert.equal(
-          context.focusedConstraintSide(scope.evaluation, scope.constraint),
-          reverse ? 'target' : 'source',
-          token,
-        );
+        if (scope.evaluation.transformationId) {
+          assert.equal(scope.constraint, undefined, token);
+          assert.equal(scope.evaluation.constraintFocus, undefined, token);
+        } else {
+          assert.equal(scope.evaluation.constraintFocus, 'self', token);
+          assert.equal(
+            context.focusedConstraintSide(scope.evaluation, scope.constraint),
+            reverse ? 'target' : 'source',
+            token,
+          );
+        }
       }
       for (const token of [
         '/* target-start */',
@@ -108,16 +111,19 @@ for (const method of ['on', 'align'] as const) {
         );
       }
       const axisScope = at(module, source, 'axis.axis');
-      assert.equal(axisScope.evaluation.constraintSpatial?.kind, 'around');
-      assert.equal(axisScope.evaluation.nodeIds.length, 3);
+      assert.equal(axisScope.evaluation.relationSpatial?.kind, 'rotate');
+      assert.equal(
+        axisScope.target.id,
+        at(module, source, 'rotate(').target.id,
+      );
     });
   }
 }
 
 test('on applies one opacity factor to complete source and target groups without named duplicates', async () => {
-  const source = `import {box,group} from '@code3d/core'; const base=group([box(20,10,30)]); const part=group([box(8,6,4)]).relate(self=>self.on( base.up ).offset(2,0,0)); export default group([base,part]);`;
+  const source = `import {offset, box,group} from '@code3d/core'; const base=group([box(20,10,30)]); const part=group([box(8,6,4)]).relate(self=>[self.on( base.up ), offset(2,0,0)]); export default group([base,part]);`;
   const module = await compile(source);
-  for (const token of ['on(', 'base.up', 'offset(']) {
+  for (const token of ['on(', 'base.up']) {
     const scope = at(module, source, token);
     assert.deepEqual(
       decorations.elementSourceDecoration.decorations(scope),
@@ -210,9 +216,19 @@ test('two relation elements on the same node keep distinct focus and decoration 
 });
 
 test('member previews retain their reference receiver when a chain focuses self', async () => {
-  const source = `import {box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>self.on(base.up).around(axis.axis).rotate(20));`;
+  const source = `import {axisLine, rotate, box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>[self.on(base.up), axisLine(axis.axis).rotate(20)]);`;
   const module = await compile(source);
-  const scope = at(module, source, 'axis.axis');
+  const targetAtReference = defined(
+    module.sourceTargets.find(
+      target =>
+        target.kind === 'element' &&
+        target.receiverRef?.start === source.indexOf('axis.axis'),
+    ),
+  );
+  const scope = {
+    target: targetAtReference,
+    evaluation: targetAtReference.evaluations[0],
+  };
   const receiver = defined(scope.evaluation.valueNodeIds?.[0]);
   assert.notEqual(receiver, scope.evaluation.focusNodeIds?.[0]);
   let preview:
@@ -255,4 +271,44 @@ test('member previews retain their reference receiver when a chain focuses self'
     }),
     [],
   );
+});
+
+test('joint placement highlights only the focused relation, while self and transforms keep no unrelated markers', async () => {
+  const source = `import {box,group,offset,pivot} from '@code3d/core'; const base=box(20,10,30); const part=box(8,6,4).relate(self=>[self.axis.align(base.axis),self.on(base.up), offset(1,0,0),offset(3,0,0),pivot([1,0,0]).rotate(0,0,20)]); export default group([base,part]);`;
+  const module = await compile(source);
+  for (const token of ['align(', 'on(', 'base.axis', 'base.up']) {
+    const scope = at(module, source, token);
+    const items = decorations.relationSourceDecoration.decorations(scope);
+    assert.ok(items.length > 0, token);
+    assert.ok(
+      items.every(item => item.id.startsWith(`${scope.constraint.id}:`)),
+      token,
+    );
+  }
+  for (const token of [
+    'self.on',
+    'offset(1',
+    'offset(3',
+    'pivot([',
+    'rotate(',
+  ]) {
+    const target = defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/main.ts',
+        source.indexOf(token) + 1,
+      ),
+    );
+    const evaluation = target.evaluations[0];
+    assert.deepEqual(
+      decorations.relationSourceDecoration.decorations({
+        module,
+        target,
+        evaluation,
+      }),
+      [],
+      token,
+    );
+    assert.ok(evaluation.relationPreview, token);
+  }
 });

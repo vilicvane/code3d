@@ -7,15 +7,17 @@ import ModelExample from '../../../../components/ModelExample.astro';
 import SourceCode from '../../../../components/SourceCode.astro';
 import ArrowIcon from '../../../../components/ArrowIcon.astro';
 import {appUrl, sitePath} from '../../../../lib/site';
-import source from '../../../../../../app/examples/combined-constraints.ts?raw';
+import source from '../../../../../../app/examples/constraints/combined-constraints.ts?raw';
+import transformations from '../../../../../../app/examples/constraints/transformations.ts?raw';
 
 A relation describes how one part sits against another. It is attached to a
 model value and resolved when the parts are composed. The part keeps its own
 [local coordinates](../../concepts/local-coordinates/): `originOffset()` changes
 those geometry coordinates, while a relation's `offset()` participates in
-placement. Multiple relations are solved together with their offsets.
+placement. Consecutive constraints are solved together; independent transformations
+then move that joint result.
 
-<ModelExample id="relation-preview" />
+<ModelExample id="relate" />
 
 ## Touch a directional bound
 
@@ -29,8 +31,12 @@ geometry contributes its extent. A tilted shape still has a support boundary
 in the target direction; `on` never rotates it. Without an offset, its position
 along the boundary plane stays unchanged.
 
-An explicit `offset(x, y, z)` fixes the matching bound centers in the **target
-reference frame**, including when all values are zero. Repeated offsets add.
+An explicit `offset(x, y, z)` translates self from the original solution in the
+**target reference frame**. Zero leaves the result unchanged; it never adds
+centering constraints. Use explicit point or axis alignment to center parts.
+Consecutive offsets in the same frame add. Offsets and rotations execute in
+call order: a translation before an external-axis rotation moves with that
+rotation; the same translation after it does not.
 `base.up.flip()` reverses the side of contact while keeping that frame and the
 geometry unchanged. Arbitrary models or topology elements are not valid targets.
 
@@ -38,10 +44,14 @@ geometry unchanged. Arbitrary models or topology elements are not valid targets.
 
 Return an array from `relate()` to solve several relations together:
 
-<SourceCode source={source} file="combined-constraints.ts" />
+<SourceCode source={source} file="constraints/combined-constraints.ts" />
 
 <p>
-  <a href={appUrl('combined-constraints.ts')} target="_blank" rel="noopener">
+  <a
+    href={appUrl('constraints/combined-constraints.ts')}
+    target="_blank"
+    rel="noopener"
+  >
     {'Open this example in the App '}
     <ArrowIcon />
   </a>
@@ -81,12 +91,16 @@ surface's normal sense. These change direction metadata while preserving the
 reference axes. Point membership ignores direction; a curve lying on a surface
 does not gain an arbitrary heading in that surface.
 
-An align offset translates self in the target reference axes after alignment
-and before explicit rotations. Zero adds no extra position condition. It does
-not pin centers as an on offset does. Source and target can be written in either
-order; `relate` still owns the movable self.
+Constraints do not have offset or rotation methods. To adjust their solved pose,
+add an independent `offset(x, y, z)` array entry. Its direction uses the fixed
+composition axes, regardless of which side of `on` or `align` names self.
+Zero leaves the preceding solution unchanged.
 
-<ModelExample id="geometric-alignment" />
+<ModelExample id="expose" />
+
+The pin function exposes its mounting face, tip face and centerline. The cap
+aligns its axis to the pin and touches its tip. These two relations express the
+actual fit; changing the pin's height does not require recomputing the cap position.
 
 Relation curves keep their actual shape and serve as the arrow shaft. Only
 the arrowhead is added at the directed endpoint (or seam for a closed curve),
@@ -97,38 +111,90 @@ both ends.
 Arrowheads keep the same screen size as you zoom. Unsupported geometry,
 geometric incompatibility, and numerical nonconvergence have separate errors.
 
-For several relations involving align on one model, edit the numeric parameters
-or source so the joint system is solved for each change. Spatial drags are
-available for a single align relation; a coupled system may respond differently
-from a rigid move, so it uses parameter editing instead.
+To adjust a multi-constraint result visually, select self. The App edits or adds
+an independent transformation after the joint constraint segment.
 
 ## Choose a rotation pivot or axis
 
 ```ts
-const placed = part.relate(self =>
-  self.on(base.up).pivot([50, 0, 0]).rotate(0, 0, 45),
-);
+import {pivot} from '@code3d/core';
+
+const placed = part.relate(self => [
+  self.on(base.up),
+  pivot([50, 0, 0]).rotate(0, 0, 45),
+]);
 ```
 
 The pivot is expressed in self's local coordinates. Use `pivotVertex(id)` to
 choose one of self's vertices, or omit the pivot and call `rotate(x, y, z)`
 to rotate around self's origin. Angles are degrees, applied X, then Y, then Z.
-`around(base.axis).rotate(angle)` instead uses a positioned line axis; external
+`axisLine(base.axis).rotate(angle)` instead uses a positioned line axis; external
 axes follow their own composition placement. Each selection applies only to
 the next rotation.
 
-Each chain's rotation follows its contact placement, so the contact does not
-cancel the authored rotation. Other relations constrain the resulting pose.
-All explicit orientations on one self must agree.
+To move a reference without losing it, use
+`pivotVertex(id).pivotOffset(dx, dy, dz).rotate(x, y, z)` or
+`axisLine(base.axis).axisOffset(dx, dy, dz).rotate(angle)`. `pivot([...])` also
+accepts `pivotOffset`. The point displacement uses self's local axes; the axis
+displacement uses the selected axis frame. Moving along the axis itself has no
+effect on the rotation. These are reference modifiers, followed by one `rotate`;
+completed transformations remain separate array entries.
+
+Rotations follow the preceding joint constraint solution. Later transformations
+compose in order; a later constraint starts a new segment from that pose.
+Groups move their assembled children as one rigid part.
 
 ### Bend a loft with explicit rotations
 
-<ModelExample id="bound-rotation" />
+<ModelExample id="loft" />
 
 The octagonal and rectangular sections first touch the circle's `up` bound,
 then turn 45° and 90° around a pivot 50 units along self's X axis.
 Inspect `sections` to see the positioned profiles, or `loft` to see the solid
 through them. Editing `pivot` or `rotate` changes the same source used here.
+
+## Transform a joint result
+
+Import `offset`, `rotate`, `pivot`, `pivotVertex`, `pivotPoint`, `axisEdge`, or `axisLine` from Core to build
+an independent `Transformation` inside `relate`. It acts on the joint solution
+and can move the part away from its contacts:
+
+<SourceCode source={transformations} file="constraints/transformations.ts" />
+
+<p>
+  <a
+    href={appUrl('constraints/transformations.ts')}
+    target="_blank"
+    rel="noopener"
+  >
+    {'Open the transformation example '}
+    <ArrowIcon />
+  </a>
+</p>
+
+Independent `offset(x, y, z)` uses the composition's fixed axes. Rotating the
+part does not rotate those offset directions. Independent `rotate(x, y, z)`
+uses self's current origin and local axes; `pivot([x, y, z])` changes that center,
+`pivotVertex(id)` chooses a self vertex; `pivotPoint(pointRef)` selects a local or external point while keeping self XYZ axes. `axisEdge(id).rotate(angle)` chooses a straight self edge, and `axisLine(lineRef).rotate(angle)` uses
+the referenced axis in its solved placement. Pivot selections apply to the next
+rotation. Completed transformations cannot be chained: write `[offset(...), rotate(...)]`,
+not `offset(...).rotate(...)`. Only pivot and axis selections expose `rotate` to
+complete that one operation. These constructors describe relative placement;
+they do not add `model.offset()` or change standalone geometry.
+
+Transformation array entries execute in order. A later constraint
+starts a new joint segment: `[align, on, offset, rotate]` solves the two constraints
+then transforms the result; `[align, offset, on]` solves align, moves the result,
+then solves on from that pose. The later segment preserves its unconstrained
+position and orientation from its input. Previous segments do not remain hard
+conditions on that later result. Successive `relate` calls continue the same
+sequence; constraints without an intervening transformation remain one segment.
+
+The fixed composition frame belongs to this assembly. A nested group's existing
+placement and origin rules carry it into the enclosing group; it is not the
+viewport's world frame. Call order remains meaningful, especially around a fixed
+external axis. A fixed-axis translation and a rotation about the current self
+origin can happen to commute without changing the sequencing rule.
 
 ## Choose which part moves
 
@@ -146,22 +212,22 @@ composition peers visible while highlighting the selected anchor.
 
 The callback parameter in `relate(part => ...)` is the new related model
 value. Place the cursor on its declaration or a use of `part` inside the
-callback to inspect the same relationship. Even before you write a consuming
+callback to inspect its completed placement segment. Its tools edit the nearest
+following offset or rotation, with the preview including later operations in that segment.
+Even before you write a consuming
 `group` or `loft`, the relation context shows the participants in their solved
 positions. Selecting the related model's standalone binding shows it in its local
 frame. Operations preserve the observable meaning of existing model values.
 
-Within a relation chain, the cursor previews the result through the selected
-call: `on`/`align` show the base relation, and each `offset` or `rotate` shows its
-own result. `pivot`, `pivotVertex`, and `around` show the preceding pose with
-the selected rotation reference. Later calls do not move this preview or its
-handles. Earlier `relate` calls remain in effect; sibling constraints in the
-current callback are combined when inspecting the completed `relate` result.
-If an intermediate stage conflicts with inherited constraints, the App reports
-that stage's preview error and keeps the valid final model available.
+In a `relate` array, `on` and `align` show the joint solution of their continuous
+constraint segment. Each independent `offset` or `rotate` shows its own result.
+The pivot and axis selectors show the preceding pose with the selected reference.
+Later steps do not move this preview or its handles. Previous segments provide
+the incoming pose; later segments are excluded. An invalid segment reports a
+preview error while keeping the valid final model available.
 
 <p>
-  <a href={sitePath('examples/relation-preview/')}>
+  <a href={sitePath('examples/relate/')}>
     Step through contact, target, offset, and rotation in the relation preview →
   </a>
 </p>
@@ -182,11 +248,11 @@ inherited constraints still affect the solved position, but their references do
 not become second-level highlights unless the current call also uses them.
 Entering an individual constraint returns to its existing step-by-step preview.
 
-On `self.on(...)` or `self.align(...)`, and through the following `offset`,
-`pivot`, `pivotVertex`, `around`, and `rotate` calls, self is selected. Inside
+On `self.on(...)` or `self.align(...)`, and in independent `offset`,
+`pivot`, `pivotVertex`, `pivotPoint`, `axisEdge`, `axisLine`, and `rotate` calls, self is selected. Inside
 the parentheses of `on(...)` or `align(...)`, the target reference is selected.
-In the reverse spelling `base.on(self.up).offset(...)`, both the target
-argument and the offset therefore focus self. Selecting an explicit reference
+In the reverse spelling `base.on(self.up)`, the target
+argument focuses self. Selecting an explicit reference
 such as the receiver `base` focuses that reference. Switching sides changes
 emphasis without changing marker size or color.
 
@@ -222,13 +288,51 @@ shared, other affected objects preview the change as well.
 
 Without a safe upstream parameter, dragging preserves the offset expression
 and adjusts it by an increment. For example, an X movement of `2` changes
-`.offset((i - 2) * 8, 0, 0)` to `.offset((i - 2) * 8 + 2, 0, 0)`.
+`offset((i - 2) * 8, 0, 0)` to `offset((i - 2) * 8 + 2, 0, 0)`.
 Another movement of `3` combines that increment into `+ 5`. Returning by `5`
 removes it. The tool does not change the inner `8` or keep nesting offset calls.
 
-Only the outermost offset is edited. When no offset is present, or its arguments
-cannot be edited axis by axis, the tool appends one offset and reuses it on later
-drags. A shared expression changes all of its runtime occurrences; it is not
+Selecting self shows the complete placement segment. Choosing a tool keeps a
+matching current call, or checks the immediately following transformation. If
+that transformation matches, it activates the existing call; otherwise it inserts
+before that transformation. It never skips a different transformation to find
+a matching one farther ahead. With no following transformation, it appends. In a multi-constraint array,
+they target independent transformations after the jointly solved constraints.
+The search stops at the next constraint segment. App inserts the corresponding
+Core import when needed. It preserves existing aliases and avoids local name
+collisions.
+
+The toolbar starts with no active tool when selecting a model, self, or a blank
+array position. Choose a tool explicitly, or place the caret in an existing
+offset or rotation call to activate its tool. When focus moves into the viewport,
+the editor keeps a static caret and word marker at the current source position.
+The active tool's existing call is underlined; if the tool needs to insert a call,
+the underline appears on that new code after the edit. Marked code scrolls into
+view, including horizontally, without taking focus from the viewport or an input.
+Parameter and topology tools use the same source markers and navigation.
+Clicking a tool with an existing call moves the caret to the complete expression
+end, such as `offset()|` or `axisEdge(1).rotate(25)|`, and shows that step immediately. If a new call is needed, the viewport shows the state just
+before the actual insertion position. The chosen tool stays active, and clicking
+alone does not change the source. New array calls put the caret in the insertion
+gap: before the closing bracket at the end, or before the next item in the middle.
+From an array gap, the same rule checks only the immediately following item;
+a mismatch keeps the insertion position.
+
+The start of a self expression, such as `|self.axis.align(...)`, also counts as
+self context. Plain rotate and pivot selectors match point rotation; axis selectors match
+axis rotation. Choosing one does not activate a call of the other type.
+
+When an `offset` or `rotate` is selected, the matching tool edits that call.
+Choosing another tool checks the next transformation first. A match activates it;
+a mismatch inserts immediately after the selected call, before later operations. For independent transformations this inserts a new array
+item; a single return value becomes an array. It never chains one completed
+transformation into another. Handles and previews use the frame of that exact
+edit, excluding later operations. A spread argument is replaced
+with the current three values when editing that call.
+
+A safe shared parameter can update multiple instances of the same call. If it
+also controls a different operation, dragging adjusts the selected expression
+instead. A shared expression changes all of its runtime occurrences; it is not
 an override for only the clicked part.
 
 Release to commit the preview, or press `Esc` while dragging to cancel without
@@ -236,8 +340,13 @@ closing the panel. Use Undo after an edit has been committed. Numeric panel
 input has a different meaning when an expression appears as a placeholder:
 it [replaces the whole argument](../model-tools/#what-a-panel-can-edit).
 
-Select `pivot` for point handles, `pivotVertex` for a vertex picker,
-`around` for its axis, or `rotate` for three rings or one axis ring.
+Use the position toolbar above the panel to choose translation or a rotation
+variant. In either rotation tool, hold Alt to move its reference instead of
+rotating the part. Point or axis candidates appear while the corresponding
+rotation tool is active; click one directly to choose the reference. Point selection
+retains a vertex ID; axis selection uses a straight edge or a named axis of self.
+Replacing a reference within the same rotation type retains its offset and angles;
+choosing a reference for the other rotation type adds a new zero-angle operation.
 
 To change the standalone geometry and its origin, see
 [origins and rotation](../origins-and-rotation/).

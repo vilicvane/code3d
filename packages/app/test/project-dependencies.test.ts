@@ -444,11 +444,11 @@ test('uses installed just-range ESM and types with builtin core across cached mo
               path: '/just-range.ts',
               source: [
                 'import range from "just-range";',
-                'import {box, group} from "@code3d/core";',
+                'import {offset, box, group} from "@code3d/core";',
                 'const base = box(44, 2, 10);',
                 `const bars = range(${count}).map(i =>`,
                 '  box(4, 4 + i * 3, 4).relate(part =>',
-                '    part.down.on(base.up).offset((i - 2) * 8, 0, 0),',
+                '    [part.down.on(base.up), offset((i - 2) * 8, 0, 0)],',
                 '  ),',
                 ');',
                 'export default group([base, ...bars]);',
@@ -880,7 +880,7 @@ test('locates a missing relative asset in the original author source', async () 
 });
 
 test('synchronous font assets invalidate on file edits and batch text operations retain source tools', async () => {
-  let path = '/packages/app/examples/fonts/DejaVuSans.ttf';
+  let path = '/packages/core/test/fonts/DejaVuSans.ttf';
   let revision = 1;
   const files: ProjectFileReader = {
     readFile: file =>
@@ -959,7 +959,7 @@ test('synchronous font assets invalidate on file edits and batch text operations
         .filter(object => object.operation.kind === 'extrude')
         .map(solid => solid.mesh),
     );
-    path = '/packages/app/examples/fonts/DejaVuSans.ttf';
+    path = '/packages/core/test/fonts/DejaVuSans.ttf';
     revision++;
     const restored = await compiler.compile(project, '/model.ts');
     assert.equal(restored.diagnostic, undefined);

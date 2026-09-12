@@ -13,7 +13,9 @@ description: 'code3d 的局部坐标、原点与相对位置约定。设计、�
 
 处理坐标时先明确它属于哪个模型值、实例或参考元素。模型局部轴、线/面锚点的参考坐标架、组合位姿和视口世界坐标各有归属；同样的 XYZ 数字不代表同一个方向或位置。`expose()` 将引用带入外层模型的局部空间，重复实例通过具体 occurrence 解析。
 
-关系中的约束共同求解位姿，未约束自由度采用求解器的默认结果。约束自身的 offset 参数参与这组关系的解释；它与作用于求解结果的独立位移有不同语义。
+relate 中连续的约束共同求解位姿；初段未约束自由度采用求解器默认结果，后段继承前段姿态。Constraint 仅表达 on/align，不提供 offset、rotate 或 pivot/axis 选择器。相对变换只能通过独立 Transformation 数组项表达，作用于前面同段的联合解，允许离开此前接触位置。变换严格按数组顺序执行；随后出现约束时进入新段，不把此前约束跨段收集回去。连续 relate 调用接续同一排列。零位移和零角度不增加位置或朝向条件。 混合求解收尾时，保留前段未约束的平移需让与之对齐的其他零件共同参与平移自由度；不能冻结从属零件后单独回正被引用的零件。
+
+独立 `offset` 沿该组合求解参考架的固定轴移动，不跟随 self 的朝向，也不是视口世界轴。独立 `rotate` 默认绕 self 当前原点和局部 XYZ 轴；pivot/pivotVertex/pivotPoint 改中心；pivotPoint 接受点引用并保留 self XYZ 旋转轴。axisEdge 使用 self 直边 ID，axisLine 使用线引用的已求解摆放。group 构造、嵌套与原点操作统一重表达该参考架及位姿。固定轴平移与当前自原点旋转可能交换，不能据此重排操作。模型本身不提供 offset；构造函数只生成由 relate 消费的描述值。完成的独立 offset/rotate 不再提供任何链式变换方法；pivot/pivotVertex/pivotPoint 的未完成选择可接一次 pivotOffset，axisEdge/axisLine 可接一次 axisOffset，之后只能用 rotate 完成。多个独立操作写为数组项，不能从 offset 进入 rotate 或反向接链。
 
 ## 原点
 
@@ -53,7 +55,7 @@ point([x, y, z]) ≡ point().originOffset(-x, -y, -z)
 
 模型原点与几何中心分别理解：`line([10, 0, 0])` 的原点为 `[0, 0, 0]`，几何中点为 `[5, 0, 0]`。绕模型 Y 轴旋转 90° 后，其端点为 `[0, 0, -10]`；线的切向参考架不替代模型 XYZ。
 
-`originOffset()` 改变内部坐标，关系链的 `offset()` 表达组合摆放；分别使用各自所属的参考系。
+`originOffset()` 改变内部坐标，独立 `offset()` 表达组合摆放；分别使用各自所属的参考系。
 
 ## 存储与交互
 
@@ -66,3 +68,9 @@ point([x, y, z]) ≡ point().originOffset(-x, -y, -z)
 派生辅助几何也要明确所属模型，再使用当前可见实例的位姿。布尔重叠区域属于主输入的坐标；形状变化可能影响结果模型的关系求解位置，不能借用结果位姿来放置输入辅助几何。原点等操作参考标记与随几何移动的锚点分别处理，提交到重新求值之间的临时状态也须遵守，不能重复应用几何偏移。
 
 涉及原点标记、参考轴或空间控件的绘制时，另读 [code3d visualization](../code3d-visualization/SKILL.md)。
+
+`pivotOffset(dx, dy, dz)` 沿 self 的局部轴平移所选中心；`axisOffset(dx, dy, dz)` 沿所选轴参考架的轴平移整条旋转轴，保留其方向。偏移保留原引用；沿旋转轴自身移动不会改变旋转结果。反向轴改变有向旋转角，参考位移仍沿该轴的原参考架。GUI 使用同一参考架，连续拖动修改已有偏移调用。
+
+GUI 移动坐标 `pivot([...])` 时直接改坐标；只有引用中心 `pivotVertex` 才附加 `pivotOffset`。已有参考偏移继续修改同一调用，不重复追加；默认原点旋转首次改中心使用 `pivot([...])`。
+
+`pivotVertex(id)`/`axisEdge(id)` 延后按 relate 的 self 解析拓扑；`pivotPoint(pointRef)`/`axisLine(lineRef)` 保留引用及其所属模型。外部点按组合中已求解位置确定中心，点偏移与旋转仍沿 self 的操作前局部轴；不能在构造时把外部点烘焙成尚未摆放的 self 坐标。axisLine 只接受直线/轴，不接受曲边。

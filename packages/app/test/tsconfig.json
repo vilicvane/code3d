@@ -7,5 +7,5 @@
       "/test/*": ["./*"]
     }
   },
-  "include": ["**/*.ts", "../src/**/*.d.ts"]
+  "include": ["**/*.ts", "../src/**/*.d.ts", "../examples/**/*.ts"]
 }

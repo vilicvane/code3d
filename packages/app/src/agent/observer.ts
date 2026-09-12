@@ -136,7 +136,7 @@ export class AgentObserver {
         module.activeDesignContextId,
       );
       const sketchId = selected
-        ? viewport.sourceEvaluation()?.evaluation.sketchIds?.[0]
+        ? viewport.sourceContext?.evaluation.sketchIds?.[0]
         : undefined;
       const sketches = sketchId ? observeSketch(sketchId, module.sketches) : [];
       const diagnostic = sketches.length
@@ -238,7 +238,7 @@ export class AgentObserver {
         cursor: snapshot.request.cursor,
         contextId:
           snapshot.module.activeDesignContextId ??
-          this.getViewport().sourceEvaluation()?.evaluation.contextId,
+          this.getViewport().sourceContext?.evaluation.contextId,
         arguments: snapshot.request.arguments ?? null,
         argumentSource:
           snapshot.request.arguments === undefined
@@ -292,7 +292,7 @@ export class AgentObserver {
         'The selected context did not produce renderable geometry.',
       );
     const models: ObservedBrep[] = [];
-    const selection = viewport.sourceEvaluation()?.evaluation.selection;
+    const selection = viewport.sourceContext?.evaluation.selection;
     const occurrence = viewport.getSelected();
     if (selection && occurrence) {
       const scope = 'scope' in selection ? selection.scope : undefined;

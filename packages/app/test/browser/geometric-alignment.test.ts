@@ -35,9 +35,9 @@ test(
     });
     await page.goto(appUrl!);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 30000});
-    const source = `import {arc, box, group, line} from '@code3d/core';
+    const source = `import {offset, arc, box, group, line} from '@code3d/core';
 const base=arc([20,0,0],[0,20,0],[-20,0,0]);
-const part=arc([0,20,0],[-20,0,0],[0,-20,0]).relate(self=>self.align(base).offset(0,0,8));
+const part=arc([0,20,0],[-20,0,0],[0,-20,0]).relate(self=>[self.align(base), offset(0,0,8)]);
 const axis=box(1,1,1);
 const rail=line([30,0,0],[30,20,0]).relate(self=>self.align(axis.axis.reverse()));
 export default group([base,part,rail]);`;
@@ -58,8 +58,7 @@ export default group([base,part,rail]);`;
     await page.locator('[data-parameter=z]').waitFor();
     await page.waitForFunction(
       () =>
-        window.alignmentTest.viewport.sourceEvaluation()?.evaluation
-          .constraintId,
+        window.alignmentTest.viewport.sourceContext?.evaluation.constraintId,
     );
     const inspect = () =>
       page.evaluate(async () => {
@@ -131,8 +130,8 @@ export default group([base,part,rail]);`;
     await select('self.align(axis');
     await page.waitForFunction(() => {
       const vp = window.alignmentTest.viewport,
-        scope = vp.sourceEvaluation();
-      const owner = scope?.evaluation.constraintOwnerNodeId;
+        scope = vp.sourceContext;
+      const owner = scope?.evaluation.relationOwnerNodeId;
       return vp['module']?.objects
         .get(owner!)
         ?.constraints.some(c => c.targetElement.name === 'axis');

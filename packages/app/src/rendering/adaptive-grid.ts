@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {gridStep} from '../grid-scale';
+import {gridStep, majorGridCells} from '../grid-scale';
 import {spatialAxisColors} from '../spatial-axis-colors';
 import {cameraAspect, cameraViewHeight, type ViewCamera} from './view-camera';
 
@@ -78,7 +78,7 @@ export class AdaptiveGrid extends THREE.Mesh<
           }
           float grid(vec2 point, vec2 footprint, float spacing) {
             return max(0.08 * lines(point, footprint, spacing),
-                       0.14 * lines(point, footprint, spacing * 5.0));
+                       0.14 * lines(point, footprint, spacing * ${majorGridCells.toFixed(1)}));
           }
           void main() {
             vec3 offset = right * screen.x + up * screen.y;
@@ -171,7 +171,7 @@ export class AdaptiveGrid extends THREE.Mesh<
     // pans must not lose sub-cell precision or move the grid's actual origin.
     const localFocus = uniforms.focusPoint.value as THREE.Vector3;
     uniforms.axisOffset.value.set(localFocus.x, localFocus.y);
-    const period = this.step * 5;
+    const period = this.step * majorGridCells;
     uniforms.gridOffset.value.set(
       ((localFocus.x * span) % period) / span,
       ((localFocus.y * span) % period) / span,

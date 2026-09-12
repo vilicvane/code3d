@@ -31,7 +31,7 @@ for (const call of ['profile.extrude(3)', 'extrude(profile, 3)']) {
           t.diagnostic(
             JSON.stringify(
               await page.evaluate(() => ({
-                scope: window.extrusionApp?.viewport.sourceEvaluation(),
+                scope: window.extrusionApp?.viewport.sourceContext,
                 source: window.extrusionApp?.codeEditor.editor.getValue(),
                 panel: document.querySelector('.contextual-tool-panel')
                   ?.outerHTML,

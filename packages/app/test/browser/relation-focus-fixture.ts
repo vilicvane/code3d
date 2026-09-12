@@ -53,6 +53,8 @@ export async function measureRelationFocus() {
       color: string;
     }>;
     selectionBox?: number;
+    ownerPositions: number[][];
+    expectedOwnerPosition: readonly number[];
     topologyHighlights: number;
     exported: boolean;
   }> = [];
@@ -106,8 +108,8 @@ export async function measureRelationFocus() {
       const constraints =
         label === 'two constraints'
           ? `[${relation},self.on(other.front)]`
-          : `${relation}.offset(2,0,0)`;
-      const source = `import {box,group,line,point} from '@code3d/core'; const base=${geometry}; const other=${geometry}; const part=${geometry}.relate(self=>${constraints}); export default group([base,part,other]);`;
+          : `[${relation}, offset(2,0,0)]`;
+      const source = `import {offset,box,group,line,point} from '@code3d/core'; const base=${geometry}; const other=${geometry}; const part=${geometry}.relate(self=>${constraints}); export default group([base,part,other]);`;
       const module = await client.compile(
         {files: [{path: '/main.ts', source}]},
         '/main.ts',
@@ -118,18 +120,35 @@ export async function measureRelationFocus() {
         '/* target */',
         label === 'two constraints' ? 'on( /* target */' : 'offset(',
         ...(label === 'two constraints'
-          ? ['other.front', 'on(other.front']
+          ? [
+              'self.on( /* target */',
+              'other.front',
+              'on(other.front',
+              'self.on(other.front)',
+            ]
           : []),
         '/* target */',
       ];
       for (const token of tokens) {
         viewport.selectBySourceOffset('/main.ts', source.indexOf(token) + 1);
-        const scope = viewport.sourceEvaluation()!;
+        const scope = viewport.sourceContext!;
         const constraint = evaluatedConstraint(
           module.objects,
           scope.evaluation,
         )!;
         const primary = focusedConstraintSide(scope.evaluation, constraint);
+        viewport['root'].updateMatrixWorld(true);
+        const ownerId = scope.evaluation.relationOwnerNodeId!;
+        const ownerPositions = viewport['root'].children
+          .filter(
+            root =>
+              (root.userData.sourceNodeId ??
+                viewport['occurrences'].get(root.userData.selectionKey)?.node
+                  .nodeId) === ownerId,
+          )
+          .map(root => root.getWorldPosition(new THREE.Vector3()).toArray());
+        const expectedOwnerPosition =
+          module.objects.get(ownerId)!.compositionTransform.position;
         const drawn: (typeof samples)[number]['drawn'] = [];
         const bodies: (typeof samples)[number]['bodies'] = [];
         let topologyHighlights = 0;
@@ -243,6 +262,8 @@ export async function measureRelationFocus() {
             drawn: [...drawn],
             bodies: [...bodies],
             selectionBox,
+            ownerPositions,
+            expectedOwnerPosition,
             topologyHighlights,
             exported,
           });
@@ -332,7 +353,7 @@ export default group([part,base,front,old,other]);`;
           '/main.ts',
           source.lastIndexOf(token) + (token === 'self.on(base' ? 6 : 1),
         );
-        const scope = viewport.sourceEvaluation()!;
+        const scope = viewport.sourceContext!;
         const whole = !!scope.evaluation.relationContext;
         const selected = reverse && !whole ? id('base') : id('part');
         const secondary = new Set(

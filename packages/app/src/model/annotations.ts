@@ -1,6 +1,6 @@
 import ts from '@typescript/typescript6';
 
-export const code3dAnnotationNames = ['arguments', 'param'] as const;
+export const code3dAnnotationNames = ['arguments', 'param', 'tool'] as const;
 
 export type Code3dAnnotationName = (typeof code3dAnnotationNames)[number];
 

@@ -4,6 +4,7 @@ import type {
   SourceTargetEvaluation,
 } from './model/compiler';
 import type {ToolParameterSchema} from './model/tool-schema';
+import type {SpatialTool} from './tools/transform-gizmo';
 import type {
   EdgeId,
   ElementKind,
@@ -69,6 +70,8 @@ type ViewportAnchorDecorationBase = ViewportDecorationBase &
     /** Existing curve geometry supplies the shaft; this frame is its endpoint. */
     headOnly?: boolean;
     layer?: 'reference' | 'foreground';
+    /** Semantic tool reference, projected from the current occurrence preview. */
+    spatialReference?: 'origin' | 'pivot' | 'axis';
     appearance: ViewportDecorationAppearance;
   }>;
 
@@ -132,6 +135,7 @@ export type SourceDecorationContext = Readonly<{
   target: SourceTarget;
   evaluation: SourceTargetEvaluation;
   parameter?: ToolParameterSchema;
+  spatialTool?: SpatialTool;
 }>;
 
 export type SourceDecorationProvider = Readonly<{

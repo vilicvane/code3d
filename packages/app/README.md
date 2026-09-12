@@ -5,7 +5,7 @@ Code3D's browser modeling workspace: a TypeScript editor, project file explorer,
 private package builds the App served at the website's `/app/` path.
 
 For using the product, start with [working in the App](../web/src/content/docs/docs/getting-started/app.md)
-or [collaborating with agents](../web/src/content/docs/docs/guides/agents.md).
+or [collaborating with agents](../web/src/content/docs/docs/guides/agents.mdx).
 Agents editing a model through the App should read the [Markdown entry](../../docs/agents.md).
 To develop Code3D itself, use the [development guide](../../.agents/docs/development.md)
 and [architecture overview](../../.agents/docs/architecture/overview.md).
@@ -101,3 +101,20 @@ combined static output. To test copied agent prompts locally, set
 `VITE_CODE3D_DOCS_URL` in ignored `.env.development.local` to the running website's
 `/docs/` URL. Both the HTML introduction and linked Markdown instructions must be
 served when checking the connection flow.
+
+## Runnable examples
+
+The [shared catalog](render-samples/catalog.ts) registers the sources under
+[examples](examples/), grouped by modeling topic. The App, website and docs use
+these files directly. Start with [the desktop stand](examples/projects/phone-stand.ts)
+or [the practical model guide](../web/src/content/docs/docs/guides/practical-models.mdx).
+The default browser project imports the canonical stand function and needs no install.
+Basic examples are named for their teaching goal; project parts are imported, not copied.
+The text example uses Google Fonts; local fonts appear only as a commented alternative.
+
+Every example has native geometry tests and an App open/edit/Undo test. Run
+`npm run test:run --workspace @code3d/app` for native tests,
+`npm run test:examples:packages --workspace @code3d/app` for clean npm consumers,
+and `CODE3D_TEST_URL=http://127.0.0.1:<reserved-port>/ npm run test:examples:browser
+--workspace @code3d/app` against the task server and host Chrome. Build and package
+publication workflows run the example gates too.

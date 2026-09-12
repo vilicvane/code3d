@@ -14,11 +14,16 @@ export const anchorPixels = {
   arrowLength: 28,
   ringRadius: 4,
   pointRadius: 3,
+  pivotRingRadius: 8,
   crossRadius: 10,
   frameLength: 24,
 } as const;
 
-type Marker = Readonly<{object: THREE.Object3D; position: THREE.Vector3}>;
+type Marker = Readonly<{
+  object: THREE.Object3D;
+  position: THREE.Vector3;
+  faceCamera: boolean;
+}>;
 
 export class AnchorDecorationObject extends THREE.Group {
   private readonly markers: Marker[] = [];
@@ -39,11 +44,15 @@ export class AnchorDecorationObject extends THREE.Group {
     this.name = decoration.id;
     this.userData.decoration = decoration;
     applyTransform(this, decoration.transform);
-    const marker = (glyph: THREE.Object3D, y = 0) => {
+    const marker = (glyph: THREE.Object3D, y = 0, faceCamera = false) => {
       const object = new THREE.Group();
       object.add(glyph);
       object.matrixAutoUpdate = false;
-      this.markers.push({object, position: new THREE.Vector3(0, y, 0)});
+      this.markers.push({
+        object,
+        position: new THREE.Vector3(0, y, 0),
+        faceCamera,
+      });
       this.add(object);
     };
     const arrow = (direction: 1 | -1) =>
@@ -55,11 +64,15 @@ export class AnchorDecorationObject extends THREE.Group {
 
     if (decoration.elementKind === 'point') {
       const point = new THREE.Group();
-      point.add(
-        anchorDot(anchorPixels.pointRadius, appearance),
-        anchorCross(anchorPixels.crossRadius, appearance),
-      );
-      marker(point);
+      const pivot = decoration.spatialReference === 'pivot';
+      const outline = pivot
+        ? anchorRing(anchorPixels.pivotRingRadius, appearance)
+        : anchorCross(anchorPixels.crossRadius, appearance);
+      // A rotation center has no preferred plane. Keep its ring legible from
+      // every view; reference axes and faces retain their actual orientation.
+      if (pivot) outline.rotation.x = Math.PI / 2;
+      point.add(anchorDot(anchorPixels.pointRadius, appearance), outline);
+      marker(point, 0, pivot);
     } else if (decoration.elementKind === 'line') {
       if (decoration.headOnly) {
         this.add(
@@ -145,7 +158,7 @@ export class AnchorDecorationObject extends THREE.Group {
     camera.updateWorldMatrix(true, false);
     this.updateWorldMatrix(true, false);
     this.inverseWorld.copy(this.matrixWorld).invert();
-    for (const {object, position} of this.markers) {
+    for (const {object, position, faceCamera} of this.markers) {
       this.markerWorld.makeTranslation(position).premultiply(this.matrixWorld);
       this.markerWorld.decompose(
         this.positionWorld,
@@ -157,6 +170,7 @@ export class AnchorDecorationObject extends THREE.Group {
         this.positionWorld,
         viewportHeight,
       );
+      if (faceCamera) camera.getWorldQuaternion(this.rotationWorld);
       this.scaleWorld.setScalar(size);
       object.matrix
         .copy(this.inverseWorld)

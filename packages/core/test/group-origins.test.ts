@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Anchor, Model} from '@code3d/core';
-import {box, group, line, point, rectangle} from '../bld/node/index.js';
+import {
+  rotate,
+  axisLine,
+  box,
+  group,
+  line,
+  point,
+  rectangle,
+} from '../bld/node/index.js';
 import {
   composeTransforms,
   modelElementReference,
@@ -108,12 +116,14 @@ test('only the chosen reference member defines the new group frame after an orig
 });
 
 test('first-member orientation and translation define the full frame and ordering preserves relative poses', () => {
-  const first = box(8, 6, 4).relate(self =>
-    self.center.align(point([20, 4, 6])).rotate(10, 20, 30),
-  );
-  const second = box(2, 4, 6).relate(self =>
-    self.center.align(point([-5, 8, 12])).rotate(-15, 25, 5),
-  );
+  const first = box(8, 6, 4).relate(self => [
+    self.center.align(point([20, 4, 6])),
+    rotate(10, 20, 30),
+  ]);
+  const second = box(2, 4, 6).relate(self => [
+    self.center.align(point([-5, 8, 12])),
+    rotate(-15, 25, 5),
+  ]);
   const firstPose = snapshot(first).compositionTransform;
   const secondPose = snapshot(second).compositionTransform;
   for (const [members, expected] of [
@@ -170,9 +180,10 @@ test('group rebasing preserves solved internal relations, anchors, bounds and ea
 
 test('originPoint resolves a rotated member into the group frame and keeps explicit origin through copies', () => {
   const body = box(8, 6, 4);
-  const instance = body.relate(self =>
-    self.center.align(point([20, 4, 6])).rotate(0, 0, 90),
-  );
+  const instance = body.relate(self => [
+    self.center.align(point([20, 4, 6])),
+    rotate(0, 0, 90),
+  ]);
   const assembly = group([point(), instance]).expose({body: instance});
   const selected = assembly.originPoint(instance.vertex(3)).material('#aabbcc');
   near(position(selected.body.vertex(3)), [0, 0, 0]);
@@ -310,13 +321,15 @@ test('group rotation carries solved members, references and bounds around the se
 
 test('nested repeated assemblies rotate rigidly in fixed XYZ order without re-solving member relations', () => {
   const base = box(10, 4, 6);
-  const cap = box(2, 2, 2).relate(self =>
-    self.on(base.up).around(base.axis).rotate(35),
-  );
+  const cap = box(2, 2, 2).relate(self => [
+    self.on(base.up),
+    axisLine(base.axis).rotate(35),
+  ]);
   const part = group([base, cap]).expose({base, cap});
-  const left = part.relate(self =>
-    self.base.center.align(point([-10, 0, 0])).rotate(10, 20, 30),
-  );
+  const left = part.relate(self => [
+    self.base.center.align(point([-10, 0, 0])),
+    rotate(10, 20, 30),
+  ]);
   const right = part.relate(self => self.base.center.align(point([30, 0, 0])));
   const original = group([left, right])
     .expose({leftPart: left, rightPart: right})

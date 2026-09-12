@@ -12,12 +12,12 @@ test(
     const source =
       (
         await readFile(
-          new URL('../../examples/materials.ts', import.meta.url),
+          new URL('../fixtures/native-materials.ts', import.meta.url),
           'utf8',
         )
       ).replace('export const materialsExample', 'const materialsExample') +
       `
-import {Texture} from '@code3d/core/three';
+import {Texture, MeshBasicMaterial} from '@code3d/core/three';
 const canvas = new OffscreenCanvas(2, 2);
 const ctx = canvas.getContext('2d');
 ctx.fillStyle = '#f080ff';

@@ -1,3 +1,4 @@
+import {offset, rotate, pivot, pivotVertex, axisLine} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
@@ -5,7 +6,7 @@ import {
   extrude,
   group,
   rectangle,
-  type Constraint,
+  type Transformation,
   type Model,
 } from '@code3d/core';
 import type {ModelSnapshotObject} from '@code3d/core/tooling';
@@ -175,9 +176,9 @@ for (const operation of [
   'rotate',
   'pivot',
   'pivotVertex',
-  'around',
+  'axisLine',
 ] as const) {
-  test(`constraint ${operation} defaults preserve solved placement`, t => {
+  test(`transformation ${operation} defaults preserve solved placement`, t => {
     const base = box(20, 30, 40);
     const source = box(4, 6, 8).originOffset(1, 2, 3);
     const models: Model[] = [base, source];
@@ -186,21 +187,24 @@ for (const operation of [
       const model = source.relate(self => {
         const constraint = self.on(base.up);
         if (operation === 'pivot') {
-          const chain = Reflect.apply(constraint.pivot, constraint, args);
-          return chain.rotate(0, 0, 25);
+          const chain = Reflect.apply(pivot, undefined, args);
+          return [constraint, chain.rotate(0, 0, 25)];
         }
         const receiver =
           operation === 'pivotVertex'
-            ? constraint.pivotVertex(1)
-            : operation === 'around'
-              ? constraint.around(base.axis)
-              : constraint;
+            ? pivotVertex(1)
+            : operation === 'axisLine'
+              ? axisLine(base.axis)
+              : {offset, rotate};
         const method = operation === 'offset' ? 'offset' : 'rotate';
-        return Reflect.apply(
-          Reflect.get(receiver, method),
-          receiver,
-          args,
-        ) as Constraint;
+        return [
+          constraint,
+          Reflect.apply(
+            Reflect.get(receiver, method),
+            receiver,
+            args,
+          ) as Transformation,
+        ];
       });
       models.push(model);
       return model;
@@ -208,7 +212,7 @@ for (const operation of [
     const defaults =
       operation === 'pivot'
         ? [[0, 0, 0]]
-        : operation === 'around'
+        : operation === 'axisLine'
           ? [0]
           : [0, 0, 0];
     for (const args of [[], [undefined]])
@@ -218,7 +222,7 @@ for (const operation of [
         snapshot(place([[2, undefined, 4]])),
         snapshot(place([[2, 0, 4]])),
       );
-    } else if (operation !== 'around') {
+    } else if (operation !== 'axisLine') {
       equivalent(
         snapshot(place([3, undefined, 5])),
         snapshot(place([3, 0, 5])),

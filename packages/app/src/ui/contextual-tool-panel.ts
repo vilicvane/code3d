@@ -7,6 +7,8 @@ export type ContextualToolParameterView = Readonly<{
   value?: number;
   placeholder?: string;
   step: number;
+  /** XYZ distances use the viewport grid; step remains the fallback without a grid. */
+  gridStep?: boolean;
   min?: number;
   max?: number;
   invalid?: boolean;
@@ -34,6 +36,7 @@ export type ContextualToolPanelView = Readonly<{
 
 type ContextualToolPanelOptions = Readonly<{
   sourceParameter?(): string | undefined;
+  gridStep?(): number | undefined;
   onParameterInput(name: string, value: number | undefined): void;
   /** Whether the commit is awaiting refreshed parameter availability. */
   onParameterCommit(name: string, value: number | undefined): boolean;
@@ -58,6 +61,7 @@ export class ContextualToolPanel {
   private readonly controls = new Map<string, ParameterControl>();
   private view?: ContextualToolPanelView;
   private readonly stopSourceHighlight: () => void;
+  private readonly stopParameterSteps: () => void;
   private pendingNavigation?: Readonly<{
     from: HTMLInputElement;
     to: HTMLInputElement;
@@ -103,6 +107,18 @@ export class ContextualToolPanel {
       show: action,
       hide: action,
     });
+    this.stopParameterSteps = reaction(
+      () => ({view: this.view, gridStep: this.options.gridStep?.()}),
+      ({view, gridStep}) => {
+        for (const parameter of view?.parameters ?? []) {
+          const step =
+            parameter.gridStep && gridStep !== undefined
+              ? gridStep
+              : parameter.step;
+          this.controls.get(parameter.name)!.input.step = String(step);
+        }
+      },
+    );
     this.stopSourceHighlight = reaction(
       () => ({name: this.sourceParameter, view: this.view}),
       ({name}) => {
@@ -165,6 +181,7 @@ export class ContextualToolPanel {
 
   dispose(): void {
     this.stopSourceHighlight();
+    this.stopParameterSteps();
     this.cancelPendingNavigation();
     this.root.remove();
   }
@@ -221,6 +238,25 @@ export class ContextualToolPanel {
           return;
         }
         this.cancelPendingNavigation();
+        if (
+          (event.key === 'ArrowUp' || event.key === 'ArrowDown') &&
+          this.view?.parameters.find(field => field.name === parameter.name)
+            ?.gridStep &&
+          !input.readOnly
+        ) {
+          // Like a drag, step from the authored value rather than jumping to an absolute grid multiple.
+          const current =
+            finiteInputValue(input) ?? (Number(input.placeholder) || 0);
+          const next =
+            current + (event.key === 'ArrowUp' ? 1 : -1) * Number(input.step);
+          input.value = String(Number(next.toPrecision(12)));
+          this.options.onParameterInput(
+            parameter.name,
+            finiteInputValue(input),
+          );
+          event.preventDefault();
+          return;
+        }
         if (event.key !== 'Enter') return;
         this.options.onParameterCommit(parameter.name, finiteInputValue(input));
         event.preventDefault();
@@ -293,7 +329,6 @@ export class ContextualToolPanel {
   ): void {
     const control = this.controls.get(parameter.name)!;
     control.label.textContent = parameter.label.toUpperCase();
-    control.input.step = String(parameter.step);
     setOptionalNumberAttribute(control.input, 'min', parameter.min);
     setOptionalNumberAttribute(control.input, 'max', parameter.max);
     control.input.disabled = parameter.disabled ?? false;

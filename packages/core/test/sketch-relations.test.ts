@@ -1,6 +1,11 @@
+import type {Transformation} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
+  offset,
+  pivot,
+  pivotVertex,
+  rotate,
   box,
   group,
   loft,
@@ -11,7 +16,7 @@ import {
 } from '@code3d/core';
 import {replicad} from '@code3d/core/replicad';
 import {
-  constraintPreview,
+  relationPreview,
   isModelObject,
   modelElementReference,
   sketchDefinition,
@@ -19,7 +24,6 @@ import {
   sketchSource,
   snapshotSketch,
   rotateVector,
-  type Constraint,
 } from '@code3d/core/tooling';
 import {defined} from '../../../test/assert.ts';
 import {createModelSnapshotter, modelGeometry} from './model-test.ts';
@@ -88,10 +92,14 @@ test('directed planes, target-frame offset and pivot rotations reuse the model r
   const target = rectangle(30, 30).rotate(0, 0, 45).originOffset(0, -8, 0);
   const builds = [
     (s: {plane: typeof target.plane}) => s.plane.align(target.plane),
-    (s: {plane: typeof target.plane}) =>
-      s.plane.align(target.plane.flip()).offset(3, 4, 5),
-    (s: {plane: typeof target.plane}) =>
-      s.plane.align(target.plane).pivot([1, 2, 3]).rotate(0, 15, 0),
+    (s: {plane: typeof target.plane}) => [
+      s.plane.align(target.plane.flip()),
+      offset(3, 4, 5),
+    ],
+    (s: {plane: typeof target.plane}) => [
+      s.plane.align(target.plane),
+      pivot([1, 2, 3]).rotate(0, 15, 0),
+    ],
   ];
   for (const build of builds) {
     const frame = sketch().relate(build);
@@ -105,21 +113,23 @@ test('directed planes, target-frame offset and pivot rotations reuse the model r
 });
 
 test('constraint stage previews operate on empty sketches and leave final data immutable', () => {
-  let relation!: Constraint;
+  let relation!: Transformation;
   const host = rectangle(10, 10).originOffset(0, -6, 0);
-  const placed = sketch().relate(
-    s => (relation = s.plane.align(host).offset(2, 0, 0)),
-  );
-  const preview = defined(constraintPreview(relation));
+  const placed = sketch().relate(s => [
+    s.plane.align(host),
+    (relation = offset(2, 0, 0)),
+  ]);
+  const preview = defined(relationPreview(relation));
   assert.equal(preview.object.nodeId, sketchFrame(placed).nodeId);
   near(preview.object.compositionTransform.position, pose(placed).position);
   assert.equal(preview.object.constraints.length, 1);
   assert.throws(
     () =>
       pose(
-        sketch().relate(s =>
-          s.plane.align(host).pivotVertex(1).rotate(0, 20, 0),
-        ),
+        sketch().relate(s => [
+          s.plane.align(host),
+          pivotVertex(1).rotate(0, 20, 0),
+        ]),
       ),
     /requires model topology/,
   );
@@ -208,12 +218,14 @@ test('references bind immutable host values, with explicit occurrence references
   const hostRef = defined(modelElementReference(placed.plane));
   assert.equal(hostRef.model, sketchFrame(placed));
   assert.notEqual(host, moved);
-  const first = host.relate(s =>
-    s.down.on(box(60, 10, 60).up).offset(-15, 0, 0),
-  );
-  const second = host.relate(s =>
-    s.down.on(box(60, 10, 60).up).offset(15, 0, 0),
-  );
+  const first = host.relate(s => [
+    s.down.on(box(60, 10, 60).up),
+    offset(-15, 0, 0),
+  ]);
+  const second = host.relate(s => [
+    s.down.on(box(60, 10, 60).up),
+    offset(15, 0, 0),
+  ]);
   const assembly = group([first, second]).expose({first, second});
   const left = disk().relate(s => s.plane.align(assembly.first.up));
   const right = disk().relate(s => s.plane.align(assembly.second.up));

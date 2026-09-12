@@ -150,6 +150,13 @@ export function signatureParameters(
 export function parameterAnnotations(
   node: ts.Node,
 ): readonly Code3dAnnotation[] {
+  return toolAnnotations(node).filter(
+    annotation => annotation.name === 'param',
+  );
+}
+
+/** A tool may expose reference picking without numeric/ID parameters. */
+export function toolAnnotations(node: ts.Node): readonly Code3dAnnotation[] {
   const sourceFile = node.getSourceFile();
   // JSDoc on a const belongs to its variable statement, including emitted .d.ts.
   const owner =
@@ -162,7 +169,9 @@ export function parameterAnnotations(
     sourceFile,
     owner.getFullStart(),
     owner.getStart(sourceFile),
-  ).filter(annotation => annotation.name === 'param');
+  ).filter(
+    annotation => annotation.name === 'param' || annotation.name === 'tool',
+  );
 }
 
 export function parameterAnnotationSites(

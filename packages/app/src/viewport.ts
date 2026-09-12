@@ -9,6 +9,8 @@ import {
   computed,
   makeObservable,
   observableRef,
+  observableShallow,
+  reaction,
   runInAction,
 } from 'mobx';
 import {orientImageCamera, type ImageView} from './rendering/image-camera';
@@ -50,6 +52,8 @@ import {
 } from './rendering/model-renderer';
 import {
   TransformGizmo,
+  bindingTool,
+  type SpatialTool,
   type TransformGizmoBinding,
   type TransformGizmoEvent,
 } from './tools/transform-gizmo';
@@ -58,14 +62,24 @@ import type {
   ViewportDecoration,
 } from './viewport-decoration';
 import {parameterSourceDecoration} from './model/parameter-decorations';
+import {previewSpatialReference} from './model/origin-decorations';
 import {sourceParameterAt} from './model/tool-arguments';
+import {
+  contextualToolCallId,
+  contextualToolScope,
+} from './tools/contextual-tool-context';
 import type {ToolParameterSchema} from './model/tool-schema';
 import {
   dimensionEdges,
   representativeDimensionEdge,
 } from './rendering/parameter-dimension';
-import {spatialBindings, relationBindings} from './tools/model-spatial-tool';
-import type {SpatialObjectPreview} from './tools/spatial-edit';
+import {
+  continuedSpatialBindings,
+  spatialBindings,
+  transformationBindings,
+  rotationReferenceBindings,
+} from './tools/model-spatial-tool';
+import type {SpatialObjectPreview, SpatialPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 import {pickScreenTopology} from './rendering/topology-picking';
 import {boundAppearance} from './rendering/bound-appearance';
@@ -103,7 +117,9 @@ type SourceViewTarget = Readonly<{
 
 type SelectedViewTarget = Readonly<{kind: 'model'}> | SourceViewTarget;
 
-type RenderedViewTarget = SelectedViewTarget | Readonly<{kind: 'completion'}>;
+type RenderedViewTarget =
+  | SelectedViewTarget
+  | Readonly<{kind: 'completion' | 'retained' | 'unfocused'}>;
 
 type TransientPreviewRestore = Readonly<{
   module: ModelModule;
@@ -155,6 +171,7 @@ export type ModelViewportOptions = Readonly<{
   onDrillDown: (node: ModelSnapshotObject) => void;
   onNavigateSource: (sourceRef: SourceRef) => void;
   onPositionTool: (event: TransformGizmoEvent) => void;
+  canEditPosition?: (binding: TransformGizmoBinding) => boolean;
   onTopologySelection: (event: TopologySelectionEvent) => void;
   sourceDecorationProviders?: readonly SourceDecorationProvider[];
   showCoordinateReference?: boolean;
@@ -178,6 +195,7 @@ export type TopologySelectionEvent =
   | Readonly<{kind: 'cancel'}>;
 
 type TopologySelectionState = {
+  positionTool: boolean;
   kind: TopologyKind;
   multiple: boolean;
   occurrenceKey: string;
@@ -307,6 +325,12 @@ export class ModelViewport {
   private readonly controls: ViewportNavigation;
   private readonly coordinateReference?: ViewportCoordinateReference;
   private liveGridStep = 1;
+  private awaitingToolUpdate = false;
+  private pendingSpatialTool?: {
+    key: string;
+    targetId?: string;
+    bindings: readonly TransformGizmoBinding[];
+  };
   private readonly animateViewChanges: boolean;
   private readonly isViewVisible: () => boolean;
   private readonly raycaster = new THREE.Raycaster();
@@ -321,16 +345,11 @@ export class ModelViewport {
     parameter: ToolParameterSchema;
   }>;
   private readonly committedParameterPreviews = new Map<string, number>();
-  private readonly occurrenceTranslationPreviews = new Map<string, Vec3>();
   private hasFramedView = false;
   private scenes?: ViewportScenes;
   private activeScene?: ViewportScene;
   private readonly viewStates = new Map<string, ViewportState>();
   private stateRevision = 0;
-  private readonly committedOccurrenceTranslationPreviews = new Map<
-    string,
-    Vec3
-  >();
   private readonly decorationLayers = new Map<string, DecorationInstance[]>();
   private readonly transformGizmo: TransformGizmo;
   private readonly spatialPreviews = new Map<string, SpatialObjectPreview>();
@@ -338,6 +357,7 @@ export class ModelViewport {
     string,
     SpatialObjectPreview
   >();
+  private readonly hiddenSourceDecorations = new Set<string>();
   private readonly spatialParameterValues = new Map<string, number>();
   private readonly onSelect: ModelViewportOptions['onSelect'];
   private readonly onViewChange: ModelViewportOptions['onViewChange'];
@@ -368,6 +388,7 @@ export class ModelViewport {
       onDrillDown,
       onNavigateSource,
       onPositionTool,
+      canEditPosition,
       onTopologySelection,
       sourceDecorationProviders = [],
       showCoordinateReference = true,
@@ -384,8 +405,59 @@ export class ModelViewport {
     this.onTopologySelection = onTopologySelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
     this.rendering = new ModelRenderer(this.container);
-    makeObservable<this, 'liveGridStep'>(this, {
+    makeObservable<
+      this,
+      | 'module'
+      | 'sourceParameter'
+      | 'parameterPreviews'
+      | 'spatialPreviews'
+      | 'hiddenSourceDecorations'
+      | 'renderedViewTarget'
+      | 'selectedKey'
+      | 'selectKey'
+      | 'selectSourceTarget'
+      | 'liveGridStep'
+      | 'awaitingToolUpdate'
+      | 'topologySelection'
+      | 'clearTopologySelection'
+      | 'renderSourceTarget'
+      | 'renderModelView'
+      | 'retainRenderedGeometry'
+    >(this, {
+      module: observableRef,
+      sourceParameter: observableRef,
+      parameterPreviews: observableShallow,
+      spatialPreviews: observableShallow,
+      hiddenSourceDecorations: observableShallow,
+      setParameterPreview: action,
+      clearParameterPreview: action,
+      commitParameterPreview: action,
+      setSpatialPreview: action,
+      clearSpatialPreview: action,
+      setSourceDecorationVisible: action,
+      renderedViewTarget: observableRef,
+      selectedKey: observableRef,
+      sourceContext: computed,
+      availablePositionTools: computed,
+      selectBySourceOffset: action,
+      selectEvaluationContext: action,
+      selectSourceTarget: action,
+      selectKey: action,
+      restoreTransientPreview: action,
+      previewCompletion: action,
+      previewCompletedProject: action,
       liveGridStep: observableRef,
+      awaitingToolUpdate: observableRef,
+      topologySelection: observableRef,
+      clearTopologySelection: action,
+      renderSourceTarget: action,
+      renderModelView: action,
+      retainRenderedGeometry: action,
+      beginTopologySelection: action,
+      endTopologySelection: action,
+      commitSpatialPreview: action,
+      awaitToolUpdate: action,
+      renderModule: action,
       gridStep: computed,
       renderMode: computed,
       setRenderMode: action,
@@ -435,7 +507,68 @@ export class ModelViewport {
       },
       this.rendering.grid,
       onPositionTool,
+      () =>
+        !this.awaitingToolUpdate &&
+        (!this.topologySelection || this.topologySelection.positionTool),
+      canEditPosition,
+      () => {
+        const scope = this.sourceContext;
+        const occurrence = this.getSelected();
+        if (!scope || !occurrence || !this.module) return;
+        return JSON.stringify([
+          scope.target.sourceRef.file,
+          contextualToolCallId(this.module, scope.target) ?? scope.target.id,
+          scope.evaluation.contextId,
+          occurrence.key,
+        ]);
+      },
     );
+    // Source context and in-flight previews own one decoration projection. A
+    // committed preview remains authoritative until the model is replaced.
+    const stopSourceDecorations = reaction(
+      () => ({
+        module: this.module,
+        scope: this.sourceContext,
+        parameter: this.sourceParameter,
+        spatialTool: this.transformGizmo.tool,
+        spatialPreviews: [...this.spatialPreviews],
+        parameterPreviews: [...this.parameterPreviews],
+        hidden: new Set(this.hiddenSourceDecorations),
+      }),
+      ({
+        module,
+        scope,
+        parameter,
+        spatialTool,
+        spatialPreviews,
+        parameterPreviews,
+        hidden,
+      }) => {
+        const previewing =
+          spatialPreviews.length + parameterPreviews.length > 0;
+        for (const provider of this.sourceDecorationProviders) {
+          const decorations =
+            module &&
+            scope &&
+            !scope.evaluation.relationPreviewDiagnostic &&
+            !hidden.has(provider.id) &&
+            !(previewing && provider.previewBehavior === 'hide')
+              ? provider.decorations({
+                  module,
+                  target: scope.target,
+                  evaluation: scope.evaluation,
+                  parameter:
+                    parameter?.targetId === scope.target.id
+                      ? parameter.parameter
+                      : undefined,
+                  spatialTool,
+                })
+              : [];
+          this.setDecorations(sourceDecorationOwner(provider.id), decorations);
+        }
+      },
+    );
+    window.addEventListener('pagehide', stopSourceDecorations, {once: true});
 
     this.renderer.domElement.addEventListener('pointerdown', event =>
       this.beginSelectionGesture(event),
@@ -481,13 +614,25 @@ export class ModelViewport {
     this.rendering.renderFrame();
   }
 
+  /** Keep stale handles unavailable until a replacement model is rendered. */
+  awaitToolUpdate(): void {
+    this.awaitingToolUpdate = true;
+    this.pendingSpatialTool = undefined;
+  }
+
   renderModule(
     module: ModelModule | null,
     selectedKey = 'root',
     source?: SourceViewSelection,
+    retainOnError = false,
   ): boolean {
     this.restoreTransientPreview();
     this.saveViewportState();
+    this.awaitingToolUpdate = false;
+    this.pendingSpatialTool = undefined;
+    const retainGeometry =
+      retainOnError && !!this.module && !!module?.diagnostic;
+    const previousSource = this.sourceContext?.target.sourceRef;
     this.module = module;
     this.sourceParameter = undefined;
     this.scenes = module ? new ViewportScenes(module) : undefined;
@@ -500,11 +645,14 @@ export class ModelViewport {
         source.offset,
         selectedKey,
         source.contextId,
+        previousSource?.end === source.offset ? previousSource : undefined,
       )
     )
       return true;
     if (module?.fallback) {
       this.renderModelView(selectedKey);
+    } else if (retainGeometry) {
+      this.retainRenderedGeometry();
     } else {
       this.activeScene = undefined;
       this.resetRenderedView();
@@ -530,22 +678,23 @@ export class ModelViewport {
     offset: number,
     preferredOccurrenceKey?: string,
     preferredContextId?: string,
+    preferredSource?: SourceRef,
   ): boolean {
     const scope = this.sourceEvaluationAt(
       this.module,
       file,
       offset,
       preferredContextId,
+      preferredSource,
     );
     const match = scope?.target;
-    const previousParameter = this.sourceParameter;
     const parameter = match && sourceParameterAt(match, file, offset);
     this.sourceParameter = parameter
       ? {targetId: match!.id, parameter}
       : undefined;
-    if (!scope) {
-      this.clearDecorations(
-        sourceDecorationOwner(parameterSourceDecoration.id),
+    if (!scope || !sourceContextRenderable(this.module!, scope)) {
+      this.retainRenderedGeometry(
+        this.renderedViewTarget.kind === 'retained' ? 'retained' : 'unfocused',
       );
       return false;
     }
@@ -570,21 +719,12 @@ export class ModelViewport {
       ) {
         this.selectKey(preferredOccurrenceKey, false);
       }
-      if (previousParameter?.parameter !== parameter) {
-        const scope = this.renderedSourceScope();
-        if (scope)
-          this.renderSourceDecorations(
-            this.module!,
-            scope.target,
-            scope.evaluation,
-          );
-      }
     }
     return true;
   }
 
   selectEvaluationContext(contextId: string): boolean {
-    const scope = this.renderedSourceScope();
+    const scope = this.sourceContext;
     if (!scope) return false;
     const evaluationIndex = scope.target.evaluations.findIndex(
       evaluation => evaluation.contextId === contextId,
@@ -600,20 +740,35 @@ export class ModelViewport {
     return true;
   }
 
-  sourceEvaluation():
+  /** The current semantic focus, shared by panels, handles and reference picking. */
+  get sourceContext():
     | Readonly<{
         target: SourceTarget;
         evaluation: SourceTargetEvaluation;
         evaluationIndex: number;
       }>
     | undefined {
-    const scope = this.renderedSourceScope();
-    return scope && this.renderedViewTarget.kind === 'source'
-      ? {
-          ...scope,
-          evaluationIndex: this.renderedViewTarget.evaluationIndex,
-        }
+    if (!this.module || this.renderedViewTarget.kind !== 'source') return;
+    const {targetId, evaluationIndex} = this.renderedViewTarget;
+    const target = this.module.sourceTargets.find(
+      target => target.id === targetId,
+    );
+    const evaluation = target?.evaluations[evaluationIndex];
+    return target && evaluation
+      ? {target, evaluation, evaluationIndex}
       : undefined;
+  }
+
+  /** A relate owns its toolbar even while a reference or another expression has focus. */
+  get availablePositionTools(): readonly SpatialTool[] {
+    const source = this.sourceContext;
+    if (
+      source &&
+      this.module &&
+      contextualToolScope(this.module, source).evaluation.relationOwnerNodeId
+    )
+      return ['translate', 'rotate-point', 'rotate-axis'];
+    return this.transformGizmo.availableTools;
   }
 
   /** Resolve a replacement snapshot with the same context choice as rendering. */
@@ -622,9 +777,27 @@ export class ModelViewport {
     file: string,
     offset: number,
     preferredContextId?: string,
-  ): ReturnType<ModelViewport['sourceEvaluation']> {
-    const target = this.sourceTargetAt(file, offset, module);
+    preferredSource?: SourceRef,
+  ): ModelViewport['sourceContext'] {
+    const target = this.sourceTargetAt(file, offset, module, preferredSource);
     if (!target) return;
+    const current = module === this.module ? this.sourceContext : undefined;
+    const owner =
+      current && module
+        ? contextualToolScope(module, current).evaluation.relationOwnerNodeId
+        : undefined;
+    // A loop's references and self can share a contextId. Source navigation
+    // retains the actual relation instance, including when focus changes sides.
+    const matchingOwnerIndex =
+      owner && module
+        ? target.evaluations.findIndex(
+            evaluation =>
+              (!preferredContextId ||
+                evaluation.contextId === preferredContextId) &&
+              contextualToolScope(module, {target, evaluation}).evaluation
+                .relationOwnerNodeId === owner,
+          )
+        : -1;
     const matchingContextIndex = preferredContextId
       ? target.evaluations.findIndex(
           evaluation => evaluation.contextId === preferredContextId,
@@ -632,16 +805,18 @@ export class ModelViewport {
       : -1;
     const retainedEvaluationIndex =
       module === this.module &&
-      this.renderedViewTarget.kind === 'source' &&
-      this.renderedViewTarget.targetId === target.id
-        ? this.renderedViewTarget.evaluationIndex
+      this.selectedViewTarget.kind === 'source' &&
+      this.selectedViewTarget.targetId === target.id
+        ? this.selectedViewTarget.evaluationIndex
         : -1;
     const preferredEvaluationIndex =
-      matchingContextIndex >= 0
-        ? matchingContextIndex
-        : retainedEvaluationIndex >= 0
-          ? retainedEvaluationIndex
-          : 0;
+      matchingOwnerIndex >= 0
+        ? matchingOwnerIndex
+        : matchingContextIndex >= 0
+          ? matchingContextIndex
+          : retainedEvaluationIndex >= 0
+            ? retainedEvaluationIndex
+            : 0;
     const evaluationIndex = target.evaluations[preferredEvaluationIndex]
       ? preferredEvaluationIndex
       : 0;
@@ -676,12 +851,12 @@ export class ModelViewport {
       // This immediate member preview precedes recompiling its relation.
       // Keep its actual receiver and never draw the previous contact snapshot.
       constraintId: undefined,
-      constraintOwnerNodeId: undefined,
+      relationOwnerNodeId: undefined,
       relationContext: undefined,
       constraintFocus: undefined,
-      constraintPreview: undefined,
-      constraintPreviewDiagnostic: undefined,
-      constraintSpatial: undefined,
+      relationPreview: undefined,
+      relationPreviewDiagnostic: undefined,
+      relationSpatial: undefined,
       topologyReferences: element?.topology
         ? [{nodeId: receiver.nodeId, name: element.name, ...element.topology}]
         : undefined,
@@ -769,11 +944,18 @@ export class ModelViewport {
   }
 
   getSelected(): Occurrence | undefined {
-    return this.occurrences.get(this.selectedKey);
+    return this.renderedViewTarget.kind === 'retained'
+      ? undefined
+      : this.occurrences.get(this.selectedKey);
   }
 
   exportScene() {
-    if (!this.module || this.transientPreviewRestore) return undefined;
+    if (
+      !this.module ||
+      this.transientPreviewRestore ||
+      this.renderedViewTarget.kind === 'retained'
+    )
+      return undefined;
     return {
       module: this.module,
       instances: collectExportInstances(this.occurrences.values()),
@@ -788,7 +970,7 @@ export class ModelViewport {
     return renderedModelName(
       this.module,
       roots,
-      this.sourceEvaluation()?.target.sourceRef,
+      this.sourceContext?.target.sourceRef,
     );
   }
 
@@ -799,6 +981,7 @@ export class ModelViewport {
     multiple: boolean,
     initialIds: readonly TopologyId[] = [],
     scope?: TopologySelectionScope,
+    positionTool = false,
   ): readonly TopologyId[] {
     const occurrence = this.occurrences.get(occurrenceKey);
     const input = this.module?.objects.get(
@@ -827,6 +1010,7 @@ export class ModelViewport {
     guide.matrixAutoUpdate = false;
     this.decorationRoot.add(guide);
     this.topologySelection = {
+      positionTool,
       kind,
       multiple,
       occurrenceKey,
@@ -838,7 +1022,7 @@ export class ModelViewport {
     };
     this.updateTopologySelectionTransform();
     this.rebuildSelectionHighlight();
-    this.updateTransformGizmo();
+    if (!positionTool) this.updateTransformGizmo();
     this.rebuildTopologySelectionOverlay();
     this.refreshTopologyHover();
     this.updateDecorationVisibilities();
@@ -846,10 +1030,15 @@ export class ModelViewport {
   }
 
   endTopologySelection(): void {
+    const positionTool = this.topologySelection?.positionTool;
     this.clearTopologySelection();
     this.rebuildSelectionHighlight();
-    this.updateTransformGizmo();
+    if (!positionTool) this.updateTransformGizmo();
     this.updateDecorationVisibilities();
+  }
+
+  get selectingRotationReference(): boolean {
+    return this.topologySelection?.positionTool ?? false;
   }
 
   setSelectedTopologyIds(ids: readonly TopologyId[]): void {
@@ -860,7 +1049,7 @@ export class ModelViewport {
   }
 
   hasRelativePositionContext(): boolean {
-    const scope = this.renderedSourceScope();
+    const scope = this.sourceContext;
     return (
       isRelativePositionContext(scope?.target) ||
       !!(scope?.evaluation.isCollection && scope.evaluation.focusNodeIds)
@@ -893,49 +1082,6 @@ export class ModelViewport {
   commitParameterPreview(targetId: string, value: number): void {
     this.committedParameterPreviews.set(targetId, value);
     this.parameterPreviews.set(targetId, value);
-    this.transformGizmo.commitParameterValue(targetId, value);
-  }
-
-  setOccurrenceTranslationPreview(
-    occurrenceKeys: readonly string[],
-    delta: Vec3,
-  ): void {
-    occurrenceKeys.forEach(key => {
-      const committed = this.committedOccurrenceTranslationPreviews.get(key);
-      this.occurrenceTranslationPreviews.set(key, [
-        (committed?.[0] ?? 0) + delta[0],
-        (committed?.[1] ?? 0) + delta[1],
-        (committed?.[2] ?? 0) + delta[2],
-      ]);
-    });
-    this.highlightedOccurrenceKeys = new Set(occurrenceKeys);
-    this.rebuildImpactHighlights();
-    this.applyPreviewTransforms();
-  }
-
-  clearOccurrenceTranslationPreview(occurrenceKeys: readonly string[]): void {
-    occurrenceKeys.forEach(key => {
-      const committed = this.committedOccurrenceTranslationPreviews.get(key);
-      if (committed) {
-        this.occurrenceTranslationPreviews.set(key, committed);
-      } else {
-        this.occurrenceTranslationPreviews.delete(key);
-      }
-    });
-    this.highlightedOccurrenceKeys = new Set(
-      this.committedOccurrenceTranslationPreviews.keys(),
-    );
-    this.rebuildImpactHighlights();
-    this.applyPreviewTransforms();
-  }
-
-  commitOccurrenceTranslationPreview(occurrenceKeys: readonly string[]): void {
-    occurrenceKeys.forEach(key => {
-      const translation = this.occurrenceTranslationPreviews.get(key);
-      if (translation) {
-        this.committedOccurrenceTranslationPreviews.set(key, translation);
-      }
-    });
   }
 
   setSpatialPreview(objects: readonly SpatialObjectPreview[]): void {
@@ -967,13 +1113,35 @@ export class ModelViewport {
   commitSpatialPreview(
     objects: readonly SpatialObjectPreview[],
     parameter?: Readonly<{id: string; value: number}>,
+    continuation?: SpatialPreview['continuation'],
   ): void {
     this.setSpatialPreview(objects.map(committedSpatialObject));
     for (const {key} of objects)
       this.committedSpatialPreviews.set(key, this.spatialPreviews.get(key)!);
     if (parameter)
       this.spatialParameterValues.set(parameter.id, parameter.value);
-    this.updateTransformGizmo();
+    const bindings = continuation
+      ? continuedSpatialBindings(
+          this.transformGizmo.currentBindings,
+          continuation.binding,
+          continuation.value,
+          objects.map(committedSpatialObject),
+        )
+      : [];
+    const occurrence = this.getSelected();
+    if (bindings.length && occurrence) {
+      this.pendingSpatialTool = {
+        key: occurrence.key,
+        targetId: this.sourceContext?.target.id,
+        bindings,
+      };
+      this.awaitingToolUpdate = false;
+      this.transformGizmo.attach(
+        occurrence.object,
+        bindings,
+        this.transformGizmo.tool,
+      );
+    }
   }
 
   setDecorations(
@@ -995,27 +1163,35 @@ export class ModelViewport {
             (!occurrenceKeys || occurrenceKeys.has(occurrence.key)),
         )
         .map(occurrence => {
+          const projected =
+            decoration.kind === 'anchor'
+              ? previewSpatialReference(
+                  decoration,
+                  this.spatialPreviews.get(occurrence.key),
+                  occurrence.node,
+                )
+              : decoration;
           const decorationObject =
-            decoration.kind === 'mesh'
-              ? createMeshDecorationObject(decoration)
-              : decoration.kind === 'edges'
-                ? createEdgeDecorationObject(decoration)
-                : decoration.kind === 'bounds'
-                  ? createBoundsDecorationObject(decoration)
-                  : decoration.kind === 'surface'
+            projected.kind === 'mesh'
+              ? createMeshDecorationObject(projected)
+              : projected.kind === 'edges'
+                ? createEdgeDecorationObject(projected)
+                : projected.kind === 'bounds'
+                  ? createBoundsDecorationObject(projected)
+                  : projected.kind === 'surface'
                     ? createSurfaceDecorationObject(
-                        decoration,
-                        decoration.operationRole ?? occurrence.operationRole,
+                        projected,
+                        projected.operationRole ?? occurrence.operationRole,
                       )
-                    : decoration.kind === 'topology'
-                      ? createTopologyDecorationObject(decoration)
-                      : decoration.kind === 'dimension'
+                    : projected.kind === 'topology'
+                      ? createTopologyDecorationObject(projected)
+                      : projected.kind === 'dimension'
                         ? createDimensionDecorationObject(
-                            decoration,
+                            projected,
                             this.camera,
                             occurrence.object.matrixWorld,
                           )
-                        : new AnchorDecorationObject(decoration);
+                        : new AnchorDecorationObject(projected);
           const object = new THREE.Group();
           object.matrixAutoUpdate = false;
           object.add(decorationObject);
@@ -1024,8 +1200,8 @@ export class ModelViewport {
             object,
             occurrenceKey: occurrence.key,
             frame:
-              decoration.kind === 'anchor'
-                ? (decoration.frame ?? 'geometry')
+              projected.kind === 'anchor'
+                ? (projected.frame ?? 'geometry')
                 : 'geometry',
             bounds: decoration.kind === 'bounds',
             anchor:
@@ -1072,38 +1248,12 @@ export class ModelViewport {
   }
 
   setSourceDecorationVisible(providerId: string, visible: boolean): void {
-    const owner = sourceDecorationOwner(providerId);
-    if (!visible) {
-      this.clearDecorations(owner);
-      return;
-    }
-    const scope = this.renderedSourceScope();
-    if (!this.module || !scope) return;
-    const provider = this.sourceDecorationProviders.find(
-      candidate => candidate.id === providerId,
-    )!;
-    this.setDecorations(
-      owner,
-      provider.decorations({
-        module: this.module,
-        target: scope.target,
-        evaluation: scope.evaluation,
-        parameter: this.parameterForSource(scope.target),
-      }),
-    );
+    if (visible) this.hiddenSourceDecorations.delete(providerId);
+    else this.hiddenSourceDecorations.add(providerId);
   }
 
-  hideSourceDecorationsDuringPreview(): void {
-    this.sourceDecorationProviders
-      .filter(provider => provider.previewBehavior === 'hide')
-      .forEach(provider => this.setSourceDecorationVisible(provider.id, false));
-  }
-
-  restoreSourceDecorations(): void {
-    const scope = this.renderedSourceScope();
-    if (this.module && scope) {
-      this.renderSourceDecorations(this.module, scope.target, scope.evaluation);
-    }
+  get positionTools(): TransformGizmo {
+    return this.transformGizmo;
   }
 
   get dragPreview() {
@@ -1301,12 +1451,12 @@ export class ModelViewport {
     const relatedNodes = this.resolveNodes(evaluation.nodeIds)
       .filter(
         node =>
-          !evaluation.constraintPreviewDiagnostic ||
-          node.nodeId !== evaluation.constraintOwnerNodeId,
+          !evaluation.relationPreviewDiagnostic ||
+          node.nodeId !== evaluation.relationOwnerNodeId,
       )
       .map(node =>
-        node.nodeId === evaluation.constraintPreview?.nodeId
-          ? {...node, ...evaluation.constraintPreview}
+        node.nodeId === evaluation.relationPreview?.nodeId
+          ? {...node, ...evaluation.relationPreview}
           : node,
       );
     const placement = sourceTargetPlacement(evaluation);
@@ -1325,11 +1475,21 @@ export class ModelViewport {
         evaluation.operationInput?.operationId,
         [...evaluation.nodeIds, ...(evaluation.operationInput?.nodeIds ?? [])],
       ),
-    ]).filter(
-      ({node}) =>
-        !evaluation.constraintPreviewDiagnostic ||
-        node.nodeId !== evaluation.constraintOwnerNodeId,
-    );
+    ])
+      .filter(
+        ({node}) =>
+          !evaluation.relationPreviewDiagnostic ||
+          node.nodeId !== evaluation.relationOwnerNodeId,
+      )
+      .map(context => {
+        const preview = target.evaluations.find(
+          candidate =>
+            candidate.relationPreview?.nodeId === context.node.nodeId,
+        )?.relationPreview;
+        return preview
+          ? {...context, node: {...context.node, ...preview}}
+          : context;
+      });
     const layeredScene = focusNodes.length + contextNodes.length > 1;
     this.selectionEmphasized =
       focusNodeIds !== undefined || target.kind !== 'constraint';
@@ -1425,7 +1585,6 @@ export class ModelViewport {
       [...focusNodes, ...contextNodes.map(({node}) => node)],
       placement,
     );
-    this.renderSourceDecorations(this.module!, target, evaluation);
     this.onViewChange?.();
   }
 
@@ -1460,24 +1619,56 @@ export class ModelViewport {
     file: string,
     offset: number,
     module: ModelModule | null = this.module,
+    preferredSource?: SourceRef,
   ): SourceTarget | undefined {
-    return module?.sourceTargets
-      .filter(
-        ({sourceRef}) =>
-          sourceRef.file === file &&
-          sourceRef.start <= offset &&
-          offset <= sourceRef.end,
-      )
-      .sort((left, right) => {
-        const leftIsTool = left.tool !== undefined;
-        const rightIsTool = right.tool !== undefined;
-        if (leftIsTool !== rightIsTool) return leftIsTool ? -1 : 1;
-        return (
-          sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef) ||
-          sourceTargetPriority(left) - sourceTargetPriority(right) ||
-          latestRuntimeOrder(right) - latestRuntimeOrder(left)
-        );
-      })[0];
+    const candidates = (module?.sourceTargets ?? []).filter(
+      ({sourceRef}) =>
+        sourceRef.file === file &&
+        sourceRef.start <= offset &&
+        offset <= sourceRef.end,
+    );
+    // A call end and a zero-width insertion gap can share one caret. Navigation
+    // carries its registered source identity; recompilation retains that choice
+    // through the existing selected source context.
+    const preferred = preferredSource
+      ? candidates.filter(
+          ({sourceRef}) =>
+            sourceRef.file === preferredSource.file &&
+            sourceRef.start === preferredSource.start &&
+            sourceRef.end === preferredSource.end,
+        )
+      : [];
+    const atExpressionStart = candidates.some(
+      target => !target.relationArray && target.sourceRef.start === offset,
+    );
+    const selected = (
+      preferred.length
+        ? preferred
+        : candidates.filter(
+            target => !atExpressionStart || !target.relationArray,
+          )
+    ).sort((left, right) => {
+      const isInsertion = (target: SourceTarget) =>
+        !!target.relationArray &&
+        offset > target.sourceRef.start &&
+        offset < target.sourceRef.end;
+      const leftInsertion = isInsertion(left);
+      const rightInsertion = isInsertion(right);
+      if (leftInsertion !== rightInsertion) return leftInsertion ? -1 : 1;
+      const leftIsTool = left.tool !== undefined;
+      const rightIsTool = right.tool !== undefined;
+      if (leftIsTool !== rightIsTool) return leftIsTool ? -1 : 1;
+      return (
+        sourceSpan(left.sourceRef) - sourceSpan(right.sourceRef) ||
+        sourceTargetPriority(left) - sourceTargetPriority(right) ||
+        latestRuntimeOrder(right) - latestRuntimeOrder(left)
+      );
+    })[0];
+    return selected?.rotationToolId
+      ? (module?.sourceTargets.find(
+          target => target.id === selected.rotationToolId,
+        ) ?? selected)
+      : selected;
   }
 
   private buildContextObject(
@@ -1575,7 +1766,25 @@ export class ModelViewport {
     };
   }
 
+  private retainRenderedGeometry(
+    kind: 'retained' | 'unfocused' = 'retained',
+  ): void {
+    this.renderedViewTarget = {kind};
+    this.clearRenderedInteraction();
+    this.rebuildSelectionHighlight();
+  }
+
   private resetRenderedView(): void {
+    this.clearRenderedInteraction();
+    this.disposeRoot();
+    this.occurrences.clear();
+    this.contextOccurrences.clear();
+    this.rebuildSelectionHighlight();
+    this.root.clear();
+  }
+
+  private clearRenderedInteraction(): void {
+    if (this.pendingSpatialTool) this.awaitToolUpdate();
     if (this.topologySelection) {
       this.clearTopologySelection();
       this.onTopologySelection({kind: 'cancel'});
@@ -1583,21 +1792,15 @@ export class ModelViewport {
     this.transformGizmo.detach();
     this.clearImpactHighlights();
     this.clearAllDecorations();
-    this.disposeRoot();
-    this.occurrences.clear();
-    this.contextOccurrences.clear();
-    this.rebuildSelectionHighlight();
     this.parameterPreviews.clear();
     this.committedParameterPreviews.clear();
-    this.occurrenceTranslationPreviews.clear();
-    this.committedOccurrenceTranslationPreviews.clear();
+    this.hiddenSourceDecorations.clear();
     this.spatialPreviews.clear();
     this.committedSpatialPreviews.clear();
     this.spatialParameterValues.clear();
     this.highlightedTargetId = undefined;
     this.highlightedOccurrenceKeys.clear();
     this.selectionClick = undefined;
-    this.root.clear();
     this.decorationRoot.clear();
   }
 
@@ -1656,8 +1859,77 @@ export class ModelViewport {
       return;
     }
     const occurrence = this.getSelected();
-    const scope = this.renderedSourceScope();
+    const source = this.sourceContext;
+    const scope =
+      source && this.module ? contextualToolScope(this.module, source) : source;
+    const attach = (bindings: readonly TransformGizmoBinding[]) => {
+      const name = scope?.target.tool?.signature.name;
+      const explicit =
+        name &&
+        [
+          'offset',
+          'rotate',
+          'originOffset',
+          'originPoint',
+          'originVertex',
+          'originCenter',
+          'pivot',
+          'pivotVertex',
+          'pivotPoint',
+          'pivotOffset',
+          'axisEdge',
+          'axisLine',
+          'axisOffset',
+        ].includes(name);
+      this.transformGizmo.attach(
+        occurrence!.object,
+        bindings,
+        explicit && bindings[0] ? bindingTool(bindings[0]) : undefined,
+      );
+    };
+    if (this.pendingSpatialTool) {
+      if (
+        occurrence?.key === this.pendingSpatialTool.key &&
+        scope?.target.id === this.pendingSpatialTool.targetId
+      )
+        attach(this.pendingSpatialTool.bindings);
+      else this.transformGizmo.detach();
+      return;
+    }
     if (occurrence && scope && this.module) {
+      if (scope.target.rotationSelection) {
+        this.transformGizmo.attach(
+          occurrence.object,
+          [],
+          ['axisLine', 'axisEdge'].includes(
+            scope.target.rotationSelection.selector,
+          )
+            ? 'rotate-axis'
+            : 'rotate-point',
+        );
+        return;
+      }
+      const relation = scope.evaluation;
+      const selection = relation.relationSpatial?.kind;
+      if (
+        (relation.constraintId ||
+          relation.transformationId ||
+          scope.target.relationArray) &&
+        relation.relationOwnerNodeId === occurrence.node.nodeId &&
+        (!selection || selection === 'rotate' || selection === 'offset') &&
+        !relation.operationId
+      ) {
+        const bindings = transformationBindings(
+          this.module,
+          occurrence,
+          this.renderedOccurrences(),
+          this.committedSpatialPreviews,
+          this.spatialParameterValues,
+          scope,
+        );
+        attach([...bindings, ...rotationReferenceBindings(bindings)]);
+        return;
+      }
       const bindings = spatialBindings(
         this.module,
         scope,
@@ -1667,16 +1939,16 @@ export class ModelViewport {
         this.spatialParameterValues,
       );
       if (bindings.length > 0) {
-        this.transformGizmo.attach(occurrence.object, bindings);
+        attach([...bindings, ...rotationReferenceBindings(bindings)]);
         return;
       }
-      if (scope.evaluation.constraintSpatial) {
+      if (scope.evaluation.relationSpatial) {
         this.transformGizmo.detach();
         return;
       }
     }
     if (
-      this.topologySelection ||
+      (this.topologySelection && !this.topologySelection.positionTool) ||
       !occurrence ||
       occurrence.depth === 0 ||
       !this.hasRelativePositionContext()
@@ -1684,40 +1956,16 @@ export class ModelViewport {
       this.transformGizmo.detach();
       return;
     }
-    const constraintId =
-      scope?.target.kind === 'constraint'
-        ? scope.evaluation.constraintId!
-        : null;
-    this.transformGizmo.attach(
-      occurrence.object,
-      this.module
-        ? relationBindings(
-            this.module,
-            occurrence,
-            this.renderedOccurrences(),
-            constraintId,
-            this.committedSpatialPreviews,
-            this.spatialParameterValues,
-          )
-        : [],
-    );
-  }
-
-  private renderedSourceScope():
-    | Readonly<{
-        target: SourceTarget;
-        evaluation: SourceTargetEvaluation;
-      }>
-    | undefined {
-    if (!this.module || this.renderedViewTarget.kind !== 'source') {
-      return undefined;
-    }
-    const renderedTarget = this.renderedViewTarget;
-    const target = this.module.sourceTargets.find(
-      candidate => candidate.id === renderedTarget.targetId,
-    );
-    const evaluation = target?.evaluations[renderedTarget.evaluationIndex];
-    return target && evaluation ? {target, evaluation} : undefined;
+    const bindings = this.module
+      ? transformationBindings(
+          this.module,
+          occurrence,
+          this.renderedOccurrences(),
+          this.committedSpatialPreviews,
+          this.spatialParameterValues,
+        )
+      : [];
+    attach([...bindings, ...rotationReferenceBindings(bindings)]);
   }
 
   private applyPreviewTransforms(): void {
@@ -1760,61 +2008,37 @@ export class ModelViewport {
   }
 
   private previewTranslationFor(occurrence: Occurrence): Vec3 {
-    const occurrenceOffset = this.occurrenceTranslationPreviews.get(
-      occurrence.key,
-    );
-    const offset: [number, number, number] = [
-      occurrenceOffset?.[0] ?? 0,
-      occurrenceOffset?.[1] ?? 0,
-      occurrenceOffset?.[2] ?? 0,
-    ];
-    for (const constraint of occurrence.node.constraints) {
-      const localOffset: [number, number, number] = [0, 0, 0];
-      for (const parameter of constraint.parameters) {
+    const offset: [number, number, number] = [0, 0, 0];
+    for (const transformation of occurrence.node.transformations ?? []) {
+      for (const parameter of transformation.parameters) {
         const previewValue = this.parameterPreviews.get(parameter.target.id);
-        if (previewValue === undefined || parameter.operation !== 'offset') {
+        if (previewValue === undefined || parameter.operation !== 'offset')
           continue;
-        }
         const axis = axisIndex(parameter.argument);
-        if (axis !== undefined) {
-          localOffset[axis] +=
-            (previewValue - parameter.target.value) * parameter.sensitivity;
-        }
+        if (axis === undefined) continue;
+        const stage = transformation.offsets.find(stage =>
+          stage.sourceRefs.some(
+            ref =>
+              ref.file === parameter.operationRef.file &&
+              ref.start === parameter.operationRef.start &&
+              ref.end === parameter.operationRef.end,
+          ),
+        );
+        if (!stage) continue;
+        const localOffset = new THREE.Vector3();
+        localOffset.setComponent(
+          axis,
+          (previewValue - parameter.target.value) * parameter.sensitivity,
+        );
+        localOffset.applyQuaternion(
+          new THREE.Quaternion(...stage.frame.quaternion),
+        );
+        offset[0] += localOffset.x;
+        offset[1] += localOffset.y;
+        offset[2] += localOffset.z;
       }
-      const frame = new THREE.Quaternion(...constraint.offsetFrame.quaternion);
-      const worldOffset = new THREE.Vector3(...localOffset).applyQuaternion(
-        frame,
-      );
-      offset[0] += worldOffset.x * constraint.offsetDirection;
-      offset[1] += worldOffset.y * constraint.offsetDirection;
-      offset[2] += worldOffset.z * constraint.offsetDirection;
     }
     return offset;
-  }
-
-  private renderSourceDecorations(
-    module: ModelModule,
-    target: SourceTarget,
-    evaluation: SourceTargetEvaluation,
-  ): void {
-    if (evaluation.constraintPreviewDiagnostic) return;
-    for (const provider of this.sourceDecorationProviders) {
-      const decorations = provider.decorations({
-        module,
-        target,
-        evaluation,
-        parameter: this.parameterForSource(target),
-      });
-      this.setDecorations(sourceDecorationOwner(provider.id), decorations);
-    }
-  }
-
-  private parameterForSource(
-    target: SourceTarget,
-  ): ToolParameterSchema | undefined {
-    return this.sourceParameter?.targetId === target.id
-      ? this.sourceParameter.parameter
-      : undefined;
   }
 
   private beginSelectionGesture(event: PointerEvent): void {
@@ -2057,7 +2281,11 @@ export class ModelViewport {
   }
 
   private pickTargets(event: PointerEvent): readonly ViewportPickTarget[] {
-    if (this.renderedViewTarget.kind === 'completion') return [];
+    if (
+      this.renderedViewTarget.kind === 'completion' ||
+      this.renderedViewTarget.kind === 'retained'
+    )
+      return [];
     this.prepareRaycaster(event);
 
     const hits = this.raycaster.intersectObjects(this.root.children, true);
@@ -2083,7 +2311,7 @@ export class ModelViewport {
   }
 
   private hasCompositionSourceContext(): boolean {
-    const scope = this.renderedSourceScope();
+    const scope = this.sourceContext;
     return Boolean(
       (scope?.evaluation.operationInput &&
         scope.target.contextTargetIds.length > 0) ||
@@ -2350,7 +2578,8 @@ function sourceTargetPriority(target: SourceTarget): number {
   if (target.kind === 'operation-selection') return -2;
   if (target.kind === 'tool') return -1;
   if (target.kind === 'element') return -1;
-  if (target.kind === 'constraint') return 0;
+  if (target.kind === 'constraint' || target.kind === 'transformation')
+    return 0;
   if (target.kind === 'operation-input') return 1;
   if (target.kind === 'operation-output') return 2;
   return 3;
@@ -2361,6 +2590,7 @@ export function sourceTargetPlacement(
 ): ModelPlacement {
   return evaluation.isCollection ||
     evaluation.constraintId !== undefined ||
+    evaluation.transformationId !== undefined ||
     evaluation.relationContext !== undefined ||
     isCompositionInputRole(evaluation.operationInput?.role)
     ? 'composition'
@@ -2368,7 +2598,8 @@ export function sourceTargetPlacement(
 }
 
 function isRelativePositionContext(target: SourceTarget | undefined): boolean {
-  if (target?.kind === 'constraint') return true;
+  if (target?.kind === 'constraint' || target?.kind === 'transformation')
+    return true;
   const role = target?.operation?.role;
   return target?.kind === 'operation-input' && isCompositionInputRole(role);
 }
@@ -2381,8 +2612,8 @@ function sourceOperationRole(
   if (module.toolNodeIds.has(nodeId)) return 'tool';
   const input = evaluation.operationInput;
   if (!input) return undefined;
-  const sourceNodeIds = evaluation.constraintOwnerNodeId
-    ? [evaluation.constraintOwnerNodeId]
+  const sourceNodeIds = evaluation.relationOwnerNodeId
+    ? [evaluation.relationOwnerNodeId]
     : evaluation.nodeIds;
   return sourceNodeIds.includes(nodeId) ? input.role : undefined;
 }
@@ -3015,4 +3246,20 @@ function uniqueContextNodes(
     seen.add(node.nodeId);
     return true;
   });
+}
+
+/** A failed result retains its source metadata even when this focus has no usable view. */
+function sourceContextRenderable(
+  module: ModelModule,
+  {target, evaluation}: NonNullable<ModelViewport['sourceContext']>,
+): boolean {
+  return (
+    (evaluation.runtime.outcome === 'completed' ||
+      (!!target.rotationSelection &&
+        !!evaluation.relationPreview &&
+        !evaluation.relationPreviewDiagnostic) ||
+      !!target.tool?.arguments.some(argument => argument.target)) &&
+    (evaluation.nodeIds.some(id => module.objects.has(id)) ||
+      !!evaluation.sketchIds?.some(id => module.sketches.has(id)))
+  );
 }

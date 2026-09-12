@@ -15,6 +15,7 @@ import type {
 import type {ModelModule, SourceTargetEvaluation} from './compiler';
 import {
   evaluatedConstraints,
+  evaluatedConstraint,
   focusedConstraintSide,
 } from './constraint-context';
 import {boundAppearance} from '../rendering/bound-appearance';
@@ -367,49 +368,62 @@ const secondaryRelationMarkerOpacity = 0.7;
 
 export const relationSourceDecoration: SourceDecorationProvider = {
   id: 'relation-geometry',
-  decorations({module, evaluation}) {
-    return evaluatedConstraints(module.objects, evaluation).flatMap(
-      constraint => {
-        const focus = focusedConstraintSide(evaluation, constraint);
-        return (['source', 'target'] as const).flatMap(side => {
-          const node = module.objects.get(constraint[side].nodeId);
-          if (!node) return [];
-          const element =
-            side === 'source'
-              ? constraint.sourceElement
-              : constraint.targetElement;
-          const decorations: readonly ViewportDecoration[] =
-            constraint.kind === 'align'
-              ? alignedElementDecorations(module, node, element)
-              : [
-                  ...(side === 'source'
-                    ? [
-                        {
-                          kind: 'bounds' as const,
-                          id: 'bounds',
-                          nodeId: node.nodeId,
-                          ...constraint.sourceBounds,
-                          appearance: boundAppearance,
-                        },
-                      ]
-                    : []),
-                  ...namedElementDecorations(node, element),
-                ];
-          const opacity = side === focus ? 1 : secondaryRelationMarkerOpacity;
-          return decorations.map(decoration => ({
-            ...decoration,
-            id: `${constraint.id}:${side}:${decoration.id}`,
-            appearance: {
-              ...decoration.appearance,
-              opacity: (decoration.appearance.opacity ?? 1) * opacity,
-              edgeOpacity: decoration.appearance.edgeColor
-                ? (decoration.appearance.edgeOpacity ?? 1) * opacity
-                : undefined,
-            },
-          }));
-        });
-      },
-    );
+  decorations({module, target, evaluation}) {
+    // A joint preview still solves every relation; only the focused relation
+    // contributes reference markers. Bare self and spatial operations have their
+    // own origin/pivot/axis controls instead of all constraint decorations.
+    if (
+      target.rotationSelection ||
+      target.tool?.signature.name === 'offset' ||
+      evaluation.relationSpatial ||
+      (target.kind === 'value' &&
+        evaluation.constraintFocus !== 'target' &&
+        !evaluation.element &&
+        !evaluation.anchorReferences?.length &&
+        !evaluation.topologyReferences?.length)
+    )
+      return [];
+    const current = evaluatedConstraint(module.objects, evaluation);
+    return (current ? [current] : []).flatMap(constraint => {
+      const focus = focusedConstraintSide(evaluation, constraint);
+      return (['source', 'target'] as const).flatMap(side => {
+        const node = module.objects.get(constraint[side].nodeId);
+        if (!node) return [];
+        const element =
+          side === 'source'
+            ? constraint.sourceElement
+            : constraint.targetElement;
+        const decorations: readonly ViewportDecoration[] =
+          constraint.kind === 'align'
+            ? alignedElementDecorations(module, node, element)
+            : [
+                ...(side === 'source'
+                  ? [
+                      {
+                        kind: 'bounds' as const,
+                        id: 'bounds',
+                        nodeId: node.nodeId,
+                        ...constraint.sourceBounds,
+                        appearance: boundAppearance,
+                      },
+                    ]
+                  : []),
+                ...namedElementDecorations(node, element),
+              ];
+        const opacity = side === focus ? 1 : secondaryRelationMarkerOpacity;
+        return decorations.map(decoration => ({
+          ...decoration,
+          id: `${constraint.id}:${side}:${decoration.id}`,
+          appearance: {
+            ...decoration.appearance,
+            opacity: (decoration.appearance.opacity ?? 1) * opacity,
+            edgeOpacity: decoration.appearance.edgeColor
+              ? (decoration.appearance.edgeOpacity ?? 1) * opacity
+              : undefined,
+          },
+        }));
+      });
+    });
   },
 };
 

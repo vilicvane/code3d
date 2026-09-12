@@ -41,25 +41,41 @@ shows each step with the same editable source used by the App.
 ## Example
 
 ```ts
-import {box, cylinder, group} from '@code3d/core';
+import {cylinder, regularPrism} from '@code3d/core';
 
-const baseHeight = 4;
-const postHeight = 14;
+/**
+ * Select spacer(...) to edit its parameters or compare the Arguments presets.
+ * @code3d.param height {kind: 'length', default: 12, constraints: {min: 4, max: 30}}
+ * @code3d.param radius {kind: 'length', default: 5, constraints: {min: 4, max: 10}}
+ * @code3d.param sides {kind: 'count', default: 6, constraints: {min: 3, max: 12}}
+ * @code3d.arguments [12, 5, 6]
+ * @code3d.arguments [20, 6, 8]
+ */
+export function spacer(height = 12, radius = 5, sides = 6) {
+  const body = regularPrism(radius, height, sides);
+  const bore = cylinder(2, height);
+  return body.cut([bore]);
+}
 
-// Share an origin on the contact plane: the base below, the post above.
-const base = box(36, baseHeight, 24)
-  .fillet(1)
-  .originOffset(0, baseHeight / 2, 0);
-const post = cylinder(4, postHeight).originOffset(10, -postHeight / 2, 0);
-
-export const model = group([base, post]);
+export default spacer(12, 5, 6);
 ```
 
-`originOffset()` subtracts its offset from the geometry's coordinates. Here the
-base's top and the post's bottom share Y = 0, with the post at X = −10. `group`
-assembles them at their common origin. Place the cursor on `base`, `post`, or
-`originOffset` to inspect and adjust that context; Code3D writes interactive
-changes back to the same source.
+This spacer demonstrates parameter annotations and presets. Select a call to change
+its dimensions with the parameter tools, or use the Arguments presets to inspect
+different sizes. An edit to the shared function affects every caller; Undo
+restores the source and its resulting geometry.
+
+## Explore the examples
+
+- [Desktop stand](https://www.code3d.org/app/#/file/examples/projects/phone-stand.ts): change the width and lean of a one-piece phone stand.
+- [Mounting plate](https://www.code3d.org/app/#/file/examples/sketches/mounting-plate.ts): edit a slot on a rotated part's plane.
+- [Text](https://www.code3d.org/app/#/file/examples/text.ts): raised and engraved text using Google Fonts.
+- [Third-party npm packages](https://www.code3d.org/app/#/file/examples/npm/model.ts): install and use a browser-compatible npm dependency.
+- [Desktop controller](https://www.code3d.org/app/#/file/examples/projects/desktop-controller/model.ts): explore a multi-file assembly and export STEP, STL or 3MF.
+- [Modeling with an agent](docs/agents.md): connect an agent and continue editing the same project.
+
+The iPhone image above is a modeling screenshot; its complete source is not
+currently distributed with the runnable examples.
 
 ## Run locally
 

@@ -218,8 +218,8 @@ test('reads real JSDoc only and keeps multiline offsets in the original source',
   assert.deepEqual(diagnostics(sourceFile(source)), []);
 });
 
-test('recognizes only param and arguments, leaving former variable tags as ordinary comments', () => {
-  assert.deepEqual([...annotationNames], ['arguments', 'param']);
+test('recognizes tool, param and arguments, leaving former variable tags as ordinary comments', () => {
+  assert.deepEqual([...annotationNames], ['arguments', 'param', 'tool']);
   const source = [
     '/**',
     ' * @code3d.label Custom width',
@@ -234,12 +234,13 @@ test('recognizes only param and arguments, leaving former variable tags as ordin
     '/**',
     " * @code3d.param size {kind: 'length'}",
     ' * @code3d.arguments [width]',
+    ' * @code3d.tool',
     ' */',
     'function model(size: number) {}',
   ].join('\n');
   assert.deepEqual(
     annotations(source).map(annotation => annotation.name),
-    ['param', 'arguments'],
+    ['param', 'arguments', 'tool'],
   );
   assert.deepEqual(diagnostics(sourceFile(source)), []);
   const result = select(source.replace('Custom width', 'Custom wi|dth'));

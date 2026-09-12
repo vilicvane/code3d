@@ -33,7 +33,10 @@ TypeScript 隐藏声明不等于 JavaScript 对象上的字段不可读；这是
 组合只在需要具体几何、查询或显示时解释相关模型的关系闭包；单独检查一个模型
 仍使用它自己的局部几何。复用同一个模型值与创建两个 `relate` 值具有不同身份。
 
-`relate` 确定接受摆放的 self，关系保存在新模型值上。
+`relate` 确定接受摆放的 self，约束与独立 Transformation 按顺序保存在新模型值的 placements 中。Constraint 只表示 on/align 条件，不提供变换或旋转选择器；独立 Transformation 只表示一次 offset 或 rotate，不提供完成后的链式方法。pivot/pivotVertex/pivotPoint 可接一次 pivotOffset，axisEdge/axisLine 可接一次 axisOffset；偏移后的未完成选择只提供 rotate，完成后同样返回单步 Transformation；两者共用源码 trace。
+连续约束形成联合求解段；独立变换作用于该段结果，随后约束仅继承前段姿态与自由度，不继承其硬条件。求解器先联合求解条件，再执行独立 transformations；只有 Transformation 存储动作与参考，不保留约束内变换路径。引用其他零件时使用其最终姿态。连续 relate 调用接续原排列。快照的 relationStages 保存段边界、结果位姿和固定组合架；原点重表达和嵌套组合一起变换该架。
+独立 Transformation 不改变独立查看的局部几何。
+旋转选择按输入区分坐标 pivot、self 拓扑 pivotVertex/axisEdge 和直接引用 pivotPoint/axisLine。拓扑 ID 延后由 self 解析；外部点线保留所属模型，参与关系闭包并使用已求解姿态。点引用只改变中心，旋转及 pivotOffset 仍沿 self 操作前局部轴；求解器正向执行与逆向恢复共用同一旋转参考计算，避免在摆放确定前烘焙外部点。
 
 原点由构造器确定；派生操作继承主输入坐标系，不按结果包围盒自动居中。
 group/union/intersect 使用首个成员或操作数的完整局部坐标系，cut 使用 stock，
@@ -48,11 +51,12 @@ loft 使用第一截面，extrude 保留输入面。group 将求解位姿统一�
 草图局部定义、空间副本及上下文编辑的契约见[草图专题](sketch.md#空间参考架与模型上下文)。
 
 - `on` 将模型或有限拓扑的支撑边界放到目标方向 bound，只求平移；不暗中旋转、
-  匹配真实面或把切向位置居中。显式 offset 在目标参考架中表达其定位语义。
+  匹配真实面或把切向位置居中。独立 offset 在联合解上沿固定组合参考架平移 self；零位移不添加约束，后续求解段保留前段未受约束的自由位置。
 - `align` 表达底层几何重合或包含，可以解位置与姿态。线、面使用解析几何，
   忽略裁剪边界；方向的 `reverse`、`flip` 与参考轴分别处理。
-- 旋转链、pivot 和引用轴按明确的参考系构造；关系预览必须来自光标所在阶段，
-  不能混入下游链操作之后的姿态。
+- 独立旋转、pivot 和引用轴按明确的参考系构造；关系预览必须来自光标所在阶段，
+  不能混入当前操作之后的姿态。同一连续段内的兄弟约束参与联合求解，
+  前段只提供输入姿态；阶段预览截止当前变换，不越过独立变换收集后段约束。
 
 实现见 [bound-solver](../../../packages/core/src/library/bound-solver.ts)、
 [alignment-geometry](../../../packages/core/src/library/alignment-geometry.ts)和

@@ -51,6 +51,7 @@ export class ViewportNavigation extends ArcballControls {
   declare protected _gizmos: Group;
   declare protected _animationId: number;
   declare protected _timeStart: number;
+  declare protected _upState: Vector3;
   declare protected mouseActions: {
     operation: ArcballControlsMouseActionOperation;
     state: symbol;
@@ -96,6 +97,13 @@ export class ViewportNavigation extends ArcballControls {
 
   get focus(): Vector3 {
     return this._gizmos.position;
+  }
+
+  override setCamera(camera: ViewCamera): void {
+    super.setCamera(camera);
+    // Arcball rotates _upState by the camera's absolute quaternion. Its default
+    // setCamera copies world-space up, applying an already oriented up twice.
+    this._upState.set(0, 1, 0);
   }
 
   capturePose(): CameraPose {

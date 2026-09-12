@@ -5,6 +5,9 @@ import type {Model, Anchor} from '@code3d/core';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  offset,
+  rotate,
+  axisLine,
   arc,
   bezier,
   box,
@@ -171,23 +174,20 @@ test('point, circle, line and surface constraints use true cylinder and sphere g
   );
 });
 
-test('align offset moves self in the target frame and zero does not pin a trim center', () => {
+test('an offset after align moves self in composition axes and zero does not pin a trim center', () => {
   const target = line([100, 0, 0], [200, 0, 0]);
   const original = point([3, 7, 9]);
   const plain = original.relate(s => s.align(target));
-  const zero = original.relate(s => s.align(target).offset(0, 0, 0));
+  const zero = original.relate(s => [s.align(target), offset(0, 0, 0)]);
   near(position(plain), position(zero));
   for (const reverse of [false, true]) {
-    const placed = original.relate(s =>
-      (reverse ? target.align(s) : s.align(target)).offset(0, 5, 0),
-    );
-    const axes = reverse
-      ? defined(modelElementReference(original.center)).transform.quaternion
-      : defined(modelElementReference(target.edge(1))).transform.quaternion;
-    const offset = rotateVector([0, 5, 0], axes);
+    const placed = original.relate(s => [
+      reverse ? target.align(s) : s.align(target),
+      offset(0, 5, 0),
+    ]);
     near(
       position(placed),
-      position(plain).map((v, i) => v + offset[i]),
+      position(plain).map((v, i) => v + [0, 5, 0][i]),
     );
   }
 });
@@ -220,20 +220,23 @@ test('elliptic cylinder sections and spherical latitude circles constrain the wh
   }
 });
 
-test('rotation, pivot and reversed around axes remain authored after alignment', () => {
+test('rotation, pivot and reversed rotation axes remain authored after alignment', () => {
   const target = point([10, 0, 0]);
-  const rotated = line([0, 0, 0], [0, 10, 0]).relate(s =>
-    s.start.align(target).rotate(0, 0, 90),
-  );
+  const rotated = line([0, 0, 0], [0, 10, 0]).relate(s => [
+    s.start.align(target),
+    rotate(0, 0, 90),
+  ]);
   near(world(rotated, rotated.start).position, [10, 0, 0]);
   near(direction(rotated, rotated.edge(1)), [-1, 0, 0]);
   const axis = box(1, 1, 1).axis;
-  const a = point([10, 0, 0]).relate(s =>
-    s.align(target).around(axis).rotate(90),
-  );
-  const b = point([10, 0, 0]).relate(s =>
-    s.align(target).around(axis.reverse()).rotate(-90),
-  );
+  const a = point([10, 0, 0]).relate(s => [
+    s.align(target),
+    axisLine(axis).rotate(90),
+  ]);
+  const b = point([10, 0, 0]).relate(s => [
+    s.align(target),
+    axisLine(axis.reverse()).rotate(-90),
+  ]);
   near(position(a), position(b));
   near(pose(a).quaternion, pose(b).quaternion);
 });
@@ -294,10 +297,11 @@ test('proven incompatibility, unsupported geometry and nonconvergence are distin
   );
 });
 
-test('repeated compatible rotation chains apply their authored angle once', () => {
+test('duplicate constraints share one solution before one independent rotation', () => {
   const placed = box(2, 2, 2).relate(self => [
-    self.center.align(point()).rotate(0, 90, 0),
-    self.center.align(point()).rotate(0, 90, 0),
+    self.center.align(point()),
+    self.center.align(point()),
+    rotate(0, 90, 0),
   ]);
   near(rotateVector([1, 0, 0], pose(placed).quaternion), [0, 0, -1]);
 });
@@ -331,4 +335,28 @@ test('point-to-ellipse placement follows the nearest locus point, ignoring trim 
   near([p[1]], [0]);
   const tangent = [(-20 * p[2]) / 10, 0, (10 * p[0]) / 20];
   assert.ok(Math.abs(move[0] * tangent[0] + move[2] * tangent[2]) < 1e-4);
+});
+
+test('point alignment to a bound-placed part keeps its fixed orientation exact in standalone previews', () => {
+  const base = box(70, 5, 52).fillet(2).originOffset(0, 2.5, 0);
+  const mast = box(12, 32, 12)
+    .fillet(1)
+    .relate(part => [
+      part.axis.align(base.axis),
+      offset(0, 0, -12),
+      part.down.on(base.up),
+    ]);
+  const axle = cylinder(3, 20)
+    .rotate(0, 0, 90)
+    .relate(part => part.center.align(mast.center));
+  near(position(axle), [0, 16, -12]);
+  near(pose(mast).quaternion, [0, 0, 0, 1]);
+  const knob = box(5, 16, 16).relate(part => [
+    part.center.align(axle.center),
+    offset(-12.5, 0, 0),
+  ]);
+  near(position(knob), [-12.5, 16, -12]);
+  const assembly = group([base, mast, axle]);
+  assert.equal(snapshot(assembly).children.length, 3);
+  near(position(axle), [0, 16, -12]);
 });

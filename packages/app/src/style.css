@@ -875,6 +875,25 @@ kbd {
   border-bottom: 1px solid #d8ff3e88;
 }
 
+.monaco-editor .code3d-context-word {
+  background: #d8ff3e1a;
+  outline: 1px solid #d8ff3e44;
+  border-radius: 2px;
+}
+
+.monaco-editor .code3d-context-caret {
+  border-left: 2px solid #d8ff3ecc;
+  margin-left: -1px;
+}
+
+.code3d-active-tool-source {
+  background: #d8ff3e0d;
+}
+
+.monaco-editor .code3d-active-tool-source-inline {
+  border-bottom: 1px solid #d8ff3e99;
+}
+
 /* Monaco themes the rename container; native inputs need explicit inheritance. */
 .monaco-editor .rename-box .rename-input {
   color: inherit;
@@ -1809,11 +1828,13 @@ kbd {
   max-width: calc(100% - 2 * var(--viewport-inset) - 384px);
 }
 .sketch-toolbar {
-  --sketch-tool-inset: 3px;
-  position: relative;
   grid-area: tools / 1;
   justify-self: end;
   margin: 0 var(--viewport-inset) var(--viewport-inset) 0;
+}
+.tool-toolbar {
+  --tool-inset: 3px;
+  position: relative;
   z-index: 1;
   display: flex;
   align-items: stretch;
@@ -1826,26 +1847,26 @@ kbd {
   background: #11120feb;
   backdrop-filter: blur(12px);
 }
-.sketch-tool-group {
+.tool-group {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: var(--sketch-tool-inset);
+  padding: var(--tool-inset);
 }
-.sketch-tool-group + .sketch-tool-group {
+.tool-group + .tool-group {
   border-left: 1px solid var(--line);
 }
-.sketch-tool-variants {
+.tool-variants {
   display: flex;
 }
-.sketch-toolbar .sketch-tool-caret {
+.tool-toolbar .tool-caret {
   width: 14px;
   margin-left: -2px;
 }
-.sketch-tool-caret .ui-icon {
+.tool-caret .ui-icon {
   width: 12px;
 }
-.sketch-tool-menu {
+.tool-menu {
   margin: 0;
   padding: 4px;
   border: 1px solid var(--line);
@@ -1854,18 +1875,18 @@ kbd {
   color: inherit;
   min-width: 172px;
 }
-.sketch-tool-menu:popover-open {
+.tool-menu:popover-open {
   display: grid;
   gap: 2px;
 }
-.sketch-toolbar .sketch-tool-menu button {
+.tool-toolbar .tool-menu button {
   width: auto;
   padding: 6px 10px;
   justify-content: flex-start;
   gap: 10px;
   color: inherit;
 }
-.sketch-tool-menu button[aria-checked='true'] {
+.tool-menu button[aria-checked='true'] {
   color: var(--acid);
   background: #d8ff3e12;
 }
@@ -1884,7 +1905,7 @@ kbd {
 .sketch-constraint-tools[hidden] {
   display: none;
 }
-.sketch-constraint-tools .sketch-toolbar,
+.sketch-constraint-tools .tool-toolbar,
 .sketch-constraint-tools .drawing-inputs {
   position: static;
   margin: 0;
@@ -1893,7 +1914,8 @@ kbd {
 .sketch-constraint-tools .drawing-input-title {
   display: none;
 }
-.sketch-editor button {
+.sketch-editor button,
+.tool-toolbar button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1905,7 +1927,8 @@ kbd {
   background: var(--soft);
   cursor: pointer;
 }
-.sketch-editor button:focus-visible {
+.sketch-editor button:focus-visible,
+.tool-toolbar button:focus-visible {
   outline: 1px solid var(--acid);
   outline-offset: 2px;
 }
@@ -1913,7 +1936,7 @@ kbd {
   color: var(--acid);
   border-color: #66752c;
 }
-.sketch-toolbar button {
+.tool-toolbar button {
   width: 30px;
   height: 30px;
   padding: 0;
@@ -1921,18 +1944,18 @@ kbd {
   background: transparent;
   color: var(--muted);
 }
-.sketch-toolbar button:not(:disabled):hover {
+.tool-toolbar button:not(:disabled):hover {
   color: inherit;
   background: #ffffff0b;
 }
-.sketch-toolbar button[aria-pressed='true'],
-.sketch-toolbar button[aria-pressed='mixed'] {
+.tool-toolbar button[aria-pressed='true'],
+.tool-toolbar button[aria-pressed='mixed'] {
   color: var(--acid);
   border-color: #66752c;
   background: #d8ff3e12;
 }
 
-.sketch-toolbar button[aria-pressed='mixed'] {
+.tool-toolbar button[aria-pressed='mixed'] {
   border-style: dashed;
 }
 .sketch-view-options button[aria-pressed='true'] {
@@ -2427,11 +2450,13 @@ kbd {
 }
 
 .viewport-header {
+  --viewport-header-height: 38px;
   position: absolute;
   top: var(--viewport-inset);
   left: var(--viewport-inset);
   z-index: 6;
   display: flex;
+  align-items: flex-start;
   gap: 8px;
   max-width: calc(
     100% - 2 * var(--viewport-inset) - var(--viewport-coordinate-size) - 8px
@@ -2441,6 +2466,7 @@ kbd {
 
 .viewport-mode {
   display: flex;
+  height: var(--viewport-header-height);
   flex-shrink: 0;
   align-items: stretch;
   gap: 2px;
@@ -2497,7 +2523,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 38px;
+  height: var(--viewport-header-height);
   min-width: 0;
   padding: 9px 13px 9px 11px;
   color: #a3aa96;
@@ -3722,6 +3748,20 @@ kbd {
 }
 .tool-drag-delta {
   color: var(--acid);
+}
+
+.spatial-toolbar {
+  display: grid;
+  gap: 6px;
+  max-width: 300px;
+  pointer-events: auto;
+}
+.spatial-toolbar[hidden] {
+  display: none;
+}
+.spatial-toolbar .tool-toolbar {
+  max-width: 100%;
+  background: #11120f;
 }
 
 .settings-dialog {

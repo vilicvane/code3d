@@ -20,7 +20,9 @@ export const previewOperations = [
   'align',
   'pivot',
   'pivotVertex',
-  'around',
+  'pivotPoint',
+  'axisEdge',
+  'axisLine',
   'reverse',
   'flip',
   // Operations: composition and booleans.

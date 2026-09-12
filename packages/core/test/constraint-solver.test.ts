@@ -5,6 +5,11 @@ import type {Model} from '@code3d/core';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  offset,
+  pivot,
+  rotate,
+  pivotVertex,
+  axisLine,
   box,
   circle,
   group,
@@ -175,19 +180,22 @@ test('selected points, edges and surfaces use only their own finite extent', () 
   near(position(sloped), [0, 8, 0]);
 });
 
-test('offset pins bound centers in the unchanged target frame, including explicit zero', () => {
+test('offset translates the existing solution without pinning bound centers', () => {
   const base = box(10, 10, 10);
-  const shifted = box(20, 20, 20).relate(self =>
-    self.on(base.down).offset(5, 0, 7),
-  );
-  near(position(shifted), [5, -15, -7]);
-  const centered = point([20, 0, 30]).relate(self =>
-    self.on(base.up).offset(0, 0, 0),
-  );
-  near(position(centered), [-20, 5, -30]);
-  const flip = box(20, 20, 20).relate(self =>
-    self.on(base.up.flip()).offset(5, 0, 7),
-  );
+  const shifted = box(20, 20, 20).relate(self => [
+    self.on(base.down),
+    offset(5, 0, 7),
+  ]);
+  near(position(shifted), [5, -15, 7]);
+  const centered = point([20, 0, 30]).relate(self => [
+    self.on(base.up),
+    offset(0, 0, 0),
+  ]);
+  near(position(centered), [0, 5, 0]);
+  const flip = box(20, 20, 20).relate(self => [
+    self.on(base.up.flip()),
+    offset(5, 0, 7),
+  ]);
   near(position(flip), [5, -5, 7]);
   near(pose(flip).quaternion, identity);
   assert.deepEqual(
@@ -213,10 +221,11 @@ test('redundancy is accepted and positional conflicts never rotate the model', (
   ]);
   assert.throws(() => snapshot(conflict), /Conflicting bound positions/);
   const pinnedConflict = point().relate(self => [
-    self.on(base.up).offset(0, 0, 0),
+    self.on(base.up),
+    offset(0, 0, 0),
     self.on(base.right),
   ]);
-  assert.throws(() => snapshot(pinnedConflict), /Conflicting bound positions/);
+  near(position(pinnedConflict), [5, 5, 0]);
   near(position(point().relate(self => self.on(self.up))), [0, 0, 0]);
   assert.throws(
     () => snapshot(box(2, 2, 2).relate(self => self.on(self.up))),
@@ -256,9 +265,9 @@ test('group bounds include solved child placements and stay rigid in a parent co
   const cap = box(2, 2, 2).relate(self => self.on(base.up));
   const inner = group([base, cap]);
   const target = point([20, 30, 40]);
-  const moved = inner.relate(self => self.on(target.up).offset(0, 0, 0));
+  const moved = inner.relate(self => [self.on(target.up), offset(0, 0, 0)]);
   const outer = snapshot(group([target, moved]));
-  near(outer.children[1].transform.position, [20, 35, 40]);
+  near(outer.children[1].transform.position, [0, 35, 0]);
   near(outer.children[1].children[1].transform.position, [0, 6, 0]);
   const exposed = moved.expose({mount: cap.up});
   near(
@@ -285,12 +294,14 @@ test('on rejects arbitrary target anchors and infinite source references', () =>
 
 test('pivot rotation preserves the original bent loft and standalone geometry', () => {
   const start = circle(20);
-  const via = regularPolygon(20, 8).relate(self =>
-    self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 45),
-  );
-  const end = rectangle(40, 40).relate(self =>
-    self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 90),
-  );
+  const via = regularPolygon(20, 8).relate(self => [
+    self.on(start.up),
+    pivot([50, 0, 0]).rotate(0, 0, 45),
+  ]);
+  const end = rectangle(40, 40).relate(self => [
+    self.on(start.up),
+    pivot([50, 0, 0]).rotate(0, 0, 90),
+  ]);
   near(position(via), [50 - 25 * Math.SQRT2, -25 * Math.SQRT2, 0]);
   near(position(end), [50, -50, 0]);
   near(snapshot(via).transform.quaternion, identity);
@@ -302,41 +313,44 @@ test('pivot rotation preserves the original bent loft and standalone geometry', 
 test('local pivot, pivotVertex, and direct rotate all refer to relate self', () => {
   const base = box(10, 10, 10);
   const original = box(2, 2, 2).originOffset(3, 4, 5).rotate(0, 0, 30);
-  const atOrigin = original.relate(self => self.on(base.up).rotate(0, 45, 0));
-  const explicit = original.relate(self =>
-    self.on(base.up).pivot([0, 0, 0]).rotate(0, 45, 0),
-  );
+  const atOrigin = original.relate(self => [
+    self.on(base.up),
+    rotate(0, 45, 0),
+  ]);
+  const explicit = original.relate(self => [
+    self.on(base.up),
+    pivot([0, 0, 0]).rotate(0, 45, 0),
+  ]);
   near(position(atOrigin), position(explicit));
   near(pose(atOrigin).quaternion, pose(explicit).quaternion);
   const self = box(2, 2, 2);
   const vertex = defined(modelElementReference(self.vertex(1))).transform
     .position;
-  const a = self.relate(copy =>
-    base.on(copy.up).pivotVertex(1).rotate(0, 0, 90),
-  );
-  const b = self.relate(copy =>
-    base.on(copy.up).pivot(vertex).rotate(0, 0, 90),
-  );
+  const a = self.relate(copy => [
+    base.on(copy.up),
+    pivotVertex(1).rotate(0, 0, 90),
+  ]);
+  const b = self.relate(copy => [
+    base.on(copy.up),
+    pivot(vertex).rotate(0, 0, 90),
+  ]);
   near(position(a), position(b));
   near(pose(a).quaternion, pose(b).quaternion);
   assert.throws(
     // @ts-expect-error An unfinished pivot chain must be rejected at runtime.
-    () => self.relate(copy => copy.on(base.up).pivot([1, 2, 3])),
+    () => self.relate(copy => [copy.on(base.up), pivot([1, 2, 3])]),
     /completed Constraint/,
   );
 });
 
-test('successive rotations compose and a second contact constrains the final pose', () => {
+test('successive rotations compose and a later contact starts a new solve segment', () => {
   const base = point();
   const source = circle(2);
-  const placed = source.relate(self =>
-    self
-      .on(base.up)
-      .pivot([5, 0, 0])
-      .rotate(0, 0, 30)
-      .pivot([0, 0, 3])
-      .rotate(20, 0, 0),
-  );
+  const placed = source.relate(self => [
+    self.on(base.up),
+    pivot([5, 0, 0]).rotate(0, 0, 30),
+    pivot([0, 0, 3]).rotate(20, 0, 0),
+  ]);
   const expected = composeTransforms(
     rotationAround([5, 0, 0], [0, 0, 30]),
     rotationAround([0, 0, 3], [20, 0, 0]),
@@ -344,44 +358,55 @@ test('successive rotations compose and a second contact constrains the final pos
   near(position(placed), expected.position);
   near(pose(placed).quaternion, expected.quaternion);
   const constrained = source.relate(self => [
-    self.on(base.up).pivot([5, 0, 0]).rotate(0, 0, 90),
+    self.on(base.up),
+    pivot([5, 0, 0]).rotate(0, 0, 90),
     self.on(base.right),
   ]);
   near(position(constrained), [0, -5, 0]);
-  const conflict = source.relate(self => [
-    self.on(base.up).rotate(0, 0, 30),
-    self.on(base.right).rotate(0, 0, 45),
+  const sequential = source.relate(self => [
+    self.on(base.up),
+    rotate(0, 0, 30),
+    self.on(base.right),
+    rotate(0, 0, 45),
   ]);
-  assert.throws(() => snapshot(conflict), /Conflicting explicit rotations/);
+  near(
+    pose(sequential).quaternion,
+    rotationAround([0, 0, 0], [0, 0, 75]).quaternion,
+  );
 });
 
-test('around resolves local and positioned external axes', () => {
+test('axis selection resolves local and positioned external axes', () => {
   const origin = point();
-  const selfAxis = box(2, 2, 2).relate(self =>
-    self.on(origin.up).around(self.axis).rotate(90),
-  );
+  const selfAxis = box(2, 2, 2).relate(self => [
+    self.on(origin.up),
+    axisLine(self.axis).rotate(90),
+  ]);
   near(rotateVector([1, 0, 0], pose(selfAxis).quaternion), [0, 0, -1]);
   const axis = box(2, 2, 2).relate(self =>
-    self.center.on(point([10, 20, 30]).up).offset(0, 0, 0),
+    self.center.align(point([10, 20, 30])),
   );
-  const rotated = point().relate(self =>
-    self.on(origin.up).around(axis.axis).rotate(90),
-  );
+  const rotated = point().relate(self => [
+    self.on(origin.up),
+    axisLine(axis.axis).rotate(90),
+  ]);
   near(position(rotated), [-20, 0, 40]);
   near(rotateVector([1, 0, 0], pose(rotated).quaternion), [0, 0, -1]);
 });
 
-test('compatible rotation chains choose free translation independently of relation order and duplication', () => {
+test('joint contacts are independent of order and duplicate entries before one rotation', () => {
   const base = point();
   for (const reverse of [false, true])
     for (const duplicate of [false, true]) {
       const placed = point().relate(self => {
-        const a = self.on(base.up).pivot([0, 0, 0]).rotate(0, 90, 0);
-        const b = self.on(base.up).pivot([10, 0, 0]).rotate(0, 90, 0);
+        const a = self.on(base.up);
+        const b = self.on(base.front);
         const constraints = [a, b, ...(duplicate ? [a] : [])];
-        return reverse ? constraints.reverse() : constraints;
+        return [
+          ...(reverse ? constraints.reverse() : constraints),
+          pivot([10, 0, 0]).rotate(0, 90, 0),
+        ];
       });
-      near(position(placed), [5, 0, 5]);
+      near(position(placed), [10, 0, 10]);
     }
 });
 
@@ -391,7 +416,107 @@ test('runtime errors distinguish missing bound targets and curved rotation axes'
     // @ts-expect-error Missing and scalar targets must fail at runtime.
     assert.throws(() => part.on(target), /directional bound/);
   assert.throws(
-    () => part.on(part.up).around(circle(3).edge(1)),
+    () => [part.on(part.up), axisLine(circle(3).edge(1))],
     /straight axis/,
   );
 });
+
+for (const reverse of [false, true]) {
+  test(`offset translates self's solved pose, including reversed endpoints (${reverse})`, () => {
+    const base = box(10, 20, 30).originOffset(-40, -15, 7);
+    const part = box(2, 4, 6).originOffset(13, -8, 17);
+    const relation = (self: typeof part) =>
+      reverse ? base.on(self.up) : self.on(base.up);
+    const solved = pose(part.relate(relation));
+    const shifted = pose(
+      part.relate(self => [relation(self), offset(3, 5, 7)]),
+    );
+    near(
+      shifted.position,
+      solved.position.map((n, i) => n + [3, 5, 7][i]),
+    );
+    near(shifted.quaternion, solved.quaternion);
+    near(
+      position(part.relate(self => [relation(self), offset(0, 0, 0)])),
+      solved.position,
+    );
+  });
+}
+
+test('zero rotation on a sibling contact adds no orientation constraint', () => {
+  const base = point();
+  const part = circle(2);
+  const make = (zero: boolean) =>
+    part.relate(self => [
+      self.on(base.up),
+      pivot([5, 0, 0]).rotate(0, 0, 90),
+      self.on(base.right),
+      ...(zero ? [rotate(0, 0, 0)] : []),
+    ]);
+  near(position(make(true)), position(make(false)));
+  near(pose(make(true)).quaternion, pose(make(false)).quaternion);
+});
+
+for (const kind of ['on', 'align'] as const) {
+  test(`${kind} applies offsets and external rotations in call order`, () => {
+    const target = point();
+    const axis = box(1, 1, 1);
+    const original = point();
+    const relation = (self: typeof original) =>
+      kind === 'on' ? self.on(target.up) : self.align(target);
+    const before = original.relate(self => [
+      relation(self),
+      offset(10, 0, 0),
+      axisLine(axis.axis).rotate(90),
+    ]);
+    const after = original.relate(self => [
+      relation(self),
+      axisLine(axis.axis).rotate(90),
+      offset(10, 0, 0),
+    ]);
+    near(position(before), [0, 0, -10]);
+    near(position(after), [10, 0, 0]);
+    const interleaved = original.relate(self => [
+      relation(self),
+      offset(10, 0, 0),
+      axisLine(axis.axis).rotate(90),
+      offset(2, 3, 4),
+    ]);
+    near(position(interleaved), [2, 3, -6]);
+  });
+}
+
+test('axis selection uses the final external axis position after mixed constraints solve', () => {
+  const axis = box(2, 2, 2)
+    .rotate(0, 0, 90)
+    .relate(self => [
+      self.center.align(line([0, 0, 0], [0, 100, 0])),
+      self.center.on(point([0, 20, 0]).up),
+    ]);
+  const rotated = point().relate(self => [
+    self.on(point().up),
+    axisLine(axis.axis).rotate(90),
+  ]);
+  near(position(axis), [0, 20, 0]);
+  near(position(rotated), [0, 20, 20]);
+});
+
+for (const mixed of [false, true]) {
+  test(`untransformed sibling contacts do not dilute offsets (mixed=${mixed})`, () => {
+    const base = box(10, 10, 10);
+    const axis = box(2, 2, 2).relate(self => self.center.align(base.center));
+    for (const reverse of [false, true]) {
+      const placed = box(20, 20, 20).relate(self => {
+        const constraints = [self.edge(3).on(base.left), self.up.on(base.down)];
+        return [
+          ...(reverse ? constraints.reverse() : constraints),
+          offset(0, 0, 0),
+          rotate(0, 0, 0),
+          offset(5, 0, 7),
+        ];
+      });
+      const model = group([base, placed, ...(mixed ? [axis] : [])]);
+      near(snapshot(model).children[1].transform.position, [10, -15, 7]);
+    }
+  });
+}

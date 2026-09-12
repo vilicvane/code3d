@@ -9,7 +9,7 @@ import ArrowIcon from './ArrowIcon.astro';
 interface Props {
   id?: string;
 }
-const {id = 'first-model'} = Astro.props;
+const {id = 'desktop-stand'} = Astro.props;
 const example = (await getEntry('examples', id))!;
 const contexts = await Promise.all(
   sourceContextSets[id]!.map(async context => ({
@@ -95,6 +95,17 @@ const selectedIndex = contexts.length - 1;
       const panels = [
         ...this.querySelectorAll<HTMLElement>('[role="tabpanel"]'),
       ];
+      const revealFocus = () => {
+        const panel = panels.find(panel => !panel.hidden);
+        const pre = panel?.querySelector('pre');
+        const focus = pre?.querySelector('.source-focus');
+        if (pre && focus)
+          pre.scrollTop +=
+            focus.getBoundingClientRect().top -
+            pre.getBoundingClientRect().top -
+            pre.clientHeight / 2;
+      };
+      requestAnimationFrame(revealFocus);
       const select = (tab: HTMLButtonElement, focus = false) => {
         tabs.forEach(candidate => {
           candidate.setAttribute('aria-selected', String(candidate === tab));
@@ -103,6 +114,7 @@ const selectedIndex = contexts.length - 1;
         panels.forEach(panel => {
           panel.hidden = panel.id !== tab.getAttribute('aria-controls');
         });
+        revealFocus();
         if (focus) tab.focus();
       };
       tabs.forEach((tab, index) => {

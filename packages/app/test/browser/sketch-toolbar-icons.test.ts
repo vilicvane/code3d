@@ -51,7 +51,7 @@ test('drawing icons retain their point roles in the toolbar and rectangle varian
   for (const [kind, name] of [
     ['horizontal', 'Horizontal'],
     ['length', 'Length'],
-    ['angle', 'Angle'],
+    ['angle', 'Orientation'],
   ] as const) {
     const tool = constraints
       .getByRole('button', {name, exact: true})
@@ -87,7 +87,7 @@ test('toolbar dividers reach both inner edges and leave the same icon inset on e
       const bar = root.getBoundingClientRect();
       const border = parseFloat(getComputedStyle(root).borderTopWidth);
       const groups = [
-        ...root.querySelectorAll<HTMLElement>(':scope > .sketch-tool-group'),
+        ...root.querySelectorAll<HTMLElement>(':scope > .tool-group'),
       ];
       const icon = (group: HTMLElement, last = false) => {
         const buttons =

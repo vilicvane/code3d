@@ -42,11 +42,17 @@ jobs:
       - name: Verify installed npm tarballs
         run: npm run test:packages
 
+      - name: Verify examples in clean npm projects
+        run: npm run test:examples:packages --workspace @code3d/app
+
       - name: Build app and render-only entry
         run: npm run build --workspace @code3d/app
 
       - name: Install render browser
         run: npx playwright-core install --with-deps chromium
+
+      - name: Exercise every example in the App
+        run: npm run test:examples:browser --workspace @code3d/app
 
       - name: Generate website model images
         run: npm run render:web-images

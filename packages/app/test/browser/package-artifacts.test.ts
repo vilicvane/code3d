@@ -92,7 +92,7 @@ test(
     const fontUrl = new URL('/packed-font.ttf', process.env.CODE3D_TEST_URL)
       .href;
     const fontBytes = await readFile(
-      new URL('packages/app/examples/fonts/DejaVuSans.ttf', root),
+      new URL('packages/core/test/fonts/DejaVuSans.ttf', root),
     );
     await context.route(fontUrl, route =>
       route.fulfill({

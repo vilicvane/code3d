@@ -189,7 +189,7 @@ holes add `counterboreTop`/`counterboreBottom`; countersunk holes add
 references. Named boundaries are finite `Bound` values. For example,
 `tool.shaftBottom.on(plate.down.flip())` places a hole against the plate's lower
 boundary without rotating it; `flip()` reverses facing and preserves its offset
-coordinate frame. See the [socket-cap mounting example](../app/examples/website/fastener.ts).
+coordinate frame. See the [socket-cap mounting example](../app/examples/assemblies/screw-box/model.ts).
 
 ## Specifications and drives
 
@@ -241,6 +241,7 @@ thread features.
 
 ## Source and verification
 
+[Complete mounting example](../app/examples/assemblies/screw-box/model.ts),
 [ISO gallery](../app/examples/iso-screws.ts),
 [GB/T gallery](../app/examples/gb-screws.ts),
 [public modules](src/library/index.ts), [geometry tests](test/standards.test.ts),

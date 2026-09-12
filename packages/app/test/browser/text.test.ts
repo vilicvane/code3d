@@ -1,3 +1,4 @@
+import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium, type Page} from 'playwright-core';
@@ -10,7 +11,7 @@ declare const window: Window & {
 };
 
 test(
-  'bundled font text supports size and batch extrusion editing with undo in the App',
+  'local font text supports size and batch extrusion editing with undo in the App',
   {timeout: 120_000},
   async t => {
     assert.ok(process.env.CODE3D_TEST_URL);
@@ -39,8 +40,21 @@ test(
       waitUntil: 'domcontentloaded',
     });
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    const fontBytes = await readFile(
+      new URL('../../../core/test/fonts/DejaVuSans.ttf', import.meta.url),
+    );
+    await page.evaluate(
+      async bytes => {
+        const {openBrowserProjectFileSystem} =
+          await import('/src/project/filesystem.ts');
+        await (
+          await openBrowserProjectFileSystem()
+        ).writeFile('/text-test.ttf', new Uint8Array(bytes));
+      },
+      [...fontBytes],
+    );
     const source = `import {font, text, extrude, group} from '@code3d/core';
-const sans = font(new URL('./examples/fonts/DejaVuSans.ttf', import.meta.url));
+const sans = font(new URL('./text-test.ttf', import.meta.url));
 const profiles = text('B8i', sans, 20);
 export const lettering = group(extrude(profiles, 3));`;
     await page.evaluate(() => window.textApp.codeEditor.editor.focus());
@@ -77,8 +91,9 @@ export const lettering = group(extrude(profiles, 3));`;
     await distance.fill('0');
     await page.keyboard.press('Enter');
     await page.getByText('Model error', {exact: true}).waitFor();
-    // An error retains the last successful geometry and closes its stale tool.
-    assert.equal(await distance.isVisible(), false);
+    // Failed extrusion keeps its current input editable while showing the error.
+    assert.equal(await distance.isVisible(), true);
+    assert.equal(await distance.inputValue(), '0');
     await page.evaluate(() => window.textApp.codeEditor.editor.focus());
     await page.keyboard.press('Control+z');
     await page.getByText('Ready', {exact: true}).waitFor();

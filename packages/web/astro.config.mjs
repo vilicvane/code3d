@@ -79,6 +79,7 @@ export default defineConfig({
         {
           label: 'Guides',
           items: [
+            {slug: 'docs/guides/practical-models'},
             {slug: 'docs/guides/agents'},
             {slug: 'docs/guides/relations'},
             {slug: 'docs/guides/origins-and-rotation'},

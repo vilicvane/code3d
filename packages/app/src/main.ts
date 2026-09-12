@@ -1,8 +1,19 @@
+import {
+  contextualToolContext,
+  contextualToolCallId,
+  contextualParameterAt,
+  contextualToolSource,
+  contextualToolActivation,
+} from './tools/contextual-tool-context';
+import {SpatialToolbar} from './ui/spatial-toolbar';
+import {relationSelfExpression} from './tools/source-expression';
 import {ToolDragPreviewView} from './ui/tool-drag-preview';
+import {movedExamplePaths} from '../render-samples/catalog';
 import {resolveRenderView} from '@code3d/agent';
 import {
   compareTopologyIds,
   formatTopologyId,
+  isTopologyId,
   type EdgeId,
   type ModelSnapshotObject,
   type ParameterTarget,
@@ -20,7 +31,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide';
-import {autorun, reaction} from 'mobx';
+import {autorun, reaction, runInAction} from 'mobx';
 import {appSettings} from './app-settings';
 import {AppSettingsDialog} from './ui/app-settings';
 import brandMark from '../../../assets/brand/mark.svg?raw';
@@ -42,6 +53,7 @@ import type {
   EdgeArgumentTarget,
   ModelModule,
   TopologySelectionScope,
+  SourceTarget,
 } from './model/compiler';
 import {ModelCompilerClient} from './model/compiler-client';
 import {
@@ -53,13 +65,11 @@ import {
   elementSourceDecoration,
   namedElementDecorations,
 } from './model/element-decorations';
-import {originDecoration} from './model/origin-decorations';
 import {
   ModelPreviewState,
   type ModelPreviewRequest,
 } from './model/preview-state';
 import {sourceDecorationProviders} from './model/source-decorations';
-import {sourceParameterAt} from './model/tool-arguments';
 import {isToolSelectionParameter} from './model/tool-parameter-config';
 import type {
   ToolArgumentEditTarget,
@@ -122,7 +132,6 @@ import './style.css';
 import {
   contextualParameterIntent,
   contextualParameterView,
-  contextualToolParameters,
   validContextualParameter,
   type ContextualToolParameterState,
 } from './tools/contextual-tool-parameters';
@@ -209,7 +218,14 @@ const localPackageFiles = directoryWorkspaceId
       developmentWorkspaces,
     )
   : projectFileSystem;
-const requestedFile = filePathFromRoute(window.location.hash);
+let requestedFile = filePathFromRoute(window.location.hash);
+if (
+  requestedFile &&
+  movedExamplePaths[requestedFile] &&
+  !(await localPackageFiles.stat(requestedFile))
+) {
+  requestedFile = movedExamplePaths[requestedFile];
+}
 let initialFileError: unknown;
 const initialProject: ModelProject = await loadInitialProject();
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -508,13 +524,13 @@ const stopLanguage = autorun(() =>
 );
 codeEditor.editor.onDidDispose(stopLanguage);
 const retrySaveButton = requiredElement<HTMLButtonElement>('retry-save-button');
-const agentObserver = new AgentObserver(
+const agentObserver: AgentObserver = new AgentObserver(
   packageFiles,
   () => agentProject.currentRevision,
   preparePackages,
 );
 const agentRenders = new AgentRenderHistory();
-const agentProject = new AgentProjectSession(
+const agentProject: AgentProjectSession = new AgentProjectSession(
   projectFileSystem,
   codeEditor,
   request => agentObserver.observe(request),
@@ -727,6 +743,11 @@ type TopologyReferenceSelectionTool = {
   selectedIds: readonly TopologyId[];
 };
 type ContextualToolState = {
+  rotationSelection?: SourceTarget['rotationSelection'];
+  focus: Pick<
+    NonNullable<ReturnType<typeof contextualToolContext>>,
+    'arguments' | 'reference'
+  >;
   callId: string;
   contextId: string;
   targetId: string;
@@ -756,7 +777,7 @@ const viewport = new ModelViewport(viewportHost, {
       selectedDesignContextId = undefined;
     } else {
       preferredEvaluationContextId =
-        viewport.sourceEvaluation()?.evaluation.contextId;
+        viewport.sourceContext?.evaluation.contextId;
     }
     selectOccurrence(occurrence, occurrence.view === 'model');
   },
@@ -765,6 +786,7 @@ const viewport = new ModelViewport(viewportHost, {
     codeEditor.revealSource(sourceRef);
   },
   onPositionTool: handlePositionTool,
+  canEditPosition: canEditPositionBinding,
   onTopologySelection: handleTopologySelection,
   sourceDecorationProviders,
 });
@@ -813,7 +835,7 @@ const elementsPanel = new ElementsPanel(elements, elementsCount, {
   onPreview: preview => {
     viewport.clearDecorations(elementsDecorationOwner);
     const occurrence = viewport.getSelected();
-    const sourceElement = viewport.sourceEvaluation()?.evaluation.element;
+    const sourceElement = viewport.sourceContext?.evaluation.element;
     const element = preview?.kind === 'reference' ? preview.element : undefined;
     const previewsSourceElement =
       element !== undefined &&
@@ -857,8 +879,9 @@ const sourceEditPopover = new SourceEditPopover(
 );
 const viewportToolStack = requiredElement('viewport-tool-stack');
 const contextualToolPanel = new ContextualToolPanel(viewportToolStack, {
+  gridStep: () => viewport.gridStep,
   sourceParameter: () => {
-    const scope = viewport.sourceEvaluation();
+    const scope = viewport.sourceContext;
     const cursor = codeEditor.parameterCursor;
     if (
       !scope ||
@@ -867,13 +890,9 @@ const contextualToolPanel = new ContextualToolPanel(viewportToolStack, {
       contextualTool.contextId !== scope.evaluation.contextId
     )
       return undefined;
-    const parameter = sourceParameterAt(
-      scope.target,
-      cursor.file,
-      cursor.offset,
-      ref => codeEditor.resolveSourceRef(ref),
+    return contextualParameterAt(contextualTool.focus, cursor, ref =>
+      codeEditor.resolveSourceRef(ref),
     );
-    return parameter?.name;
   },
   onParameterInput: updateContextualToolParameter,
   onParameterCommit: commitContextualToolParameter,
@@ -894,7 +913,7 @@ const toolEngine = new ToolEngine({
     codeEditor.applySourceEdits(baseVersion, edits, options),
   applyPreview: preview => applyToolPreview(preview),
   commitPreview: preview => commitToolPreview(preview),
-  clearPreview: (preview, reason) => clearToolPreview(preview, reason),
+  clearPreview: preview => clearToolPreview(preview),
 });
 const sketchEditor = new SketchEditorController(viewportHost, {
   reportResult: (operation, error) =>
@@ -908,6 +927,89 @@ const sketchEditor = new SketchEditorController(viewportHost, {
   commit: intent =>
     commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
 });
+const spatialToolbar = new SpatialToolbar(
+  viewportToolStack,
+  viewport.positionTools,
+  {
+    visible: () => !sketchEditor.hasTarget && viewport.renderMode !== 'render',
+    availableTools: () => viewport.availablePositionTools,
+    cancel: cancelRotationReferenceSelection,
+    activateSource: tool => {
+      const scope = viewport.sourceContext;
+      const module = previewState.module;
+      if (!scope || !module) return;
+      const tools = viewport.positionTools;
+      codeEditor.activateSourceTool(
+        contextualToolActivation(
+          module,
+          scope,
+          tool,
+          tools.toolBinding ?? tools.rotationBinding,
+        ),
+      );
+    },
+  },
+);
+viewportToolStack.prepend(spatialToolbar.root);
+codeEditor.observeSourceContext(() => {
+  const scope = viewport.sourceContext;
+  const module = previewState.module;
+  if (!scope || !module || sketchEditor.hasTarget) return;
+  const tools = viewport.positionTools;
+  const tool = contextualToolSource(module, scope.target, tools.tool);
+  return {
+    tool,
+    caretOnly: !!scope.target.relationArray,
+  };
+});
+const stopContextualTool = reaction(
+  () => ({
+    context: viewport.sourceContext,
+    occurrence: viewport.getSelected(),
+    model: previewState.module,
+    modelVersion: previewState.sourceVersion,
+    sourceVersion: codeEditor.sourceVersion(),
+  }),
+  () => syncContextualTool(),
+  {
+    equals: (a, b) =>
+      a.context === b.context &&
+      a.occurrence === b.occurrence &&
+      a.model === b.model &&
+      a.modelVersion === b.modelVersion &&
+      a.sourceVersion === b.sourceVersion,
+  },
+);
+window.addEventListener('pagehide', stopContextualTool, {once: true});
+const stopRotationReferences = reaction(
+  () => ({
+    tool: viewport.positionTools.referencePicking,
+    binding: viewport.positionTools.rotationBinding,
+    target: viewport.sourceContext?.target.id,
+    occurrence: viewport.getSelected()?.key,
+    modelVersion: previewState.sourceVersion,
+    sourceVersion: codeEditor.sourceVersion(),
+  }),
+  ({tool, modelVersion, sourceVersion}) => {
+    cancelRotationReferenceSelection();
+    if (tool && modelVersion === sourceVersion)
+      beginRotationReferenceSelection(tool);
+  },
+  {
+    equals: (a, b) =>
+      a.tool === b.tool &&
+      a.binding === b.binding &&
+      a.target === b.target &&
+      a.occurrence === b.occurrence &&
+      a.modelVersion === b.modelVersion &&
+      a.sourceVersion === b.sourceVersion,
+  },
+);
+window.addEventListener('pagehide', () => spatialToolbar.dispose(), {
+  once: true,
+});
+window.addEventListener('pagehide', stopRotationReferences, {once: true});
+
 const dragPreviewView = new ToolDragPreviewView(
   viewportToolStack,
   () => sketchEditor.dragPreview ?? viewport.dragPreview,
@@ -1009,10 +1111,11 @@ codeEditor.onChange(change => {
   if (change.kind !== 'content') renderProjectNavigation();
   requestModelUpdate(
     toolChange || historyChange ? 0 : appSettings.value.editDelayMs,
+    toolChange || historyChange,
   );
 });
 
-codeEditor.onCursorOffset(({file, offset}) => {
+codeEditor.onCursorOffset(({file, offset, sourceRef}) => {
   pendingAgentFollow = undefined;
   if (previewState.pendingFile) return;
   const matched = viewport.selectBySourceOffset(
@@ -1020,6 +1123,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
     offset,
     undefined,
     preferredEvaluationContextId,
+    sourceRef,
   );
   if (!matched && previewState.module) {
     const designContext = designContextAt(previewState.module, file, offset);
@@ -1031,8 +1135,7 @@ codeEditor.onCursorOffset(({file, offset}) => {
       return;
     }
   }
-  preferredEvaluationContextId =
-    viewport.sourceEvaluation()?.evaluation.contextId;
+  preferredEvaluationContextId = viewport.sourceContext?.evaluation.contextId;
   if (
     selectedDesignInvocation &&
     preferredEvaluationContextId !== selectedDesignContextId
@@ -1046,7 +1149,6 @@ codeEditor.onCursorOffset(({file, offset}) => {
   } else if (previewState.module) {
     renderDesignArguments(previewState.module);
   }
-  syncContextualTool(matched);
 });
 codeEditor.onCompletionFocus(handleCompletionFocus);
 codeEditor.onEditorActivation(cursor => {
@@ -1277,6 +1379,11 @@ browserStorageButton.addEventListener('click', () => {
 });
 
 window.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && spatialToolbar.selection) {
+    cancelRotationReferenceSelection();
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'Escape' && viewport.cancelPositionTool()) {
     event.preventDefault();
     return;
@@ -1560,6 +1667,15 @@ async function activateProjectFile(
 ): Promise<void> {
   const version = ++fileOpenVersion;
   if (cancelled()) return;
+  if (
+    path &&
+    movedExamplePaths[path] &&
+    !codeEditor.fileState(path) &&
+    !(await localPackageFiles.stat(path))
+  ) {
+    if (version !== fileOpenVersion || cancelled()) return;
+    path = movedExamplePaths[path];
+  }
   if (path && !codeEditor.fileState(path)) {
     let source: string;
     try {
@@ -1625,7 +1741,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   const designContextId =
     designContext && 'id' in designContext ? designContext.id : undefined;
   compilingDesignContextId = designContextId;
-  previewState.showStatus('busy');
+  previewState.beginCompilation();
   if (designContextId) {
     renderCurrentPanels();
   }
@@ -1644,7 +1760,6 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       previewState.restore(request, restored.module);
       viewport.renderModule(restored.module, 'root');
       previewState.presented(hasViewportTarget());
-      syncContextualTool();
     },
   );
 
@@ -1655,36 +1770,9 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       file,
       designContext,
     );
-    previewState.beginCompilation();
     const nextModule = await compilation;
     if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
     const cursor = codeEditor.cursorSource();
-    const focusedScope =
-      cursor &&
-      viewport.sourceEvaluationAt(
-        nextModule,
-        cursor.file,
-        cursor.offset,
-        preferredEvaluationContextId,
-      );
-    const focusedEvaluation = focusedScope?.evaluation;
-    const availablePreview =
-      focusedEvaluation &&
-      (focusedEvaluation.runtime.outcome === 'completed' ||
-        focusedScope?.target.tool?.arguments.some(
-          argument => argument.target,
-        )) &&
-      (focusedEvaluation.nodeIds.some(id => nextModule.objects.has(id)) ||
-        focusedEvaluation.sketchIds?.some(id => nextModule.sketches.has(id)));
-    if (nextModule.diagnostic && previewState.module && !availablePreview) {
-      previewState.fail(nextModule.diagnostic);
-      compilingDesignContextId = undefined;
-      finishContextualTool();
-      sketchEditor.invalidate();
-      renderCurrentPanels();
-      if (await presentModelDiagnostic(request)) restoreModelStatus();
-      return;
-    }
     if (
       cursor &&
       !nextModule.sourceTargets.some(
@@ -1703,41 +1791,46 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
         return;
       }
     }
-    previewState.accept(request, nextModule);
-    codeEditor.setDesignArguments(nextModule.designArguments);
-    sketchEditor.retain(
-      nextModule.diagnostic,
-      codeEditor.cursorSource(),
-      nextModule.sketches,
-    );
-    codeEditor.trackSourceRefs([
-      ...toolSourceRefs(nextModule),
-      ...sketchEditor.sourceRefs(),
-    ]);
-    selectedDesignContextId = nextModule.activeDesignContextId;
-    compilingDesignContextId = undefined;
-    if (
-      preferredEvaluationContextId === designContextId &&
-      !nextModule.activeDesignContextId
-    ) {
-      preferredEvaluationContextId = undefined;
-    }
-    viewport.renderModule(
-      nextModule,
-      selectedKey,
-      cursor ? {...cursor, contextId: preferredEvaluationContextId} : undefined,
-    );
-    preferredEvaluationContextId =
-      viewport.sourceEvaluation()?.evaluation.contextId;
-    const selected = viewport.getSelected();
-    if (selected) {
-      selectOccurrence(selected, false);
-    } else {
-      renderElementsPanel();
-      renderDesignArguments(nextModule);
-    }
-    syncContextualTool();
-    previewState.presented(hasViewportTarget());
+    const retainOnError = previewState.module !== null;
+    runInAction(() => {
+      previewState.accept(request, nextModule);
+      codeEditor.setDesignArguments(nextModule.designArguments);
+      sketchEditor.retain(
+        nextModule.diagnostic,
+        codeEditor.cursorSource(),
+        nextModule.sketches,
+      );
+      codeEditor.trackSourceRefs([
+        ...toolSourceRefs(nextModule),
+        ...sketchEditor.sourceRefs(),
+      ]);
+      selectedDesignContextId = nextModule.activeDesignContextId;
+      compilingDesignContextId = undefined;
+      if (
+        preferredEvaluationContextId === designContextId &&
+        !nextModule.activeDesignContextId
+      ) {
+        preferredEvaluationContextId = undefined;
+      }
+      viewport.renderModule(
+        nextModule,
+        selectedKey,
+        cursor
+          ? {...cursor, contextId: preferredEvaluationContextId}
+          : undefined,
+        retainOnError,
+      );
+      preferredEvaluationContextId =
+        viewport.sourceContext?.evaluation.contextId;
+      const selected = viewport.getSelected();
+      if (selected) {
+        selectOccurrence(selected, false);
+      } else {
+        renderElementsPanel();
+        renderDesignArguments(nextModule);
+      }
+      previewState.presented(hasViewportTarget());
+    });
     if (following && pendingAgentFollow === following) {
       pendingAgentFollow = undefined;
       if (
@@ -1993,14 +2086,14 @@ function scheduleModelRun(delay: number): void {
   }, delay);
 }
 
-function requestModelUpdate(delay: number): void {
+function requestModelUpdate(delay: number, interactive = false): void {
   pendingAgentFollow = undefined;
   activeCompletionFocus = undefined;
   window.clearTimeout(completionPreviewTimer);
   completionPreviewTimer = undefined;
   viewport.restoreTransientPreview();
   renderElementsPanel(viewport.getSelected());
-  previewState.showStatus('busy');
+  previewState.queueUpdate(interactive);
   previewState.invalidate();
   compiler.cancel();
   refreshViewportFeedback();
@@ -2020,7 +2113,6 @@ function selectCompiledEvaluationContext(
   const occurrence = viewport.getSelected();
   if (occurrence) selectOccurrence(occurrence, false);
   else renderDesignArguments(previewState.module);
-  syncContextualTool();
   return true;
 }
 
@@ -2056,7 +2148,7 @@ function designContextAt(module: ModelModule, file: string, offset: number) {
 }
 
 function inspectedFunctionId(module: ModelModule): string | undefined {
-  const sourceFunctionId = viewport.sourceEvaluation()?.target.functionId;
+  const sourceFunctionId = viewport.sourceContext?.target.functionId;
   if (sourceFunctionId) return sourceFunctionId;
   const cursor = codeEditor.cursorSource();
   return cursor
@@ -2095,7 +2187,7 @@ function renderElementsPanel(occurrence?: Occurrence): void {
     elementsPanel.render();
     return;
   }
-  const sourceElement = viewport.sourceEvaluation()?.evaluation.element;
+  const sourceElement = viewport.sourceContext?.evaluation.element;
   elementsPanel.render(
     occurrence.node,
     sourceElement?.nodeId === occurrence.node.nodeId
@@ -2110,7 +2202,7 @@ function drillToObjectSource(node: ModelSnapshotObject): void {
   if (!compiledSource) return;
   const sourceRef =
     codeEditor.resolveSourceRef(compiledSource) ?? compiledSource;
-  const evaluationContextId = viewport.sourceEvaluation()?.evaluation.contextId;
+  const evaluationContextId = viewport.sourceContext?.evaluation.contextId;
   codeEditor.revealSource(sourceRef, true);
   const matched = viewport.selectBySourceOffset(
     sourceRef.file,
@@ -2165,8 +2257,7 @@ function renderDesignArguments(module: ModelModule | null): void {
   if (contexts.length === 0) return;
 
   const activeContextId =
-    viewport.sourceEvaluation()?.evaluation.contextId ??
-    selectedDesignContextId;
+    viewport.sourceContext?.evaluation.contextId ?? selectedDesignContextId;
   contexts.forEach(context => {
     const active = context.id === activeContextId;
     const compiling = context.id === compilingDesignContextId;
@@ -2213,8 +2304,9 @@ function renderCurrentPanels(): void {
     renderDesignArguments(previewState.module);
 }
 
-function syncContextualTool(sourceTargetFocused = true): void {
-  const scope = viewport.sourceEvaluation();
+function syncContextualTool(): void {
+  const scope = viewport.sourceContext;
+  const sourceTargetFocused = scope !== undefined;
   if (
     sourceTargetFocused &&
     previewState.module &&
@@ -2251,28 +2343,33 @@ function syncContextualTool(sourceTargetFocused = true): void {
   const continuesPrevious =
     previous !== undefined &&
     scope !== undefined &&
-    scope.target.tool !== undefined &&
-    previous.callId === scope.target.tool.callId &&
-    previous.contextId === scope.evaluation.contextId &&
-    previous.signature.id === scope.target.tool.signature.id;
+    previewState.module !== null &&
+    previous.callId ===
+      contextualToolCallId(previewState.module, scope.target) &&
+    previous.contextId === scope.evaluation.contextId;
   if (previewState.sourceVersion !== codeEditor.sourceVersion()) {
     if (previous && !continuesPrevious) finishContextualTool();
     return;
   }
+  const context =
+    scope?.target.tool && previewState.module
+      ? contextualToolContext(previewState.module, scope, ref =>
+          codeEditor.readSource(ref),
+        )
+      : undefined;
   const occurrence = viewport.getSelected();
   const sourceTool = scope?.target.tool;
-  if (!scope || !sourceTool) {
+  if (!scope || !sourceTool || !context) {
     finishContextualTool();
     return;
   }
   if (previous && !continuesPrevious) finishContextualTool();
-  const parameters = contextualToolParameters(
-    sourceTool.signature,
-    sourceTool.arguments,
-    scope.target.sourceRef,
-    scope.evaluation.parameters ?? [],
-    scope.evaluation.toolArguments,
-  );
+  const {
+    rotationSelection: draft,
+    signature,
+    parameters,
+    arguments: mergedArguments,
+  } = context;
   const baselineValues = continuesPrevious
     ? previous.baselineValues
     : parameterValues(parameters);
@@ -2284,22 +2381,24 @@ function syncContextualTool(sourceTargetFocused = true): void {
     ? new Set(previous.removedArguments)
     : new Set<string>();
   if (!continuesPrevious || previous.historyState === 'applied') {
-    sourceTool.arguments.forEach(argument => {
+    mergedArguments.forEach(argument => {
       if (argument.target?.kind === 'present') {
         removedArguments.delete(argument.name);
       }
     });
   }
   contextualTool = {
-    callId: sourceTool.callId,
+    rotationSelection: draft,
+    focus: context,
+    callId: context.callId,
     contextId: scope.evaluation.contextId,
     targetId: scope.target.id,
     evaluationIndex: scope.evaluationIndex,
     sourceFile: scope.target.sourceRef.file,
-    signature: sourceTool.signature,
+    signature,
     presentArguments: continuesPrevious
-      ? mergePresentArguments(previous.presentArguments, sourceTool.arguments)
-      : presentArguments(sourceTool.arguments),
+      ? mergePresentArguments(previous.presentArguments, mergedArguments)
+      : presentArguments(mergedArguments),
     parameters,
     undoGroup: continuesPrevious
       ? previous.undoGroup
@@ -2528,7 +2627,7 @@ function renderContextualToolPanel(forceParameterValues = false): void {
     })),
   );
   const view: ContextualToolPanelView = {
-    id: `${tool.callId}:${tool.contextId}:${tool.signature.id}`,
+    id: `${tool.callId}:${tool.contextId}`,
     title: humanizeToolName(tool.signature.name),
     meta: edge
       ? `${edge.availableEdgeIds.length} AVAILABLE`
@@ -2536,34 +2635,83 @@ function renderContextualToolPanel(forceParameterValues = false): void {
         ? `${topology.availableIds.length} AVAILABLE`
         : undefined,
     parameters,
-    selection: topology
-      ? {
-          name: topology.parameter.name,
-          label: topology.parameter.label.toUpperCase(),
-          summary:
-            topology.parameter.multiple &&
-            topology.selectedIds.length > 0 &&
-            topology.selectedIds.length === topology.availableIds.length
-              ? `All ${topologySelectionLabel(topology.parameter).toLowerCase()}`
-              : formatTopologyIds(
-                  topology.parameter.kind,
-                  topology.selectedIds,
-                ),
-        }
-      : edge
+    selection:
+      tool.rotationSelection && tool.rotationSelection.selector !== 'pivot'
         ? {
-            name: tool.signature.parameters.find(
-              parameter => parameter.kind === 'edge',
-            )!.name,
-            label: 'SELECTED EDGES',
-            summary: edge.hasExplicitEdgeSelection
-              ? formatEdgeIds(edge.selectedEdgeIds)
-              : 'All edges',
+            name: tool.focus.reference?.name ?? 'rotation-reference',
+            label: ['axisEdge', 'axisLine'].includes(
+              tool.rotationSelection.selector,
+            )
+              ? 'AXIS'
+              : 'PIVOT',
+            summary: draftRotationReferenceLabel(tool.rotationSelection),
           }
-        : undefined,
+        : topology
+          ? {
+              name: topology.parameter.name,
+              label: topology.parameter.label.toUpperCase(),
+              summary:
+                topology.parameter.multiple &&
+                topology.selectedIds.length > 0 &&
+                topology.selectedIds.length === topology.availableIds.length
+                  ? `All ${topologySelectionLabel(topology.parameter).toLowerCase()}`
+                  : formatTopologyIds(
+                      topology.parameter.kind,
+                      topology.selectedIds,
+                    ),
+            }
+          : edge
+            ? {
+                name: tool.signature.parameters.find(
+                  parameter => parameter.kind === 'edge',
+                )!.name,
+                label: 'SELECTED EDGES',
+                summary: edge.hasExplicitEdgeSelection
+                  ? formatEdgeIds(edge.selectedEdgeIds)
+                  : 'All edges',
+              }
+            : viewport.positionTools.reference &&
+                viewport.positionTools.reference.kind !== 'pivot'
+              ? {
+                  name: tool.focus.reference?.name ?? 'rotation-reference',
+                  label: ['axisLine', 'axisEdge'].includes(
+                    viewport.positionTools.reference.kind,
+                  )
+                    ? 'AXIS'
+                    : 'PIVOT',
+                  summary:
+                    'name' in viewport.positionTools.reference
+                      ? viewport.positionTools.reference.name
+                      : formatTopologyId(
+                          viewport.positionTools.reference.kind === 'axisEdge'
+                            ? 'edge'
+                            : 'vertex',
+                          viewport.positionTools.reference.id,
+                        ),
+                }
+              : undefined,
     actions,
   };
   contextualToolPanel.show(view, forceParameterValues);
+}
+
+function draftRotationReferenceLabel(
+  draft: NonNullable<SourceTarget['rotationSelection']>,
+): string {
+  if (!draft.reference) return 'None';
+  if (draft.selector === 'pivotVertex' || draft.selector === 'axisEdge') {
+    try {
+      const id: unknown = JSON.parse(draft.reference);
+      if (isTopologyId(id))
+        return formatTopologyId(
+          draft.selector === 'axisEdge' ? 'edge' : 'vertex',
+          id,
+        );
+    } catch {
+      // An authored expression remains readable before its reference evaluates.
+    }
+  }
+  return draft.reference;
 }
 
 function humanizeToolName(value: string): string {
@@ -2577,10 +2725,13 @@ function humanizeToolName(value: string): string {
 }
 
 function syncSelectionProvider(
-  scope: NonNullable<ReturnType<ModelViewport['sourceEvaluation']>>,
+  scope: NonNullable<ModelViewport['sourceContext']>,
   occurrence: Occurrence | undefined,
 ): void {
-  if (scope.target.kind === 'topology-selection') {
+  if (scope.target.rotationSelection) {
+    finishEdgeSelectionTool();
+    dismissTopologyReferenceSelectionTool(false);
+  } else if (scope.target.kind === 'topology-selection') {
     finishEdgeSelectionTool();
     syncTopologyReferenceSelectionProvider(scope, occurrence);
   } else {
@@ -2590,7 +2741,7 @@ function syncSelectionProvider(
 }
 
 function syncTopologyReferenceSelectionProvider(
-  scope: NonNullable<ReturnType<ModelViewport['sourceEvaluation']>>,
+  scope: NonNullable<ModelViewport['sourceContext']>,
   occurrence: Occurrence | undefined,
 ): void {
   const selection = scope.evaluation.selection;
@@ -2657,7 +2808,7 @@ function syncTopologyReferenceSelectionProvider(
 }
 
 function syncEdgeSelectionProvider(
-  scope: NonNullable<ReturnType<ModelViewport['sourceEvaluation']>>,
+  scope: NonNullable<ModelViewport['sourceContext']>,
   occurrence: Occurrence | undefined,
 ): void {
   const operation = scope?.target.operation?.kind;
@@ -2760,7 +2911,157 @@ function startEdgeSelection(
   renderContextualToolPanel();
 }
 
+function beginRotationReferenceSelection(
+  tool: 'rotate-point' | 'rotate-axis',
+): void {
+  const binding = viewport.positionTools.rotationBinding;
+  const occurrence = viewport.getSelected();
+  const draft = viewport.sourceContext?.target.rotationSelection;
+  if ((!binding && !draft) || !occurrence) return;
+  if (previewState.sourceVersion !== codeEditor.sourceVersion()) {
+    showToolIssue(
+      'Wait for the current model before selecting a new reference.',
+    );
+    return;
+  }
+  const source = binding?.spatial.source;
+  const ref =
+    draft?.sourceRef ??
+    binding?.spatial.operationRef ??
+    (source && 'sourceRef' in source ? source.sourceRef : undefined);
+  if (!ref) return;
+  const current = codeEditor.resolveSourceRef(ref);
+  if (!current) return;
+  const self = relationSelfExpression(
+    current.file,
+    codeEditor.readSource({
+      file: current.file,
+      start: 0,
+      end: Number.MAX_SAFE_INTEGER,
+    }),
+    current,
+  );
+  dismissTopologyReferenceSelectionTool();
+  dismissEdgeSelectionTool();
+  try {
+    const availableIds =
+      tool === 'rotate-axis'
+        ? self
+          ? (occurrence.node.mesh?.edgeGroups
+              .filter(group => group.linear)
+              .map(group => group.edgeId) ?? [])
+          : []
+        : undefined;
+    const hasTopology =
+      tool === 'rotate-axis'
+        ? !!availableIds?.length
+        : !!occurrence.node.mesh?.topologyVertices.length;
+    if (hasTopology)
+      viewport.beginTopologySelection(
+        occurrence.key,
+        occurrence.node.nodeId,
+        tool === 'rotate-axis' ? 'edge' : 'vertex',
+        false,
+        [],
+        availableIds
+          ? {
+              geometryNodeId: occurrence.node.nodeId,
+              availableIds,
+              transform: {
+                position: [0, 0, 0],
+                quaternion: [0, 0, 0, 1],
+                scale: [1, 1, 1],
+              },
+            }
+          : undefined,
+        true,
+      );
+    spatialToolbar.setSelection({
+      binding,
+      draft,
+      tool,
+      occurrenceKey: occurrence.key,
+      sourceVersion: codeEditor.sourceVersion(),
+      hasTopology,
+    });
+  } catch (error) {
+    showToolIssue(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function cancelRotationReferenceSelection(): void {
+  if (!spatialToolbar.selection) return;
+  const {hasTopology} = spatialToolbar.selection;
+  spatialToolbar.setSelection(undefined);
+  if (hasTopology && viewport.selectingRotationReference)
+    viewport.endTopologySelection();
+}
+
+function selectRotationReference(
+  event: Extract<TopologySelectionEvent, {kind: 'change'}>,
+): void {
+  const expression = JSON.stringify(event.id);
+  selectRotationReferenceExpression(expression);
+}
+
+function selectRotationReferenceExpression(expression: string): void {
+  const selection = spatialToolbar.selection!;
+  if (selection.sourceVersion !== codeEditor.sourceVersion()) {
+    cancelRotationReferenceSelection();
+    return;
+  }
+  const {binding, tool, draft} = selection;
+  const source = binding?.spatial.source;
+  const reference = binding?.spatial.objects.find(
+    object => object.nodeId === binding.spatial.ownerNodeId,
+  )?.spatial.reference;
+  const selector = tool === 'rotate-axis' ? 'axisEdge' : 'pivotVertex';
+  const factory = (draft?.constructors ?? binding?.spatial.constructors)?.[
+    selector
+  ];
+  const changesRotationKind =
+    (tool === 'rotate-axis') !==
+    (reference?.kind === 'axisLine' || reference?.kind === 'axisEdge');
+  const sourceRef =
+    draft?.sourceRef ??
+    binding?.spatial.operationRef ??
+    (source && 'sourceRef' in source ? source.sourceRef : undefined);
+  if (!sourceRef) return;
+  const intent: ToolIntent = {
+    kind: 'model.spatial',
+    operation: 'rotation-reference',
+    change: {
+      kind: 'rotation-reference',
+      sourceRef,
+      selector,
+      expression,
+      draft: !!draft,
+      previous: ['axisLine', 'axisEdge'].includes(
+        draft?.selector ?? reference?.kind ?? '',
+      )
+        ? 'axis'
+        : 'point',
+      factory,
+      append: draft
+        ? undefined
+        : source?.kind === 'transformation-insert'
+          ? source.container
+          : changesRotationKind
+            ? factory?.container
+            : undefined,
+    },
+    preview: {kind: 'model-spatial', objects: []},
+  };
+  cancelRotationReferenceSelection();
+  commitToolSession(toolEngine.begin('viewport.rotation-reference'), intent);
+}
+
 function handleTopologySelection(event: TopologySelectionEvent): void {
+  if (spatialToolbar.selection) {
+    if (event.kind === 'cancel') cancelRotationReferenceSelection();
+    else if (event.kind === 'change') selectRotationReference(event);
+    return;
+  }
   if (event.kind === 'cancel') {
     if (topologyReferenceSelectionTool) {
       dismissTopologyReferenceSelectionTool(false);
@@ -3075,7 +3376,9 @@ function interruptCompileForTool(): boolean {
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   compiler.cancel();
-  restoreModelStatus();
+  // The displayed geometry still predates the queued source edit. A new
+  // gesture only suspends compilation; cancelling it must resume that update.
+  previewState.queueUpdate(true);
   return true;
 }
 
@@ -3142,28 +3445,22 @@ function positionIntent(
   value: number,
 ): ToolIntent {
   if (binding.kind === 'spatial') return spatialIntent(binding, value);
-  if (binding.kind === 'parameter') {
-    return {
-      ...parameterIntent(binding.target, value),
-      completeArguments: binding.completeArguments,
-    };
-  }
-  const delta: [number, number, number] = [0, 0, 0];
-  delta[positionAxisIndex(binding.axis)] = value;
   return {
-    kind: 'relation.offset',
-    receiver: binding.receiver,
-    occurrenceKeys: binding.occurrenceKeys,
-    delta,
-    frameQuaternion: binding.frame.quaternion,
-    direction: binding.sensitivity as 1 | -1,
+    ...parameterIntent(binding.target, value),
+    completeArguments: binding.completeArguments,
   };
 }
 
-function positionAxisIndex(axis: TransformGizmoBinding['axis']): 0 | 1 | 2 {
-  if (axis === 'x') return 0;
-  if (axis === 'y') return 1;
-  return 2;
+function canEditPositionBinding(binding: TransformGizmoBinding): boolean {
+  if (previewState.sourceVersion === undefined) return false;
+  // Observe source revision as well as checking mapped anchors after formatting/undo.
+  codeEditor.sourceVersion();
+  const source = binding.kind === 'spatial' ? binding.spatial.source : binding;
+  const reference =
+    source.kind === 'parameter' || source.kind === 'omitted-argument'
+      ? source.target.sourceRef
+      : source.sourceRef;
+  return codeEditor.resolveSourceRef(reference) !== undefined;
 }
 
 function positionBindingId(binding: TransformGizmoBinding): string {
@@ -3176,65 +3473,39 @@ function positionBindingId(binding: TransformGizmoBinding): string {
         : source.sourceRef;
     return `spatial:${sourceRef.file}:${sourceRef.start}:${sourceRef.end}`;
   }
-  if (binding.kind === 'parameter') {
-    return binding.target.id;
-  }
-  const {start, end} = binding.receiver.sourceRef;
-  return `expression:${binding.receiver.sourceRef.file}:${start}:${end}`;
+  return binding.target.id;
 }
 
 function applyToolPreview(preview: ToolPreview): void {
   if (preview.kind === 'model-spatial') {
-    viewport.hideSourceDecorationsDuringPreview();
     viewport.setSpatialPreview(preview.objects);
-    viewport.setDecorations(
-      'spatial-preview',
-      [
-        ...new Map(
-          preview.objects.map(object => [object.nodeId, object]),
-        ).values(),
-      ].map(object => originDecoration(object.nodeId, object.spatial.origin)),
-    );
   } else if (preview.kind === 'parameter') {
     viewport.setParameterPreview(preview.targetId, preview.value);
-    viewport.hideSourceDecorationsDuringPreview();
-  } else if (preview.kind === 'occurrence-translation') {
-    viewport.setOccurrenceTranslationPreview(
-      preview.occurrenceKeys,
-      preview.delta,
-    );
-    viewport.hideSourceDecorationsDuringPreview();
   } else if (preview.kind === 'viewport-decorations') {
     viewport.setDecorations(preview.owner, preview.decorations);
   }
 }
 
 function commitToolPreview(preview: ToolPreview): void {
+  viewport.awaitToolUpdate();
   if (preview.kind === 'model-spatial') {
-    viewport.commitSpatialPreview(preview.objects, preview.parameter);
+    viewport.commitSpatialPreview(
+      preview.objects,
+      preview.parameter,
+      preview.continuation,
+    );
   } else if (preview.kind === 'parameter') {
     viewport.commitParameterPreview(preview.targetId, preview.value);
-  } else if (preview.kind === 'occurrence-translation') {
-    viewport.commitOccurrenceTranslationPreview(preview.occurrenceKeys);
   }
 }
 
-function clearToolPreview(
-  preview: ToolPreview,
-  reason: 'replace' | 'end',
-): void {
+function clearToolPreview(preview: ToolPreview): void {
   if (preview.kind === 'model-spatial') {
     viewport.clearSpatialPreview(preview.objects);
-    viewport.clearDecorations('spatial-preview');
   } else if (preview.kind === 'parameter') {
     viewport.clearParameterPreview(preview.targetId);
-  } else if (preview.kind === 'occurrence-translation') {
-    viewport.clearOccurrenceTranslationPreview(preview.occurrenceKeys);
   } else if (preview.kind === 'viewport-decorations') {
     viewport.clearDecorations(preview.owner);
-  }
-  if (reason === 'end') {
-    viewport.restoreSourceDecorations();
   }
 }
 
@@ -3260,7 +3531,41 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
     ),
     ...module.sourceTargets.flatMap(target => [
       target.sourceRef,
+      ...(target.argumentListRef ? [target.argumentListRef] : []),
+      ...(target.callRef ? [target.callRef] : []),
+      ...(target.rotationSelection
+        ? [
+            target.rotationSelection.sourceRef,
+            ...target.rotationSelection.calls.flatMap(call => [
+              call.sourceRef,
+              call.argumentListRef,
+              ...call.arguments.flatMap(argument =>
+                argument.target
+                  ? [
+                      argument.target.sourceRef,
+                      ...(argument.target.kind === 'present'
+                        ? [argument.target.removalSourceRef]
+                        : []),
+                    ]
+                  : [],
+              ),
+            ]),
+          ]
+        : []),
       ...(target.receiverRef ? [target.receiverRef] : []),
+      ...Object.values({
+        ...target.transformationInsertion,
+        ...target.rotationSelection?.constructors,
+      }).flatMap(insertion =>
+        insertion
+          ? [
+              insertion.sourceRef,
+              ...(insertion.importAddition
+                ? [insertion.importAddition.sourceRef]
+                : []),
+            ]
+          : [],
+      ),
       ...(target.tool?.arguments.flatMap(({target}) =>
         target
           ? [
@@ -3289,10 +3594,12 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
     ...[...module.objects.values()].flatMap(node => [
       ...node.sourceRefs,
       ...node.parameters.map(parameter => parameter.target.sourceRef),
-      ...node.constraints.flatMap(constraint => [
-        ...constraint.sourceRefs,
-        ...constraint.parameters.map(parameter => parameter.target.sourceRef),
-      ]),
+      ...[...node.constraints, ...(node.transformations ?? [])].flatMap(
+        constraint => [
+          ...constraint.sourceRefs,
+          ...constraint.parameters.map(parameter => parameter.target.sourceRef),
+        ],
+      ),
     ]),
   ];
   return [
@@ -3378,7 +3685,7 @@ function observeViewportTarget(): void {
 function hasViewportTarget(): boolean {
   return (
     viewport.hasRenderableGeometry() ||
-    viewport.sourceEvaluation() !== undefined ||
+    viewport.sourceContext !== undefined ||
     sketchEditor.hasTarget
   );
 }

@@ -14,7 +14,7 @@ import {
 import {isToolSelectionKind} from './tool-parameter-config';
 
 import {
-  parameterAnnotations,
+  toolAnnotations,
   readToolParameterAnnotations,
   signatureParameters,
   type SignatureParameter,
@@ -237,7 +237,7 @@ function annotationDeclaration(
   const declaration = signature.getDeclaration();
   // Overload-specific annotations remain attached to the resolved signature.
   if (declaration?.name) {
-    return parameterAnnotations(declaration).length ? declaration : undefined;
+    return toolAnnotations(declaration).length ? declaration : undefined;
   }
   let symbol = checker.getSymbolAtLocation(expression);
   const visited = new Set<ts.Symbol>();
@@ -248,7 +248,7 @@ function annotationDeclaration(
       continue;
     }
     const annotated = symbol.declarations?.find(
-      node => parameterAnnotations(node).length > 0,
+      node => toolAnnotations(node).length > 0,
     );
     if (annotated) return annotated;
     const variable = symbol.valueDeclaration;
@@ -262,7 +262,7 @@ function annotationDeclaration(
     // implementation or assume that a wrapper preserves its input signature.
     symbol = checker.getSymbolAtLocation(variable.initializer);
   }
-  return declaration && parameterAnnotations(declaration).length
+  return declaration && toolAnnotations(declaration).length
     ? declaration
     : undefined;
 }
@@ -279,7 +279,11 @@ function toolSignatureSchema(
     declaration,
     signatureParameters,
   );
-  if (annotations.length === 0) return undefined;
+  if (
+    annotations.length === 0 &&
+    !toolAnnotations(declaration).some(value => value.name === 'tool')
+  )
+    return undefined;
   const name = declarationName(declaration);
   const parameters = annotations.map(({parameter, index, name, config}) => {
     const common = {

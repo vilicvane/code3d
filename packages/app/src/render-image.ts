@@ -1,3 +1,5 @@
+import {BrowserPackageManager} from './project/browser-package-manager';
+import {bundledExamples} from './project/bundled-examples';
 import {openBrowserProjectFileSystem} from './project/filesystem';
 import {ModelCompilerClient} from './model/compiler-client';
 import {
@@ -7,30 +9,17 @@ import {
 import {renderSamples, sourceContextSets} from '../render-samples/catalog';
 import {ModelDiagnosticError} from './model/diagnostic';
 import {sourceDecorationProviders} from './model/source-decorations';
-import type {ModelProject} from './project/project';
 import {ModelViewport} from './viewport';
 import './render-image.css';
 
-const sources = import.meta.glob<string>('../examples/**/*.ts', {
-  query: '?raw',
-  import: 'default',
-  eager: true,
-});
-const renderProjects: Record<
-  string,
-  ModelProject & Readonly<{rootPath: string; focus: SourceToken}>
-> = Object.fromEntries(
+const renderProjects = Object.fromEntries(
   renderSamples.map(sample => [
     sample.id,
     {
-      rootPath: '/' + sample.file,
-      files: [
-        {
-          path: '/' + sample.file,
-          source: sources['../examples/' + sample.file]!,
-        },
-      ],
+      rootPath: '/examples/' + sample.file,
+      files: bundledExamples.files,
       focus: sample.focus,
+      view: 'view' in sample ? sample.view : undefined,
     },
   ]),
 );
@@ -39,7 +28,7 @@ type ModelName = keyof typeof renderProjects;
 
 function requestedModel(): ModelName {
   const name =
-    new URLSearchParams(location.search).get('model') ?? 'first-model';
+    new URLSearchParams(location.search).get('model') ?? 'desktop-stand';
   if (!(name in renderProjects)) {
     throw new Error(`Unknown render model: ${name}`);
   }
@@ -70,9 +59,12 @@ async function renderModel(): Promise<void> {
 
   const name = requestedModel();
   const project = renderProjects[name];
-  const compiler = new ModelCompilerClient(
-    await openBrowserProjectFileSystem(),
-  );
+  const files = await openBrowserProjectFileSystem();
+  await files.initialize();
+  await files.syncDirectory(bundledExamples);
+  const packages = new BrowserPackageManager(files);
+  await packages.prepare(project.rootPath);
+  const compiler = new ModelCompilerClient(packages.dependencies);
   const module = await compiler
     .compile(project, project.rootPath)
     .finally(() => compiler.dispose());
@@ -106,6 +98,7 @@ async function renderModel(): Promise<void> {
   const image = await viewport.captureImage(
     Math.round(width),
     Math.round(height),
+    project.view,
   );
   window.code3dRenderedImage = await blobDataUrl(image);
   document.documentElement.dataset.renderState = 'ready';

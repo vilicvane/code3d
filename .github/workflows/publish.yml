@@ -53,6 +53,15 @@ jobs:
           npm test
           npm run test:packages
 
+      - name: Verify clean npm examples
+        run: npm run test:examples:packages --workspace @code3d/app
+
+      - name: Install example test browser
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Verify every App example before publication
+        run: npm run test:examples:browser --workspace @code3d/app
+
       - name: Upload verified npm artifacts
         uses: actions/upload-artifact@v4
         with:

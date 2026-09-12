@@ -4,6 +4,9 @@ import {createModelSnapshotter, disposeModelObjects} from './model-test.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
+  offset,
+  rotate,
+  pivot,
   bezier,
   circle,
   group,
@@ -58,9 +61,10 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
   const vertex = point([2, 3, 4]);
   const faceRelated = circle(2).relate(self => self.surface(1).on(face.up));
   const edgeRelated = line([1, 0, 0]).relate(self => self.edge(1).on(edge.up));
-  const vertexRelated = point().relate(self =>
-    self.vertex(1).on(vertex.up).offset(0, 0, 0),
-  );
+  const vertexRelated = point().relate(self => [
+    self.vertex(1).on(vertex.up),
+    offset(0, 0, 0),
+  ]);
 
   try {
     const constraints = [faceRelated, edgeRelated, vertexRelated].map(
@@ -80,7 +84,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
     );
     const relatedSnapshot = snapshotModel(vertexRelated);
     assert.deepEqual(relatedSnapshot.transform.position, [0, 0, 0]);
-    assertVectorNear(relatedSnapshot.compositionTransform.position, [2, 3, 4]);
+    assertVectorNear(relatedSnapshot.compositionTransform.position, [0, 3, 0]);
   } finally {
     disposeModelObjects([
       face,
@@ -96,7 +100,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
 test('resolves relation placement only inside a composition', () => {
   const snapshotModel = createModelSnapshotter();
   const target = point([2, 3, 4]);
-  const related = point().relate(self => self.on(target.up).offset(0, 0, 0));
+  const related = point().relate(self => self.align(target));
   const assembly = group([target, related]);
 
   try {
@@ -122,22 +126,18 @@ test('lofts nonparallel planar profiles along a curved spine', () => {
     [10, 20, 9],
     [4, 28, 14],
   ]);
-  const start = circle(4).relate(profile =>
-    profile
-      .on(point().up)
-      .offset(0, 0, 0)
-      .rotate(0, 0, (-Math.atan2(12, 7) * 180) / Math.PI),
-  );
-  const end = rectangle(7, 4).relate(profile =>
-    profile
-      .on(point([4, 28, 14]).up)
-      .offset(0, 0, 0)
-      .rotate(
-        (Math.atan2(5, Math.hypot(6, 8)) * 180) / Math.PI,
-        0,
-        (Math.atan2(6, 8) * 180) / Math.PI,
-      ),
-  );
+  const start = circle(4).relate(profile => [
+    profile.center.align(point()),
+    rotate(0, 0, (-Math.atan2(12, 7) * 180) / Math.PI),
+  ]);
+  const end = rectangle(7, 4).relate(profile => [
+    profile.center.align(point([4, 28, 14])),
+    rotate(
+      (Math.atan2(5, Math.hypot(6, 8)) * 180) / Math.PI,
+      0,
+      (Math.atan2(6, 8) * 180) / Math.PI,
+    ),
+  ]);
   const result = loft([start, end], {spine});
 
   try {
@@ -180,12 +180,15 @@ test('lofts planar sections without a spine', () => {
 test('reports an unsuccessful loft without losing its editable sections', () => {
   const snapshotModel = createModelSnapshotter();
   const start = circle(20);
-  const via = regularPolygon(20, 8).relate(self =>
-    self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 45).offset(-18, 0, 0),
-  );
-  const end = rectangle(40, 40).relate(self =>
-    self.on(start.up).pivot([50, 0, 0]).rotate(0, 0, 90),
-  );
+  const via = regularPolygon(20, 8).relate(self => [
+    self.on(start.up),
+    pivot([50, 0, 0]).rotate(0, 0, 45),
+    offset(-18, 0, 0),
+  ]);
+  const end = rectangle(40, 40).relate(self => [
+    self.on(start.up),
+    pivot([50, 0, 0]).rotate(0, 0, 90),
+  ]);
   const sections = group([start, via, end]);
   try {
     assert.throws(
@@ -194,7 +197,10 @@ test('reports an unsuccessful loft without losing its editable sections', () => 
     );
     const snapshot = snapshotModel(sections);
     assert.equal(snapshot.children.length, 3);
-    assert.deepEqual(snapshot.children[1].constraints[0].offset, [-18, 0, 0]);
+    assert.deepEqual(
+      snapshot.children[1].transformations!.at(-1)!.offsets.at(-1)!.value,
+      [-18, 0, 0],
+    );
     assert.ok(defined(snapshot.children[1].mesh).triangles.length > 0);
   } finally {
     disposeModelObjects([start, via, end, sections]);

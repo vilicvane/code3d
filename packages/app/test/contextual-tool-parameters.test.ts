@@ -287,9 +287,9 @@ test('omitted coordinate arrays expose defaults and insert only the next compone
     ['pivot([2, /* next */])', 'y', 'pivot([2, /* next */5])'],
     ['pivot([, 2, 3])', 'x', 'pivot([5, 2, 3])'],
   ] as const) {
-    const source = `import {box} from '@code3d/core';
+    const source = `import {box, pivot} from '@code3d/core';
 const base = box(20, 30, 40);
-box(4, 6, 8).relate(self => self.on(base.up).${call}.rotate(0, 0, 25));`;
+box(4, 6, 8).relate(self => [self.on(base.up), ${call}.rotate(0, 0, 25)]);`;
     const result = await compileParameters(source, 'pivot');
     assert.equal(result.module.diagnostic, undefined);
     const parameter = defined(result.parameters.get(name));
@@ -326,10 +326,10 @@ test('coordinate defaults do not overwrite explicit undefined, opaque arrays or 
     'pivot([...coords])',
     'pivot([1, ...coords])',
   ]) {
-    const source = `import {box} from '@code3d/core';
+    const source = `import {box, pivot} from '@code3d/core';
 const coords = [1, 2, 3] as const;
 const base = box(20, 30, 40);
-box(4, 6, 8).relate(self => self.on(base.up).${call}.rotate(0, 0, 25));`;
+box(4, 6, 8).relate(self => [self.on(base.up), ${call}.rotate(0, 0, 25)]);`;
     const {parameters} = await compileParameters(source, 'pivot');
     for (const name of call === 'pivot([1, ...coords])'
       ? ['y', 'z']

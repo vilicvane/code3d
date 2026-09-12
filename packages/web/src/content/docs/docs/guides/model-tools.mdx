@@ -6,16 +6,16 @@ description: Use JSDoc to give ordinary TypeScript functions parameter panels an
 import SourceCode from '../../../../components/SourceCode.astro';
 import ArrowIcon from '../../../../components/ArrowIcon.astro';
 import {appUrl} from '../../../../lib/site';
-import source from '../../../../../../app/examples/design-arguments.ts?raw';
+import source from '../../../../../../app/examples/annotations.ts?raw';
 
 A model function can have visual controls without becoming a different kind of
 function. Add JSDoc annotations to describe its parameters; the App reads them
 alongside its TypeScript signature.
 
-<SourceCode source={source} file="design-arguments.ts" />
+<SourceCode source={source} file="annotations.ts" />
 
 <p>
-  <a href={appUrl('design-arguments.ts')} target="_blank" rel="noopener">
+  <a href={appUrl('annotations.ts')} target="_blank" rel="noopener">
     {'Open this example in the App '}
     <ArrowIcon />
   </a>
@@ -41,7 +41,7 @@ For example:
 /** @code3d.param radius {kind: 'length', label: 'Radius', constraints: {min: 1}} */
 ```
 
-Place the cursor in `makeKnob(10, 5, 6)` to open its parameter panel. Change an
+Place the cursor in `spacer(12, 5, 6)` to open its parameter panel. Change an
 input and the App writes to the corresponding source value. Normal source
 Undo and Redo still apply.
 
@@ -53,13 +53,13 @@ annotate the overload signatures that should offer tools.
 ## Describe an omitted argument's default
 
 ```ts
-/** @code3d.param twist {kind: 'angle', default: 60} */
-function makeKnob(twist = 60) {
-  // Build the model using twist.
+/** @code3d.param height {kind: 'length', default: 12} */
+function spacer(height = 12) {
+  // Build the model using height.
 }
 ```
 
-For `makeKnob()`, the panel shows `60` as a numeric placeholder. The annotation
+For `spacer()`, the panel shows `12` as a numeric placeholder. The annotation
 describes this display value; the function implementation decides what an
 omitted argument actually does. Keep the two consistent. The App reads the
 same annotation from source and published `.d.ts` declarations, without
@@ -105,6 +105,39 @@ normal execution or change its exports. Exporting the function remains an
 ordinary choice about reuse by another module.
 
 ## What a panel can edit
+
+The active tool's call is underlined in the editor and scrolls into view without
+taking focus from the panel. A static caret and word marker retain your source
+position when focus moves into the viewport. Parameter, topology, and spatial
+tools share this navigation behavior, including newly inserted calls.
+Choosing a spatial tool keeps a matching current call or checks the immediately
+following transformation. A matching call activates immediately and places the
+caret at the expression end, such as `offset()|` or `axisEdge(1).rotate(25)|`.
+The toolbar is available throughout `relate(...)`, including `self.axis`, target
+references, and callback whitespace, without activating a tool by default.
+Expression panels and reference highlights keep their focus until you choose a
+spatial tool, which acts on that relation's `self`. Nested `relate` calls use the
+innermost `self`. A callback returning one constraint also supports these tools;
+its first added transformation converts the return value to an array.
+The start of `self` in a relation also provides this lookup. It does not skip
+a different transformation to find a matching call farther ahead. If the call needs
+to be added, the caret moves to its insertion gap and the viewport shows the
+state immediately before that position. Neither action changes the source until you edit the model.
+Tool edits place the caret after the affected call name, before `(`: picking a
+vertex focuses `pivotVertex`, while changing rotation angles focuses `rotate`.
+Moving the caret into an argument list yourself still highlights its parameter.
+
+The origin is marked by a lime cross with a center dot. A rotation pivot uses
+an orange ring with a center dot; an axis reference remains orange. These markers
+follow your edit while the model updates, including consecutive drags. Choosing
+point rotation shows its pivot before a rotation call is written. Holding Alt
+switches to moving that pivot and keeps the same marker.
+
+Hold **Shift** while dragging to use larger snap increments: one major grid
+interval (five small cells) for movement, or **15°** from the drag's starting
+angle for rotation. You can press or release Shift during the drag. **Alt + Shift**
+moves a rotation pivot or axis by major grid intervals. Movement uses the grid
+spacing at the start of the drag; typed values remain exact.
 
 Controls follow a unique chain of TypeScript definitions to an editable
 numeric source value, including supported variables, object properties, and
@@ -154,7 +187,7 @@ argument that can be appended is editable, even when later parameters have
 default placeholders. Editing never fills intermediate positions with
 `undefined`.
 
-At and after a spread argument such as `makeKnob(...args)`, the panel cannot
+At and after a spread argument such as `spacer(...args)`, the panel cannot
 map individual parameter positions to source arguments. Those controls remain
 disabled without default placeholders.
 
@@ -179,3 +212,5 @@ builder signature; panel defaults come from `@code3d.param`. Use ordinary calls 
 
 See [custom primitives](../custom-primitives/) for the complete twisted-knob
 example, including parameter tools, placement, and colors.
+
+`@code3d.tool` marks a callable as a tool even when it has no numeric or topology-ID parameters. It does not make an arbitrary reference editable by itself; Core uses it for `axisLine`, whose axis is handled by the App’s rotation reference picker. Use `@code3d.param` for ordinary editable model parameters.
