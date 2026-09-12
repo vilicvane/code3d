@@ -42,6 +42,68 @@ const completionFormatSettings = {
 
 class ProjectTypeScriptWorker extends TypeScriptWorker {
   private readonly annotations = new AnnotationLanguageService(this);
+  private navigationWorker?: ProjectTypeScriptWorker;
+
+  constructor(
+    private readonly context: unknown,
+    private readonly createData: unknown,
+    private readonly navigationRoot?: string,
+  ) {
+    super(context, createData);
+  }
+
+  /** Navigation queries get an isolated program; opening a model never adds project roots. */
+  workerForRequest(
+    method: PropertyKey,
+    file: unknown,
+  ): ProjectTypeScriptWorker {
+    if (
+      typeof file !== 'string' ||
+      !file.startsWith('/') ||
+      typeof method !== 'string' ||
+      method.endsWith('Diagnostics') ||
+      this.isProjectFile(file) ||
+      !this.getScriptSnapshot(file)
+    )
+      return this;
+    if (this.navigationWorker?.navigationRoot !== file) {
+      this.navigationWorker?.getLanguageService().dispose();
+      this.navigationWorker = new ProjectTypeScriptWorker(
+        this.context,
+        {
+          ...(this.createData as object),
+          extraLibs: this.getExtraLibs(),
+        },
+        file,
+      );
+    }
+    return this.navigationWorker;
+  }
+
+  override async updateExtraLibs(
+    libs: ReturnType<TypeScriptWorker['getExtraLibs']>,
+  ) {
+    await super.updateExtraLibs(libs);
+    await this.navigationWorker?.updateExtraLibs(libs);
+  }
+
+  private isProjectFile(file: string): boolean {
+    return !!this.getLanguageService().getProgram()?.getSourceFile(file);
+  }
+
+  override async getSyntacticDiagnostics(file: string) {
+    return this.isProjectFile(file) ? super.getSyntacticDiagnostics(file) : [];
+  }
+
+  override async getSuggestionDiagnostics(file: string) {
+    return this.isProjectFile(file) ? super.getSuggestionDiagnostics(file) : [];
+  }
+
+  override async getCompilerOptionsDiagnostics(file: string) {
+    return this.isProjectFile(file)
+      ? super.getCompilerOptionsDiagnostics(file)
+      : [];
+  }
 
   override readFile(file: string): string | undefined {
     return super.readFile(monacoFileName(file));
@@ -128,6 +190,7 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
   }
 
   override async getSemanticDiagnostics(fileName: string) {
+    if (!this.isProjectFile(fileName)) return [];
     const diagnostics = await super.getSemanticDiagnostics(fileName);
     if (!this.hasParameterAnnotations(fileName)) return diagnostics;
     return [
@@ -140,11 +203,11 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
   }
 
   override getScriptFileNames(): string[] {
-    return [
-      ...new Set(super.getScriptFileNames().map(typeScriptFileName)),
-    ].filter(
-      fileName => !fileName.endsWith('.json') && !fileName.endsWith('.map'),
-    );
+    if (this.navigationRoot) return [this.navigationRoot];
+    const roots = this.getScriptSnapshot('/workspace/.__code3d-roots.json');
+    return roots
+      ? (JSON.parse(roots.getText(0, roots.getLength())) as string[])
+      : [];
   }
 
   async getProjectCompletions(
@@ -225,7 +288,10 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
 }
 
 self.onmessage = () => {
-  initialize((context, createData) =>
-    typeScriptWorkerRequests(new ProjectTypeScriptWorker(context, createData)),
-  );
+  initialize((context, createData) => {
+    const worker = new ProjectTypeScriptWorker(context, createData);
+    return typeScriptWorkerRequests(worker, (method, file) =>
+      worker.workerForRequest(method, file),
+    );
+  });
 };

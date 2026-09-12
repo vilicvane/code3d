@@ -32,7 +32,10 @@ function mapFileNames(
 }
 
 /** Normalize at the RPC boundary, including Monaco's built-in providers. */
-export function typeScriptWorkerRequests<T extends object>(worker: T): T {
+export function typeScriptWorkerRequests<T extends object>(
+  worker: T,
+  selectWorker: (method: PropertyKey, file: unknown) => T = () => worker,
+): T {
   return new Proxy(worker, {
     get(target, method) {
       const member = Reflect.get(target, method);
@@ -46,9 +49,10 @@ export function typeScriptWorkerRequests<T extends object>(worker: T): T {
         if (method === 'getDocumentHighlights') {
           args[2] = (args[2] as string[]).map(typeScriptFileName);
         }
+        const selected = selectWorker(method, args[0]);
         const result = Reflect.apply(
-          member,
-          target,
+          Reflect.get(selected, method) as typeof member,
+          selected,
           args.map(arg => mapFileNames(arg, typeScriptFileName)),
         );
         const serialize = (value: unknown) =>

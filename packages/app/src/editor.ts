@@ -343,7 +343,15 @@ export class CodeEditor {
     return (
       isSourceFile(path) &&
       !/\.d\.[cm]?ts$/.test(path) &&
+      !this.isNavigationSource(path) &&
       !isReadonlyProjectFile(path)
+    );
+  }
+
+  private isNavigationSource(path: string): boolean {
+    return (
+      this.projectLanguage?.navigationFiles.some(file => file.path === path) ??
+      false
     );
   }
 
@@ -382,6 +390,12 @@ export class CodeEditor {
       this.setProjectLanguage({
         ...this.projectLanguage,
         files: this.projectLanguage.files.filter(file => !affected(file.path)),
+        navigationFiles: this.projectLanguage.navigationFiles.filter(
+          file => !affected(file.path),
+        ),
+        rootPaths: this.projectLanguage.rootPaths.filter(
+          path => !affected(path),
+        ),
         realPaths: Object.fromEntries(
           Object.entries(this.projectLanguage.realPaths ?? {}).filter(
             ([from, to]) => !affected(from) && !affected(to),
@@ -409,15 +423,35 @@ export class CodeEditor {
   }
 
   setProjectLanguage(language: ProjectLanguage): void {
+    const navigationChanged =
+      JSON.stringify(
+        this.projectLanguage?.navigationFiles.map(file => file.path),
+      ) !== JSON.stringify(language.navigationFiles.map(file => file.path));
     this.projectLanguage = language;
     projectPackageSpecifiers = language.packageSpecifiers;
     this.navigationFiles = new Map(
-      language.files.map(file => [file.path, file.source]),
+      [...language.files, ...language.navigationFiles].map(file => [
+        file.path,
+        file.source,
+      ]),
     );
-    const extraLibs = language.files.map(file => ({
+    const extraLibs = [
+      ...language.files,
+      ...language.navigationFiles,
+      ...(language.toolingFile ? [language.toolingFile] : []),
+    ].map(file => ({
       filePath: monaco.Uri.file('/workspace' + file.path).toString(),
       content: file.source,
     }));
+    extraLibs.push({
+      filePath: 'file:///workspace/.__code3d-roots.json',
+      content: JSON.stringify(
+        [
+          ...language.rootPaths,
+          ...(language.toolingFile ? [language.toolingFile.path] : []),
+        ].map(path => '/workspace' + path),
+      ),
+    });
     extraLibs.push({
       filePath: 'file:///workspace/.__code3d-realpaths.json',
       content: JSON.stringify(
@@ -448,6 +482,7 @@ export class CodeEditor {
       }
       const installed = defaults.getExtraLibs();
       if (
+        navigationChanged ||
         Object.keys(installed).length !== extraLibs.length ||
         extraLibs.some(lib => installed[lib.filePath]?.content !== lib.content)
       ) {
@@ -523,6 +558,17 @@ export class CodeEditor {
     for (const file of project.files) {
       this.addDocument(file.path, file.source);
     }
+    this.setProjectLanguage({
+      files: [],
+      navigationFiles: [],
+      compilerOptions: {},
+      packageSpecifiers: [],
+      rootPaths: project.files
+        .filter(
+          file => isSourceFile(file.path) && !isReadonlyProjectFile(file.path),
+        )
+        .map(file => file.path),
+    });
     const active = this.activePath
       ? this.requireDocument(this.activePath)
       : undefined;
@@ -530,6 +576,7 @@ export class CodeEditor {
     this.editor = monaco.editor.create(container, {
       model: active?.model ?? null,
       readOnly: this.readOnly,
+      renderValidationDecorations: 'on',
       theme: 'code3d-dark',
       automaticLayout: true,
       fontFamily: "'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace",
@@ -555,18 +602,36 @@ export class CodeEditor {
       | 'refreshParameterCursor'
       | 'languageErrorCounts'
       | 'refreshLanguageErrors'
+      | 'projectLanguage'
+      | 'activePath'
+      | 'operationReadOnly'
+      | 'readOnly'
     >(this, {
       parameterCursorValue: observableRef,
       refreshParameterCursor: action,
       languageErrorCounts: observableRef,
       refreshLanguageErrors: action,
       errorCounts: computed,
+      projectLanguage: observableRef,
+      activePath: observableRef,
+      operationReadOnly: observableRef,
+      readOnly: computed,
+      setProjectLanguage: action,
+      setReadOnly: action,
+      switchFile: action,
+      renameFile: action,
+      deleteFile: action,
+      replaceDirectory: action,
     });
+    const stopReadOnly = autorun(() =>
+      this.editor.updateOptions({readOnly: this.readOnly}),
+    );
     this.editor.onDidChangeModelContent(() => this.refreshParameterCursor());
     const markers = monaco.editor.onDidChangeMarkers(() =>
       this.refreshLanguageErrors(),
     );
     this.editor.onDidDispose(() => {
+      stopReadOnly();
       markers.dispose();
       for (const document of this.documents.values())
         document.stopDiagnostics();
@@ -583,7 +648,6 @@ export class CodeEditor {
     );
     this.editor.onDidChangeModel(() => {
       this.refreshParameterCursor();
-      this.editor.updateOptions({readOnly: this.readOnly});
       for (const cursor of this.agentCursors.values()) {
         this.editor.layoutContentWidget(cursor.widget);
       }
@@ -684,7 +748,11 @@ export class CodeEditor {
   project(): ModelProject {
     return {
       files: [...this.documents.values()]
-        .filter(document => !isReadonlyProjectFile(document.path))
+        .filter(
+          document =>
+            !isReadonlyProjectFile(document.path) &&
+            !this.isNavigationSource(document.path),
+        )
         .map(({path, model}) => ({path, source: model.getValue()}))
         .sort((left, right) => left.path.localeCompare(right.path)),
     };
@@ -739,7 +807,10 @@ export class CodeEditor {
       files.set(path, model.getValue());
     return {
       files: [...files]
-        .filter(([path]) => !isReadonlyProjectFile(path))
+        .filter(
+          ([path]) =>
+            !isReadonlyProjectFile(path) && !this.isNavigationSource(path),
+        )
         .map(([path, source]) => ({path, source})),
     };
   }
@@ -767,13 +838,14 @@ export class CodeEditor {
 
   setReadOnly(readOnly: boolean): void {
     this.operationReadOnly = readOnly;
-    this.editor.updateOptions({readOnly: this.readOnly});
   }
 
   private get readOnly(): boolean {
     return (
       this.operationReadOnly ||
-      (!!this.activePath && isReadonlyProjectFile(this.activePath))
+      (!!this.activePath &&
+        (isReadonlyProjectFile(this.activePath) ||
+          this.isNavigationSource(this.activePath)))
     );
   }
 

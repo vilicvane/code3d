@@ -316,6 +316,23 @@ test(
       true,
       'a completed explorer operation keeps package sources read-only',
     );
+    const navigationDiagnostics = await page.evaluate(async () => {
+      const {codeEditor} = window.packageApp;
+      const {projectTypeScriptWorker} =
+        await import('/src/monaco/typescript-worker-client.ts');
+      const model = codeEditor.editor.getModel()!;
+      const worker = await projectTypeScriptWorker('typescript', model.uri);
+      return {
+        semantic: await worker.getSemanticDiagnostics(model.uri.toString()),
+        syntactic: await worker.getSyntacticDiagnostics(model.uri.toString()),
+      };
+    });
+    assert.deepEqual(navigationDiagnostics.semantic, []);
+    assert.deepEqual(navigationDiagnostics.syntactic, []);
+    await page.waitForFunction(() => {
+      const {codeEditor} = window.packageApp;
+      return !codeEditor.errorCounts.get(codeEditor.currentFile()!);
+    });
 
     await page.evaluate(() =>
       window.packageApp.codeEditor.openFile('/a/model.ts'),

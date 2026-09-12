@@ -29,6 +29,22 @@ declare module 'monaco-editor/language/typescript/ts.worker' {
   export class TypeScriptWorker {
     constructor(context: unknown, createData: unknown);
     getExtraLibs(): TypeScriptWorkerExtraLibs;
+    updateExtraLibs(libs: TypeScriptWorkerExtraLibs): Promise<void>;
+    getSyntacticDiagnostics(
+      fileName: string,
+    ): ReturnType<
+      typeScriptLanguage.TypeScriptWorker['getSyntacticDiagnostics']
+    >;
+    getSuggestionDiagnostics(
+      fileName: string,
+    ): ReturnType<
+      typeScriptLanguage.TypeScriptWorker['getSuggestionDiagnostics']
+    >;
+    getCompilerOptionsDiagnostics(
+      fileName: string,
+    ): ReturnType<
+      typeScriptLanguage.TypeScriptWorker['getCompilerOptionsDiagnostics']
+    >;
     getLanguageService(): TypeScriptLanguageService;
     getScriptFileNames(): string[];
     readFile(fileName: string): string | undefined;
