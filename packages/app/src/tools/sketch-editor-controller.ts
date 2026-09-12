@@ -99,6 +99,10 @@ export class SketchEditorController {
     return this.active ? this.sourceLayers : undefined;
   }
 
+  get dragPreview() {
+    return this.editor.dragPreview;
+  }
+
   get navigation() {
     return this.editor.navigation;
   }

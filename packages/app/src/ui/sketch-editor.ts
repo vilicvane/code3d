@@ -1,6 +1,9 @@
+import type {ToolDragPreview} from './tool-drag-preview';
 import {gridStep} from '../grid-scale';
 import {
   action,
+  computed,
+  runInAction,
   makeObservable,
   observableRef,
   reaction,
@@ -175,6 +178,59 @@ export class SketchEditor {
   private gesture?: Gesture;
   private space = false;
 
+  get dragPreview(): ToolDragPreview | undefined {
+    const gesture = this.gesture;
+    if (gesture?.kind !== 'move' || gesture.released || !this.view)
+      return undefined;
+    const start = this.view.layers.at(-1)!;
+    const current = gesture.preview?.snapshot ?? start;
+    const original = start.entities.find(
+      entity => entity.id === gesture.target.id,
+    );
+    if (gesture.parameter === 'radius') {
+      const entity = current.entities.find(
+        entity => entity.id === gesture.target.id,
+      );
+      if (
+        !original ||
+        !('radius' in original) ||
+        !entity ||
+        !('radius' in entity)
+      )
+        return undefined;
+      return {
+        label: 'Radius',
+        values: [
+          {
+            label: '',
+            start: original.radius,
+            value: entity.radius,
+            unit: 'unit',
+          },
+        ],
+      };
+    }
+    const address = sketchPointResolver([
+      ...this.view.layers.slice(0, -1),
+      current,
+    ])(gesture.target);
+    const point =
+      address &&
+      [...this.view.layers.slice(0, -1), current]
+        .find(layer => layer.id === address.layer)
+        ?.entities.find(entity => entity.id === address.id);
+    if (point?.kind !== 'point') return undefined;
+    return {
+      label: 'Point',
+      values: ['X', 'Y'].map((label, index) => ({
+        label,
+        start: gesture.target.position[index],
+        value: point.position[index],
+        unit: 'unit',
+      })),
+    };
+  }
+
   private get center(): SketchPosition {
     return this.navigation.pose.center;
   }
@@ -203,11 +259,19 @@ export class SketchEditor {
     ) => Promise<SketchDragPreview>,
     private readonly reportMove: (error?: string) => void,
   ) {
-    makeObservable<this, 'view'>(this, {
-      view: observableRef,
-      show: action,
-      hide: action,
-    });
+    makeObservable<this, 'view' | 'gesture' | 'pointerDown' | 'pointerUp'>(
+      this,
+      {
+        view: observableRef,
+        gesture: observableRef,
+        dragPreview: computed,
+        pointerDown: action,
+        pointerUp: action,
+        cancel: action,
+        show: action,
+        hide: action,
+      },
+    );
     this.root.className = 'sketch-editor';
     this.root.setAttribute('aria-label', 'Sketch editor');
     this.root.hidden = true;
@@ -416,6 +480,7 @@ export class SketchEditor {
   }
 
   dispose(): void {
+    this.cancel();
     this.stopDrawing();
     this.navigation.reset();
     this.abort.abort();
@@ -797,8 +862,13 @@ export class SketchEditor {
           start: position,
           position: point.position,
           released: false,
+          preview: undefined,
           version: 0,
         };
+        makeObservable(this.gesture, {
+          preview: observableRef,
+          released: observableRef,
+        });
         this.svg.setPointerCapture(event.pointerId);
       }
     }
@@ -906,7 +976,9 @@ export class SketchEditor {
             gesture.mergeTarget,
           );
           if (this.gesture !== gesture) return;
-          gesture.preview = preview;
+          runInAction(() => {
+            gesture.preview = preview;
+          });
           gesture.error = undefined;
         } catch (error) {
           if (this.gesture !== gesture) return;
@@ -932,7 +1004,9 @@ export class SketchEditor {
     if (gesture?.kind === 'move') {
       await gesture.pending;
       if (this.gesture !== gesture) return;
-      this.gesture = undefined;
+      runInAction(() => {
+        this.gesture = undefined;
+      });
       this.reportMove(gesture.error);
       if (gesture.preview && !gesture.error) {
         const data = gesture.preview.data.flatMap(e => {

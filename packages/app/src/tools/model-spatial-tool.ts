@@ -225,7 +225,9 @@ export function spatialBindings(
             : occurrence.node.transform,
         mode,
         axis,
-        label: `${kind === 'rotate' ? 'Rotate' : kind === 'pivot' ? 'Pivot' : 'Origin'} ${axis.toUpperCase()}`,
+        label:
+          (!offsetOrigin && schema?.label) ||
+          `${kind === 'rotate' ? 'Rotate' : kind === 'pivot' ? 'Pivot' : 'Origin'} ${axis.toUpperCase()}`,
         value: parameter
           ? (parameterValues.get(parameter.target.id) ?? parameter.target.value)
           : offsetOrigin
@@ -298,12 +300,7 @@ export function relationBindings(
   const offset = relationToolTarget(module, constraint, 'offset');
   const rotation = relationToolTarget(module, constraint, 'rotate');
   return [
-    ...positionBindings(
-      occurrence,
-      occurrences,
-      constraint.id,
-      offset?.sourceRef,
-    ),
+    ...positionBindings(occurrence, occurrences, constraint.id, offset),
     ...(rotation
       ? existingRelationRotationBindings(
           module,
@@ -635,7 +632,7 @@ export function positionBindings(
   occurrence: SpatialToolOccurrence,
   occurrences: readonly SpatialToolOccurrence[],
   constraintId: string | null,
-  offsetSourceRef?: SourceRef,
+  offsetTarget?: SourceTarget,
 ): TransformGizmoBinding[] {
   const constraint =
     constraintId === null
@@ -646,7 +643,11 @@ export function positionBindings(
   if (!constraint || !canPreviewConstraintTransform(occurrence.node)) {
     return [];
   }
-  const receiver = offsetSourceRef ?? constraint.sourceRefs.at(-1);
+  const receiver = offsetTarget?.sourceRef ?? constraint.sourceRefs.at(-1);
+  const axisLabel = (axis: TransformAxis) =>
+    offsetTarget?.tool?.signature.parameters.find(
+      parameter => parameter.name === axis,
+    )?.label ?? `Δ${axis.toUpperCase()}`;
   const parameters = editableParameterUsages(
     constraint.parameters.filter(
       ({operation, operationRef}) =>
@@ -698,7 +699,7 @@ export function positionBindings(
       anchor: 'bounds',
       axis,
       target,
-      label: target.label,
+      label: axisLabel(axis),
       value: target.value,
       sensitivity: sensitivity * constraint.offsetDirection,
       parameterKind: target.kind,
@@ -731,7 +732,7 @@ export function positionBindings(
         mode: 'translate',
         anchor: 'bounds',
         axis,
-        label: `Δ${axis.toUpperCase()}`,
+        label: axisLabel(axis),
         value: 0,
         sensitivity: constraint.offsetDirection,
         parameterKind: 'length',

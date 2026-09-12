@@ -277,3 +277,15 @@ ModelPreviewState 的 statusDiagnostic 从当前 presentation 派生，顶部 Mo
 使用它显示原生 tooltip，并在有 sourceRef 时支持点击/Enter/Space，复用 revealSource 跨文件定位。
 忙碌或恢复 Ready 时同步移除详情和跳转资格，不保存另一份待跳转错误。成功求解的草图 warning 及修复 actions 使用同一诊断与事务接口，
 具体作用域和安全写回见[草图](sketch.md#诊断与源码同步)。
+
+### Drag value readout
+
+`TransformGizmo.dragPreview` and `SketchEditor.dragPreview` derive numeric readouts
+from their active gestures, observed by the shared `ToolDragPreviewView`. Initial
+values stay fixed for the gesture; current values use snapped source parameters
+for 3D and solved geometry for sketch point/radius edits. Gesture completion or
+cancellation removes the readout, including asynchronous sketch solves that finish
+after release. The contextual panel and readout share a flex stack; hidden panels
+consume no space. Both containers share their width, padding, border, translucent background,
+backdrop blur and shadow, and each readout row uses
+`field: old + delta = new` with a signed operator and the unit after the result. No synthetic source tool or second preview value store is needed.

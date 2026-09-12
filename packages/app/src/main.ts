@@ -1,3 +1,4 @@
+import {ToolDragPreviewView} from './ui/tool-drag-preview';
 import {resolveRenderView} from '@code3d/agent';
 import {
   compareTopologyIds,
@@ -264,6 +265,7 @@ app.innerHTML = `
             </span>
             <strong>Select to preview</strong>
           </div>
+          <div class="viewport-tool-stack" id="viewport-tool-stack"></div>
           <div class="viewport-feedback-stack" id="viewport-feedback-stack">
             <div class="viewport-diagnostic-stack" id="viewport-diagnostic-stack" role="status" aria-live="polite" aria-atomic="true" hidden></div>
           </div>
@@ -809,7 +811,8 @@ const sourceEditPopover = new SourceEditPopover(
   viewportFeedbackStack,
   sourceRef => codeEditor.revealSource(sourceRef, true),
 );
-const contextualToolPanel = new ContextualToolPanel(viewportHost, {
+const viewportToolStack = requiredElement('viewport-tool-stack');
+const contextualToolPanel = new ContextualToolPanel(viewportToolStack, {
   sourceParameter: () => {
     const scope = viewport.sourceEvaluation();
     const cursor = codeEditor.parameterCursor;
@@ -860,6 +863,13 @@ const sketchEditor = new SketchEditorController(viewportHost, {
   },
   commit: intent =>
     commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
+});
+const dragPreviewView = new ToolDragPreviewView(
+  viewportToolStack,
+  () => sketchEditor.dragPreview ?? viewport.dragPreview,
+);
+window.addEventListener('pagehide', () => dragPreviewView.dispose(), {
+  once: true,
 });
 
 const viewportGridScale = new ViewportGridScale(
