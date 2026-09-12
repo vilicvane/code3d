@@ -360,7 +360,7 @@ const factor = require('./factor.json'); exports.radius = cached((x) => x * fact
       (await compile()).fallback?.mesh?.vertices,
       first.fallback?.mesh?.vertices,
     );
-    compiler.compiler.refreshDependencies();
+    compiler.compiler.refreshProject();
     const changed = await compile();
     assert.equal(changed.diagnostic, undefined);
     assert.notDeepEqual(

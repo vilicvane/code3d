@@ -141,3 +141,75 @@ function transactionComplete(transaction: IDBTransaction): Promise<void> {
     transaction.onerror = () => reject(transaction.error);
   });
 }
+
+type DirectoryChangeRecord = {
+  type:
+    'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
+  relativePathComponents: string[];
+  relativePathMovedFrom?: string[];
+};
+type DirectoryObserver = {
+  observe(
+    handle: FileSystemDirectoryHandle,
+    options: {recursive: boolean},
+  ): Promise<void>;
+  disconnect(): void;
+};
+
+/** Experimental browser capability; absence or lost observation uses the caller's polling path. */
+export async function observeProjectDirectory(
+  handle: FileSystemDirectoryHandle,
+  changed: (paths?: readonly string[]) => void,
+  unavailable: () => void,
+): Promise<(() => void) | undefined> {
+  const Observer = (
+    globalThis as typeof globalThis & {
+      FileSystemObserver?: new (
+        callback: (records: DirectoryChangeRecord[]) => void,
+      ) => DirectoryObserver;
+    }
+  ).FileSystemObserver;
+  if (!Observer) return undefined;
+  let active = true;
+  let observer: DirectoryObserver | undefined;
+  const disconnect = () => {
+    active = false;
+    observer?.disconnect();
+  };
+  try {
+    observer = new Observer(records => {
+      if (!active) return;
+      if (records.some(record => record.type === 'errored')) {
+        disconnect();
+        unavailable();
+        return;
+      }
+      if (records.some(record => record.type === 'unknown')) {
+        changed();
+        return;
+      }
+      const paths = new Set<string>();
+      for (const record of records) {
+        for (const parts of [
+          record.relativePathComponents,
+          record.relativePathMovedFrom,
+        ]) {
+          if (
+            !parts ||
+            parts.some(part =>
+              ['node_modules', '.code3d', '.git'].includes(part),
+            )
+          )
+            continue;
+          paths.add('/' + parts.join('/'));
+        }
+      }
+      if (paths.size) changed([...paths]);
+    });
+    await observer.observe(handle, {recursive: true});
+    return active ? disconnect : undefined;
+  } catch {
+    disconnect();
+    return undefined;
+  }
+}

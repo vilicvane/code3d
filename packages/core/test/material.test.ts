@@ -111,7 +111,7 @@ test('setting material on a related assembly preserves member identities and exp
       before.children.map(child => ({...child, material: '#aabbcc'})),
     );
     const [x, y, z] = after.children[1].transform.position;
-    assert.ok(Math.hypot(x, y - 3, z) < 1e-8);
+    assert.ok(Math.hypot(x, y - 6, z) < 1e-8);
     assert.deepEqual(
       defined(modelElementReference(colored.mount)).transform,
       defined(modelElementReference(assembly.mount)).transform,

@@ -37,6 +37,7 @@ function fixture(
     ['/model.ts', 'const model = 1;'],
     ['/lib.ts', 'export const value = 2;'],
   ]);
+  const loadedSources = new Map(disk);
   const documents = new Map(
     [...disk].map(([path, content]) => [path, {content, version: '1'}]),
   );
@@ -160,6 +161,7 @@ function fixture(
   );
   return {
     disk,
+    fileSystem,
     documents,
     writes,
     errors,
@@ -167,6 +169,17 @@ function fixture(
     cursors,
     editor,
     session,
+    refresh: (paths: readonly string[], cancelled?: () => boolean) =>
+      session.refreshExternalFiles(
+        {
+          files: paths.map(path => ({
+            path,
+            source:
+              documents.get(path)?.content ?? loadedSources.get(path) ?? '',
+          })),
+        },
+        cancelled,
+      ),
     apply: (input: ApplyInput, agent = 'alice') =>
       session.handle(agent, agent, {operation: 'apply', input}),
     read: async (path: string) =>
@@ -758,4 +771,137 @@ test('agent changes update open non-source documents and allow removing the last
   );
   assert.equal((await f.apply({files})).ok, true);
   assert.deepEqual([...f.disk.keys()], ['/README.md']);
+});
+
+test('external changes replace stale open buffers without writing back and detect deletions', async () => {
+  const f = fixture();
+  await f.refresh(f.editor.filePaths());
+  const revision = f.session.currentRevision;
+  const changes: string[] = [];
+  f.session.onEntriesChange(reason => changes.push(reason));
+  f.disk.set('/lib.ts', 'export const value = 99;');
+  f.disk.delete('/model.ts');
+  await f.refresh(f.editor.filePaths());
+  assert.equal(f.documents.get('/lib.ts')?.content, 'export const value = 99;');
+  assert.equal(f.documents.has('/model.ts'), false);
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(changes, ['external']);
+  assert.equal(f.session.currentRevision, revision + 1);
+  await f.refresh(f.editor.filePaths());
+  assert.deepEqual(changes, ['external']);
+});
+
+test('external synchronization preserves failed saves and observes unopened dependencies', async () => {
+  const f = fixture();
+  f.documents.delete('/lib.ts');
+  await f.refresh(['/model.ts', '/lib.ts']);
+  const changes: string[] = [];
+  f.session.onEntriesChange(reason => changes.push(reason));
+  f.failing.add('/model.ts');
+  f.edit('/model.ts', 'local draft');
+  await assert.rejects(f.session.flush());
+  f.disk.set('/model.ts', 'external change');
+  f.disk.set('/lib.ts', 'changed dependency');
+  await f.refresh(['/model.ts', '/lib.ts']);
+  assert.equal(f.documents.get('/model.ts')?.content, 'local draft');
+  assert.equal(f.documents.has('/lib.ts'), false);
+  assert.equal(f.session.hasUnsaved, true);
+  assert.ok(changes.includes('external'));
+});
+
+test('initial synchronization reads stale buffers and cancellation prevents publication', async () => {
+  const f = fixture();
+  f.disk.set('/model.ts', 'external before first check');
+  await f.refresh(['/model.ts'], () => true);
+  assert.equal(f.documents.get('/model.ts')?.content, 'const model = 1;');
+  await f.refresh(['/model.ts']);
+  assert.equal(
+    f.documents.get('/model.ts')?.content,
+    'external before first check',
+  );
+  assert.deepEqual(f.writes, []);
+});
+
+test('external read cannot overwrite an edit made while another file is being read', async () => {
+  const f = fixture();
+  const read = f.fileSystem.readFile.bind(f.fileSystem);
+  const entered = gate<void>();
+  const release = gate<void>();
+  f.fileSystem.readFile = async path => {
+    if (path === '/lib.ts') {
+      entered.resolve();
+      await release.promise;
+    }
+    return read(path);
+  };
+  f.disk.set('/model.ts', 'external source');
+  const refresh = f.refresh(['/model.ts', '/lib.ts']);
+  await entered.promise;
+  f.edit('/model.ts', 'new user source');
+  release.resolve();
+  await refresh;
+  await f.session.flush();
+  assert.equal(f.documents.get('/model.ts')?.content, 'new user source');
+  assert.equal(f.disk.get('/model.ts'), 'new user source');
+});
+
+test('events and explicit refresh reread contents even when file metadata is unchanged', async () => {
+  const f = fixture();
+  const project = () => f.editor.project();
+  await f.session.refreshExternalFiles(project());
+  f.disk.set('/model.ts', 'const model = 9;');
+  await f.session.refreshExternalFiles(project());
+  assert.equal(f.documents.get('/model.ts')?.content, 'const model = 1;');
+  await f.session.refreshExternalFiles(project(), undefined, ['/model.ts']);
+  assert.equal(f.documents.get('/model.ts')?.content, 'const model = 9;');
+  f.disk.set('/model.ts', 'const model = 8;');
+  await f.session.refreshExternalFiles(project(), undefined, undefined, true);
+  assert.equal(f.documents.get('/model.ts')?.content, 'const model = 8;');
+  assert.deepEqual(f.writes, []);
+});
+
+test('targeted events check only affected paths and unchanged polls do not read contents', async () => {
+  const f = fixture();
+  await f.refresh(f.editor.filePaths());
+  const stats: string[] = [];
+  const reads: string[] = [];
+  const stat = f.fileSystem.stat.bind(f.fileSystem);
+  const read = f.fileSystem.readFile.bind(f.fileSystem);
+  f.fileSystem.stat = async path => {
+    stats.push(path);
+    return stat(path);
+  };
+  f.fileSystem.readFile = async path => {
+    reads.push(path);
+    return read(path);
+  };
+  await f.refresh(f.editor.filePaths());
+  assert.equal(stats.length, 2);
+  assert.equal(reads.length, 0);
+  stats.length = 0;
+  f.disk.set('/lib.ts', 'export const value = 3;');
+  await f.session.refreshExternalFiles(f.editor.project(), undefined, [
+    '/lib.ts',
+  ]);
+  assert.deepEqual(stats, ['/lib.ts']);
+  assert.deepEqual(reads, ['/lib.ts']);
+});
+
+test('large source sets use bounded metadata concurrency', async () => {
+  const f = fixture();
+  const files = Array.from({length: 80}, (_, i) => ({
+    path: `/part${i}.ts`,
+    source: '',
+  }));
+  let active = 0;
+  let maximum = 0;
+  f.fileSystem.stat = async () => {
+    maximum = Math.max(maximum, ++active);
+    await new Promise(resolve => setTimeout(resolve, 1));
+    active--;
+    return undefined;
+  };
+  await f.session.refreshExternalFiles({files});
+  assert.equal(maximum, 16);
+  assert.equal(active, 0);
 });

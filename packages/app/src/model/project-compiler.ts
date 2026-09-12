@@ -55,7 +55,7 @@ export class ProjectCompiler {
   private readonly builder: ProjectBuilder;
   private dependencies: DependencyBuilder;
   private restoredDependencies?: DependencyArtifact;
-  private dependenciesRefreshRequested = false;
+  private projectRefreshRequested = false;
 
   constructor(
     files: ProjectFileReader,
@@ -95,7 +95,12 @@ export class ProjectCompiler {
     ) => Promise<DependencyArtifact | undefined>,
   ): Promise<ProjectBuildArtifact> {
     checkCancelled();
-    const refresh = this.dependenciesRefreshRequested;
+    const refresh = this.projectRefreshRequested;
+    if (refresh) {
+      // Manual refresh must see files whose timestamps and sizes were preserved.
+      this.files.clear();
+      this.builtinFiles.clear();
+    }
     const select = (
       path: string,
       info: import('../project/file-reader').ProjectFileInfo | undefined,
@@ -139,7 +144,7 @@ export class ProjectCompiler {
       this.language.reset();
     }
     if (refresh) this.restoredDependencies = undefined;
-    this.dependenciesRefreshRequested = false;
+    this.projectRefreshRequested = false;
     this.language.invalidate(changed);
     // Finish applying invalidation before cancellation can consume these changes.
     checkCancelled();
@@ -312,7 +317,7 @@ export class ProjectCompiler {
     return (this.restoredDependencies = this.dependencies.reuse(artifact));
   }
 
-  refreshDependencies(): void {
-    this.dependenciesRefreshRequested = true;
+  refreshProject(): void {
+    this.projectRefreshRequested = true;
   }
 }

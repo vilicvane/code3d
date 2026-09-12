@@ -391,7 +391,7 @@ test(
         await compile();
         await write('node_modules/width/index.js', 'export default 6;');
         await compile();
-        client.refreshDependencies();
+        client.refreshProject();
         await compile();
         await write(
           'node_modules/width/package.json',

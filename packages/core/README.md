@@ -4,6 +4,12 @@ The TypeScript modeling runtime used by Code3D. Compose solids, profiles, curves
 points, and editable sketches; inspect their geometry and reuse the same models
 in the App or a supported Node.js runtime.
 
+Model constructors define the initial origin; derived operations inherit their main
+input frame. `group`, `union`, and `intersect` use the first member or operand,
+`cut` uses the stock, and `loft` uses the first section. See the
+[default origin rules](../web/src/content/docs/docs/concepts/local-coordinates.md#default-origin-rules)
+for all constructors and explicit origin operations.
+
 ## Start with a model
 
 ```sh

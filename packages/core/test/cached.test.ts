@@ -1,4 +1,4 @@
-import {cached} from '@code3d/core';
+import {box, cached, cut} from '@code3d/core';
 import {definePrimitive, replicad} from '@code3d/core/replicad';
 import {
   beginModelEvaluation,
@@ -269,3 +269,43 @@ test('primitive disk restore skips its builder and creates independently owned m
     disposeModelObjects([...owned]);
   }
 });
+
+for (const persistence of [false, true]) {
+  for (const first of ['boolean', 'geometry'] as const) {
+    for (const operation of ['originOffset', 'rotate'] as const) {
+      test(`${operation} and boolean transforms keep distinct cache values: ${first} first, ${persistence ? 'persistent' : 'memory'}`, () => {
+        if (persistence) setKernelArtifactStore(store);
+        const stock = box(10, 10, 10);
+        const cutter = box(2, 2, 2);
+        const owned = [stock, cutter];
+        const expected = modelGeometry(cutter).value.shape.boundingBox.bounds;
+        const geometry = () => {
+          const result = cutter[operation](0, 0, 0);
+          owned.push(result);
+          assert.deepEqual(
+            modelGeometry(result).value.shape.boundingBox.bounds,
+            expected,
+          );
+          assert.ok(createModelSnapshotter()(result).mesh!.vertices.length > 0);
+        };
+        const boolean = () => {
+          const result = cut(stock, [cutter]);
+          owned.push(result);
+          assert.ok(createModelSnapshotter()(result).mesh!.vertices.length > 0);
+        };
+        try {
+          (first === 'boolean' ? boolean : geometry)();
+          if (persistence) clearKernelOperationCache();
+          (first === 'boolean' ? geometry : boolean)();
+          if (persistence) clearKernelOperationCache();
+          geometry();
+          boolean();
+          if (persistence)
+            assert.ok(kernelOperationCacheStats().persistentHits > 0);
+        } finally {
+          disposeModelObjects(owned);
+        }
+      });
+    }
+  }
+}

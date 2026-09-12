@@ -360,3 +360,46 @@ test('opening an unrelated document updates language without changing the execut
     await compiler.dispose();
   }
 });
+
+test('project refresh rereads reached source and config despite unchanged file versions', async () => {
+  const disk = new Map([
+    [
+      '/entry.ts',
+      'import {value} from "./helper.ts"; export const result = value;',
+    ],
+    ['/helper.ts', 'export const value = 1;'],
+    ['/tsconfig.json', '{"compilerOptions":{"strict":false}}'],
+    ['/unused.ts', 'export const untouched = true;'],
+  ]);
+  const reads: string[] = [];
+  const reader: ProjectFileReader = {
+    async readFile(path) {
+      reads.push(path);
+      return disk.has(path)
+        ? new TextEncoder().encode(disk.get(path)!)
+        : packageTestFiles.readFile(path);
+    },
+    async stat(path) {
+      return disk.has(path)
+        ? {kind: 'file', version: 'unchanged'}
+        : packageTestFiles.stat(path);
+    },
+  };
+  const compiler = new ProjectCompiler(reader, packageTestFiles, esbuild);
+  try {
+    const first = await compiler.compile({files: []}, '/entry.ts');
+    disk.set('/helper.ts', 'export const value = 2;');
+    disk.set('/tsconfig.json', '{"compilerOptions":{"strict":true}}');
+    const stale = await compiler.compile({files: []}, '/entry.ts');
+    assert.equal(stale.id, first.id);
+    reads.length = 0;
+    compiler.refreshProject();
+    const fresh = await compiler.compile({files: []}, '/entry.ts');
+    assert.notEqual(fresh.id, first.id);
+    for (const path of ['/entry.ts', '/helper.ts', '/tsconfig.json'])
+      assert.ok(reads.includes(path), path);
+    assert.equal(reads.includes('/unused.ts'), false);
+  } finally {
+    await compiler.dispose();
+  }
+});

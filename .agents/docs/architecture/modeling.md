@@ -35,6 +35,13 @@ TypeScript 隐藏声明不等于 JavaScript 对象上的字段不可读；这是
 
 `relate` 确定接受摆放的 self，关系保存在新模型值上。
 
+原点由构造器确定；派生操作继承主输入坐标系，不按结果包围盒自动居中。
+group/union/intersect 使用首个成员或操作数的完整局部坐标系，cut 使用 stock，
+loft 使用第一截面，extrude 保留输入面。group 将求解位姿统一左乘首成员位姿的逆，
+保留成员相对装配；空 group 为默认坐标系。原点操作显式重表达坐标且不改变旧值。
+完整[原点选择规则](../../../packages/web/src/content/docs/docs/concepts/local-coordinates.md#default-origin-rules)
+统一记录构造器、继承操作、文字和自定义图元的行为。
+
 运行时的 `RelationObject` 提供关系存储、位姿求解与阶段预览，`ModelObject`
 负责有限几何和拓扑，`SketchFrame` 表达不依赖 B-Rep 的草图参考架。两者共用
 关系语义，不用虚构面或组合体把空草图接入模型路径；参考架快照不参与几何导出。

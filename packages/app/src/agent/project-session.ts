@@ -14,6 +14,8 @@ import {
 import type {SourceRef} from '@code3d/core/tooling';
 import type {ProjectEditorChange} from '../editor';
 import type {CursorTypeInfo} from '../monaco/type-info';
+import {decodeProjectFile} from '../project/file-reader';
+import {mapProjectIO} from '../project/io';
 import type {ProjectFileSystem} from '../project/filesystem';
 import {
   checkProjectEntryOperation,
@@ -81,6 +83,7 @@ export class AgentProjectSession {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly drafts = observable.map<string, Draft>([], {deep: false});
   private accepting = false;
+  private readonly externalVersions = new Map<string, string | undefined>();
   private revision = 1;
   private readonly updateListeners = new Set<(update: AgentUpdate) => void>();
   private readonly agentStates = new Map<
@@ -93,7 +96,7 @@ export class AgentProjectSession {
     }
   >();
   private readonly entryListeners = new Set<
-    (reason: 'operation' | 'save') => void
+    (reason: 'operation' | 'save' | 'external') => void
   >();
 
   constructor(
@@ -128,13 +131,13 @@ export class AgentProjectSession {
   }
 
   onEntriesChange(
-    listener: (reason: 'operation' | 'save') => void,
+    listener: (reason: 'operation' | 'save' | 'external') => void,
   ): () => void {
     this.entryListeners.add(listener);
     return () => this.entryListeners.delete(listener);
   }
 
-  private entriesChanged(reason: 'operation' | 'save'): void {
+  private entriesChanged(reason: 'operation' | 'save' | 'external'): void {
     for (const listener of this.entryListeners) listener(reason);
   }
 
@@ -244,6 +247,94 @@ export class AgentProjectSession {
       throw new Error(
         'Project files have unsaved changes. Retry saving before leaving this project.',
       );
+  }
+
+  /** Reconcile disk changes without saving them back or replacing in-flight edits. */
+  async refreshExternalFiles(
+    project: ModelProject,
+    cancelled: () => boolean = () => false,
+    changedPaths?: readonly string[],
+    force = false,
+  ): Promise<void> {
+    await this.enqueue(async () => {
+      if (cancelled()) return;
+      const sources = new Map(
+        project.files.map(file => [file.path, file.source]),
+      );
+      const unique = [
+        ...new Set([
+          ...sources.keys(),
+          ...[...this.externalVersions]
+            .filter(([, version]) => version === undefined)
+            .map(([path]) => path),
+        ]),
+      ];
+      const retained = new Set(unique);
+      for (const path of this.externalVersions.keys())
+        if (!retained.has(path)) this.externalVersions.delete(path);
+      const selected = changedPaths
+        ? unique.filter(path =>
+            changedPaths.some(changed => projectPathIsWithin(path, changed)),
+          )
+        : unique;
+      const states = new Map(
+        selected.map(path => [path, this.editor.fileState(path)]),
+      );
+      const infos = await mapProjectIO(selected, path =>
+        this.fileSystem.stat(path),
+      );
+      const updates: {path: string; content: string | null}[] = [];
+      let changed = false;
+      for (const [index, path] of selected.entries()) {
+        if (cancelled()) return;
+        if (this.drafts.has(path)) continue;
+        const info = infos[index];
+        const version =
+          info && JSON.stringify([info.kind, info.version, info.size]);
+        if (
+          !force &&
+          !changedPaths &&
+          this.externalVersions.has(path) &&
+          this.externalVersions.get(path) === version
+        )
+          continue;
+        const state = states.get(path);
+        const bytes =
+          info?.kind === 'file'
+            ? await this.fileSystem.readFile(path)
+            : undefined;
+        if (cancelled()) return;
+        if (
+          this.drafts.has(path) ||
+          this.editor.fileState(path)?.version !== state?.version
+        )
+          continue;
+        const content = bytes === undefined ? null : decodeProjectFile(bytes);
+        // First observation also checks editor buffers: they may predate this watcher.
+        if (state) {
+          if (state.content !== content) {
+            updates.push({path, content});
+            changed = true;
+          }
+        } else if (content !== sources.get(path)) changed = true;
+        this.externalVersions.set(path, version);
+      }
+      if (cancelled() || !changed) return;
+      this.advanceRevision();
+      const applicable = updates.filter(update => {
+        const current = this.editor.fileState(update.path);
+        if (
+          this.drafts.has(update.path) ||
+          current?.version !== states.get(update.path)?.version
+        ) {
+          this.externalVersions.delete(update.path);
+          return false;
+        }
+        return true;
+      });
+      this.acceptEditorChanges(() => this.editor.applyFiles(applicable));
+      this.entriesChanged('external');
+    });
   }
 
   async retrySaves(): Promise<void> {

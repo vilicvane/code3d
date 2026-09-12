@@ -162,8 +162,8 @@ test('the same geometry retains independent placement in two exposed occurrences
       defined(modelTopologyReference(a)).geometry,
       defined(modelTopologyReference(b)).geometry,
     );
-    near(position(a.center), [-25, 0, 0]);
-    near(position(b.center), [15, 0, 0]);
+    near(position(a.center), [-5, 0, 0]);
+    near(position(b.center), [35, 0, 0]);
     assert.throws(
       () => group([left, right]).expose({ambiguous: body}),
       /multiple occurrences/,

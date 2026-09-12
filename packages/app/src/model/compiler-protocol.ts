@@ -41,7 +41,7 @@ export type FileRequest = FileQuery &
 type WorkerRequest =
   | CompileRequest
   | Readonly<{kind: 'cancel-compile'; id: number}>
-  | Readonly<{kind: 'refresh-dependencies'}>
+  | Readonly<{kind: 'refresh-project'}>
   | Readonly<{kind: 'clear-build-cache'; projectIdentity: string}>
   | Readonly<{
       kind: 'execution-succeeded';

@@ -364,9 +364,10 @@ Every geometric model exposes `center`: its initial local bounding-box center,
 carried along by subsequent transforms. Rotation does not recalculate it from
 the rotated shape's axis-aligned bounds. Origin edits change its coordinates;
 `.originCenter().originOffset(1, 0, 0)` leaves it at `[-1, 0, 0]`.
-A group chooses its default origin from the bounding-box center of its solved
-direct member origins, keeping the assembly axes. Geometry size does not change
-this default, and nested groups contribute only their own origins. Group origin
+A group inherits the first member's solved local coordinate frame, including
+its origin and axes, while preserving relative member placement. Nested groups
+keep their own frames; an empty group uses the default origin and axes. Member
+order can change the group's frame. Group origin
 edits move the entire assembly's local coordinates together; they preserve its
 internal relations. `rotate(x, y, z)` turns the solved assembly about its current
 origin, including nested instances. `originPoint(part.center)` resolves the member's actual

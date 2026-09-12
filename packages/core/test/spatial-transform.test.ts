@@ -203,7 +203,8 @@ test('line coordinates retain model XYZ independently of the tangent anchor fram
   const related = segment.relate(self =>
     self.start.align(point()).rotate(0, 90, 0),
   );
-  const scene = snapshot(group([related])).children[0];
+  // An explicit first reference retains the frame in which we inspect rotation.
+  const scene = snapshot(group([point(), related])).children[1];
   const end = defined(modelElementReference(related.end)).transform;
   near(composeTransforms(scene.transform, end).position, [0, 0, -10]);
   near(
