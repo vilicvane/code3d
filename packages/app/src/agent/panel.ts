@@ -6,6 +6,7 @@ import {agentPrompt} from './prompt';
 import {findAgentName, randomAgentName} from './names';
 import {MousePointer2, UserRoundCog} from 'lucide';
 import {createIcon} from '../ui/icons';
+import {AppDialog} from '../ui/dialog';
 
 type AgentRow = {
   element: HTMLDivElement;
@@ -17,7 +18,7 @@ type AgentRow = {
 export class AgentPanel {
   private readonly navigation = document.createElement('div');
   private readonly badges = new Map<string, HTMLButtonElement>();
-  private readonly dialog = document.createElement('dialog');
+  private readonly modal: AppDialog;
   private readonly createForm = document.createElement('div');
   private readonly createFields = document.createElement('fieldset');
   private readonly port = document.createElement('input');
@@ -65,8 +66,20 @@ export class AgentPanel {
     open.before(this.navigation);
     open.setAttribute('aria-label', 'Connect Agent');
     open.title = 'Connect Agent';
-    this.dialog.className = 'app-dialog agent-dialog';
-    this.dialog.setAttribute('aria-label', 'Connect Agent');
+    this.modal = new AppDialog({
+      title: 'Connect Agent',
+      className: 'agent-dialog',
+      canDismiss: () => {
+        if (!this.connection.open) return true;
+        this.connection.open = false;
+        return false;
+      },
+      onClose: () => {
+        this.connection.open = false;
+        this.clearPromptMessage();
+        this.finishCreateAnimation();
+      },
+    });
     const content = document.createElement('div');
     content.className = 'app-dialog-content';
     const heading = document.createElement('header');
@@ -113,7 +126,7 @@ export class AgentPanel {
     this.addButton.classList.add('button-primary');
     const footer = document.createElement('footer');
     footer.append(
-      button('Close', () => this.dialog.close()),
+      button('Close', () => this.modal.close()),
       this.addButton,
     );
     const feedback = document.createElement('div');
@@ -145,29 +158,14 @@ export class AgentPanel {
     createContent.append(this.createFields, feedback, footer);
     this.createForm.append(createContent);
     content.append(heading, this.list, this.createForm);
-    this.dialog.append(content);
-    document.body.append(this.dialog);
+    this.modal.element.append(content);
     open.addEventListener(
       'click',
       () => {
-        this.dialog.showModal();
+        this.modal.open();
       },
       {signal: this.listeners.signal},
     );
-    this.dialog.addEventListener('click', event => {
-      if (event.target === this.dialog) this.dialog.close();
-    });
-    this.dialog.addEventListener('cancel', event => {
-      if (!this.connection.open) return;
-      event.preventDefault();
-      this.connection.open = false;
-    });
-    this.dialog.addEventListener('keydown', event => event.stopPropagation());
-    this.dialog.addEventListener('close', () => {
-      this.connection.open = false;
-      this.clearPromptMessage();
-      this.finishCreateAnimation();
-    });
     document.addEventListener(
       'pointerdown',
       event => {
@@ -359,7 +357,7 @@ export class AgentPanel {
   private revealCreateForm(): void {
     this.finishCreateAnimation();
     if (
-      !this.dialog.open ||
+      !this.modal.isOpen ||
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
     )
       return;
@@ -404,7 +402,7 @@ export class AgentPanel {
     this.rows.get(agentId)!.element.scrollIntoView({block: 'nearest'});
     try {
       await navigator.clipboard.writeText(value);
-      if (!this.dialog.open || generation !== this.promptGeneration) return;
+      if (!this.modal.isOpen || generation !== this.promptGeneration) return;
       this.promptMessage.textContent = 'Prompt copied.';
       if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches)
         this.promptMessage.animate({opacity: [0.35, 1]}, 180);
@@ -413,7 +411,7 @@ export class AgentPanel {
         3000,
       );
     } catch {
-      if (!this.dialog.open || generation !== this.promptGeneration) return;
+      if (!this.modal.isOpen || generation !== this.promptGeneration) return;
       this.prompt.focus();
       this.prompt.select();
       this.promptMessage.textContent = 'Select and copy the prompt above.';
@@ -493,8 +491,7 @@ export class AgentPanel {
     this.listeners.abort();
     this.clearPromptMessage();
     this.finishCreateAnimation();
-    this.dialog.close();
-    this.dialog.remove();
+    this.modal.dispose();
     this.navigation.remove();
   }
 

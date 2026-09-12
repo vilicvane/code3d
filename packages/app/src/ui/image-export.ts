@@ -42,6 +42,10 @@ export class ImageExportDialog {
     this.dialog.setSubmitLabel('Export PNG');
   }
 
+  dispose(): void {
+    this.dialog.dispose();
+  }
+
   open(): void {
     if (!this.width.value) {
       const {width, height} = this.host.getBoundingClientRect();

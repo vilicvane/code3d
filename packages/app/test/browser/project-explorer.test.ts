@@ -236,6 +236,37 @@ test(
 );
 
 test(
+  'package prompts validate inline and cancellation leaves the project unchanged',
+  {timeout: 60_000},
+  async t => {
+    const page = await open(t);
+    await row(page, 'src').click({button: 'right'});
+    await page
+      .getByRole('menuitem', {name: 'Install package', exact: true})
+      .click();
+    const dialog = page.getByRole('dialog', {
+      name: 'Install package',
+      exact: true,
+    });
+    assert.equal(await dialog.locator('header p').innerText(), 'In /src');
+    const input = dialog.getByRole('textbox', {name: 'Package', exact: true});
+    await input.fill('bad package name');
+    await dialog.getByRole('button', {name: 'Install', exact: true}).click();
+    assert.ok(await dialog.getByRole('alert').isVisible());
+    assert.equal(await input.inputValue(), 'bad package name');
+    await input.fill('just-range@4.2.0');
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({state: 'detached'});
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.projectFileSystem.stat('/src/package.json'),
+      ),
+      undefined,
+    );
+  },
+);
+
+test(
   'nested creation validates paths and preserves existing files in a local folder',
   {timeout: 90_000},
   async t => {
@@ -248,8 +279,11 @@ test(
       await root.getDirectoryHandle('create-local', {create: true});
       sessionStorage.setItem('nextFolder', 'create-local');
     });
-    page.once('dialog', dialog => dialog.dismiss());
     await page.getByRole('button', {name: 'Open folder', exact: true}).click();
+    await page
+      .getByRole('dialog', {name: 'Create examples', exact: true})
+      .getByRole('button', {name: 'Cancel', exact: true})
+      .click();
     await page.waitForFunction(
       () =>
         document.querySelector('#project-location')?.textContent ===
@@ -295,6 +329,10 @@ test(
     await page
       .getByText('Destination already exists: /unopened/keep.ts', {exact: true})
       .waitFor();
+    // The failed operation still refreshes the disk view before accepting commands.
+    await page
+      .locator('#project-tree[aria-busy="true"]')
+      .waitFor({state: 'detached'});
     await page.evaluate(() => {
       void window.explorerApp.projectDirectory.create('file', '/');
     });
@@ -456,8 +494,12 @@ test(
         name => sessionStorage.setItem('nextFolder', name),
         name,
       );
-      if (createExamples) page.once('dialog', dialog => dialog.accept());
       await page.locator('#open-folder-button').click();
+      if (createExamples)
+        await page
+          .getByRole('dialog', {name: 'Create examples', exact: true})
+          .getByRole('button', {name: 'Create examples', exact: true})
+          .click();
       await page.waitForURL(url => url.searchParams.get('workspace') === name);
       await page.waitForFunction(() => !!window.explorerApp);
       assert.equal(await page.locator('#project-location').innerText(), name);
@@ -548,18 +590,27 @@ test(
     const page = await open(t, [example]);
     await mockLocalDirectories(page);
     const prompts: string[] = [];
-    let accept = false;
-    page.on('dialog', async dialog => {
-      prompts.push(dialog.message());
-      await (accept ? dialog.accept() : dialog.dismiss());
-    });
-    const visit = async (name: string) => {
+    const answer = async (accept: boolean) => {
+      const dialog = page.getByRole('dialog', {
+        name: 'Create examples',
+        exact: true,
+      });
+      prompts.push(await dialog.locator('header p').innerText());
+      await dialog
+        .getByRole('button', {
+          name: accept ? 'Create examples' : 'Cancel',
+          exact: true,
+        })
+        .click();
+    };
+    const visit = async (name: string, accept?: boolean) => {
       const url = new URL(process.env.CODE3D_TEST_URL!);
       url.searchParams.set('workspace', name);
       await page.goto(url.href);
+      if (accept !== undefined) await answer(accept);
       await active(page, undefined);
     };
-    await visit('examples-skipped');
+    await visit('examples-skipped', false);
     assert.deepEqual(prompts, [
       'This folder is empty. Create bundled examples in /examples?',
     ]);
@@ -582,10 +633,10 @@ test(
     await page.mouse.click(bounds.x + 20, bounds.y + bounds.height - 12, {
       button: 'right',
     });
-    accept = true;
     await page
       .getByRole('menuitem', {name: 'Create examples', exact: true})
       .click();
+    await answer(true);
     await row(page, 'examples').waitFor();
     assert.equal(prompts.length, 2);
     await page.reload();
@@ -669,16 +720,22 @@ test(
       window.explorerApp.activateProjectFile('/examples/demo.ts'),
     );
     await active(page, '/examples/demo.ts');
-    page.once('dialog', dialog => dialog.dismiss());
     await menu(page, 'examples', 'Reset examples');
+    await page
+      .getByRole('dialog', {name: 'Reset examples', exact: true})
+      .getByRole('button', {name: 'Cancel', exact: true})
+      .click();
     assert.equal(
       await page.evaluate(() =>
         window.explorerApp.codeEditor.editor.getValue(),
       ),
       'export const edited = true;',
     );
-    page.once('dialog', dialog => dialog.accept());
     await menu(page, 'examples', 'Reset examples');
+    await page
+      .getByRole('dialog', {name: 'Reset examples', exact: true})
+      .getByRole('button', {name: 'Reset examples', exact: true})
+      .click();
     await page.waitForFunction(
       source => window.explorerApp.codeEditor.editor.getValue() === source,
       example.source,
@@ -1182,12 +1239,15 @@ test(
       ),
       undefined,
     );
-    // Other CDP clients attached to host Chrome can dismiss native dialogs.
-    // Supply the user's answer explicitly while exercising the real menu operation.
-    await page.evaluate(() => {
-      window.confirm = () => false;
-    });
     await menu(page, 'part copy.ts', 'Delete');
+    const confirmation = page.getByRole('dialog', {
+      name: 'Delete entries',
+      exact: true,
+    });
+    assert.match(await confirmation.innerText(), /part copy\.ts/);
+    await confirmation
+      .getByRole('button', {name: 'Cancel', exact: true})
+      .click();
     assert.equal(
       await page.evaluate(
         async () =>
@@ -1196,16 +1256,10 @@ test(
       ),
       'file',
     );
-    await page.evaluate(() => {
-      window.confirm = message => {
-        if (!message?.includes('part copy.ts'))
-          throw new Error(
-            'Expected the delete confirmation to name the selected file.',
-          );
-        return true;
-      };
-    });
     await menu(page, 'part copy.ts', 'Delete');
+    await confirmation
+      .getByRole('button', {name: 'Delete', exact: true})
+      .click();
     await page.locator('#viewport-status[data-state="error"]').waitFor();
   },
 );

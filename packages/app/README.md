@@ -67,6 +67,7 @@ contracts before following the implementation links below.
 | 3D rendering and viewport interaction                 | [viewport.ts](src/viewport.ts), [rendering](src/rendering/)         |
 | Sketch and source editing tools                       | [Tools](src/tools/)                                                 |
 | Agent grants, requests, cursors, following and images | [Agent integration](src/agent/)                                     |
+| App prompts and modal lifecycle                       | [Dialog API](src/ui/dialog.ts)                                      |
 | UI components                                         | [UI](src/ui/)                                                       |
 | Executable models and website samples                 | [Examples](examples/), [sample catalog](render-samples/catalog.ts)  |
 

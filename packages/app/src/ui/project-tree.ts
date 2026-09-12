@@ -18,7 +18,7 @@ import {
   type ProjectEntryOperation,
 } from '../project/file-operations';
 import {mapProjectIO} from '../project/io';
-import {parsePackageSpecifier} from '../project/package-manifest';
+import {dialogs} from './dialog';
 import {
   normalizeProjectPath,
   projectDirectory,
@@ -742,9 +742,12 @@ export class ProjectTree {
     if (!paths.length || this.busy || paths.some(isProtectedProjectPath))
       return;
     if (
-      !window.confirm(
-        `Delete ${paths.map(basename).join(', ')}? Directories include all their contents. This cannot be undone.`,
-      )
+      !(await dialogs.confirm({
+        title: 'Delete entries',
+        message: `Delete ${paths.map(basename).join(', ')}? Directories include all their contents. This cannot be undone.`,
+        submit: 'Delete',
+        danger: true,
+      }))
     )
       return;
     await this.perform({kind: 'remove', paths});
@@ -1040,9 +1043,10 @@ export class ProjectTree {
     kind: ProjectEntry['kind'],
     directory: string,
   ): Promise<string | undefined> {
-    return askProjectInput({
+    return dialogs.prompt({
       title: kind === 'file' ? 'New file' : 'New folder',
-      directory,
+      message: `In ${directory}`,
+      trim: true,
       label: 'Name',
       value: kind === 'file' ? 'untitled.ts' : 'new-folder',
       submit: 'Create',
@@ -1078,93 +1082,4 @@ function isDirectoryItem(
   item: FileTreeItemHandle | null,
 ): item is FileTreeDirectoryHandle {
   return item?.isDirectory() === true;
-}
-
-export function askInstallPackage(
-  directory: string,
-): Promise<string | undefined> {
-  return askProjectInput({
-    title: 'Install package',
-    directory,
-    label: 'Package',
-    placeholder: 'just-range or @scope/package@version',
-    submit: 'Install',
-    validate: value => {
-      parsePackageSpecifier(value);
-    },
-  });
-}
-
-function askProjectInput(options: {
-  title: string;
-  directory: string;
-  label: string;
-  value?: string;
-  placeholder?: string;
-  submit: string;
-  validate(value: string): void;
-}): Promise<string | undefined> {
-  const dialog = document.createElement('dialog');
-  dialog.className = 'app-dialog project-entry-dialog';
-  dialog.setAttribute('aria-label', options.title);
-  const form = document.createElement('form');
-  form.className = 'app-dialog-content';
-  const heading = document.createElement('h2');
-  heading.textContent = options.title;
-  const location = document.createElement('p');
-  location.textContent = `In ${options.directory}`;
-  const input = document.createElement('input');
-  input.required = true;
-  input.setAttribute('aria-label', options.label);
-  input.value = options.value ?? '';
-  input.placeholder = options.placeholder ?? '';
-  const header = document.createElement('header');
-  header.append(heading, location);
-  const field = document.createElement('label');
-  const label = document.createElement('span');
-  label.textContent = options.label;
-  field.append(label, input);
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.className = 'dialog-button';
-  cancel.textContent = 'Cancel';
-  const submit = document.createElement('button');
-  submit.type = 'submit';
-  submit.className = 'dialog-button button-primary';
-  submit.textContent = options.submit;
-  const footer = document.createElement('footer');
-  footer.append(cancel, submit);
-  form.append(header, field, footer);
-  dialog.append(form);
-  document.body.append(dialog);
-  let result: string | undefined;
-  cancel.addEventListener('click', () => dialog.close());
-  form.addEventListener('submit', event => {
-    event.preventDefault();
-    const value = input.value.trim();
-    try {
-      options.validate(value);
-      input.setCustomValidity('');
-    } catch (error) {
-      input.setCustomValidity((error as Error).message);
-    }
-    if (!form.reportValidity()) return;
-    result = value;
-    dialog.close();
-  });
-  input.addEventListener('input', () => input.setCustomValidity(''));
-  dialog.addEventListener('keydown', event => event.stopPropagation());
-  dialog.showModal();
-  input.focus();
-  input.select();
-  return new Promise(resolve =>
-    dialog.addEventListener(
-      'close',
-      () => {
-        dialog.remove();
-        resolve(result);
-      },
-      {once: true},
-    ),
-  );
 }

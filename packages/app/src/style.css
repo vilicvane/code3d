@@ -691,88 +691,6 @@ kbd {
   color: #d6ad7e;
 }
 
-.app-dialog.project-entry-dialog {
-  width: 360px;
-  padding: 20px;
-  color: #dfe2d8;
-  border-color: #363c2f;
-  border-radius: 6px;
-  background: var(--panel);
-}
-
-.project-entry-dialog .app-dialog-content {
-  gap: 16px;
-}
-
-.project-entry-dialog header {
-  display: grid;
-  gap: 4px;
-}
-
-.app-dialog.project-entry-dialog h2 {
-  margin: 0;
-  font-size: 14px;
-  line-height: 20px;
-}
-
-.app-dialog.project-entry-dialog p {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--muted);
-}
-
-.app-dialog.project-entry-dialog label > span {
-  margin: 0;
-  color: #bfc4b7;
-  font:
-    400 11px/16px Inter,
-    system-ui,
-    sans-serif;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.app-dialog.project-entry-dialog input {
-  height: 32px;
-  padding: 0 8px;
-  color: #dfe2d8;
-  background: var(--soft);
-  border-color: #363c2f;
-  border-radius: 3px;
-  font:
-    400 11px/18px 'IBM Plex Mono',
-    monospace;
-}
-
-.app-dialog.project-entry-dialog input:focus {
-  border-color: var(--editor-focus);
-  outline: none;
-}
-
-.project-entry-dialog input::selection {
-  color: #edf0e7;
-  background: #465635;
-}
-
-.app-dialog.project-entry-dialog footer {
-  justify-content: flex-end;
-}
-
-.project-entry-dialog .dialog-button {
-  min-width: 72px;
-  font:
-    500 11px/16px Inter,
-    system-ui,
-    sans-serif;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.project-entry-dialog .dialog-button:focus-visible {
-  outline: 1px solid var(--editor-focus);
-  outline-offset: 2px;
-}
-
 .editor-document {
   display: grid;
   grid-column: 2;
@@ -1529,10 +1447,10 @@ kbd {
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
   padding: 20px;
-  color: #dfe5ca;
-  border: 1px solid #4a5138;
-  border-radius: 5px;
-  background: #15180f;
+  color: #dfe2d8;
+  border: 1px solid #363c2f;
+  border-radius: 6px;
+  background: var(--panel);
   box-shadow: 0 16px 42px #0009;
 }
 
@@ -1663,6 +1581,74 @@ kbd {
 .dialog-button:hover:not(:disabled) {
   color: #dfe5ca;
   background: #272a22;
+}
+
+.message-dialog {
+  width: 360px;
+}
+.message-dialog .app-dialog-content {
+  gap: 16px;
+}
+.message-dialog header {
+  display: grid;
+  gap: 4px;
+}
+.message-dialog h2 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+}
+.message-dialog p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+.message-dialog label > span {
+  margin: 0;
+  color: #bfc4b7;
+  font:
+    400 11px/16px Inter,
+    system-ui,
+    sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.message-dialog input {
+  height: 32px;
+  padding: 0 8px;
+  color: #dfe2d8;
+  background: var(--soft);
+  border-color: #363c2f;
+  font:
+    400 11px/18px 'IBM Plex Mono',
+    monospace;
+}
+.message-dialog input:focus {
+  border-color: var(--editor-focus);
+}
+.message-dialog input::selection {
+  color: #edf0e7;
+  background: #465635;
+}
+.message-dialog footer {
+  justify-content: flex-end;
+}
+.message-dialog .dialog-button {
+  min-width: 72px;
+  font:
+    500 11px/16px Inter,
+    system-ui,
+    sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.app-dialog .dialog-button:focus-visible {
+  outline: 1px solid var(--editor-focus);
+  outline-offset: 2px;
+}
+.message-dialog .dialog-error {
+  color: #e6a28d;
 }
 
 .button-primary {
