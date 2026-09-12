@@ -172,6 +172,13 @@ can take you directly to those sources. Installed files and generated locks
 open read-only; they are not executable model files. JSON files remain editable
 project files and do not run as models.
 
+Opening a package's original source for reference does not add it to your
+project's type checking or error counts. Hover and further definition navigation
+remain available. Imported declarations still provide types; the App skips
+checking declaration-file internals by default. If your code directly imports
+an implementation source file, that file becomes a dependency and is checked
+normally. Actual errors remain visible even in read-only files.
+
 ## Local folder
 
 Choose **Open folder** in the explorer header to connect the App to a real directory.

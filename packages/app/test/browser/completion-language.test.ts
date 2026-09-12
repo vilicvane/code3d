@@ -136,6 +136,10 @@ test(
       h.setDeclaration = source =>
         h.editor.setProjectLanguage({
           ...h.language,
+          rootPaths: [
+            ...h.language.rootPaths,
+            ...(source ? ['/probe.d.ts'] : []),
+          ],
           files: [
             ...h.language.files,
             ...(source ? [{path: '/probe.d.ts', source}] : []),
@@ -199,5 +203,156 @@ test(
     assert.equal(result.restarted, true);
     assert.equal(result.strict, 1);
     assert.equal(result.relaxed, 0);
+  },
+);
+
+test(
+  'declaration-map navigation cannot inject roots, globals, or diagnostics into the project',
+  {timeout: 60_000},
+  async t => {
+    const page = await createEditor(t);
+    const result = await page.evaluate(async () => {
+      const h = window.harness;
+      const source =
+        "import {api} from 'boundary-fixture'; api('bad'); ''.ghostNavigationMember;";
+      const implementation =
+        'export function api(value: number) { const bad: number = "wrong"; return value; }\ndeclare global { interface String { ghostNavigationMember: number; } }';
+      h.language = {
+        ...h.language,
+        rootPaths: ['/model.ts'],
+        toolingFile: undefined,
+        files: [
+          {
+            path: '/node_modules/boundary-fixture/package.json',
+            source: '{"name":"boundary-fixture","types":"index.d.ts"}',
+          },
+          {
+            path: '/node_modules/boundary-fixture/index.d.ts',
+            source:
+              'export declare function api(value: number): number;\nexport type Hidden = MissingDeclarationType;\n//# sourceMappingURL=index.d.ts.map',
+          },
+        ],
+        navigationFiles: [
+          {
+            path: '/node_modules/boundary-fixture/index.d.ts.map',
+            source: JSON.stringify({
+              version: 3,
+              sources: ['../../reference.ts'],
+              names: [],
+              mappings: 'AAAA',
+            }),
+          },
+          {path: '/reference.ts', source: implementation},
+        ],
+      };
+      h.model.setValue(source);
+      h.editor.setProjectLanguage(h.language);
+      const worker = await h.worker();
+      const before = await worker.getSemanticDiagnostics(
+        h.model.uri.toString(),
+      );
+      const declaration = await worker.getSemanticDiagnostics(
+        'file:///workspace/node_modules/boundary-fixture/index.d.ts',
+      );
+      const position = source.indexOf("api('bad')") + 1;
+      const definition = await worker.getDefinitionAtPosition(
+        h.model.uri.toString(),
+        position,
+      );
+      h.editor.editor.setPosition(h.model.getPositionAt(position));
+      await h.editor.openFile(
+        new URL(definition![0].fileName).pathname.replace(/^\/workspace/, ''),
+      );
+      const file = h.editor.currentFile();
+      const navUri = 'file:///workspace/reference.ts';
+      const navWorker = await h.worker();
+      const navigationDiagnostics = await Promise.all([
+        navWorker.getSemanticDiagnostics(navUri),
+        navWorker.getSyntacticDiagnostics(navUri),
+        navWorker.getSuggestionDiagnostics(navUri),
+      ]);
+      const quickInfo = await navWorker.getQuickInfoAtPosition(
+        navUri,
+        implementation.indexOf('api') + 1,
+      );
+      const nestedDefinition = await navWorker.getDefinitionAtPosition(
+        navUri,
+        implementation.indexOf('return value') + 8,
+      );
+      const after = await navWorker.getSemanticDiagnostics(
+        h.model.uri.toString(),
+      );
+      const roots = await (
+        navWorker as typeof navWorker & {
+          getScriptFileNames(): Promise<string[]>;
+        }
+      ).getScriptFileNames();
+      const navigationInProject = h.editor
+        .project()
+        .files.some(file => file.path === '/reference.ts');
+      const navigationModelFile = h.editor.isModelFile('/reference.ts');
+      const navigationReadOnly = h.editor.editor.getRawOptions().readOnly;
+      h.model.setValue(
+        'import {api} from "./reference.ts"; api(1); "".ghostNavigationMember;',
+      );
+      const direct = await navWorker.getSemanticDiagnostics(navUri);
+      const directMain = await navWorker.getSemanticDiagnostics(
+        h.model.uri.toString(),
+      );
+      h.editor.setProjectLanguage({
+        ...h.language,
+        files: [
+          ...h.language.files,
+          {path: '/reference.ts', source: implementation},
+        ],
+        navigationFiles: h.language.navigationFiles.filter(
+          file => file.path !== '/reference.ts',
+        ),
+      });
+      const importedReadOnly = h.editor.editor.getRawOptions().readOnly;
+      h.model.setValue(source);
+      h.editor.setProjectLanguage(h.language);
+      const restoredReadOnly = h.editor.editor.getRawOptions().readOnly;
+      const removed = await navWorker.getSemanticDiagnostics(navUri);
+      return {
+        before: before.map(d => d.code),
+        after: after.map(d => d.code),
+        declaration,
+        definition,
+        file,
+        navigationDiagnostics,
+        quickInfo: !!quickInfo,
+        nestedDefinition: !!nestedDefinition?.length,
+        roots,
+        navigationInProject,
+        navigationModelFile,
+        navigationReadOnly,
+        importedReadOnly,
+        restoredReadOnly,
+        direct: direct.map(d => d.code),
+        directMain: directMain.map(d => d.code),
+        removed,
+      };
+    });
+    assert.deepEqual(result.before.sort(), [2339, 2345]);
+    assert.deepEqual(result.declaration, []);
+    assert.equal(result.file, '/reference.ts');
+    assert.match(result.definition![0].fileName, /\/reference\.ts$/);
+    assert.deepEqual(result.navigationDiagnostics, [[], [], []]);
+    assert.ok(result.quickInfo);
+    assert.ok(result.nestedDefinition);
+    assert.deepEqual(result.after.sort(), result.before.sort());
+    assert.deepEqual(result.roots, ['/workspace/model.ts']);
+    assert.equal(result.navigationInProject, false);
+    assert.equal(result.navigationModelFile, false);
+    assert.equal(result.navigationReadOnly, true);
+    assert.equal(result.importedReadOnly, false);
+    assert.equal(result.restoredReadOnly, true);
+    assert.ok(result.direct.includes(2322));
+    assert.deepEqual(result.directMain, []);
+    assert.deepEqual(result.removed, []);
+    await page.waitForFunction(
+      () => !window.harness.editor.errorCounts.has('/reference.ts'),
+    );
   },
 );

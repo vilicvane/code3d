@@ -97,7 +97,7 @@ test('source edits reuse parsed dependencies and maps; new imports prepare once 
   const cold = await state.load(source);
   assert.equal(cold.preparations, 1);
   assert.ok(
-    cold.language.files.some(
+    cold.language.navigationFiles.some(
       file => file.path === '/node_modules/one/src/index.ts',
     ),
   );
@@ -121,7 +121,7 @@ test('source edits reuse parsed dependencies and maps; new imports prepare once 
   const added = await state.load(expanded);
   assert.equal(added.preparations, 1);
   assert.ok(
-    added.language.files.some(
+    added.language.navigationFiles.some(
       file => file.path === '/node_modules/two/src/index.ts',
     ),
   );
@@ -137,7 +137,7 @@ test('source edits reuse parsed dependencies and maps; new imports prepare once 
     ),
   );
   assert.ok(
-    !removed.language.files.some(
+    !removed.language.navigationFiles.some(
       file => file.path === '/node_modules/two/src/index.ts',
     ),
   );
@@ -196,7 +196,7 @@ test('declaration and navigation source replacements become visible before the n
     ),
   );
   assert.ok(
-    changed.language.files.some(
+    changed.language.navigationFiles.some(
       file =>
         file.path.endsWith('/one/src/index.ts') && file.source.includes('42'),
     ),
@@ -258,4 +258,40 @@ test('a failed lazy declaration read is retried without discarding unchanged par
     ),
   );
   assert.equal((await state.load(expanded)).preparations, 0);
+});
+
+test('declaration-map sources remain outside the dependency graph until directly imported', async () => {
+  const implementation = '/node_modules/one/src/index.ts';
+  const state = fixture({
+    [implementation]: 'export const value: number = "wrong";',
+  });
+  const mapped = (await state.load('import {value} from "one"; value;'))
+    .language;
+  assert.ok(
+    mapped.files.some(file => file.path === '/node_modules/one/index.d.ts'),
+  );
+  assert.ok(mapped.navigationFiles.some(file => file.path === implementation));
+  assert.ok(!mapped.files.some(file => file.path === implementation));
+  assert.ok(!mapped.rootPaths.includes(implementation));
+  assert.equal(
+    state.loader['program']!.getSourceFile(implementation),
+    undefined,
+  );
+  const direct = (
+    await state.load(
+      'import {value} from "./node_modules/one/src/index.ts"; value;',
+    )
+  ).language;
+  assert.ok(direct.files.some(file => file.path === implementation));
+  assert.ok(!direct.navigationFiles.some(file => file.path === implementation));
+  assert.ok(
+    !direct.rootPaths.includes(implementation),
+    'an imported source is a dependency, not another root',
+  );
+  const program = state.loader['program']!;
+  assert.ok(
+    program
+      .getSemanticDiagnostics(program.getSourceFile(implementation)!)
+      .some(diagnostic => diagnostic.code === 2322),
+  );
 });

@@ -216,6 +216,22 @@ loft 参数预览突出当前截面，其他截面和完成形体作为淡灰上
 
 ## 编辑器状态与诊断
 
+项目语言快照区分真实依赖文件与声明映射的导航文件，并显式传递当前项目根文件。
+Monaco Worker 不再把 mirror models 和全部 extra libs 当作根文件；生成的 tooling
+导入单独提供为编译根，不进入用户文件快照。真实引用的声明继续参与类型解析，
+并遵循 App 的 `skipLibCheck`；仅沿声明映射打开的源码不参与项目检查，也不能
+通过全局声明污染用户程序。用户直接导入该源码后，它按真实依赖参与检查。
+诊断按当前 TypeScript Program 的文件归属产生，不按 node_modules 或只读属性屏蔽。
+
+项目外源码的悬停、补全和继续跳转使用同一 Worker 内独立的导航语言服务，
+以当前查询文件为根；切换导航根时释放旧服务，共享文件快照但不共享用户项目的
+Program。CodeEditor 排除仅导航文件的编译/执行输入，只读状态由项目语言快照、
+当前路径和操作锁派生，autorun 同步 Monaco，销毁时释放订阅。只读文件中的真实
+错误仍显示波浪线，保持正文、标签和文件树一致。验证见
+[项目语言快照](../../../packages/app/test/project-language.test.ts)、
+[语言服务边界](../../../packages/app/test/browser/completion-language.test.ts)和
+[真实包导航](../../../packages/app/test/browser/package-install.test.ts)。
+
 语法着色由 Monaco 的 tokenizer 和可见行调度负责，与 TypeScript Worker 诊断、
 未使用变量淡化和括号配色分别运行。Monaco 0.56 的初次渲染没有登记可见行，
 空闲任务延迟时新文件会一直使用空 token；Sticky Scroll 又可能读取视口外的
