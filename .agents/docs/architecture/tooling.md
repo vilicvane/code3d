@@ -300,9 +300,16 @@ tab 后允许无活动文档，保留文档内容、撤销和视图状态以便�
 切换到依赖文件不会清空原入口的错误；同一入口重新执行后替换其结果，源码修改、
 文件操作和项目重载时清空过期诊断。CodeEditor 的每个文档通过 autorun 消费该派生
 列表，按位置与消息去重；按需打开的子模块立即得到已有标记，移除文档时释放订阅。
-CodeEditor 从 Monaco 的非运行时 error markers 与入口诊断派生 errorCounts，避免重复计数，
-包含尚未打开的运行时错误文件。tab 持有可销毁的 autorun，只更新颜色、数量和辅助说明；
-ProjectTree 响应式重绘装饰并更新 shadow stylesheet，父目录汇总后代错误，保留 agent 与剪切标记。
+CodeEditor 从 Monaco 的非运行时 Error/Warning markers 与入口诊断派生 diagnosticCounts，
+逐文件分别统计 errors/warnings，不计 Hint/Info。运行时诊断按位置、严重级别和消息去重，
+包含尚未打开的文件，打开后排除其 Monaco 镜像，避免重复计数。
+tab 持有可销毁的 autorun，只更新颜色、总数和辅助说明；名称与总数采用最高严重级别，
+错误红色、仅警告黄色，悬浮说明分别列出两类数量。ProjectTree 使用同一统计响应式更新
+行装饰及 shadow stylesheet，父目录汇总后代错误/警告并以最高严重级别显示小点。
+诊断位、剪切标记、agent 活动位依次排列，活动小点保留各 agent 颜色，前三个之后显示
+`+N`；全部 agent 名称进入悬浮说明。目录无论折叠或展开都汇总后代活动，与诊断汇总
+保持一致；展开时目录和对应文件同时保留活动。错误清除后可降级为警告，
+诊断清空不影响 agent 活动。
 验证见[运行时诊断](../../../packages/app/test/browser/runtime-diagnostics.test.ts)。
 
 新建条目借助 Pierre 的临时行与内联重命名输入框，磁盘操作仍由项目会话执行。

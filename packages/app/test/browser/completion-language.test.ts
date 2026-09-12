@@ -354,7 +354,7 @@ test(
     assert.deepEqual(result.directMain, []);
     assert.deepEqual(result.removed, []);
     await page.waitForFunction(
-      () => !window.harness.editor.errorCounts.has('/reference.ts'),
+      () => !window.harness.editor.diagnosticCounts.has('/reference.ts'),
     );
   },
 );
