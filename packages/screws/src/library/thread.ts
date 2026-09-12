@@ -98,7 +98,13 @@ function makeHelicalThreadShape({
   const threaded = core.fuse(teeth);
   core.delete();
   teeth.delete();
-  return threaded.rotate(-90, [0, 0, 0], [1, 0, 0]).translate([0, -y / 2, 0]);
+  // The axial profile width extends past the fade's quarter-pitch centreline.
+  // Face both ends. Keep the tool clear of the crest to avoid tangent slivers.
+  const envelope = makeCylinder(majorRadius + pitch, y);
+  const trimmed = threaded.intersect(envelope);
+  threaded.delete();
+  envelope.delete();
+  return trimmed.rotate(-90, [0, 0, 0], [1, 0, 0]).translate([0, -y / 2, 0]);
 }
 
 function threadProfile(

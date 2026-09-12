@@ -8,7 +8,11 @@ import * as three from '@code3d/core/three';
 import * as nativeThree from 'three';
 import * as nativeReplicad from 'replicad';
 import * as materials from '@code3d/materials';
-import {ISO4762} from '@code3d/screws';
+import * as screws from '@code3d/screws';
+import * as ISO4762 from '@code3d/screws/iso4762';
+import * as ISO10642 from '@code3d/screws/iso10642';
+import * as ISO14583 from '@code3d/screws/iso14583';
+import * as ISO7379 from '@code3d/screws/iso7379';
 import * as agent from '@code3d/agent';
 import initSolver from '@code3d/solver';
 import initOpenCascade from '@code3d/opencascade';
@@ -42,6 +46,14 @@ for (const specifier of [
   await assert.rejects(import(specifier), {
     code: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
   });
+
+for (const [name, standard] of Object.entries(screws)) {
+  const direct = await import(
+    '@code3d/screws/' + name.toLowerCase().replace('_', '-')
+  );
+  assert.equal(direct.screw, standard.screw);
+  assert.equal(direct.specifications, standard.specifications);
+}
 
 const records = new Map();
 tooling.setKernelArtifactStore({
@@ -78,7 +90,12 @@ try {
   );
   assert.equal(shapes.length, 6);
   shapes.push(...core.extrude(shapes.slice(2), 2));
-  shapes.push(ISO4762.screw('M3', 8));
+  shapes.push(
+    ISO4762.screw('M3', 8),
+    ISO10642.screw('M3', 10),
+    ISO14583.screw('M3', 8),
+    ISO7379.screw(6.5, 10),
+  );
   const snapshot = tooling.createModelSnapshotter();
   for (const shape of shapes) {
     assert.ok(

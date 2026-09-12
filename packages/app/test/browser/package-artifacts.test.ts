@@ -102,8 +102,10 @@ test(
       }),
     );
     const source = `import {font, text, extrude, group} from '@code3d/core';
-import {ISO4762} from '@code3d/screws';
-export default group([...extrude(text('B8i', font(new URL(${JSON.stringify(fontUrl)})), 10), 2), ISO4762.screw('M3', 8)]);`;
+import {ISO14583 as aggregate} from '@code3d/screws';
+import * as ISO14583 from '@code3d/screws/iso14583';
+if (aggregate.screw !== ISO14583.screw) throw new Error('Screws subpath identity differs');
+export default group([...extrude(text('B8i', font(new URL(${JSON.stringify(fontUrl)})), 10), 2), ISO14583.screw('M3', 8)]);`;
     await context.route('**/src/project/default-project.ts*', route =>
       route.fulfill({
         contentType: 'text/javascript',

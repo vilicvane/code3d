@@ -18,6 +18,46 @@
     ".": {
       "types": "./bld/library/index.d.ts",
       "default": "./bld/library/index.js"
+    },
+    "./iso4762": {
+      "types": "./bld/library/iso-4762.d.ts",
+      "default": "./bld/library/iso-4762.js"
+    },
+    "./iso10642": {
+      "types": "./bld/library/iso-10642.d.ts",
+      "default": "./bld/library/iso-10642.js"
+    },
+    "./iso7380-1": {
+      "types": "./bld/library/iso-7380-1.d.ts",
+      "default": "./bld/library/iso-7380-1.js"
+    },
+    "./iso4017": {
+      "types": "./bld/library/iso-4017.d.ts",
+      "default": "./bld/library/iso-4017.js"
+    },
+    "./iso4014": {
+      "types": "./bld/library/iso-4014.d.ts",
+      "default": "./bld/library/iso-4014.js"
+    },
+    "./iso7380-2": {
+      "types": "./bld/library/iso-7380-2.d.ts",
+      "default": "./bld/library/iso-7380-2.js"
+    },
+    "./iso4029": {
+      "types": "./bld/library/iso-4029.d.ts",
+      "default": "./bld/library/iso-4029.js"
+    },
+    "./iso7045": {
+      "types": "./bld/library/iso-7045.d.ts",
+      "default": "./bld/library/iso-7045.js"
+    },
+    "./iso14583": {
+      "types": "./bld/library/iso-14583.d.ts",
+      "default": "./bld/library/iso-14583.js"
+    },
+    "./iso7379": {
+      "types": "./bld/library/iso-7379.d.ts",
+      "default": "./bld/library/iso-7379.js"
     }
   },
   "files": [

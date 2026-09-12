@@ -16,7 +16,6 @@ import {
 const {ISO4762} = screws;
 
 test('keeps the thread primitive private to the screws package', async () => {
-  assert.deepEqual(Object.keys(screws), ['ISO4762']);
   assert.equal('helicalThread' in screws, false);
   await assert.rejects(
     // @ts-expect-error Private package paths must also fail at runtime.
