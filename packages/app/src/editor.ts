@@ -1,7 +1,7 @@
 import * as monaco from 'monaco-editor/editor';
 import {AgentError} from '@code3d/agent';
 import {diffChars} from 'diff';
-import {action, makeObservable, observableRef} from 'mobx';
+import {action, autorun, makeObservable, observableRef} from 'mobx';
 import {randomAgentColor} from './agent/colors';
 import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
@@ -98,6 +98,7 @@ type ProjectDocument = {
   model: monaco.editor.ITextModel;
   viewState?: monaco.editor.ICodeEditorViewState | null;
   subscription: monaco.IDisposable;
+  stopDiagnostics: () => void;
 };
 
 type ContentChangeOrigin = 'user' | 'tool' | 'agent' | 'undo' | 'redo';
@@ -514,6 +515,7 @@ export class CodeEditor {
     private readonly container: HTMLElement,
     project: ModelProject,
     initialPath: string | undefined,
+    private readonly modelDiagnostics: () => readonly ModelDiagnostic[] = () => [],
   ) {
     this.activePath =
       initialPath === undefined ? undefined : normalizeProjectPath(initialPath);
@@ -554,6 +556,10 @@ export class CodeEditor {
       },
     );
     this.editor.onDidChangeModelContent(() => this.refreshParameterCursor());
+    this.editor.onDidDispose(() => {
+      for (const document of this.documents.values())
+        document.stopDiagnostics();
+    });
     this.editor.onDidBlurEditorText(() => this.refreshParameterCursor());
     this.sourceDecoration = this.editor.createDecorationsCollection();
     this.editor.addCommand(
@@ -1406,27 +1412,6 @@ export class CodeEditor {
     this.sourceDecoration.clear();
   }
 
-  setModelDiagnostics(diagnostics: readonly ModelDiagnostic[] = []): void {
-    for (const document of this.documents.values()) {
-      const markers = diagnostics.flatMap(diagnostic =>
-        diagnostic.sourceRef?.file === document.path
-          ? [
-              modelDiagnosticMarker(
-                document.model,
-                diagnostic,
-                diagnostic.sourceRef,
-              ),
-            ]
-          : [],
-      );
-      monaco.editor.setModelMarkers(
-        document.model,
-        modelDiagnosticOwner,
-        markers,
-      );
-    }
-  }
-
   async hasLanguageError(): Promise<boolean> {
     const model = this.editor.getModel();
     if (!model) return false;
@@ -1607,6 +1592,21 @@ export class CodeEditor {
     const document: ProjectDocument = {
       path: normalized,
       model,
+      stopDiagnostics: autorun(() => {
+        const markers = new Map<string, monaco.editor.IMarkerData>();
+        for (const diagnostic of this.modelDiagnostics()) {
+          if (diagnostic.sourceRef?.file !== normalized) continue;
+          const marker = modelDiagnosticMarker(
+            model,
+            diagnostic,
+            diagnostic.sourceRef,
+          );
+          markers.set(JSON.stringify(marker), marker);
+        }
+        monaco.editor.setModelMarkers(model, modelDiagnosticOwner, [
+          ...markers.values(),
+        ]);
+      }),
       subscription: model.onDidChangeContent(event => {
         if (isReadonlyProjectFile(normalized)) return;
         const origin: ContentChangeOrigin = event.isUndoing
@@ -1646,6 +1646,7 @@ export class CodeEditor {
     this.designArgumentModels.get(path)?.dispose();
     this.designArgumentModels.delete(path);
     document.subscription.dispose();
+    document.stopDiagnostics();
     document.model.dispose();
     this.annotationDecorations.delete(path);
     this.documents.delete(path);

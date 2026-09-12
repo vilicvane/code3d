@@ -440,6 +440,7 @@ const codeEditor = new CodeEditor(
   editorHost,
   initialProject,
   initialProject.files[0]?.path,
+  () => previewState.editorDiagnostics,
 );
 replaceFileRoute(codeEditor.currentFile());
 const packageManager = !directoryWorkspaceId
@@ -545,7 +546,10 @@ codeEditor.onAgentLocations(locations =>
 );
 agentProject.onEntriesChange(reason => {
   void projectDirectory.refresh();
-  if (reason !== 'save') requestModelUpdate(0);
+  if (reason !== 'save') {
+    previewState.clearEditorDiagnostics();
+    requestModelUpdate(0);
+  }
 });
 const agentConnections = new AgentConnections(
   codeEditor,
@@ -970,6 +974,7 @@ viewportStatus.addEventListener('keydown', event => {
 });
 
 codeEditor.onChange(change => {
+  previewState.clearEditorDiagnostics();
   const toolChange = change.kind === 'content' && change.origin === 'tool';
   const historyChange =
     change.kind === 'content' &&
@@ -1736,7 +1741,6 @@ function activatePreviewFile(reload = false): void {
     return;
   compiler.cancel();
   compilingDesignContextId = undefined;
-  codeEditor.setModelDiagnostics();
   codeEditor.setDesignArguments([]);
   codeEditor.trackSourceRefs([]);
   if (previewState.retainingView) sketchEditor.invalidate();
@@ -1754,11 +1758,7 @@ function clearPresentedView(): void {
 async function presentModelDiagnostic(
   request: ModelPreviewRequest,
 ): Promise<boolean> {
-  const {diagnostic, warnings} = previewState;
-  codeEditor.setModelDiagnostics([
-    ...(diagnostic ? [diagnostic] : []),
-    ...warnings,
-  ]);
+  const {diagnostic} = previewState;
   refreshViewportFeedback();
   if (!diagnostic || diagnostic.sourceRef) {
     errorBar.hidden = true;

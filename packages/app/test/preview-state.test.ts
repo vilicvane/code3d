@@ -18,6 +18,36 @@ const emptyModule: ModelModule = {
   designArguments: [],
 };
 
+test('editor diagnostics belong to evaluated entries and survive navigation until invalidated', () => {
+  const state = new ModelPreviewState();
+  const failure = {
+    kind: 'evaluation',
+    summary: 'Invalid input',
+    sourceRef: {file: '/helper.ts', start: 10, end: 20},
+  } as const;
+  const publications: number[] = [];
+  const stop = reaction(
+    () => state.editorDiagnostics.length,
+    count => publications.push(count),
+  );
+  state.activate('/model.ts');
+  state.accept(state.begin(1), {...emptyModule, diagnostic: failure});
+  state.activate('/helper.ts');
+  state.accept(state.begin(1), emptyModule);
+  assert.deepEqual(state.editorDiagnostics, [failure]);
+  state.activate('/model.ts');
+  state.accept(state.begin(1), emptyModule);
+  assert.deepEqual(state.editorDiagnostics, []);
+  state.fail(failure);
+  state.clearEditorDiagnostics();
+  assert.deepEqual(state.editorDiagnostics, []);
+  state.fail(failure);
+  state.activate('/model.ts', true);
+  assert.deepEqual(state.editorDiagnostics, []);
+  assert.deepEqual(publications, [1, 0, 1, 0, 1, 0]);
+  stop();
+});
+
 test('requests expire on source changes, superseding runs, and switching away and back', () => {
   const state = new ModelPreviewState();
   state.activate('/model.ts');
