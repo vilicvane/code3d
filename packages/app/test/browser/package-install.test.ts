@@ -331,7 +331,7 @@ test(
     assert.deepEqual(navigationDiagnostics.syntactic, []);
     await page.waitForFunction(() => {
       const {codeEditor} = window.packageApp;
-      return !codeEditor.errorCounts.get(codeEditor.currentFile()!);
+      return !codeEditor.diagnosticCounts.get(codeEditor.currentFile()!);
     });
 
     await page.evaluate(() =>

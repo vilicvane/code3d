@@ -91,16 +91,25 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
     return !!this.getLanguageService().getProgram()?.getSourceFile(file);
   }
 
+  private get languageReady(): boolean {
+    const ready = this.getScriptSnapshot(
+      '/workspace/.__code3d-language-ready.json',
+    );
+    return ready?.getText(0, ready.getLength()) === 'true';
+  }
+
   override async getSyntacticDiagnostics(file: string) {
     return this.isProjectFile(file) ? super.getSyntacticDiagnostics(file) : [];
   }
 
   override async getSuggestionDiagnostics(file: string) {
-    return this.isProjectFile(file) ? super.getSuggestionDiagnostics(file) : [];
+    return this.languageReady && this.isProjectFile(file)
+      ? super.getSuggestionDiagnostics(file)
+      : [];
   }
 
   override async getCompilerOptionsDiagnostics(file: string) {
-    return this.isProjectFile(file)
+    return this.languageReady && this.isProjectFile(file)
       ? super.getCompilerOptionsDiagnostics(file)
       : [];
   }
@@ -190,7 +199,7 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
   }
 
   override async getSemanticDiagnostics(fileName: string) {
-    if (!this.isProjectFile(fileName)) return [];
+    if (!this.languageReady || !this.isProjectFile(fileName)) return [];
     const diagnostics = await super.getSemanticDiagnostics(fileName);
     if (!this.hasParameterAnnotations(fileName)) return diagnostics;
     return [

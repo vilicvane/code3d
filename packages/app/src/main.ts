@@ -44,7 +44,11 @@ import type {
   TopologySelectionScope,
 } from './model/compiler';
 import {ModelCompilerClient} from './model/compiler-client';
-import {ModelDiagnosticError, type ModelDiagnostic} from './model/diagnostic';
+import {
+  ModelDiagnosticError,
+  describeDiagnosticCounts,
+  type ModelDiagnostic,
+} from './model/diagnostic';
 import {
   elementSourceDecoration,
   namedElementDecorations,
@@ -496,10 +500,13 @@ const preparePackages = async (_project: ModelProject, file: string) => {
 };
 const compiler = new ModelCompilerClient(
   packageFiles,
-  language => codeEditor.setProjectLanguage(language),
   preparePackages,
   directoryWorkspaceId ? `directory:${directoryWorkspaceId}` : 'browser',
 );
+const stopLanguage = autorun(() =>
+  codeEditor.setProjectLanguage(compiler.language),
+);
+codeEditor.editor.onDidDispose(stopLanguage);
 const retrySaveButton = requiredElement<HTMLButtonElement>('retry-save-button');
 const agentObserver = new AgentObserver(
   packageFiles,
@@ -514,7 +521,7 @@ const agentProject = new AgentProjectSession(
   error => showProjectIssue(error),
 );
 const projectDirectory = new ProjectTree(projectTree, {
-  errorCounts: () => codeEditor.errorCounts,
+  diagnosticCounts: () => codeEditor.diagnosticCounts,
   async entries(directory) {
     const entries = new Map(
       (await listProjectEntries(projectFileSystem, directory)).map(entry => [
@@ -1509,18 +1516,21 @@ function renderProjectNavigation(): void {
       label.className = 'editor-tab-label';
       label.textContent = path.slice(path.lastIndexOf('/') + 1);
       open.append(createIcon(File, 'project-entry-icon file-icon'), label);
-      const errors = document.createElement('span');
-      errors.className = 'editor-tab-errors';
-      open.append(errors);
+      const diagnostics = document.createElement('span');
+      diagnostics.className = 'editor-tab-diagnostics';
+      open.append(diagnostics);
       stopTabDiagnostics.push(
         autorun(() => {
-          const count = codeEditor.errorCounts.get(path) ?? 0;
-          tab.classList.toggle('has-errors', count > 0);
-          errors.hidden = count === 0;
-          errors.textContent = String(count);
-          const detail = count
-            ? ` · ${count} ${count === 1 ? 'error' : 'errors'}`
-            : '';
+          const counts = codeEditor.diagnosticCounts.get(path);
+          const count = counts ? counts.errors + counts.warnings : 0;
+          tab.dataset.diagnosticSeverity = counts?.errors
+            ? 'error'
+            : counts?.warnings
+              ? 'warning'
+              : '';
+          diagnostics.hidden = count === 0;
+          diagnostics.textContent = String(count);
+          const detail = counts ? ` · ${describeDiagnosticCounts(counts)}` : '';
           open.title = path + detail;
           open.setAttribute('aria-label', path + detail);
         }),

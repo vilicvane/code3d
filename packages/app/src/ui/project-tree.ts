@@ -8,6 +8,10 @@ import {
 } from '@pierre/trees';
 import type {AgentLocation} from '../editor';
 import {
+  describeDiagnosticCounts,
+  type FileDiagnosticCounts,
+} from '../model/diagnostic';
+import {
   action,
   autorun,
   makeObservable,
@@ -45,7 +49,7 @@ type ProjectTreeOptions = Readonly<{
   onUpdateDependencies?(directory: string): Promise<void>;
   onClearBuildCache?(): Promise<void>;
   onBusy(busy: boolean): void;
-  errorCounts?(): ReadonlyMap<string, number>;
+  diagnosticCounts?(): ReadonlyMap<string, FileDiagnosticCounts>;
 }>;
 
 /** Pierre owns tree interactions; the project session owns filesystem mutations. */
@@ -251,26 +255,29 @@ export class ProjectTree {
       `,
     });
     this.tree.render({fileTreeContainer: container});
-    const errorStyles = document.createElement('style');
-    container.shadowRoot!.append(errorStyles);
+    const diagnosticStyles = document.createElement('style');
+    container.shadowRoot!.append(diagnosticStyles);
     const stopDecorations = autorun(() => {
       // Pierre invokes decorations during its own render; read their inputs here.
       this.agentLocations;
       this.clipboard;
-      const paths = new Set<string>();
-      for (const path of this.options.errorCounts?.().keys() ?? []) {
-        paths.add(path.slice(1));
+      const paths = new Map<string, 'error' | 'warning'>();
+      for (const [path, counts] of this.options.diagnosticCounts?.() ?? []) {
+        const severity = counts.errors ? 'error' : 'warning';
+        paths.set(path.slice(1), severity);
         for (
           let parent = projectDirectory(path);
           parent !== '/';
           parent = projectDirectory(parent)
-        )
-          paths.add(parent.slice(1) + '/');
+        ) {
+          const key = parent.slice(1) + '/';
+          if (paths.get(key) !== 'error') paths.set(key, severity);
+        }
       }
-      errorStyles.textContent = [...paths]
+      diagnosticStyles.textContent = [...paths]
         .map(
-          path =>
-            `[data-item-path="${CSS.escape(path)}"] [data-item-section="content"] { color: var(--diagnostic-error); }`,
+          ([path, severity]) =>
+            `[data-item-path="${CSS.escape(path)}"] [data-item-section="content"] { color: var(--diagnostic-${severity}); }`,
         )
         .join('\n');
       this.tree.render({fileTreeContainer: container});
@@ -396,7 +403,7 @@ export class ProjectTree {
         listeners.abort();
         this.finishCreation();
         stopDecorations();
-        errorStyles.remove();
+        diagnosticStyles.remove();
         this.closeMenu?.({restoreFocus: false});
         this.tree.cleanUp();
       }
@@ -1128,34 +1135,38 @@ export class ProjectTree {
 
   private decoration(item: ContextMenuItem): FileTreeRowDecoration | null {
     const path = normalizeProjectPath(item.path);
-    const directory = this.tree.getItem(item.path);
     const locations = this.agentLocations.filter(
       location =>
         location.file === path ||
-        (item.kind === 'directory' &&
-          isDirectoryItem(directory) &&
-          !directory.isExpanded() &&
-          projectPathIsWithin(location.file, path)),
+        (item.kind === 'directory' && projectPathIsWithin(location.file, path)),
     );
     const cut =
       this.clipboard?.kind === 'move' &&
       this.clipboard.paths.some(parent => projectPathIsWithin(path, parent));
-    const errors = this.options.errorCounts?.();
-    const errorCount =
+    const diagnostics = this.options.diagnosticCounts?.();
+    const counts =
       item.kind === 'directory'
-        ? [...(errors ?? [])].reduce(
-            (count, [file, value]) =>
-              count + (projectPathIsWithin(file, path) ? value : 0),
-            0,
+        ? [...(diagnostics ?? [])].reduce(
+            (total, [file, value]) =>
+              projectPathIsWithin(file, path)
+                ? {
+                    errors: total.errors + value.errors,
+                    warnings: total.warnings + value.warnings,
+                  }
+                : total,
+            {errors: 0, warnings: 0},
           )
-        : (errors?.get(path) ?? 0);
-    if (!locations.length && !cut && !errorCount) return null;
+        : (diagnostics?.get(path) ?? {errors: 0, warnings: 0});
+    const count = counts.errors + counts.warnings;
+    if (!locations.length && !cut && !count) return null;
     const parts = [
-      ...(errorCount
+      ...(count
         ? [
             {
-              text: item.kind === 'directory' ? '●' : String(errorCount),
-              color: 'var(--diagnostic-error)',
+              text: item.kind === 'directory' ? '●' : String(count),
+              color: counts.errors
+                ? 'var(--diagnostic-error)'
+                : 'var(--diagnostic-warning)',
             },
           ]
         : []),
@@ -1170,8 +1181,8 @@ export class ProjectTree {
       text: parts.map(part => part.text).join(''),
       parts,
       title: [
-        errorCount
-          ? `${errorCount} ${errorCount === 1 ? 'error' : 'errors'}${item.kind === 'directory' ? ' in this folder' : ''}`
+        count
+          ? `${describeDiagnosticCounts(counts)}${item.kind === 'directory' ? ' in this folder' : ''}`
           : '',
         cut ? 'Cut — ready to move' : '',
         ...locations.map(location => `${location.name}: ${location.file}`),

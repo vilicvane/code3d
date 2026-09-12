@@ -22,6 +22,7 @@
   --editor-selection: #29331e;
   --editor-focus: #91a46a;
   --diagnostic-error: #e39086;
+  --diagnostic-warning: #ddc58e;
   --agent-color-0: #70c8f0;
   --agent-color-1: #d8a0f5;
   --agent-color-2: #efad6c;
@@ -803,12 +804,21 @@ kbd {
   white-space: nowrap;
 }
 
-.editor-tab.has-errors .editor-tab-label,
-.editor-tab-errors {
-  color: var(--diagnostic-error);
+.editor-tab[data-diagnostic-severity='error'] {
+  --tab-diagnostic-color: var(--diagnostic-error);
 }
 
-.editor-tab-errors {
+.editor-tab[data-diagnostic-severity='warning'] {
+  --tab-diagnostic-color: var(--diagnostic-warning);
+}
+
+.editor-tab[data-diagnostic-severity='error'] .editor-tab-label,
+.editor-tab[data-diagnostic-severity='warning'] .editor-tab-label,
+.editor-tab-diagnostics {
+  color: var(--tab-diagnostic-color);
+}
+
+.editor-tab-diagnostics {
   flex: none;
   font-size: 11px;
 }

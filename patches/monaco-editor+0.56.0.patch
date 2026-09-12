@@ -136,3 +136,42 @@ index 0ae0bad..c61a08b 100644
          for (let i = 0; i < this._renderedStickyLines.length; i++) {
              const stickyLine = this._renderedStickyLines[i];
              stickyLine.lineNumberDomNode.remove();
+diff --git a/node_modules/monaco-editor/esm/vs/languages/features/typescript/languageFeatures.js b/node_modules/monaco-editor/esm/vs/languages/features/typescript/languageFeatures.js
+--- a/node_modules/monaco-editor/esm/vs/languages/features/typescript/languageFeatures.js
++++ b/node_modules/monaco-editor/esm/vs/languages/features/typescript/languageFeatures.js
+@@ -189,8 +189,16 @@
+     this._disposables = [];
+   }
+   async _doValidate(model) {
++    // A completed request belongs to both its source revision and language setup.
++    const listener = this._listener[model.uri.toString()];
++    const version = model.getVersionId();
++    const extraLibs = this._defaults.getExtraLibs();
++    const isCurrent = () => !model.isDisposed()
++      && model.getVersionId() === version
++      && this._defaults.getExtraLibs() === extraLibs
++      && this._listener[model.uri.toString()] === listener;
+     const worker = await this._worker(model.uri);
+-    if (model.isDisposed()) {
++    if (!isCurrent()) {
+       return;
+     }
+     const promises = [];
+@@ -205,7 +213,7 @@
+       promises.push(worker.getSuggestionDiagnostics(model.uri.toString()));
+     }
+     const allDiagnostics = await Promise.all(promises);
+-    if (!allDiagnostics || model.isDisposed()) {
++    if (!allDiagnostics || !isCurrent()) {
+       return;
+     }
+     const diagnostics = allDiagnostics.reduce((p, c) => c.concat(p), []).filter(
+@@ -215,7 +223,7 @@
+       (relatedInformation) => relatedInformation.file ? Uri.parse(relatedInformation.file.fileName) : null
+     );
+     await this._libFiles.fetchLibFilesIfNecessary(relatedUris);
+-    if (model.isDisposed()) {
++    if (!isCurrent()) {
+       return;
+     }
+     editor.setModelMarkers(

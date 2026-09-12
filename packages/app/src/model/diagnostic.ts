@@ -1,6 +1,20 @@
 import type {SourceRef} from '@code3d/core/tooling';
 import type {ToolIntent} from '../tools/tool-system';
 
+export type FileDiagnosticCounts = Readonly<{errors: number; warnings: number}>;
+
+export function describeDiagnosticCounts({
+  errors,
+  warnings,
+}: FileDiagnosticCounts): string {
+  return [
+    errors ? `${errors} ${errors === 1 ? 'error' : 'errors'}` : '',
+    warnings ? `${warnings} ${warnings === 1 ? 'warning' : 'warnings'}` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
 export type ModelDiagnosticAction = Readonly<{
   label: string;
   intent: ToolIntent;
