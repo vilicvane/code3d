@@ -273,7 +273,6 @@ export type ModelModule = Readonly<{
   exports: ReadonlyMap<string, string>;
   catalog: readonly ObjectCatalogEntry[];
   sourceTargets: readonly SourceTarget[];
-  evaluationContexts: readonly EvaluationContext[];
   designArguments: readonly DesignArgumentContext[];
   activeDesignContextId?: string;
 }>;

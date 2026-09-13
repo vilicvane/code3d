@@ -32,7 +32,7 @@ import {
   transformGeometry,
   type AlignmentGeometry,
 } from './alignment-geometry.js';
-import {cached, cachedArtifact} from './cached.js';
+import {cache, cachedArtifact} from './cached.js';
 import {extrudeWithTopology} from './extrude.js';
 import {font, googleFont, type Font} from './font.js';
 import {
@@ -4851,7 +4851,11 @@ export type SnapshotQueryBatch = Readonly<{
   weight: number;
   sourceRef?: SourceRef;
   encode(): Uint8Array;
-  accept(query: SnapshotQuery, value: SnapshotQueryResult): void;
+  accept(
+    query: SnapshotQuery,
+    value: SnapshotQueryResult,
+    milliseconds: number,
+  ): void;
 }>;
 
 export function planModelSnapshotQueries(
@@ -4907,7 +4911,8 @@ export function planModelSnapshotQueries(
         (input.geometry.topology?.surfaces.ids.length ?? 0)) *
       queries.length,
     encode: () => encodeKernelArtifact(id, input.geometry),
-    accept: (query, value) => snapshotQuery.accept(query.key, value),
+    accept: (query, value, milliseconds) =>
+      snapshotQuery.accept(query.key, value, milliseconds),
   }));
 }
 
@@ -4917,7 +4922,11 @@ export function executeSnapshotQueryBatch(
   bytes: Uint8Array,
   queries: readonly SnapshotQuery[],
   checkCancelled: () => void,
-  onResult: (query: SnapshotQuery, value: SnapshotQueryResult) => void,
+  onResult: (
+    query: SnapshotQuery,
+    value: SnapshotQueryResult,
+    milliseconds: number,
+  ) => void,
   onRestore?: (milliseconds: number) => void,
 ): void {
   const started = performance.now();
@@ -4929,7 +4938,9 @@ export function executeSnapshotQueryBatch(
     onRestore?.(performance.now() - started);
     for (const query of queries) {
       checkCancelled();
-      onResult(query, computeSnapshotQuery(geometry, query));
+      const started = performance.now();
+      const value = computeSnapshotQuery(geometry, query);
+      onResult(query, value, performance.now() - started);
     }
   } finally {
     geometry.shape.delete();
@@ -5012,7 +5023,7 @@ export const authoringApi = Object.freeze({
   pivotPoint,
   axisEdge,
   axisLine,
-  cached,
+  cache,
   font,
   googleFont,
   text,

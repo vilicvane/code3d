@@ -674,6 +674,41 @@ test('retains topology values at bindings, aliases, and collection results', asy
   assert.equal(binding('repeated').nodeIds.length, 2);
 });
 
+test('numeric loops preserve per-call geometry tools without reading hidden properties', async () => {
+  const source = `import {box, group} from '@code3d/core';
+    const numeric = Object.create(null);
+    Object.defineProperty(numeric, 'hidden', {get() { throw new Error('hidden getter'); }});
+    const parts = [3, 7].map(width => {
+      const data = new Float32Array(1024);
+      for (let i = 0; i < data.length; i++) data[i] = Math.max(0, Math.sin(i));
+      const payload = {numeric, data, get unused() { throw new Error('unused getter'); }};
+      return box(width, 2, 4).originOffset(width, 0, 0);
+    });
+    export default group(parts);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const target = defined(
+    ModelViewport.prototype['sourceTargetAt'].call(
+      {module},
+      '/model.ts',
+      source.indexOf('originOffset(') + 3,
+    ),
+  );
+  assert.equal(target.evaluations.length, 2);
+  assert.deepEqual(
+    target.evaluations.map(evaluation => evaluation.toolArguments?.[0]).sort(),
+    [3, 7],
+  );
+  assert.equal(
+    new Set(target.evaluations.map(evaluation => evaluation.toolExecutionOrder))
+      .size,
+    2,
+  );
+});
+
 test('parameter previews observe bound values without changing function execution', async () => {
   const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';
     function strict(part) {

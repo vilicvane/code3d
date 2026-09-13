@@ -2,6 +2,7 @@ import ts from '@typescript/typescript6';
 import {decodeProjectFile, type ProjectFileReader} from './file-reader';
 
 export type CachedDefinitions = ReadonlyMap<number, string>;
+type FunctionKind = 'cache' | 'primitive' | 'compute';
 type Module = {source: ts.SourceFile; checker: ts.TypeChecker};
 
 /** Fingerprints only a definition's local dependency closure, plus imported code. */
@@ -34,11 +35,18 @@ export class CachedDefinitionCompiler {
     visit(module.source);
     const definitions = new Map<number, string>();
     for (const call of calls) {
+      const isCache = await this.resolveFunction(
+        module,
+        call.expression,
+        'cache',
+        new Set(),
+      );
       if (
+        !isCache &&
         !(await this.resolveFunction(
           module,
           call.expression,
-          'factory',
+          'primitive',
           new Set(),
         ))
       )
@@ -52,7 +60,11 @@ export class CachedDefinitionCompiler {
         ))
       )
         continue;
-      const identity = await this.fingerprint(module, call.arguments);
+      // Invocation arguments belong to the runtime key, not the definition.
+      const roots = isCache
+        ? [call.arguments[0], ...call.arguments.slice(2)]
+        : call.arguments;
+      const identity = await this.fingerprint(module, roots);
       if (identity) definitions.set(call.getStart(module.source), identity);
     }
     return definitions;
@@ -95,16 +107,17 @@ export class CachedDefinitionCompiler {
                 .map(element => (element.propertyName ?? element.name).text)),
         );
       for (const name of names)
-        if (
-          await this.exportedFunction(
-            module.source.fileName,
-            specifier,
-            name,
-            'factory',
-            new Set(),
+        for (const kind of ['cache', 'primitive'] as const)
+          if (
+            await this.exportedFunction(
+              module.source.fileName,
+              specifier,
+              name,
+              kind,
+              new Set(),
+            )
           )
-        )
-          return true;
+            return true;
     }
     return false;
   }
@@ -176,7 +189,7 @@ export class CachedDefinitionCompiler {
   private async resolveFunction(
     module: Module,
     expression: ts.Expression,
-    kind: 'factory' | 'compute',
+    kind: FunctionKind,
     seen: Set<ts.Node | string>,
   ): Promise<boolean> {
     if (seen.has(expression)) return false;
@@ -264,17 +277,18 @@ export class CachedDefinitionCompiler {
     importer: string,
     specifier: string,
     name: string,
-    kind: 'factory' | 'compute',
+    kind: FunctionKind,
     seen: Set<ts.Node | string>,
   ): Promise<boolean> {
-    if (kind === 'factory') {
-      if (specifier === '@code3d/core') return name === 'cached';
+    if (kind !== 'compute') {
+      if (specifier === '@code3d/core')
+        return kind === 'cache' && name === 'cache';
       if (specifier === '@code3d/core/replicad')
-        return name === 'definePrimitive';
+        return kind === 'primitive' && name === 'definePrimitive';
     }
     const path = await this.resolve(specifier, importer);
     if (!path || path.endsWith('.json')) return false;
-    if (kind === 'factory' && !this.hasImports(path, await this.source(path)))
+    if (kind !== 'compute' && !this.hasImports(path, await this.source(path)))
       return false;
     const key = kind + ':' + path + ':' + name;
     if (seen.has(key)) return false;

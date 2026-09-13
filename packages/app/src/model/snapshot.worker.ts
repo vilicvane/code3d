@@ -28,14 +28,12 @@ scope.onmessage = async ({data}: MessageEvent<SnapshotWorkerRequest>) => {
       return;
     }
     const start = performance.now();
-    let previous = start;
     tooling!.executeSnapshotQueryBatch(
       data.id,
       data.bytes,
       data.queries,
       () => checkCompilationCancellation(data.cancellation),
-      (query, value) => {
-        const now = performance.now();
+      (query, value, milliseconds) => {
         const transfer = Object.values(value).flatMap(item =>
           ArrayBuffer.isView(item) ? [item.buffer as ArrayBuffer] : [],
         );
@@ -45,12 +43,11 @@ scope.onmessage = async ({data}: MessageEvent<SnapshotWorkerRequest>) => {
             id: data.id,
             key: query.key.id,
             value,
-            milliseconds: now - previous,
+            milliseconds,
             nativeBytes: nativeBytes(),
           },
           transfer,
         );
-        previous = performance.now();
       },
       milliseconds => {
         send({
@@ -59,7 +56,6 @@ scope.onmessage = async ({data}: MessageEvent<SnapshotWorkerRequest>) => {
           restoreMs: milliseconds,
           nativeBytes: nativeBytes(),
         });
-        previous = performance.now();
       },
     );
     send({

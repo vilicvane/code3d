@@ -36,12 +36,17 @@ panels. If a field is invalid, saving opens its category and focuses that field.
 | ----------------------------- | --------------------------------- | ------------------------------------------------------------------------------ |
 | Edit delay (ms)               | 400                               | Wait after typing before updating the model.                                   |
 | Completion preview delay (ms) | 200                               | Wait before previewing a focused completion candidate.                         |
-| Resolution limit (×)          | Unlimited                         | Cap the viewport pixel ratio; leave empty for full display resolution.         |
+| Resolution limit (DPR)        | Unlimited                         | Cap the viewport pixel ratio; leave empty for full display resolution.         |
 | Geometry workers              | Hardware-based, up to 4 initially | Maximum parallel geometry queries; enter any positive whole number.            |
 | Memory cache (GiB)            | 2                                 | Soft computation-cache budget; active models can exceed it.                    |
 | Disk cache (GiB)              | 2                                 | Shared build, geometry and resource cache budget, including maintenance space. |
+| Disk cache threshold (ms)     | 1                                 | Minimum computation time for new results to qualify for disk storage.          |
 
 Cache budgets accept positive decimal values and have no App-imposed maximum.
+The disk cache threshold accepts non-negative decimal values; 0 removes the time
+threshold. It applies to new computations from the next model execution. Existing
+cache entries and their eligibility are preserved, and faster results still use
+the memory cache. It does not filter package downloads or compiled build artifacts.
 More geometry workers can speed up independent queries while using more memory.
 The resolution setting applies immediately to the viewport; image exports keep
 their chosen dimensions. Delays apply to subsequent previews, computation

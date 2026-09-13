@@ -13,7 +13,7 @@ import {
 } from './kernel-cache.js';
 import {estimateRetainedBytes} from './retained-memory.js';
 
-export type CachedOptions<Value> = CacheCodec<Value>;
+export type CacheOptions<Value> = CacheCodec<Value>;
 
 const identities = new WeakMap<Function, string>();
 const sessionIdentities = new WeakMap<Function, string>();
@@ -56,18 +56,34 @@ const dataLifecycle: KernelValueLifecycle<unknown> = {
 
 /**
  * Memoizes a synchronous, deterministic computation in the shared cache.
+ * Omit args to create a function, or pass an argument tuple to return its value.
  * Pass changing captured state as arguments and treat returned data as immutable.
  * The engine fingerprints definitions and dependencies for persistent reuse.
  * Outside the engine, function identity provides process-local memory reuse.
  * Custom encoder/decoder pairs run only when writing/restoring persistent data;
  * memory hits return the retained value without decoding or copying it.
  */
-export function cached<Args extends unknown[], Value>(
+export function cache<Args extends unknown[], Value>(
   compute: (
     ...args: Args
   ) => Value & (Value extends PromiseLike<unknown> ? never : unknown),
-  options?: CachedOptions<NoInfer<Value>>,
-): (...args: Args) => Value {
+  args: Readonly<NoInfer<Args>>,
+  options?: CacheOptions<NoInfer<Value>>,
+): Value;
+export function cache<Args extends unknown[], Value>(
+  compute: (
+    ...args: Args
+  ) => Value & (Value extends PromiseLike<unknown> ? never : unknown),
+  args?: undefined,
+  options?: CacheOptions<NoInfer<Value>>,
+): (...args: Args) => Value;
+export function cache<Args extends unknown[], Value>(
+  compute: (
+    ...args: Args
+  ) => Value & (Value extends PromiseLike<unknown> ? never : unknown),
+  args?: Readonly<Args>,
+  options?: CacheOptions<Value>,
+): Value | ((...args: Args) => Value) {
   const operation = cachedArtifact(
     (...args: Args): Value => {
       const value = compute(...args);
@@ -77,12 +93,14 @@ export function cached<Args extends unknown[], Value>(
         'then' in value &&
         typeof value.then === 'function'
       )
-        throw new Error('cached() requires a synchronous computation.');
+        throw new Error('cache() requires a synchronous computation.');
       return value;
     },
     {identity: compute, codec: options},
   );
-  return (...args) => operation(...args).value;
+  return args === undefined
+    ? (...args: Args) => operation(...args).value
+    : operation(...args).value;
 }
 
 /** Internal artifact form also supports native ownership and remote admission. */
@@ -116,8 +134,11 @@ export function cachedArtifact<Args extends unknown[], Value>(
     findKernelOperation(key, lifecycle, persistence);
   const findMany = (keys: readonly KernelOperationKey[]) =>
     findKernelOperations(keys, lifecycle, persistence);
-  const accept = (key: KernelOperationKey, value: Value) =>
-    acceptKernelOperation(key, lifecycle, value, persistence);
+  const accept = (
+    key: KernelOperationKey,
+    value: Value,
+    milliseconds: number,
+  ) => acceptKernelOperation(key, lifecycle, value, milliseconds, persistence);
   return Object.assign(
     (...args: Args): KernelArtifact<Value> => {
       return evaluateCachedArtifact(

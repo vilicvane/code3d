@@ -182,7 +182,8 @@ function fixture(fault?: Simulation['fault'], maximumBytes = 2 * 1024 ** 3) {
       scale: 1,
     })),
     encode: () => source.slice(),
-    accept(query, value) {
+    accept(query, value, milliseconds) {
+      assert.equal(milliseconds, 3);
       assert.ok(
         !values.has(query.key.id),
         'completed work must not be replayed',

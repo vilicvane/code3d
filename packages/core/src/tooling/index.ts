@@ -10,6 +10,7 @@ export {
   clearKernelOperationCache,
   kernelOperationCacheStats,
   setKernelCacheBudget,
+  setKernelCachePersistenceThreshold,
   setKernelArtifactStore,
   setKernelExternalBytes,
 } from '../library/kernel-cache.js';

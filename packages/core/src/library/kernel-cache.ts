@@ -40,6 +40,7 @@ export type KernelValueLifecycle<Value> = Readonly<{
 }>;
 
 type CacheEntry<Value> = Readonly<{
+  persistenceEligible: boolean;
   estimatedBytes: number;
   signature: string;
   value: Value;
@@ -49,9 +50,11 @@ type CacheEntry<Value> = Readonly<{
 
 export function createComputationCache({
   maximumBytes = 2 * 1024 ** 3,
+  minimumPersistenceMilliseconds = 1,
   nativeAllocatedBytes,
 }: {
   maximumBytes?: number;
+  minimumPersistenceMilliseconds?: number;
   nativeAllocatedBytes: () => number;
 }) {
   const entries = new Map<string, CacheEntry<unknown>>();
@@ -75,6 +78,11 @@ export function createComputationCache({
   function setKernelCacheBudget(bytes: number): void {
     maximumBytes = bytes;
     evictHistoricalEntries();
+  }
+
+  /** Apply to future computations without changing existing entries' admission. */
+  function setKernelCachePersistenceThreshold(milliseconds: number): void {
+    minimumPersistenceMilliseconds = milliseconds;
   }
 
   /** The host accounts for in-flight inputs and all auxiliary native heaps. */
@@ -134,8 +142,10 @@ export function createComputationCache({
   ): KernelArtifact<Value> {
     const hit = findKernelOperation(key, lifecycle, codec);
     if (hit) return hit;
+    const started = performance.now();
     const value = compute();
-    acceptKernelOperation(key, lifecycle, value, codec);
+    const milliseconds = performance.now() - started;
+    acceptKernelOperation(key, lifecycle, value, milliseconds, codec);
     return {id: key.id, value};
   }
 
@@ -191,7 +201,9 @@ export function createComputationCache({
           misses += 1;
           return undefined;
         }
-        cached = retainEntry(key, lifecycle, restored);
+        // Existing disk records have already been admitted; reading one must
+        // not reinterpret decode time as its original computation cost.
+        cached = retainEntry(key, lifecycle, restored, true);
         persistentHits += 1;
         persisted.add(id);
       }
@@ -204,7 +216,8 @@ export function createComputationCache({
       throw new Error(`Kernel operation cache identity collision: ${id}`);
     hits += 1;
     const value = cached.instantiate(cached.value);
-    if (codec !== false) persist(key, cached.value, codec, true);
+    if (cached.persistenceEligible && codec !== false)
+      persist(key, cached.value, codec, true);
     touchEntry(id, cached as CacheEntry<unknown>);
     return {id, value};
   }
@@ -214,6 +227,7 @@ export function createComputationCache({
     key: KernelOperationKey,
     lifecycle: KernelValueLifecycle<Value>,
     value: Value,
+    milliseconds: number,
     codec?: CacheCodec<Value> | false,
   ): void {
     const existing = entries.get(key.id);
@@ -230,8 +244,14 @@ export function createComputationCache({
       lifecycle.release(value);
       throw error;
     }
-    const entry = retainEntry(key, lifecycle, retained);
-    if (codec !== false) persist(key, retained, codec);
+    const entry = retainEntry(
+      key,
+      lifecycle,
+      retained,
+      milliseconds >= minimumPersistenceMilliseconds,
+    );
+    if (entry.persistenceEligible && codec !== false)
+      persist(key, retained, codec);
     touchEntry(key.id, entry as CacheEntry<unknown>);
   }
 
@@ -288,8 +308,10 @@ export function createComputationCache({
     key: KernelOperationKey,
     lifecycle: KernelValueLifecycle<Value>,
     retained: Value,
+    persistenceEligible: boolean,
   ): CacheEntry<Value> {
     const entry: CacheEntry<Value> = {
+      persistenceEligible,
       estimatedBytes:
         256 +
         estimateRetainedBytes(key.signature) +
@@ -375,6 +397,7 @@ export function createComputationCache({
     clearKernelOperationCache,
     kernelOperationCacheStats,
     setKernelCacheBudget,
+    setKernelCachePersistenceThreshold,
     setKernelArtifactStore,
     findKernelOperation,
     findKernelOperations,
@@ -396,6 +419,7 @@ export const {
   clearKernelOperationCache,
   kernelOperationCacheStats,
   setKernelCacheBudget,
+  setKernelCachePersistenceThreshold,
   setKernelArtifactStore,
   findKernelOperation,
   findKernelOperations,

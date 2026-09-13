@@ -498,17 +498,26 @@ the source model.
 ## Cached computations
 
 ```ts
-import {cached} from '@code3d/core';
+import {cache} from '@code3d/core';
 
-const profile = cached((radius: number, sides: number) =>
-  Array.from({length: sides}, (_, index) => {
+function buildProfile(radius: number, sides: number) {
+  return Array.from({length: sides}, (_, index) => {
     const angle = (index * 2 * Math.PI) / sides;
     return [radius * Math.cos(angle), radius * Math.sin(angle)];
-  }),
-);
+  });
+}
+const profile = cache(buildProfile);
+const points = cache(buildProfile, [10, 6]);
 ```
 
-`cached(fn, options?)` preserves synchronous parameter/result types. It caches
+`cache(fn)` returns a memoized function; `cache(fn, args)` immediately returns
+its result for the supplied argument tuple. Both forms preserve synchronous
+parameter/result types and use the same definition and argument cache keys.
+In the example, `profile(10, 6)` reuses the same cached result as `points`. An empty tuple `[]` immediately invokes
+a computation with no arguments. The argument tuple is not part of the
+compiler's function fingerprint: changing inputs selects another cache entry.
+
+The API caches
 ordinary data; use `definePrimitive()` for Replicad geometry so Core also owns
 native resources and creates fresh model metadata. Treat cached results as
 immutable. A memory hit returns the retained computed or decoded value directly,
@@ -522,10 +531,23 @@ changing dynamic state must be supplied as arguments. Functions, native handles
 and application class instances are not ordinary data arguments.
 
 For custom result types, supply both functions as
-`cached(fn, {encoder: value => bytes, decoder: bytes => value})`.
+`cache(fn, undefined, {encoder: value => bytes, decoder: bytes => value})`.
+For immediate evaluation, use `cache(fn, args, options)` with the same codec options.
 The encoder runs when saving to disk; the decoder runs once when restoring an
 entry into memory. A subsequent memory hit never calls either codec. Async
 computations are excluded: incomplete work is not admitted to the cache.
+
+New results are written to disk only when their computation reaches the configured
+threshold, 1 ms by default. In the App, change **Disk cache threshold (ms)** under
+**Settings → Cache**; fractional values are supported and 0 removes the time
+threshold. Changes apply to new computations from the next model execution;
+existing entries retain their disk eligibility.
+Faster results still use the memory cache, and later memory hits do not promote
+them to disk. The computation timer excludes the surrounding cache lookup,
+argument hashing and persistence encoding. Batched snapshot queries use their
+local or Worker computation time, excluding input restoration and transport.
+Existing disk records remain readable; restoring a record preserves its disk
+eligibility.
 
 The model engine fingerprints static function definitions, their referenced
 local declarations, imported implementation graphs and codec definitions. Aliases
@@ -538,7 +560,7 @@ and share the process-wide memory LRU. Authors do not provide cache IDs or versi
 
 Public cached computations, primitives, Core geometry, font parsing, glyph contours
 and snapshot queries share one cache. The memory budget remains 2 GiB; browser
-persistence shares the existing OPFS disk budget, min(1 GiB, 10% of origin quota).
+persistence shares the OPFS disk budget configured in App settings (2 GiB by default).
 Cancellation and exceptions retain completed entries and editing history.
 
 ## Text

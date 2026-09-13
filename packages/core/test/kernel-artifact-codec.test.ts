@@ -1,3 +1,4 @@
+import {mockComputationTime} from '../../../test/computation-clock.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {makeBox, makeCylinder} from 'replicad';
@@ -61,7 +62,8 @@ test('binary artifacts preserve geometry, metadata, scalar precision and indepen
   }
 });
 
-test('completed artifacts survive error/cancellation cleanup and storage failures preserve computation', () => {
+test('completed artifacts survive error/cancellation cleanup and storage failures preserve computation', t => {
+  mockComputationTime(t);
   const records = new Map<string, Uint8Array>();
   let flushes = 0;
   const store: KernelArtifactStore = {

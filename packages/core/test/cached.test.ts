@@ -1,4 +1,5 @@
-import {box, cached, cut} from '@code3d/core';
+import {mockComputationTime} from '../../../test/computation-clock.ts';
+import {box, cache, cut} from '@code3d/core';
 import {definePrimitive, replicad} from '@code3d/core/replicad';
 import {
   beginModelEvaluation,
@@ -8,12 +9,14 @@ import {
   setKernelArtifactStore,
 } from '@code3d/core/tooling';
 import assert from 'node:assert/strict';
-import {afterEach, test} from 'node:test';
+import {afterEach, beforeEach, test} from 'node:test';
 import {
   createModelSnapshotter,
   disposeModelObjects,
   modelGeometry,
 } from './model-test.ts';
+
+beforeEach(t => mockComputationTime(t));
 
 const records = new Map<string, Uint8Array>();
 const store = {
@@ -61,20 +64,38 @@ test('custom codecs run only for disk writes and restores, including historical 
       return new Answer(bytes[0]);
     },
   };
-  const twice = cached(compute, options);
+  const twice = cache(compute, undefined, options);
   setKernelArtifactStore(store);
-  const first = twice(10);
+  const first = cache(compute, [10], options);
   assert.equal(twice(10), first);
   twice(11);
   assert.equal(twice(10), first);
   assert.deepEqual([calls, encodes, decodes], [2, 2, 0]);
   clearKernelOperationCache();
-  const restored = twice(10);
+  const restored = cache(compute, [10], options);
   assert.ok(restored instanceof Answer);
   assert.equal(restored.value, 20);
   assert.equal(twice(10), restored);
   assert.deepEqual([calls, encodes, decodes], [2, 2, 1]);
   assert.equal(kernelOperationCacheStats().persistentHits, 1);
+});
+
+test('immediate and deferred calls reuse one function identity and distinguish argument tuples', () => {
+  let calls = 0;
+  const compute = (a: number, b = 1) => ({value: a + b, call: ++calls});
+  const deferred = cache(compute);
+  assert.equal(calls, 0);
+  const first = cache(compute, [2, 3] as const);
+  assert.equal(first.value, 5);
+  assert.equal(deferred(2, 3), first);
+  assert.equal(cache(compute, [2, 3]), first);
+  assert.equal(calls, 1);
+  assert.equal(cache(compute, [2]).value, 3);
+  assert.equal(calls, 2);
+  const noArgs = () => ({value: ++calls});
+  const value = cache(noArgs, []);
+  assert.equal(cache(noArgs)(), value);
+  assert.equal(calls, 3);
 });
 
 test('plain data preserves exact scalar and binary values after restoration', () => {
@@ -91,7 +112,7 @@ test('plain data preserves exact scalar and binary values after restoration', ()
     map: new Map([['key', new Set([1, 2])]]),
   };
   let calls = 0;
-  const data = cached(
+  const data = cache(
     identifyCachedFunction(() => {
       calls++;
       return value;
@@ -125,7 +146,7 @@ test('reference graphs, sparse arrays and shared buffer views preserve their sem
   };
   value.self = value;
   value.array[1] = undefined;
-  const data = cached(identifyCachedFunction(() => value, 'test:graph'));
+  const data = cache(identifyCachedFunction(() => value, 'test:graph'));
   data();
   clearKernelOperationCache();
   const restored = data();
@@ -137,14 +158,14 @@ test('reference graphs, sparse arrays and shared buffer views preserve their sem
   assert.equal(restored.left.buffer, restored.right.buffer);
   assert.equal(restored.left.byteOffset, 2);
   assert.equal(restored.left.buffer.byteLength, 6);
-  const same = cached((a: object, b: object) => a === b);
+  const same = cache((a: object, b: object) => a === b);
   assert.equal(same(key, key), true);
   assert.equal(same({value: 1}, {value: 1}), false);
 });
 
 test('distinct closures do not collide outside the engine and share the memory cache', () => {
   setKernelArtifactStore(store);
-  const create = (factor: number) => cached((input: number) => input * factor);
+  const create = (factor: number) => cache((input: number) => input * factor);
   const double = create(2),
     triple = create(3);
   assert.equal(double(4), 8);
@@ -161,10 +182,10 @@ test('identifying one cache definition does not leak its codec identity to other
     calls++;
     return value * 2;
   };
-  const identified = cached(
+  const identified = cache(
     identifyCachedFunction(compute, 'test:bound-definition'),
   );
-  const ordinary = cached(compute, {
+  const ordinary = cache(compute, undefined, {
     encoder: () =>
       assert.fail('An uninstrumented definition must stay in memory'),
     decoder: () =>
@@ -179,16 +200,16 @@ test('identifying one cache definition does not leak its codec identity to other
 });
 
 test('definition fingerprints and all input values distinguish cached computations', () => {
-  const old = cached(
+  const old = cache(
     identifyCachedFunction((input: number) => input * 2, 'test:old'),
   );
-  const changed = cached(
+  const changed = cache(
     identifyCachedFunction((input: number) => input * 3, 'test:changed'),
   );
   assert.equal(old(2), 4);
   assert.equal(changed(2), 6);
   let calls = 0;
-  const identity = cached((value: unknown) => {
+  const identity = cache((value: unknown) => {
     calls++;
     return value;
   });
@@ -214,7 +235,7 @@ test('completed public cached work survives cancellation while errors never ente
   const finish = beginModelEvaluation(() => {
     if (cancelled) throw new Error('Cancelled');
   });
-  const compute = cached((value: number) => {
+  const compute = cache((value: number) => {
     calls++;
     cancelled = true;
     return value * 2;
@@ -227,7 +248,7 @@ test('completed public cached work survives cancellation while errors never ente
   }
   assert.equal(compute(2), 4);
   assert.equal(calls, 1);
-  const fail = cached(() => {
+  const fail = cache(() => {
     calls++;
     throw new Error('Failure');
   });

@@ -875,6 +875,11 @@ export function createModelExecutor(
     topologyReferences?: TopologyValueReference[],
     anchorReferences?: AnchorValueReference[],
   ): RelationObject[] {
+    if (
+      value === null ||
+      (typeof value !== 'object' && typeof value !== 'function')
+    )
+      return [];
     if (isModelObject(value)) {
       return [value];
     }
@@ -909,7 +914,7 @@ export function createModelExecutor(
       });
       return ownerRecorded ? [] : [anchor.model];
     }
-    if (typeof value !== 'object' || value === null || seen.has(value)) {
+    if (typeof value !== 'object' || seen.has(value)) {
       return [];
     }
     seen.add(value);
@@ -930,17 +935,17 @@ export function createModelExecutor(
       prototype === null
     ) {
       // Observing a value must not invoke author-defined accessors.
-      return Object.values(Object.getOwnPropertyDescriptors(value)).flatMap(
-        property =>
-          property.enumerable && 'value' in property
-            ? modelObjectsIn(
-                property.value,
-                seen,
-                topologyReferences,
-                anchorReferences,
-              )
-            : [],
-      );
+      return Object.keys(value).flatMap(key => {
+        const property = Object.getOwnPropertyDescriptor(value, key)!;
+        return 'value' in property
+          ? modelObjectsIn(
+              property.value,
+              seen,
+              topologyReferences,
+              anchorReferences,
+            )
+          : [];
+      });
     }
     return [];
   }
@@ -1137,7 +1142,6 @@ export function createModelExecutor(
           ],
           files,
         ),
-        evaluationContexts: [...evaluationContexts.values()],
         designArguments: designArguments.map(
           ({
             binding: _binding,
@@ -1245,6 +1249,26 @@ export function createModelExecutor(
     >[],
     files: ReadonlyMap<string, string>,
   ): SourceTarget[] {
+    // Completion order is unique within this evaluation. Pixel/vertex loops can
+    // produce many traces; resolving each reach must not rescan the whole run.
+    const executionsByOrder = new Map<number, SourceExecutionTrace>();
+    const executionsBySite = new Map<string, SourceExecutionTrace[]>();
+    for (const execution of sourceExecutionTraces.values()) {
+      executionsByOrder.set(execution.order, execution);
+      const executions = executionsBySite.get(execution.siteId) ?? [];
+      executions.push(execution);
+      executionsBySite.set(execution.siteId, executions);
+    }
+    function sourceExecutionFor(
+      siteId: string,
+      contextId: string,
+      runtime: RuntimeReach,
+    ): SourceExecutionTrace | undefined {
+      const execution = executionsByOrder.get(runtime.order);
+      return execution?.siteId === siteId && execution.contextId === contextId
+        ? execution
+        : undefined;
+    }
     const operationsByCall = new Map<string, ModelOperationSnapshot[]>();
     for (const operation of operations.values()) {
       if (operation.siteId === undefined || operation.execution === undefined)
@@ -1560,12 +1584,9 @@ export function createModelExecutor(
     }
     const operationSelectionTargets = [...edgeSelectionSites.values()].flatMap(
       site => {
-        const evaluations = [
-          ...sourceExecutionTraces.values(),
-        ].flatMap<SourceTargetEvaluation>(execution => {
-          if (execution.siteId !== site.siteId) {
-            return [];
-          }
+        const evaluations = (
+          executionsBySite.get(site.siteId) ?? []
+        ).flatMap<SourceTargetEvaluation>(execution => {
           const sourceObject = execution.receiver;
           if (!isModelObject(sourceObject)) return [];
           const operation = operationsByCall.get(
@@ -1652,9 +1673,8 @@ export function createModelExecutor(
             isToolSelectionParameter(candidate),
         );
         if (!parameter) return [];
-        const evaluations = [...sourceExecutionTraces.values()].flatMap(
+        const evaluations = (executionsBySite.get(site.siteId) ?? []).flatMap(
           execution => {
-            if (execution.siteId !== site.siteId) return [];
             const returned = [...sourceTransformationTraces.values()]
               .filter(trace => trace.id === execution.siteId)
               .flatMap(trace => trace.evaluations)
@@ -2403,11 +2423,9 @@ export function createModelExecutor(
     const fallbackToolTargets: SourceTarget[] = [
       ...toolCallSites.values(),
     ].flatMap(site => {
-      const evaluations = [...sourceExecutionTraces.values()]
+      const evaluations = (executionsBySite.get(site.siteId) ?? [])
         .filter(
-          execution =>
-            execution.siteId === site.siteId &&
-            !toolExecutionIsRepresented(site, execution, targets),
+          execution => !toolExecutionIsRepresented(site, execution, targets),
         )
         .map(execution => ({
           runtime: sourceExecutionRuntime(execution),
@@ -2614,19 +2632,6 @@ export function createModelExecutor(
           arguments: site.arguments,
         }
       : undefined;
-  }
-
-  function sourceExecutionFor(
-    siteId: string,
-    contextId: string,
-    runtime: RuntimeReach,
-  ): SourceExecutionTrace | undefined {
-    return [...sourceExecutionTraces.values()].find(
-      execution =>
-        execution.siteId === siteId &&
-        execution.contextId === contextId &&
-        execution.order === runtime.order,
-    );
   }
 
   function attemptedEdgeIds(value: unknown): EdgeId[] {

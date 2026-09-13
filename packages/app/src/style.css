@@ -1566,6 +1566,12 @@ kbd {
   border-radius: 3px;
   outline: 0;
   background-color: #11130f;
+}
+
+.app-dialog input,
+.app-dialog select,
+.app-dialog textarea,
+.dialog-input-unit {
   font:
     500 10px/1.4 'IBM Plex Mono',
     monospace;
@@ -1584,6 +1590,26 @@ kbd {
 .app-dialog input,
 .app-dialog textarea {
   padding-right: 8px;
+}
+
+.dialog-input-control {
+  position: relative;
+  min-width: 0;
+}
+
+.dialog-input-control:has(.dialog-input-unit) input {
+  padding-right: calc(var(--input-unit-width) + 16px);
+}
+
+.dialog-input-unit {
+  position: absolute;
+  inset-block: 0;
+  right: 9px;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  pointer-events: none;
+  user-select: none;
 }
 
 .app-dialog textarea {
@@ -3865,11 +3891,10 @@ kbd {
   text-transform: none;
 }
 
-.settings-dialog input {
+.settings-input {
   grid-column: 2;
   grid-row: 1 / span 2;
   align-self: start;
-  width: 100%;
 }
 
 .settings-dialog small {
@@ -3922,7 +3947,7 @@ kbd {
   }
 
   .settings-dialog label {
-    grid-template-columns: minmax(0, 1fr) 90px;
+    grid-template-columns: minmax(0, 1fr) 100px;
     column-gap: 12px;
   }
 }

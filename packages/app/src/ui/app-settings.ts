@@ -17,6 +17,7 @@ import {AppDialog, dialogs} from './dialog';
 type Field = {
   key: keyof AppSettingsValues;
   label: string;
+  unit?: string;
   hint: string;
   step: string;
   min: string;
@@ -29,14 +30,16 @@ const groups: readonly {id: string; title: string; fields: readonly Field[]}[] =
       fields: [
         {
           key: 'editDelayMs',
-          label: 'Edit delay (ms)',
+          label: 'Edit delay',
+          unit: 'ms',
           hint: 'Wait after typing before updating the model.',
           step: '1',
           min: '0',
         },
         {
           key: 'completionDelayMs',
-          label: 'Completion preview delay (ms)',
+          label: 'Completion preview delay',
+          unit: 'ms',
           hint: 'Wait before previewing a focused completion candidate.',
           step: '1',
           min: '0',
@@ -49,7 +52,8 @@ const groups: readonly {id: string; title: string; fields: readonly Field[]}[] =
       fields: [
         {
           key: 'pixelRatioLimit',
-          label: 'Resolution limit (×)',
+          label: 'Resolution limit',
+          unit: 'DPR',
           hint: 'Leave empty to use the full display pixel ratio.',
           step: 'any',
           min: '0',
@@ -69,15 +73,25 @@ const groups: readonly {id: string; title: string; fields: readonly Field[]}[] =
       fields: [
         {
           key: 'memoryCacheGiB',
-          label: 'Memory cache (GiB)',
+          label: 'Memory cache',
+          unit: 'GiB',
           hint: 'Soft budget for computation caches. Active models may exceed it.',
           step: 'any',
           min: '0',
         },
         {
           key: 'diskCacheGiB',
-          label: 'Disk cache (GiB)',
+          label: 'Disk cache',
+          unit: 'GiB',
           hint: 'Shared across projects, including space for cache maintenance.',
+          step: 'any',
+          min: '0',
+        },
+        {
+          key: 'cachePersistenceThresholdMs',
+          label: 'Disk cache threshold',
+          unit: 'ms',
+          hint: 'Minimum time for new computations to qualify for disk storage. 0 removes the time threshold.',
           step: 'any',
           min: '0',
         },
@@ -185,6 +199,10 @@ export class AppSettingsDialog {
         caption.textContent = field.label;
         const input = document.createElement('input');
         input.type = 'number';
+        input.setAttribute(
+          'aria-label',
+          field.unit ? `${field.label} (${field.unit})` : field.label,
+        );
         input.name = field.key;
         input.min = field.min;
         input.step = field.step;
@@ -194,7 +212,21 @@ export class AppSettingsDialog {
         hint.id = `setting-${field.key}-hint`;
         hint.textContent = field.hint;
         input.setAttribute('aria-describedby', hint.id);
-        label.append(caption, input, hint);
+        const control = document.createElement('div');
+        control.className = 'dialog-input-control settings-input';
+        control.append(input);
+        if (field.unit) {
+          const unit = document.createElement('span');
+          unit.className = 'dialog-input-unit';
+          unit.textContent = field.unit;
+          unit.setAttribute('aria-hidden', 'true');
+          control.style.setProperty(
+            '--input-unit-width',
+            `${field.unit.length}ch`,
+          );
+          control.append(unit);
+        }
+        label.append(caption, control, hint);
         fields.append(label);
         this.inputs.set(field.key, input);
         this.stops.push(

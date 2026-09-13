@@ -1,3 +1,4 @@
+import {mockComputationTime} from '../../../test/computation-clock.ts';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {afterEach, test} from 'node:test';
@@ -113,7 +114,8 @@ test('a font composed of subsets lays out mixed characters on one baseline', () 
     );
 });
 
-test('variable weights change contours and advances and restore independently from disk', () => {
+test('variable weights change contours and advances and restore independently from disk', t => {
+  mockComputationTime(t);
   const bytes = readFileSync(
     new URL('./fonts/Roboto-variable-subset.ttf', import.meta.url),
   );

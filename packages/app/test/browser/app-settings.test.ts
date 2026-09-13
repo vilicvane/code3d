@@ -101,7 +101,16 @@ test(
       '',
     );
     assert.equal(await dialog.locator('[name=diskCacheGiB]').inputValue(), '2');
-    for (const key of ['snapshotConcurrency', 'memoryCacheGiB', 'diskCacheGiB'])
+    assert.equal(
+      await dialog.locator('[name=cachePersistenceThresholdMs]').inputValue(),
+      '1',
+    );
+    for (const key of [
+      'snapshotConcurrency',
+      'memoryCacheGiB',
+      'diskCacheGiB',
+      'cachePersistenceThresholdMs',
+    ])
       assert.equal(
         await dialog.locator(`[name=${key}]`).getAttribute('max'),
         null,
@@ -120,10 +129,12 @@ test(
       snapshotConcurrency: '64',
       memoryCacheGiB: '128.5',
       diskCacheGiB: '256.5',
+      cachePersistenceThresholdMs: '0.75',
     }))
       await fillSetting(page, key, value);
     await dialog.getByRole('button', {name: 'Save', exact: true}).click();
     await dialog.waitFor({state: 'hidden'});
+    assert.equal((await saved(page)).cachePersistenceThresholdMs, 0.75);
     assert.ok(Math.abs((await ratio()) - 1) < 0.02);
     await page.reload();
     await page.getByRole('button', {name: 'Settings', exact: true}).click();
@@ -134,6 +145,10 @@ test(
     assert.equal(
       await dialog.locator('[name=snapshotConcurrency]').inputValue(),
       '64',
+    );
+    assert.equal(
+      await dialog.locator('[name=cachePersistenceThresholdMs]').inputValue(),
+      '0.75',
     );
     await fillSetting(page, 'editDelayMs', '875');
     await fillSetting(page, 'diskCacheGiB', '512.5');
@@ -197,12 +212,20 @@ test(
     const node = await input.elementHandle();
     await page.evaluate(async () => {
       const {appSettings} = await import('/test/browser/app-settings-host.ts');
-      appSettings.save({...appSettings.value, memoryCacheGiB: 4.5});
+      appSettings.save({
+        ...appSettings.value,
+        memoryCacheGiB: 4.5,
+        cachePersistenceThresholdMs: 0,
+      });
     });
     await second.waitForFunction(
       () =>
         (document.querySelector('[name=memoryCacheGiB]') as HTMLInputElement)
           .value === '4.5',
+    );
+    assert.equal(
+      await second.locator('[name=cachePersistenceThresholdMs]').inputValue(),
+      '0',
     );
     assert.equal(await input.inputValue(), '875');
     assert.ok(await input.evaluate((input, node) => input === node, node));
@@ -260,7 +283,7 @@ test(
 );
 
 test(
-  'execution and persistence Workers use changed budgets without reloading the page',
+  'execution and persistence Workers use changed budgets and disk thresholds without reloading the page',
   {timeout: 120_000},
   async t => {
     const {page} = await fixture(t);
@@ -280,10 +303,17 @@ test(
             snapshotConcurrency: index ? 8 : 1,
             memoryCacheGiB: budget,
             diskCacheGiB: budget,
+            cachePersistenceThresholdMs: index ? 0 : 1000,
           });
-          const source = `import {box} from '@code3d/core';
+          const source = `import {box, cache} from '@code3d/core';
           import {kernelOperationCacheStats} from '@code3d/core/tooling';
           if (kernelOperationCacheStats().maximumBytes !== ${budget * 1024 ** 3}) throw new Error('Memory budget was not applied: ' + kernelOperationCacheStats().maximumBytes + ', expected ${budget * 1024 ** 3}');
+          const before = kernelOperationCacheStats().persistentWrites;
+          cache((value: number) => {
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+            return {value};
+          }, [${index}]);
+          if (kernelOperationCacheStats().persistentWrites - before !== ${index}) throw new Error('Disk threshold was not applied');
           export default box(${3 + index}, 4, 5);`;
           const module = await client.compile(
             {files: [{path: '/model.ts', source}]},
