@@ -20,7 +20,7 @@ const authoringValues = [
   'pivotPoint',
   'bezier',
   'box',
-  'cached',
+  'cache',
   'circle',
   'coil',
   'cut',

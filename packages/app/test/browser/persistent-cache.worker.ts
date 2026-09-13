@@ -20,7 +20,14 @@ export type CacheRequest = {
   summary?: boolean;
 };
 export type CacheResult = {
-  probe?: {computes: number; encodes: number; decodes: number; builds: number};
+  probe?: {
+    computes: number;
+    encodes: number;
+    decodes: number;
+    builds: number;
+    cheapComputes: number;
+    cheapEncodes: number;
+  };
   milliseconds: number;
   stats: TestModelPipeline['kernelCacheStats'];
   objects?: string;

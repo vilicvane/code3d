@@ -90,7 +90,7 @@ loft 使用第一截面，extrude 保留输入面。group 将求解位姿统一�
 状态须显式传参。builder 返回的单个实体所有权转移给 Core；作者负责释放中间形状，
 不能再复用或删除已转移的返回形状。screws 螺纹复用同一机制，不再维护私有 B-Rep LRU。
 
-公开 `cached(fn, options?)` 处理同步数据，内部 `cachedArtifact()` 为相同缓存机制
+公开 `cache(fn)` / `cache(fn, args)` 处理同步数据，内部 `cachedArtifact()` 为相同缓存机制
 增加内容身份、retain/instantiate/release 和远端查询接纳。内存直接保留计算/解码
 结果，encoder/decoder 只在磁盘写入/恢复时运行。几何、bounds、mesh、字体解析、
 CSS 解析和字形轮廓共用预算；解析后的字体对象只驻内存。定义身份与持久化边界见

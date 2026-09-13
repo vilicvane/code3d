@@ -1,3 +1,4 @@
+import {mockComputationTime} from '../../../test/computation-clock.ts';
 import assert from 'node:assert/strict';
 import {glob, readFile} from 'node:fs/promises';
 import {after, before, test} from 'node:test';
@@ -25,7 +26,7 @@ async function fingerprints(
   path = '/model.ts',
 ) {
   const files: Record<string, string> = {
-    '/core.js': 'export const cached = () => {};',
+    '/core.js': 'export const cache = () => {};',
     '/replicad.js': 'export const definePrimitive = () => {};',
     ...additional,
     [path]: source,
@@ -51,10 +52,10 @@ async function fingerprints(
 }
 
 test('fingerprints exclude export/position/unused edits and include transitive local helpers', async () => {
-  const source = `import {cached} from '@code3d/core';
+  const source = `import {cache} from '@code3d/core';
 const scale = 2;
 function helper(input: number) {return input * scale;}
-export const run = cached((value: number) => helper(value));
+export const run = cache((value: number) => helper(value));
 const unrelated = 1;`;
   const expected = await fingerprints(source);
   assert.equal(expected.length, 1);
@@ -75,21 +76,57 @@ const unrelated = 1;`;
   );
 });
 
+test('immediate arguments are excluded from definition fingerprints while codecs still contribute', async () => {
+  const source = `import {cache} from '@code3d/core';
+function build(value: number) {return value * 2;}
+const run = cache(build);`;
+  const expected = await fingerprints(source);
+  assert.equal(expected.length, 1);
+  for (const args of ['[2]', '[3]', '[]'])
+    assert.deepEqual(
+      await fingerprints(
+        source.replace('cache(build)', `cache(build, ${args})`),
+      ),
+      expected,
+    );
+  const invoke = `import {cache} from '@code3d/core';
+function invoke(input: number) {return cache((value: number) => value * 2, [input]);}`;
+  assert.equal((await fingerprints(invoke)).length, 1);
+  assert.deepEqual(
+    await fingerprints(invoke.replace('[input]', '[input + 1]')),
+    await fingerprints(invoke),
+  );
+  const codec =
+    ', {encoder: (value: number) => new Uint8Array([value]), decoder: (bytes: Uint8Array) => bytes[0]}';
+  const deferred = source.replace(
+    'cache(build)',
+    `cache(build, undefined${codec})`,
+  );
+  assert.deepEqual(
+    await fingerprints(deferred.replace('undefined', '[2]')),
+    await fingerprints(deferred),
+  );
+  assert.notDeepEqual(
+    await fingerprints(deferred.replace('bytes[0]', 'bytes[0] + 1')),
+    await fingerprints(deferred),
+  );
+});
+
 test('aliases, namespaces and barrels resolve cache factories without matching shadowed names', async () => {
   const sources = [
-    `import {cached as memo} from '@code3d/core'; const fn = memo((x: number) => x * 2);`,
-    `import * as core from '@code3d/core'; const fn = core.cached((x: number) => x * 2);`,
-    `import {cached} from '@code3d/core'; const memo = cached; const fn = memo((x: number) => x * 2);`,
+    `import {cache as memo} from '@code3d/core'; const fn = memo((x: number) => x * 2);`,
+    `import * as core from '@code3d/core'; const fn = core.cache((x: number) => x * 2);`,
+    `import {cache} from '@code3d/core'; const memo = cache; const fn = memo((x: number) => x * 2);`,
     `import {memo} from './barrel.js'; const fn = memo((x: number) => x * 2);`,
     `import {definePrimitive as primitive} from '@code3d/core/replicad'; const fn = primitive(() => 42);`,
-    `const {cached: memo} = require('@code3d/core'); const fn = memo((x: number) => x * 2);`,
-    `const core = require('@code3d/core'); const fn = core.cached((x: number) => x * 2);`,
+    `const {cache: memo} = require('@code3d/core'); const fn = memo((x: number) => x * 2);`,
+    `const core = require('@code3d/core'); const fn = core.cache((x: number) => x * 2);`,
   ];
   for (const source of sources)
     assert.equal(
       (
         await fingerprints(source, {
-          '/barrel.js': `export {cached as memo} from '@code3d/core';`,
+          '/barrel.js': `export {cache as memo} from '@code3d/core';`,
         })
       ).length,
       1,
@@ -97,7 +134,7 @@ test('aliases, namespaces and barrels resolve cache factories without matching s
   assert.equal(
     (
       await fingerprints(
-        `import {cached} from '@code3d/core'; function f(cached: Function) {return cached(() => 42);}`,
+        `import {cache} from '@code3d/core'; function f(cache: Function) {return cache(() => 42);}`,
       )
     ).length,
     0,
@@ -105,7 +142,7 @@ test('aliases, namespaces and barrels resolve cache factories without matching s
   assert.equal(
     (
       await fingerprints(
-        `import {cached} from '@code3d/core'; function f(fn: Function) {return cached(fn);}`,
+        `import {cache} from '@code3d/core'; function f(fn: Function) {return cache(fn);}`,
       )
     ).length,
     0,
@@ -113,7 +150,7 @@ test('aliases, namespaces and barrels resolve cache factories without matching s
 });
 
 test('imported static functions resolve through barrels while factory results remain memory-only', async () => {
-  const source = `import {cached} from '@code3d/core'; import {build} from './barrel.js'; const fn = cached(build);`;
+  const source = `import {cache} from '@code3d/core'; import {build} from './barrel.js'; const fn = cache(build);`;
   const files = {
     '/barrel.js': `export {build} from './build.js';`,
     '/build.js': 'export function build(x) {return x * 2;}',
@@ -131,7 +168,7 @@ test('imported static functions resolve through barrels while factory results re
   assert.equal(
     (
       await fingerprints(
-        `import {cached} from '@code3d/core'; import build from './build.js'; const fn = cached(build);`,
+        `import {cache} from '@code3d/core'; import build from './build.js'; const fn = cache(build);`,
         {'/build.js': 'export default function build(x) {return x * 2;}'},
       )
     ).length,
@@ -142,7 +179,7 @@ test('imported static functions resolve through barrels while factory results re
       await fingerprints(
         `import {memo} from './barrel.js'; const fn = memo(() => 42);`,
         {
-          '/barrel.js': `import {cached} from '@code3d/core'; export {cached as memo};`,
+          '/barrel.js': `import {cache} from '@code3d/core'; export {cache as memo};`,
         },
       )
     ).length,
@@ -153,7 +190,7 @@ test('imported static functions resolve through barrels while factory results re
       await fingerprints(
         `import {memo} from './barrel.js'; const fn = memo(() => 42);`,
         {
-          '/barrel.js': `import {cached} from '@code3d/core'; export const memo = cached;`,
+          '/barrel.js': `import {cache} from '@code3d/core'; export const memo = cache;`,
         },
       )
     ).length,
@@ -163,24 +200,24 @@ test('imported static functions resolve through barrels while factory results re
 
 test('captured function and loop environments keep independent memory identities', async () => {
   for (const body of [
-    'function make(factor: number) {return cached((x: number) => x * factor);}',
-    'function make({factor}: {factor: number}) {return cached((x: number) => x * factor);}',
-    'function make(factor: number) {const scale = factor * 2; return cached((x: number) => x * scale);}',
-    'for (const factor of [2, 3]) {cached((x: number) => x * factor);}',
+    'function make(factor: number) {return cache((x: number) => x * factor);}',
+    'function make({factor}: {factor: number}) {return cache((x: number) => x * factor);}',
+    'function make(factor: number) {const scale = factor * 2; return cache((x: number) => x * scale);}',
+    'for (const factor of [2, 3]) {cache((x: number) => x * factor);}',
   ])
     assert.equal(
-      (await fingerprints(`import {cached} from '@code3d/core'; ${body}`))
+      (await fingerprints(`import {cache} from '@code3d/core'; ${body}`))
         .length,
       0,
     );
 });
 
 test('static import graph, local codecs and named builders contribute to identity', async () => {
-  const source = `import {cached} from '@code3d/core'; import {helper} from './helper.js';
+  const source = `import {cache} from '@code3d/core'; import {helper} from './helper.js';
 function build(x: number) {return helper(x);}
 const encode = (x: number) => new Uint8Array([x]);
 const decode = (x: Uint8Array) => x[0];
-const fn = cached(build, {encoder: encode, decoder: decode});`;
+const fn = cache(build, undefined, {encoder: encode, decoder: decode});`;
   const dependencies = {
     '/helper.js': `import {factor} from './factor.js'; export function helper(x) {return factor * x;}`,
     '/factor.js': 'export const factor = 2;',
@@ -217,13 +254,14 @@ test('the prebundled Screws package retains its thread, cup and hexalobular prim
   assert.equal(new Set(definitions).size, 3);
 });
 
-test('compiled cached/primitive definitions reuse across edits and restore from persistent artifacts', async () => {
+test('compiled cache/primitive definitions reuse across edits and restore from persistent artifacts', async t => {
+  mockComputationTime(t);
   const compiler = await createTestModelPipeline(server);
-  const base = `import {cached} from '@code3d/core';
+  const base = `import {cache} from '@code3d/core';
 import {definePrimitive, replicad} from '@code3d/core/replicad';
 const factor = 2;
 function radius(x: number) {return x * factor;}
-const data = cached((x: number) => ({radius: radius(x)}), {
+const data = cache((x: number) => ({radius: radius(x)}), undefined, {
   encoder: (value) => new Uint8Array([value.radius]),
   decoder: (bytes) => ({radius: bytes[0]}),
 });
@@ -256,6 +294,16 @@ const unrelated = 1;`;
     assert.equal(repeat.diagnostic, undefined);
     assert.equal(tooling.kernelOperationCacheStats().misses, before.misses);
     assert.ok(tooling.kernelOperationCacheStats().hits > before.hits);
+    const immediate = base
+      .replace('undefined, {', '[2], {')
+      .replace('data(2).radius', 'data.radius');
+    const immediateResult = await compile(immediate);
+    assert.equal(immediateResult.diagnostic, undefined);
+    assert.equal(tooling.kernelOperationCacheStats().misses, before.misses);
+    assert.deepEqual(
+      immediateResult.fallback?.mesh?.vertices,
+      first.fallback?.mesh?.vertices,
+    );
     const records = new Map<string, Uint8Array>();
     store = {
       get: id => records.get(id),
@@ -275,7 +323,7 @@ const unrelated = 1;`;
     await compile(base);
     assert.ok(records.size > 0);
     tooling.clearKernelOperationCache();
-    const restored = await compile(base);
+    const restored = await compile(immediate);
     assert.equal(restored.diagnostic, undefined);
     assert.equal(tooling.kernelOperationCacheStats().misses, 0);
     assert.ok(tooling.kernelOperationCacheStats().persistentHits >= 2);
@@ -291,15 +339,16 @@ const unrelated = 1;`;
   }
 });
 
-test('CommonJS cached libraries keep their module format and invalidate changed transitive dependencies', async () => {
+test('CommonJS cache libraries keep their module format and invalidate changed transitive dependencies', async t => {
+  mockComputationTime(t);
   const files = new Map(
     Object.entries({
       '/node_modules/radii/package.json': JSON.stringify({
         main: 'index.cjs',
         types: 'index.d.ts',
       }),
-      '/node_modules/radii/index.cjs': `const {cached} = require('@code3d/core');
-const factor = require('./factor.json'); exports.radius = cached((x) => x * factor);`,
+      '/node_modules/radii/index.cjs': `const {cache} = require('@code3d/core');
+const factor = require('./factor.json'); exports.radius = cache((x) => x * factor);`,
       '/node_modules/radii/index.d.ts':
         'export function radius(value: number): number;',
       '/node_modules/radii/factor.json': '2',

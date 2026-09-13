@@ -36,6 +36,12 @@ Explicit versions keep normal resolution; production uses published packages.
 See [package environment and resolution](../../.agents/docs/architecture/runtime.md#包环境与模块解析)
 for the shared Browser storage and local-folder rules.
 
+Open **Settings → Cache** to set the **Disk cache threshold (ms)**, which defaults
+to 1 ms. It accepts fractional values; 0 removes the computation-time threshold.
+Changes apply to new computations from the next model execution, preserving
+existing caches. Faster results still use memory; downloads and compiled build
+artifacts keep their own cache policies.
+
 Each opened source file has its own cached build. The App can show its last
 successful cached preview while checking current files in the background.
 Compilation and model execution use separate Workers, so terminating a stuck

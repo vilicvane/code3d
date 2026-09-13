@@ -79,7 +79,8 @@ test('snapshot batches preserve nested origins, transforms and mesh ownership ac
         transferred,
         batch.queries,
         () => {},
-        (query, value) => batch.accept(query, value),
+        (query, value, milliseconds) =>
+          batch.accept(query, value, milliseconds),
       );
     }
     const actual = objects.map(createModelSnapshotter());
@@ -117,8 +118,8 @@ test('a cancelled batch retains completed queries and schedules only its unfinis
           () => {
             if (completed === 3) throw new Error('Cancelled');
           },
-          (query, value) => {
-            batch.accept(query, value);
+          (query, value, milliseconds) => {
+            batch.accept(query, value, milliseconds);
             completed++;
           },
         ),
@@ -135,7 +136,8 @@ test('a cancelled batch retains completed queries and schedules only its unfinis
       remaining.encode(),
       remaining.queries,
       () => {},
-      (query, value) => remaining.accept(query, value),
+      (query, value, milliseconds) =>
+        remaining.accept(query, value, milliseconds),
     );
     assert.deepEqual(planModelSnapshotQueries([object]), []);
   } finally {

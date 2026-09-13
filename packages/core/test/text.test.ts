@@ -1,3 +1,4 @@
+import {mockComputationTime} from '../../../test/computation-clock.ts';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {afterEach, test} from 'node:test';
@@ -233,7 +234,8 @@ test('text solids work as embossing and engraving boolean operands', () => {
   );
 });
 
-test('content identities reuse fonts and restore text geometry from persistent artifacts', () => {
+test('content identities reuse fonts and restore text geometry from persistent artifacts', t => {
+  mockComputationTime(t);
   const entries = new Map<string, Uint8Array>();
   setKernelArtifactStore({
     get: id => entries.get(id),

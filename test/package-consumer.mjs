@@ -1,5 +1,6 @@
 // Copied into a fresh npm consumer by scripts/test-packages.mjs. No source hooks.
 import assert from 'node:assert/strict';
+import {mock} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import * as core from '@code3d/core';
 import * as tooling from '@code3d/core/tooling';
@@ -67,8 +68,10 @@ tooling.setKernelArtifactStore({
   touchMany: ids => ids.map(id => records.has(id)),
   flush() {},
 });
+let milliseconds = 0;
+mock.method(performance, 'now', () => (milliseconds += 10));
 let calls = 0;
-const compute = core.cached(
+const compute = core.cache(
   tooling.identifyCachedFunction(value => {
     calls++;
     return {value};
@@ -80,6 +83,7 @@ tooling.clearKernelOperationCache();
 assert.deepEqual(compute(7), {value: 7});
 assert.equal(calls, 1);
 assert.equal(tooling.kernelOperationCacheStats().persistentHits, 1);
+mock.restoreAll();
 
 const shapes = [];
 try {

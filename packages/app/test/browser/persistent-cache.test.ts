@@ -86,7 +86,7 @@ function valid(result: CacheResult) {
 }
 
 test(
-  'fresh Workers and page refresh restore complete geometry; edits and undo retain both histories',
+  'fresh Workers restore costly geometry and recompute cheap operations; edits retain both histories',
   {timeout: 180_000},
   async t => {
     const page = await fixture(t);
@@ -101,11 +101,9 @@ test(
       true,
     );
     valid(restored);
-    assert.equal(restored.stats.memory!.misses, 0);
-    assert.equal(
-      restored.stats.memory!.persistentHits,
-      cold.stats.memory!.entries,
-    );
+    assert.ok(restored.stats.memory!.persistentHits > 0);
+    assert.ok(restored.stats.memory!.misses > 0);
+    assert.ok(restored.stats.memory!.misses < cold.stats.memory!.misses);
     assert.equal(digest(restored.objects!), digest(cold.objects!));
     sameTopology(JSON.parse(restored.topology!), JSON.parse(cold.topology!));
     assert.ok(restored.stepBytes! > 1000);
@@ -121,11 +119,13 @@ test(
     await page.reload();
     const undo = await compile(page, {source, inspect: true});
     valid(undo);
-    assert.equal(undo.stats.memory!.misses, 0);
+    assert.ok(undo.stats.memory!.persistentHits > 0);
+    assert.ok(undo.stats.memory!.misses < cold.stats.memory!.misses);
     assert.equal(digest(undo.objects!), digest(cold.objects!));
     const redo = await compile(page, {source: changed}, 'compiler', true);
     valid(redo);
-    assert.equal(redo.stats.memory!.misses, 0);
+    assert.ok(redo.stats.memory!.persistentHits > 0);
+    assert.ok(redo.stats.memory!.misses < cold.stats.memory!.misses);
     t.diagnostic(
       JSON.stringify({
         coldMs: cold.milliseconds,
@@ -138,19 +138,24 @@ test(
 );
 
 test(
-  'public cached and primitive constructors skip computation on memory and OPFS hits',
+  'cache and primitive constructors admit costly work to OPFS while cheap values stay in memory',
   {timeout: 180_000},
   async t => {
     const page = await fixture(t);
-    const source = `import {cached} from '@code3d/core';
+    const source = `import {cache} from '@code3d/core';
 import {definePrimitive, replicad} from '@code3d/core/replicad';
-const counts = {computes: 0, encodes: 0, decodes: 0, builds: 0};
-const data = cached((radius: number) => {counts.computes++; return {radius};}, {
+const counts = {computes: 0, encodes: 0, decodes: 0, builds: 0, cheapComputes: 0, cheapEncodes: 0};
+const wait = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);
+const radius = cache(() => {counts.cheapComputes++; return 2;}, [], {
+  encoder: value => {counts.cheapEncodes++; return new Uint8Array([value]);},
+  decoder: bytes => bytes[0],
+});
+const data = cache((radius: number) => {counts.computes++; wait(); return {radius};}, undefined, {
   encoder: value => {counts.encodes++; return new Uint8Array([value.radius]);},
   decoder: bytes => {counts.decodes++; return {radius: bytes[0]};},
 });
-const primitive = definePrimitive((radius: number) => {counts.builds++; return replicad.makeCylinder(radius, 4);});
-export const part = primitive(data(2).radius);
+const primitive = definePrimitive((radius: number) => {counts.builds++; wait(); return replicad.makeCylinder(radius, 4);});
+export const part = primitive(data(radius).radius);
 globalThis.postMessage({phase: 'cached-probe', counts});`;
     const cold = await compile(page, {source});
     valid(cold);
@@ -159,6 +164,8 @@ globalThis.postMessage({phase: 'cached-probe', counts});`;
       encodes: 1,
       decodes: 0,
       builds: 1,
+      cheapComputes: 1,
+      cheapEncodes: 0,
     });
     const hot = await compile(page, {
       source:
@@ -172,15 +179,20 @@ globalThis.postMessage({phase: 'cached-probe', counts});`;
       encodes: 0,
       decodes: 0,
       builds: 0,
+      cheapComputes: 0,
+      cheapEncodes: 0,
     });
     const restored = await compile(page, {source}, 'compiler', true);
     valid(restored);
-    assert.equal(restored.stats.memory!.misses, 0);
+    assert.ok(restored.stats.memory!.persistentHits > 0);
+    assert.ok(restored.stats.memory!.misses < cold.stats.memory!.misses);
     assert.deepEqual(restored.probe, {
       computes: 0,
       encodes: 0,
       decodes: 1,
       builds: 0,
+      cheapComputes: 1,
+      cheapEncodes: 0,
     });
     // Skipping the builder's traced calls changes execution order, while model
     // geometry, source locations and operation identities remain fresh and equal.
@@ -218,7 +230,8 @@ test(
       true,
     );
     valid(restored);
-    assert.equal(restored.stats.memory!.misses, 0);
+    assert.ok(restored.stats.memory!.persistentHits > 0);
+    assert.ok(restored.stats.memory!.misses < cold.stats.memory!.misses);
     assert.equal(restored.objects, cold.objects);
     t.diagnostic(
       JSON.stringify({
@@ -255,7 +268,8 @@ test(
     assert.equal(changed.stats.memory!.persistentHits, 0);
     const original = await compile(page, {source}, 'four');
     valid(original);
-    assert.equal(original.stats.memory!.misses, 0);
+    assert.ok(original.stats.memory!.persistentHits > 0);
+    assert.ok(original.stats.memory!.misses < changed.stats.memory!.misses);
   },
 );
 
@@ -525,7 +539,9 @@ export default group(extrude(text('B8i', sans, 10),2));`;
     valid(restored);
     assert.equal(restored.objects, cold.objects);
     assert.ok(restored.stats.memory!.persistentHits > 0);
-    assert.equal(restored.stats.memory!.misses, 1); // The parsed font is memory-only.
+    // The parsed font and cheap geometry operations are recomputed.
+    assert.ok(restored.stats.memory!.misses > 0);
+    assert.ok(restored.stats.memory!.misses < cold.stats.memory!.misses);
     const changed = await compile(page, {
       source,
       summary: true,

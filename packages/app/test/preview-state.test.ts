@@ -14,7 +14,6 @@ const emptyModule: ModelModule = {
   exports: new Map(),
   catalog: [],
   sourceTargets: [],
-  evaluationContexts: [],
   designArguments: [],
 };
 

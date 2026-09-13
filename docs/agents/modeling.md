@@ -68,7 +68,7 @@ all of its runtime instances.
 
 ## Reuse expensive computations
 
-Use `cached()` for deterministic synchronous data and `definePrimitive()` for
+Use `cache()` for deterministic synchronous data and `definePrimitive()` for
 custom Replicad solids. Both reuse repeated calls, so pass changing captured state
 as arguments; treat cached data as immutable and keep native shapes behind the
 primitive builder. Read the [cache contract](../../packages/web/src/content/docs/docs/reference/core.md#cached-computations)

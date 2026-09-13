@@ -1,6 +1,7 @@
+import {mockComputationTime} from '../../../test/computation-clock.ts';
 import assert from 'node:assert/strict';
 import {afterEach, beforeEach, test} from 'node:test';
-import {cached} from '../bld/library/cached.js';
+import {cache as cacheValue} from '../bld/library/cached.js';
 import {googleFontSources} from '../bld/library/google-font.js';
 import {
   clearKernelOperationCache,
@@ -10,7 +11,8 @@ import {
 } from '../bld/library/kernel-cache.js';
 
 let cache: ReturnType<typeof createComputationCache>;
-beforeEach(() => {
+beforeEach(t => {
+  mockComputationTime(t);
   cache = createComputationCache({
     maximumBytes: 4096,
     nativeAllocatedBytes: () => 0,
@@ -34,7 +36,7 @@ afterEach(() => {
 
 test('pure computation and Google Font CSS caches work without an installed kernel', () => {
   let computes = 0;
-  const twice = cached((value: number) => {
+  const twice = cacheValue((value: number) => {
     computes++;
     return value * 2;
   });
@@ -681,4 +683,170 @@ test('pending encoded writes count toward memory pressure without limiting the c
   assert.equal(cache.kernelOperationCacheStats().entries, 2);
   pendingWriteBytes = 0;
   assert.equal(cache.kernelOperationCacheStats().pendingPersistenceBytes, 0);
+});
+
+test('1ms persistence admission excludes lookup/retain cost and survives warm hits, store changes and cancellation', t => {
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  const records = new Map<string, Uint8Array>();
+  let encodes = 0;
+  const store = {
+    get(id: string) {
+      now += 100;
+      return records.get(id);
+    },
+    getMany: (ids: readonly string[]) => ids.map(id => records.get(id)),
+    set: (id: string, bytes: Uint8Array) => {
+      records.set(id, bytes);
+    },
+    touch: (id: string) => records.has(id),
+    touchMany: (ids: readonly string[]) => ids.map(id => records.has(id)),
+    delete: (id: string) => {
+      records.delete(id);
+    },
+    flush() {},
+  };
+  const lifecycle = {
+    estimateBytes: () => 8,
+    retain(value: number) {
+      now += 100;
+      return value;
+    },
+    instantiate: (value: number) => value,
+    release() {},
+  };
+  const codec = {
+    encoder(value: number) {
+      encodes++;
+      now += 100;
+      return new Uint8Array([value]);
+    },
+    decoder: (bytes: Uint8Array) => bytes[0],
+  };
+  const key = (id: number) => kernelOperationKey('admission', [id], []);
+  const compute = (id: number, milliseconds: number, after?: () => void) =>
+    cache.evaluateCachedArtifact(
+      key(id),
+      lifecycle,
+      () => {
+        now += milliseconds;
+        after?.();
+        return id;
+      },
+      codec,
+    );
+  cache.setKernelArtifactStore(store);
+  const end = cache.beginKernelOperationEvaluation();
+  compute(1, 0.999);
+  compute(2, 1);
+  end();
+  assert.equal(records.has(key(1).id), false);
+  assert.equal(records.has(key(2).id), true);
+  assert.equal(encodes, 1);
+  // Even a host storage reconnect must not promote fast memory entries.
+  cache.setKernelArtifactStore(store);
+  const warm = cache.beginKernelOperationEvaluation();
+  for (const id of [1, 2])
+    assert.equal(
+      cache.findKernelOperation(key(id), lifecycle, codec)?.value,
+      id,
+    );
+  warm();
+  assert.equal(encodes, 1);
+  assert.equal(records.has(key(1).id), false);
+  // Work done before a disk store exists carries the same eligibility decision.
+  cache.setKernelArtifactStore(undefined);
+  compute(3, 0);
+  compute(4, 1);
+  cache.setKernelArtifactStore(store);
+  const connected = cache.beginKernelOperationEvaluation();
+  for (const id of [3, 4]) cache.findKernelOperation(key(id), lifecycle, codec);
+  connected();
+  assert.equal(records.has(key(3).id), false);
+  assert.equal(records.has(key(4).id), true);
+  let cancelled = false;
+  const interrupted = cache.beginKernelOperationEvaluation(() => {
+    if (cancelled) throw new Error('Cancelled');
+  });
+  compute(5, 0);
+  compute(6, 1, () => {
+    cancelled = true;
+  });
+  assert.throws(() => compute(7, 1), /Cancelled/);
+  interrupted();
+  assert.equal(records.has(key(5).id), false);
+  assert.equal(records.has(key(6).id), true);
+  cache.clearKernelOperationCache();
+  assert.equal(cache.findKernelOperation(key(2), lifecycle, codec)?.value, 2);
+  // A durable value remains eligible after restoration and peer eviction.
+  records.delete(key(2).id);
+  cache.setKernelArtifactStore(store);
+  cache.findKernelOperation(key(2), lifecycle, codec);
+  assert.equal(records.has(key(2).id), true);
+});
+
+test('remote admission uses computation time and threshold changes only affect new entries', () => {
+  const records = new Map<string, Uint8Array>();
+  const store = {
+    get: id => records.get(id),
+    getMany: ids => ids.map(id => records.get(id)),
+    set: (id, bytes) => {
+      records.set(id, bytes);
+    },
+    touch: id => records.has(id),
+    touchMany: ids => ids.map(id => records.has(id)),
+    delete: id => {
+      records.delete(id);
+    },
+    flush() {},
+  } satisfies import('../bld/library/kernel-cache.js').KernelArtifactStore;
+  cache.setKernelArtifactStore(store);
+  const quick = kernelOperationKey('remote', [1], []);
+  const slow = kernelOperationKey('remote', [2], []);
+  cache.acceptKernelOperation(
+    quick,
+    lifecycle,
+    {result: 1, instance: 'worker'},
+    0.3,
+  );
+  cache.acceptKernelOperation(
+    slow,
+    lifecycle,
+    {result: 2, instance: 'worker'},
+    1,
+  );
+  assert.equal(records.has(quick.id), false);
+  assert.equal(records.has(slow.id), true);
+  cache.setKernelCachePersistenceThreshold(0);
+  assert.equal(cache.findKernelOperation(quick, lifecycle)?.value.result, 1);
+  assert.equal(records.has(quick.id), false);
+  const zero = kernelOperationKey('remote', [3], []);
+  cache.acceptKernelOperation(
+    zero,
+    lifecycle,
+    {result: 3, instance: 'worker'},
+    0,
+  );
+  assert.equal(records.has(zero.id), true);
+
+  cache.setKernelCachePersistenceThreshold(2.5);
+  for (const [id, milliseconds] of [
+    [4, 2.499],
+    [5, 2.5],
+  ]) {
+    const key = kernelOperationKey('remote', [id], []);
+    cache.acceptKernelOperation(
+      key,
+      lifecycle,
+      {result: id, instance: 'worker'},
+      milliseconds,
+    );
+    assert.equal(records.has(key.id), id === 5);
+  }
+  // Raising the threshold does not revoke an existing entry's disk eligibility.
+  // A store reconnect models a new evaluation after a peer evicted its disk record.
+  records.delete(slow.id);
+  cache.setKernelArtifactStore(store);
+  cache.findKernelOperation(slow, lifecycle);
+  assert.equal(records.has(slow.id), true);
 });

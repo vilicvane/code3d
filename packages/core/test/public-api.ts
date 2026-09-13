@@ -17,7 +17,7 @@ import {
   extrude,
   font,
   googleFont,
-  cached,
+  cache,
   frustum,
   group,
   intersect,
@@ -608,20 +608,38 @@ box(1, 2, 3).relate(self => [
   pivot(1, 2, 3).rotate(0, 0, 90),
 ]);
 
-const double = cached((value: number) => value * 2);
+const double = cache((value: number) => value * 2);
 const doubled: number = double(2);
-const encoded = cached((value: number) => ({value}), {
+const encoded = cache((value: number) => ({value}), undefined, {
   encoder: value => new Uint8Array([value.value]),
   decoder: bytes => ({value: bytes[0]}),
 });
 const decodedValue: number = encoded(2).value;
 // @ts-expect-error Both codec functions are required.
-cached((value: number) => value, {encoder: value => new Uint8Array([value])});
+cache((value: number) => value, undefined, {
+  encoder: value => new Uint8Array([value]),
+});
 // @ts-expect-error The computation must be synchronous.
-cached(async (value: number) => value);
+cache(async (value: number) => value);
 // @ts-expect-error Argument types are preserved.
 double('2');
-void [doubled, decodedValue];
+const immediate: number = cache((a: number, b: number) => a + b, [
+  1, 2,
+] as const);
+const empty: number = cache(() => 42, []);
+const immediateDecoded: number = cache((value: number) => ({value}), [2], {
+  encoder: value => new Uint8Array([value.value]),
+  decoder: bytes => ({value: bytes[0]}),
+}).value;
+// @ts-expect-error Immediate argument types are preserved.
+cache((value: number) => value, ['2']);
+// @ts-expect-error Required arguments cannot be omitted.
+cache((value: number) => value, []);
+// @ts-expect-error Extra arguments are rejected.
+cache((value: number) => value, [1, 2]);
+// @ts-expect-error Immediate computations must also be synchronous.
+cache(async (value: number) => value, [2]);
+void [doubled, decodedValue, immediate, empty, immediateDecoded];
 
 box(2, 2, 2).relate(() =>
   pivotVertex(1).pivotOffset(1, 2, 3).rotate(10, 20, 30),

@@ -7,11 +7,13 @@ export type AppSettingsValues = Readonly<{
   snapshotConcurrency: number;
   memoryCacheGiB: number;
   diskCacheGiB: number;
+  cachePersistenceThresholdMs: number;
 }>;
 
 export type ExecutionSettings = Readonly<{
   snapshotConcurrency: number;
   memoryCacheBytes: number;
+  cachePersistenceThresholdMs: number;
 }>;
 
 export const appSettingsStorageKey = 'code3d-app-settings';
@@ -28,6 +30,7 @@ export function defaultAppSettings(): AppSettingsValues {
     ),
     memoryCacheGiB: 2,
     diskCacheGiB: 2,
+    cachePersistenceThresholdMs: 1,
   };
 }
 
@@ -64,6 +67,14 @@ export function validateAppSettings(value: AppSettingsValues): void {
     throw new AppSettingError(
       'snapshotConcurrency',
       'Enter a positive whole number of geometry workers.',
+    );
+  if (
+    !Number.isFinite(value.cachePersistenceThresholdMs) ||
+    value.cachePersistenceThresholdMs < 0
+  )
+    throw new AppSettingError(
+      'cachePersistenceThresholdMs',
+      'Enter a non-negative computation threshold in ms.',
     );
   for (const key of ['memoryCacheGiB', 'diskCacheGiB'] as const) {
     const budget = value[key];
@@ -106,6 +117,7 @@ export class AppSettings {
     return {
       snapshotConcurrency: this.values.snapshotConcurrency,
       memoryCacheBytes: this.values.memoryCacheGiB * gibibyte,
+      cachePersistenceThresholdMs: this.values.cachePersistenceThresholdMs,
     };
   }
 
@@ -130,7 +142,8 @@ export class AppSettings {
     try {
       const text = this.storage?.getItem(appSettingsStorageKey);
       if (!text) return this.defaults;
-      const value = JSON.parse(text) as AppSettingsValues;
+      // Newly added preferences get their default without discarding saved choices.
+      const value: AppSettingsValues = {...this.defaults, ...JSON.parse(text)};
       validateAppSettings(value);
       return value;
     } catch {

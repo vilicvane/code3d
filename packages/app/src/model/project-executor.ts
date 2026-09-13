@@ -70,6 +70,9 @@ export class ProjectExecutor {
       const runtime = this.runtime!;
       if (settings) {
         runtime.tooling.setKernelCacheBudget(settings.memoryCacheBytes);
+        runtime.tooling.setKernelCachePersistenceThreshold(
+          settings.cachePersistenceThresholdMs,
+        );
         this.snapshotPool!.setConcurrency(settings.snapshotConcurrency);
       }
       runtime.resources.install(artifact.resources);

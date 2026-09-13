@@ -170,23 +170,19 @@ export class SnapshotWorkerPool {
           stats.encodeMs += performance.now() - before;
           this.localInputBytes = bytes.byteLength;
           this.accountMemory();
-          let previous = performance.now();
           this.tooling.executeSnapshotQueryBatch(
             batch.id,
             bytes,
             batch.queries,
             checkCancelled,
-            (query, value) => {
-              const now = performance.now();
-              stats.computeMs += now - previous;
-              batch.accept(query, value);
+            (query, value, milliseconds) => {
+              stats.computeMs += milliseconds;
+              batch.accept(query, value, milliseconds);
               stats.completed++;
-              previous = performance.now();
               this.accountMemory();
             },
             milliseconds => {
               stats.restoreMs += milliseconds;
-              previous = performance.now();
               this.accountMemory();
             },
           );
@@ -354,7 +350,7 @@ export class SnapshotWorkerPool {
         } else if (message.kind === 'result') {
           const query = pending.get(message.key)!;
           try {
-            batch.accept(query, message.value);
+            batch.accept(query, message.value, message.milliseconds);
           } catch (error) {
             fail(error instanceof Error ? error : new Error(String(error)));
             return;

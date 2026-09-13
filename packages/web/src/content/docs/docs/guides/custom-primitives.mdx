@@ -47,7 +47,7 @@ builders and their dependencies for persistent reuse; dynamic closures and
 ordinary Node calls use function object identity for memory reuse.
 
 Primitives share the same memory and disk budgets as Core computations and
-Screws. Use [`cached()`](../../reference/core/#cached-computations) for ordinary
+Screws. Use [`cache()`](../../reference/core/#cached-computations) for ordinary
 data computations; geometry needs `definePrimitive()` so Core manages its native
 resources.
 

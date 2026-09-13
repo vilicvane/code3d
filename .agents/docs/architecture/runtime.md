@@ -263,6 +263,10 @@ import 和顶层 await 的共享身份。
 每次求值用 `beginModelEvaluation` 建立上下文，在快照之后通过 `finally` 收尾。
 trace、provenance 和源码位置属于本次求值；缓存几何或依赖模型不携带上次源码
 偏移。完成快照与下一次求值独立，导出请求绑定已完成的 compile revision。
+源码联动在本次求值内按完成顺序和调用位置建立执行索引，查询具体 reach 或工具调用
+不能反复扫描整个 trace 集合。像素、顶点等纯数据循环同样会产生 trace；观察输入只
+遍历可枚举的数据属性，不读取 getter 或枚举 Math 等对象的非枚举成员。求值上下文
+仅由 Worker 内部使用，不随模型快照传回界面。
 
 生成的执行函数按内容去重，但浏览器原生 ESM 记录会保留到 Worker 结束；回收 Blob
 URL 不等于卸载模块。不能承诺无限多不同源码版本下 JavaScript 内存零增长。
@@ -284,7 +288,10 @@ URL 不等于卸载模块。不能承诺无限多不同源码版本下 JavaScrip
 
 编辑及补全调度在下一次请求读取延迟；渲染器订阅像素倍率上限并立即调整画布。
 ModelCompilerClient 发出执行请求时携带普通计算配置快照，ProjectExecutor 在执行
-边界更新 Core 历史缓存软预算与几何查询并行度；缩小并行度释放多余 Worker。
+边界更新 Core 历史缓存软预算、落盘耗时阈值与几何查询并行度；缩小并行度释放多余 Worker。
+落盘阈值默认 1ms，接受非负小数，0 取消耗时筛选；通过 Core tooling 的
+`setKernelCachePersistenceThreshold` 只影响之后计算的新条目，已有条目保留资格。
+读取设置时用字段默认值补齐未设置项，保留其他已保存偏好。
 页面预览和 Agent 观察使用同一偏好，取消/重启后的 Worker 仍收到当前值。
 ArtifactStoreHost 订阅磁盘预算并传给 I/O Worker，各次事务按当前预算打开日志；
 缩小预算时按现有日志整理规则淘汰缓存。新增订阅由所属页面/服务生命周期销毁。
@@ -298,12 +305,19 @@ ArtifactStoreHost 订阅磁盘预算并传给 I/O Worker，各次事务按当前
 支持 alias、namespace、re-export 和 CommonJS require。无关本地变量、源码位置
 及 export 变更不失效，引用的 helper/依赖变更失效。函数身份通过求值上下文注册，
 不改变原模块格式，每次定义绑定独立 callable，避免同一作者函数的不同 codec 串用。
-Core 自身沿用整体运行时身份，不重复分析其所有缓存定义。
+`cache(fn)` 返回缓存函数，`cache(fn, args)` 立即求值，共用定义身份和参数键。
+第二参数只参与运行时参数 key，第三参数 codec 才参与定义指纹，避免输入变化或
+调用方局部变量被误判为函数依赖。Core 自身沿用整体运行时身份，不重复分析其所有缓存定义。
 
 动态工厂结果、函数参数和捕获外层函数/循环绑定的闭包使用函数对象身份，仅在内存
 复用；普通 Node 调用亦如此。作者无需 id/version，动态状态必须显式传参。默认
 数据 codec 保留精确标量、循环/共享数据图、稀疏数组和共享二进制视图；自定义结果
-类型成对提供 encoder/decoder。缓存同步完成值，异步计算不能进入。内存命中直接
+类型成对提供 encoder/decoder。缓存同步完成值，异步计算不能进入。
+新计算只有 compute 耗时达到宿主配置的阈值（默认 1ms）才取得磁盘资格；资格随内存条目保留，低于阈值
+的结果仍参与内存 LRU，但命中、换 store 及取消收尾均不会补编码或写盘。磁盘恢复
+的条目保持已有资格，不用读取/解码时间反推计算成本。批量快照在 Core 内测量各次
+query 的计算时间，经 Worker 或本地回调传回 admission，不计输入恢复、消息传输
+和宿主的缓存接纳成本；原有持久化格式和 key 不变。内存命中直接
 复用保留值，不重新解码；资源所有权见[建模内核](modeling.md#互操作与资源所有权)。
 回归见 [cached-definitions](../../../packages/app/test/cached-definitions.test.ts)
 和 [cached](../../../packages/core/test/cached.test.ts)。

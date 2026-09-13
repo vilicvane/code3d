@@ -194,10 +194,19 @@ Try [mounting-plate.ts](../app/examples/sketches/mounting-plate.ts).
 
 ## Cached computations and custom primitives
 
-`cached(fn, options?)` memoizes synchronous, deterministic data computations.
+`cache(fn)` memoizes synchronous, deterministic data computations;
+`cache(fn, args)` immediately returns the cached result for an argument tuple.
+Both forms share the same function identity and argument keys. Supply custom
+codecs in the third argument: `cache(fn, undefined, options)` for a function or
+`cache(fn, args, options)` for a value.
 Pass changing captured state as arguments and treat returned data as immutable.
 Memory hits reuse the retained result; optional `encoder` / `decoder` pairs only
-run when saving to disk or restoring it. The App fingerprints static definitions
+run when saving to disk or restoring it. Newly computed entries are eligible
+for disk storage when computation reaches the configured threshold (1 ms by
+default). Faster results remain in memory and are not encoded or written on later
+memory hits. Change the threshold in **Settings → Cache** in the App; it applies
+to new computations and preserves existing cache entries. Existing
+disk records can still be restored. The App fingerprints static definitions
 and their dependencies for persistent reuse; dynamic closures and ordinary Node
 calls use function identity for memory reuse. No author cache IDs are needed.
 
