@@ -72,6 +72,8 @@ export class ModelRenderer {
   readonly grid: AdaptiveGrid;
   private readonly renderSize = new THREE.Vector2();
   private readonly stopSettings: () => void;
+  private readonly contentBounds = new THREE.Box3();
+  private readonly contentSphere = new THREE.Sphere();
 
   constructor(
     private readonly container: HTMLElement,
@@ -92,7 +94,6 @@ export class ModelRenderer {
     this.container.append(this.renderer.domElement);
 
     this.scene.background = new THREE.Color('#171815');
-    this.scene.fog = new THREE.Fog('#171815', 180, 430);
     this.scene.environment = studioEnvironment;
     this.scene.add(
       new THREE.HemisphereLight('#ffffff', '#737373', 1.2),
@@ -170,21 +171,31 @@ export class ModelRenderer {
     return frameCameraBounds(camera, box, availableFraction);
   }
 
-  updateCameraRange(cameraTarget: THREE.Vector3, viewDistance: number): void {
+  updateCameraRange(
+    cameraTarget: THREE.Vector3,
+    viewDistance: number,
+    content?: THREE.Object3D,
+  ): void {
     this.grid.focus.copy(cameraTarget);
     const distance = this.camera.position.distanceTo(cameraTarget);
     const shift = distance - viewDistance;
     const near = Math.max(Number.EPSILON, shift + viewDistance / 1000);
-    const far = shift + Math.max(viewDistance * 20, 1000);
+    let far = shift + Math.max(viewDistance * 20, 1000);
+    if (content) {
+      this.contentBounds.setFromObject(content);
+      if (!this.contentBounds.isEmpty()) {
+        this.contentBounds.getBoundingSphere(this.contentSphere);
+        far = Math.max(
+          far,
+          this.camera.position.distanceTo(this.contentSphere.center) +
+            this.contentSphere.radius * 1.01,
+        );
+      }
+    }
     if (near !== this.camera.near || far !== this.camera.far) {
       this.camera.near = near;
       this.camera.far = far;
       this.camera.updateProjectionMatrix();
-    }
-    const fog = this.scene.fog;
-    if (fog instanceof THREE.Fog) {
-      fog.near = shift + Math.max(180, viewDistance * 2);
-      fog.far = shift + Math.max(430, viewDistance * 5);
     }
   }
 

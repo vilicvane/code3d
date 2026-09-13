@@ -385,6 +385,10 @@ The grid legend at the bottom left shows the length of one small grid cell in
 the current 3D or sketch view. It updates as you zoom; source updates and
 diagnostics stack above it. Sketch wheel zoom has no fixed minimum or maximum.
 
+Model geometry does not fade with viewing distance. Zooming into large models
+keeps their distant geometry within the camera range; only the perspective grid
+fades into the background. This also applies to PNG exports.
+
 The 3D grid and coordinate indicator use the displayed model or group's local
 coordinates, or the common composition coordinates when previewing a collection
 or relation. Highlighting or moving a member keeps this frame fixed; the member's
