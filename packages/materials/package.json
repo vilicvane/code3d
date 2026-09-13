@@ -1,6 +1,6 @@
 {
   "name": "@code3d/materials",
-  "version": "0.0.1-alpha.5",
+  "version": "0.0.1-alpha.6",
   "publishConfig": {
     "access": "public"
   },
@@ -26,7 +26,7 @@
     "src"
   ],
   "peerDependencies": {
-    "@code3d/core": "^0.0.1-alpha.5"
+    "@code3d/core": "^0.0.1-alpha.6"
   },
   "devDependencies": {
     "@code3d/core": "*"
