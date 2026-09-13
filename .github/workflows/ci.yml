@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CODE3D_SITE_URL: https://www.code3d.org/
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run lint-prettier
+
+      - name: Test worktree coordination
+        run: python3 -B -m unittest discover -s .agents/skills/worktree-development/tests
+
+      - name: Check test types and run workspace tests
+        run: npm test
+
+      - name: Verify installed npm tarballs
+        run: npm run test:packages
+
+      - name: Verify examples in clean npm projects
+        run: npm run test:examples:packages --workspace @code3d/app
+
+      - name: Build app and render-only entry
+        run: npm run build --workspace @code3d/app
+
+      - name: Install render browser
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Exercise every example in the App
+        run: npm run test:examples:browser --workspace @code3d/app
+
+      - name: Generate website model images
+        run: npm run render:web-images
+
+      - name: Build website
+        run: npm run build --workspace @code3d/web
+
+      - name: Upload website artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: code3d-www
+          path: packages/web/dist/www
+          if-no-files-found: error

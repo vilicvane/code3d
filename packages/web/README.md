@@ -116,7 +116,8 @@ npm run build --workspace @code3d/web
 npm run preview --workspace @code3d/web
 ```
 
-The build checks Astro templates and TypeScript, generates the static site and
+`npm run test:types --workspace @code3d/web` checks Astro templates and TypeScript
+in the independent CI workflow. The build generates the static site and
 Pagefind index, includes App, and validates internal links, anchors, and
 asset references. Preview the production build when testing search; Pagefind
 indexes the build output.
@@ -148,8 +149,9 @@ npm run deploy
 This uses the checked-in model images. To regenerate them, run
 `npm run render:web-images` after building App, then rebuild the website.
 
-GitHub Actions regenerates model images and builds the complete artifact before
-deploying. Automatic deployment from `main` is enabled by setting the repository
+The website workflow regenerates model images and builds the complete artifact
+before deploying. Full tests run asynchronously in the independent CI workflow
+and do not gate deployment. Automatic deployment from `main` is enabled by setting the repository
 variable `CLOUDFLARE_ACCOUNT_ID` and secret `CLOUDFLARE_API_TOKEN` (an account-scoped
 Workers deployment token). Without the account variable, CI only builds and
 uploads the artifact. Local Wrangler OAuth credentials are never copied to CI.

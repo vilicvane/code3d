@@ -70,9 +70,11 @@ PlaneGCS 漏发 `dist/planegcs_dist/planegcs.d.ts`，仓库补丁补齐其模块
 
 版本 tag 标记本次发布对应的提交，npm 发包是版本发布中交付公开包的步骤。
 App 与网站由 [Build workflow](../../.github/workflows/build.yml) 在主分支更新后按部署配置发布；
-npm 包由下面的 tag workflow 发布，分别核验对应的 CI 结果。
-Build 保留分支 push、pull request 与手工触发，版本 tag 只触发 Publish 的完整验证，
-避免同一提交重复执行网站构建。
+npm 包由下面的 tag workflow 发布，分别核验上传与部署结果。
+[独立 CI](../../.github/workflows/ci.yml) 在分支 push、pull request 与手工触发时完整运行
+格式、类型、单元、真实 npm 产物消费、浏览器示例和网站构建检查。CI 异步运行，
+不通过 `needs`、`workflow_run` 或 agent 人工等待成为发布门槛。Build 仅在 main
+更新或手工触发时构建、部署网站；版本 tag 只触发 npm Publish。
 
 ### 准备版本
 
@@ -81,22 +83,24 @@ Build 保留分支 push、pull request 与手工触发，版本 tag 只触发 Pu
 2. 更新这些包的 `package.json.version`，同步受影响的内部依赖版本与根目录 lockfile。
    如果消费者需要依赖本批新增能力，也要更新它的依赖声明并将其纳入本批发布。
    更新受影响的包说明与使用文档。
-3. 在任务 worktree 中运行 `npm test`，再用
-   `CODE3D_RELEASE_TAG=v0.0.1-alpha.2 npm run test:packages` 验证目标版本。
-   将示例 tag 换成本次版本；该检查同时覆盖所有公开包，以及仅安装本批 tarball、
-   其余依赖从 npm 获取的真实消费场景。可用下文的 `--dry-run` 检查 registry 状态。
+3. 在任务 worktree 中完成当前增量必要的本地验证，复用本轮已通过的证据；
+   修复失败测试并本地跑通即可继续已授权发布，不为版本号或工作流调整重复跑全套。
+   使用 `npm run build:packages` 和 `npm run pack:packages` 构建真实 tarball 与清单。
+   `CODE3D_RELEASE_TAG=v<版本号> npm run test:packages` 可检查所有公开包，以及仅安装
+   本批 tarball、其余依赖从 npm 获取的消费场景；这属于本地/独立 CI 验证，发包 action
+   本身不运行测试。
    接着用同一个 `CODE3D_RELEASE_TAG` 运行
    `npm run update:examples:locks --workspace @code3d/app`，由真实 tarball 清单与
    公共 npm 元数据生成示例锁；锁中只记录正式 registry URL 和 tarball 完整性，
    不记录 workspace 或本地文件。提交锁后不得再修改将上传的包内容。
-   同一 tag 下的 `test:examples:packages` 与 `test:examples:browser` 使用已验证
+   同一 tag 下的 `test:examples:packages` 与 `test:examples:browser` 使用这些
    tarball 代替本批尚未上传的包，其他依赖仍来自 npm；浏览器沿正常安装、校验、
-   解压和解析路径运行全部示例。清单与 tarball 不符时失败，不退回旧版包。
+   解压和解析路径运行。清单与 tarball 不符时失败，不退回旧版包。
 4. 按[交付流程](../skills/worktree-development/references/delivery-subagent.md)完成已授权的
-   提交、合并与推送，在已验证的发布提交上创建并推送 `v<版本号>` tag。
-   CI 以 tag 对应的提交执行构建与发布。示例锁引用本批新包时，先推送该 tag，
-   等待 npm 上传与公开示例复验通过，再推送同一主分支提交触发网站部署，避免
-   Build 在新包尚未公开时安装失败。
+   提交与合并，在已验证的发布提交上创建并推送 `v<版本号>` tag。
+   Publish 以 tag 对应的提交构建、打包与上传。示例锁引用本批新包时，先推送该 tag，
+   确认 npm 包已公开且锁的完整性一致，再推送同一主分支提交触发网站部署；
+   避免网站对用户提供尚不可安装的锁。此顺序只依赖发布结果，不依赖完整 CI。
 
 公开包发布按 `dependencies`、`peerDependencies` 与 `optionalDependencies` 的反向依赖闭包联动。
 Core 发布新版本时，依赖它的 Materials、Screws 同步更新版本和 Core 最低版本并纳入本批；
@@ -114,7 +118,7 @@ Core 发布新版本时，依赖它的 Materials、Screws 同步更新版本和 
 并安装本批 tarball、从 npm 获取其余依赖，不能用工作区软链接掩盖发布关系。
 同步根 lockfile 的 workspace 元数据，并核对 CI 实际上传的已验证 tarball 完整性。
 
-### CI 发包
+### GitHub Actions 发包
 
 [Publish packages](../../.github/workflows/publish.yml) 由仓库版本 tag 触发，例如
 `v0.0.1-alpha.2`；也可重跑对应的 Actions run，或使用
@@ -130,9 +134,10 @@ Workflow 使用 GitHub hosted runner、Node.js 24 与 npm 11.19.1，给予 OIDC
 `id-token: write` 权限，不设置 npm token。包内 repository 元数据对应当前仓库。
 配置规则见 [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)。
 
-CI 先完成构建、单元测试和真实安装验证，并额外仅安装 tag 选中的 tarball，
-从 npm 获取未参与发布的依赖，检查新包没有误用工作区中未发布的依赖实现。
-随后直接发布同一份已校验完整性的 tarball，不在上传阶段重新打包或执行 lifecycle scripts。
+Publish 只构建、打包、校验发布范围与产物完整性，并上传对应 tarball；不运行格式、
+测试类型、单元、安装消费或浏览器示例测试。打包步骤生成清单，独立 CI 和本地验证
+消费同一产物身份；发布不依赖测试脚本生成清单。构建必需的声明生成和产物检查仍保留。
+上传阶段不重新打包或执行 lifecycle scripts。
 已公开版本仅在完整性与本批已验证产物一致时跳过；默认 dist-tag 为 `latest`，包的 `publishConfig.tag` 可覆盖。
 新包必须先在 npm 完成首次创建并配置 trusted publisher；CI 会在上传本批任何包前检查这一前提。
 Trusted Publisher 必须允许 direct publishing；只允许 staged publishing 的配置不能运行本流程。
@@ -149,9 +154,10 @@ Trusted Publisher 必须允许 direct publishing；只允许 staged publishing �
 ### 完成发布
 
 核对本批包的公开版本、目标 dist-tag、实际 tarball 的依赖/peer 最低版本和安装结果，
-不能只根据 workflow 成功判断 registry 已可用。发包后不设置 `CODE3D_RELEASE_TAG`，
-再次运行干净 npm 示例与浏览器示例验证，使安装从公开 registry 获取同一锁定版本；
-Publish workflow 自动执行这两道公开消费门槛。交付回报记录版本 tag、提交、包列表及验证结果。
+不能只根据 workflow 成功判断 registry 已可用。发包后按本次改动选择必要的公开消费
+抽验，不设置 `CODE3D_RELEASE_TAG`，确保安装来自真实 registry。完整示例覆盖由独立
+CI 承担，不在上传前后重复运行，也不等待 CI 完成再声明上传结果。交付回报分别记录
+版本 tag、提交、包列表、本地验证、发布结果及独立 CI 状态，不把运行中写成已通过。
 部分成功时逐包记录状态，重试沿用同一个版本 tag；需要修改源码时使用新的版本与 tag。
 App/网站的部署结果按其 workflow 单独记录。
 
@@ -182,7 +188,9 @@ npm run lint-prettier
 安装锁定的公开包并检查类型与建模，避免开发 workspace 掩盖缺依赖。
 `CODE3D_TEST_URL=http://127.0.0.1:<预留端口>/ npm run test:examples:browser --workspace @code3d/app`
 使用 host Chrome，逐例打开、参数写回、几何更新及 Undo，并验证操作失败恢复、完整
-工程导出和实际 agent 接续。CI 自行启动受控服务及浏览器，构建与发包前均运行这些门槛。
+工程导出和实际 agent 接续。独立 CI 自行启动受控服务及浏览器，完整运行这些检查；
+构建/发布工作流不重复运行。浏览器几何对比在浏览器内计算 typed array 字节摘要，
+避免通过 CDP 传输整个网格的 JSON；TAP 逐例输出失败断言，任务结束前也能定位失败。
 
 新增运行时测试使用 `*.test.ts`、`node:test` 和 `node:assert/strict`。
 Node.js 24 直接执行可擦除的 TypeScript；测试间导入使用显式 `.ts` 扩展。

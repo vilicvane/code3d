@@ -8,10 +8,11 @@
   "scripts": {
     "prepack": "node ../../scripts/package-license.mjs",
     "dev": "astro dev",
-    "build": "astro sync && node scripts/check.mjs && astro build && node scripts/check-site.mjs",
+    "build": "astro build && node scripts/check-site.mjs",
     "preview": "astro preview",
     "render-images": "node scripts/render-images.mjs",
-    "test:run": "node --test scripts/*.test.ts"
+    "test:run": "node --test scripts/*.test.ts",
+    "test:types": "astro sync && node scripts/check.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.42.0",

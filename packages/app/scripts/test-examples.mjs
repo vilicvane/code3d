@@ -24,7 +24,12 @@ try {
   const status = await new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      ['--test', '--test-concurrency=1', 'test/browser/examples.test.ts'],
+      [
+        '--test',
+        '--test-concurrency=1',
+        '--test-reporter=tap',
+        'test/browser/examples.test.ts',
+      ],
       {
         cwd: root,
         stdio: 'inherit',
