@@ -4,7 +4,7 @@ Command-line access to the project open in Code3D. The App owns files, versions,
 saving, model execution, and receipts. Node.js 24+ is required.
 
 ```sh
-npx --yes @code3d/cli /absolute/path/to/project.c3d.json serve
+npx --yes @code3d/cli@latest /absolute/path/to/project.c3d.json serve
 ```
 
 Run `serve` through the current agent session's managed process tool, keeping
@@ -16,10 +16,10 @@ session ends; do not detach it, use `nohup`, or restart the agent conversation.
 While it runs, send one complete JSON document through stdin for each invocation:
 
 ```sh
-echo '{"operation":"context"}' | npx --yes @code3d/cli project.c3d.json
-echo '{"operation":"fs.read","path":"/model.ts"}' | npx --yes @code3d/cli project.c3d.json
-npx --yes @code3d/cli project.c3d.json --request-id edit-001 < change.json
-echo '{"operation":"result","requestId":"edit-001"}' | npx --yes @code3d/cli project.c3d.json
+echo '{"operation":"context"}' | npx --yes @code3d/cli@latest project.c3d.json
+echo '{"operation":"fs.read","path":"/model.ts"}' | npx --yes @code3d/cli@latest project.c3d.json
+npx --yes @code3d/cli@latest project.c3d.json --request-id edit-001 < change.json
+echo '{"operation":"result","requestId":"edit-001"}' | npx --yes @code3d/cli@latest project.c3d.json
 ```
 
 For example, `change.json` contains the entire request:
@@ -84,9 +84,10 @@ npm run build:packages
 npm test --workspace @code3d/cli
 ```
 
-Development can use the same `npx --yes @code3d/cli` command as an installed
-release. Run `npm link` from this package after building, then verify that
-`npx --yes @code3d/cli --help` resolves this checkout.
+To test this checkout after building, run
+`node packages/cli/bld/main.js --help` from the repository root. Public workflow
+commands use `@code3d/cli@latest`; do not rely on them to select an unpublished
+checkout or a global link.
 
 - [CLI entry](src/main.ts): stdin JSON, execution options, artifacts and recovery output.
 - [Service lifecycle](src/serve.ts): session-managed stdin/PTY and shutdown.

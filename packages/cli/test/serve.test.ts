@@ -95,13 +95,13 @@ test(
     assert.equal(missing.value.error.details.delivery, 'not_sent');
     assert.match(
       missing.value.recovery.command,
-      /npx --yes @code3d\/cli .* serve$/,
+      /npx --yes @code3d\/cli@latest .* serve$/,
     );
     assert.ok(!missing.stdout.includes(config.key));
     assert.deepEqual(missing.value.recovery.argv, [
       'npx',
       '--yes',
-      '@code3d/cli',
+      '@code3d/cli@latest',
       f.file,
       'serve',
     ]);
@@ -437,7 +437,7 @@ test(
     assert.deepEqual(timed.value.recovery.queryArgv, [
       'npx',
       '--yes',
-      '@code3d/cli',
+      '@code3d/cli@latest',
       f.file,
     ]);
     finish();

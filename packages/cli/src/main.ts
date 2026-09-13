@@ -134,7 +134,7 @@ async function invoke(request: unknown): Promise<void> {
 }
 
 function recovery(error: AgentTransportError) {
-  const command = `npx --yes @code3d/cli ${shellArgument(resolve(configFile!))}`;
+  const command = `npx --yes @code3d/cli@latest ${shellArgument(resolve(configFile!))}`;
   const start = `${command} serve`;
   const queryStdin =
     JSON.stringify({operation: 'result', requestId: recoveryRequestId}) + '\n';
@@ -151,7 +151,13 @@ function recovery(error: AgentTransportError) {
     ...(action === 'start_service'
       ? {
           command: start,
-          argv: ['npx', '--yes', '@code3d/cli', resolve(configFile!), 'serve'],
+          argv: [
+            'npx',
+            '--yes',
+            '@code3d/cli@latest',
+            resolve(configFile!),
+            'serve',
+          ],
         }
       : {}),
     ...(error.delivery === 'unknown' ||
@@ -160,7 +166,12 @@ function recovery(error: AgentTransportError) {
       ? {
           queryCommand: query,
           queryStdin,
-          queryArgv: ['npx', '--yes', '@code3d/cli', resolve(configFile!)],
+          queryArgv: [
+            'npx',
+            '--yes',
+            '@code3d/cli@latest',
+            resolve(configFile!),
+          ],
         }
       : {}),
     message:

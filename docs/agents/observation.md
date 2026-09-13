@@ -5,7 +5,7 @@
 ## Render, types, and topology
 
 ```sh
-npx --yes @code3d/cli project.c3d.json --request-id inspect-001 < /tmp/inspect.json
+npx --yes @code3d/cli@latest project.c3d.json --request-id inspect-001 < /tmp/inspect.json
 ```
 
 `"render": true` requests a 960×720 PNG in Modeling mode with the default isometric

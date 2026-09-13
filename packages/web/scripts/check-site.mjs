@@ -67,7 +67,9 @@ const agentGuide = await readFile(
 );
 assert.ok(agentGuide.includes('project.c3d.json serve'));
 assert.ok(
-  agentGuide.includes(`echo '{"operation":"context"}' | npx --yes @code3d/cli`),
+  agentGuide.includes(
+    `echo '{"operation":"context"}' | npx --yes @code3d/cli@latest`,
+  ),
 );
 
 function walk(node, visit) {

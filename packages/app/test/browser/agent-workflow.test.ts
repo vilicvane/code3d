@@ -94,6 +94,7 @@ for (const storage of ['browser', 'directory'] as const)
         const prompt = await page
           .getByLabel('Agent prompt', {exact: true})
           .inputValue();
+        assert.ok(prompt.includes('npx --yes @code3d/cli@latest'));
         const guideUrl = prompt.match(/https?:\/\/\S+\/agents\.md/)![0];
         const guideResponse = await page.request.get(guideUrl);
         assert.equal(guideResponse.status(), 200);
@@ -102,7 +103,7 @@ for (const storage of ['browser', 'directory'] as const)
         assert.ok(guide.includes('project.c3d.json serve'));
         assert.ok(
           guide.includes(
-            'echo \'{"operation":"context"}\' | npx --yes @code3d/cli',
+            'echo \'{"operation":"context"}\' | npx --yes @code3d/cli@latest',
           ),
         );
         configs.push(

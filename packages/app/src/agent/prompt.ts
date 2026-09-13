@@ -6,6 +6,8 @@ const docsUrl =
 export function agentPrompt(config: AgentConfig, initial: boolean): string {
   return `${initial ? 'Work on' : 'Continue working on'} the open Code3D project as ${config.name}.
 
+Use \`npx --yes @code3d/cli@latest\` for CLI commands.
+
 Read the required workflow before starting: ${new URL('agents.md', docsUrl.endsWith('/') ? docsUrl : docsUrl + '/')}
 
 Save this private connection configuration to a local file you choose (replace this agent's previous config if any):
