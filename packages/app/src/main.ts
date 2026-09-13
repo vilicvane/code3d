@@ -24,7 +24,6 @@ import {
 import {
   File,
   FilePlus,
-  FolderOpen,
   FolderPlus,
   PanelLeftClose,
   PanelLeftOpen,
@@ -259,13 +258,13 @@ app.innerHTML = `
             <header>
               <button class="project-location" id="project-location" type="button" aria-expanded="false" aria-controls="project-storage-menu"></button>
               <div class="project-context-menu project-storage-menu" id="project-storage-menu" popover="auto" role="group" aria-label="Project storage">
+                <button id="open-folder-button" type="button">Open folder</button>
                 <button id="copy-local-folder-button" type="button" hidden>Copy to local folder and open</button>
                 <button id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
                 <button id="reload-folder-button" type="button" hidden>Reload folder</button>
                 <button id="browser-storage-button" type="button" hidden>Use browser storage</button>
               </div>
               <div class="project-actions">
-                <button id="open-folder-button" type="button" title="Open folder" aria-label="Open folder"></button>
                 <button id="new-file-button" type="button" title="New file" aria-label="New file"></button>
                 <button id="new-folder-button" type="button" title="New folder" aria-label="New folder"></button>
                 <button id="refresh-files-button" type="button" title="Refresh files and dependencies" aria-label="Refresh files and dependencies"></button>
@@ -403,7 +402,6 @@ const newFolderButton = requiredElement<HTMLButtonElement>('new-folder-button');
 const refreshFilesButton = requiredElement<HTMLButtonElement>(
   'refresh-files-button',
 );
-openFolderButton.append(createIcon(FolderOpen));
 newFileButton.append(createIcon(FilePlus));
 newFolderButton.append(createIcon(FolderPlus));
 refreshFilesButton.append(createIcon(RefreshCw));
@@ -1426,8 +1424,7 @@ function renderProjectLocation(): void {
     projectLocation.textContent = storedDirectoryHandle.name;
     projectLocation.dataset.kind = 'local';
     projectLocation.title = `Files are stored directly in ${storedDirectoryHandle.name}`;
-    openFolderButton.title = 'Change folder';
-    openFolderButton.setAttribute('aria-label', 'Change folder');
+    openFolderButton.textContent = 'Change folder';
     reconnectFolderButton.hidden = true;
     reloadFolderButton.hidden = false;
     browserStorageButton.hidden = false;
@@ -1437,8 +1434,7 @@ function renderProjectLocation(): void {
   projectLocation.textContent = 'Browser storage';
   projectLocation.dataset.kind = 'browser';
   projectLocation.title = 'Files are stored in this browser';
-  openFolderButton.title = 'Open folder';
-  openFolderButton.setAttribute('aria-label', 'Open folder');
+  openFolderButton.textContent = 'Open folder';
   reconnectFolderButton.hidden = storedDirectoryHandle === undefined;
   reconnectFolderButton.textContent = storedDirectoryHandle
     ? `Reconnect ${storedDirectoryHandle.name}`
