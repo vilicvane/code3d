@@ -364,6 +364,7 @@ test(
       await root.getDirectoryHandle('create-local', {create: true});
       sessionStorage.setItem('nextFolder', 'create-local');
     });
+    await page.locator('#project-location').click();
     await page.getByRole('button', {name: 'Open folder', exact: true}).click();
     await page
       .getByRole('dialog', {name: 'Create examples', exact: true})
@@ -484,7 +485,12 @@ test(
         },
       });
     });
-    await explorer
+    assert.equal(
+      await explorer.locator('.project-actions #open-folder-button').count(),
+      0,
+    );
+    await location.click();
+    await actions
       .getByRole('button', {name: 'Open folder', exact: true})
       .click();
     await page.waitForFunction(
@@ -508,7 +514,6 @@ test(
     );
     const bounds = (await explorer.boundingBox())!;
     for (const name of [
-      'Open folder',
       'New file',
       'New folder',
       'Refresh files and dependencies',
@@ -538,11 +543,14 @@ test(
       .click();
     await active(page, undefined);
     assert.equal(await location.innerText(), 'explorer-folder');
-    await explorer
+    await location.click();
+    await actions
       .getByRole('button', {name: 'Change folder', exact: true})
       .waitFor();
-    assert.equal(await explorer.locator('#open-folder-button svg').count(), 1);
-    await location.click();
+    assert.equal(
+      await explorer.locator('.project-actions #open-folder-button').count(),
+      0,
+    );
     await actions
       .getByRole('button', {name: 'Reload folder', exact: true})
       .waitFor();
@@ -559,9 +567,11 @@ test(
       .getByRole('button', {name: 'Use browser storage', exact: true})
       .click();
     await page.waitForURL(url => !url.searchParams.has('workspace'));
-    await explorer
+    await location.click();
+    await actions
       .getByRole('button', {name: 'Open folder', exact: true})
       .waitFor();
+    await page.keyboard.press('Escape');
     assert.equal(await location.innerText(), 'Browser storage');
   },
 );
@@ -590,6 +600,7 @@ test(
         name => sessionStorage.setItem('nextFolder', name),
         name,
       );
+      await page.locator('#project-location').click();
       await page.locator('#open-folder-button').click();
       if (createExamples)
         await page

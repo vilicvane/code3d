@@ -211,12 +211,14 @@ After copying succeeds, the App opens the local project with the current file
 selected when that file was copied. The original browser project remains available. Cancellation or failure
 keeps browser storage open; a failed copy may leave partial files in the target.
 
-Choose **Open folder** in the explorer header to connect the App to a real directory.
+Click **Browser storage** in the explorer header and choose **Open folder** to connect
+the App to a real directory. To switch local projects, click the current folder name
+and choose **Change folder**.
 The selected directory keeps its own files. When opening an empty directory,
 the App asks whether to create the bundled `/examples` folder. Declining is remembered
 for that project, so reloading does not ask again or create examples later.
 Nonempty directories open without this prompt and do not receive examples automatically.
-The **Open folder** button never copies files from the previous project or browser storage.
+The **Open folder** command never copies files from the previous project or browser storage.
 Only the App's own `.code3d` metadata is ignored when checking whether a directory is empty.
 Create your own files in the explorer.
 
