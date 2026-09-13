@@ -31,7 +31,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide';
-import {autorun, reaction, runInAction} from 'mobx';
+import {autorun, observable, reaction, runInAction} from 'mobx';
 import {appSettings} from './app-settings';
 import {AppSettingsDialog} from './ui/app-settings';
 import brandMark from '../../../assets/brand/mark.svg?raw';
@@ -57,7 +57,7 @@ import type {
 } from './model/compiler';
 import {ModelCompilerClient} from './model/compiler-client';
 import {
-  ModelDiagnosticError,
+  diagnosticFromError,
   describeDiagnosticCounts,
   type ModelDiagnostic,
 } from './model/diagnostic';
@@ -102,6 +102,7 @@ import {
   supportsProjectDirectories,
 } from './project/directory-access';
 import {
+  copyProjectToEmptyDirectory,
   listProjectEntries,
   readProjectTextFile,
   searchProjectEntries,
@@ -258,6 +259,7 @@ app.innerHTML = `
             <header>
               <button class="project-location" id="project-location" type="button" aria-expanded="false" aria-controls="project-storage-menu"></button>
               <div class="project-context-menu project-storage-menu" id="project-storage-menu" popover="auto" role="group" aria-label="Project storage">
+                <button id="copy-local-folder-button" type="button" hidden>Copy to local folder and open</button>
                 <button id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
                 <button id="reload-folder-button" type="button" hidden>Reload folder</button>
                 <button id="browser-storage-button" type="button" hidden>Use browser storage</button>
@@ -281,7 +283,6 @@ app.innerHTML = `
             <div class="editor-empty-state" id="editor-empty-state" hidden>Open a file from the explorer</div>
           </section>
         </div>
-        <div class="error-bar" id="error-bar" hidden></div>
         <div class="pane-resizer workspace-resizer" id="workspace-resizer" role="separator" aria-label="Resize code editor" aria-orientation="vertical" aria-controls="editor-document" tabindex="0" title="Drag to resize · Arrow keys to adjust"></div>
       </section>
 
@@ -356,7 +357,6 @@ const viewportEmptyState = new ViewportEmptyState(
   requiredElement('viewport-empty-state'),
 );
 const previewState = new ModelPreviewState(() => compiler.phase);
-const errorBar = requiredElement('error-bar');
 const designArgumentsPanel = requiredElement('design-arguments-panel');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
@@ -394,6 +394,10 @@ const reloadFolderButton = requiredElement<HTMLButtonElement>(
 const browserStorageButton = requiredElement<HTMLButtonElement>(
   'browser-storage-button',
 );
+const copyLocalFolderButton = requiredElement<HTMLButtonElement>(
+  'copy-local-folder-button',
+);
+const projectLocationBusy = observable.box(false);
 const newFileButton = requiredElement<HTMLButtonElement>('new-file-button');
 const newFolderButton = requiredElement<HTMLButtonElement>('new-folder-button');
 const refreshFilesButton = requiredElement<HTMLButtonElement>(
@@ -1374,6 +1378,9 @@ reconnectFolderButton.addEventListener('click', () => {
 reloadFolderButton.addEventListener('click', () => {
   void reloadProjectDirectory();
 });
+copyLocalFolderButton.addEventListener('click', () => {
+  void copyToLocalDirectory();
+});
 browserStorageButton.addEventListener('click', () => {
   void useBrowserStorage();
 });
@@ -1399,13 +1406,22 @@ window.addEventListener('keydown', event => {
   }
 });
 
-renderProjectLocation();
+const stopProjectLocation = autorun(renderProjectLocation);
+window.addEventListener('pagehide', stopProjectLocation, {once: true});
 renderProjectNavigation();
 void projectDirectory.refresh();
 if (initialFileError) projectDirectory.showError(initialFileError);
 runModel();
 
 function renderProjectLocation(): void {
+  const busy = projectLocationBusy.get();
+  projectLocation.disabled = busy;
+  openFolderButton.disabled = busy || !supportsProjectDirectories();
+  reconnectFolderButton.disabled = busy;
+  reloadFolderButton.disabled = busy;
+  browserStorageButton.disabled = busy;
+  copyLocalFolderButton.disabled = busy || !supportsProjectDirectories();
+  copyLocalFolderButton.hidden = directoryConnected;
   if (directoryConnected) {
     projectLocation.textContent = storedDirectoryHandle.name;
     projectLocation.dataset.kind = 'local';
@@ -1421,10 +1437,8 @@ function renderProjectLocation(): void {
   projectLocation.textContent = 'Browser storage';
   projectLocation.dataset.kind = 'browser';
   projectLocation.title = 'Files are stored in this browser';
-  projectLocation.disabled = storedDirectoryHandle === undefined;
   openFolderButton.title = 'Open folder';
   openFolderButton.setAttribute('aria-label', 'Open folder');
-  openFolderButton.disabled = !supportsProjectDirectories();
   reconnectFolderButton.hidden = storedDirectoryHandle === undefined;
   reconnectFolderButton.textContent = storedDirectoryHandle
     ? `Reconnect ${storedDirectoryHandle.name}`
@@ -1436,11 +1450,42 @@ function renderProjectLocation(): void {
 async function openProjectDirectory(): Promise<void> {
   setProjectLocationBusy(true);
   try {
-    await agentProject.flush();
     const handle = await pickProjectDirectory();
     if (!handle) return;
+    await agentProject.flush();
     const workspaceId = await rememberProjectDirectory(handle);
     openDirectoryWorkspace(workspaceId);
+  } catch (error) {
+    showProjectIssue(error);
+  } finally {
+    setProjectLocationBusy(false);
+  }
+}
+
+async function copyToLocalDirectory(): Promise<void> {
+  setProjectLocationBusy(true);
+  try {
+    // Invoke the picker before awaiting saves, while the click still has activation.
+    const handle = await pickProjectDirectory();
+    if (!handle) return;
+    await agentProject.update(async () => {
+      const revision = agentProject.currentRevision;
+      const target = await openDirectoryProjectFileSystem(handle);
+      await copyProjectToEmptyDirectory(projectFileSystem, target);
+      const selectedFile = codeEditor.currentFile();
+      const copiedFile =
+        selectedFile && (await target.stat(selectedFile))?.kind === 'file'
+          ? selectedFile
+          : undefined;
+      const workspaceId = await rememberProjectDirectory(handle);
+      // Edits made during the copy remain in browser storage; do not leave them behind.
+      if (agentProject.currentRevision !== revision) {
+        throw new Error(
+          'The project changed while copying. Browser storage remains open with your latest changes; the selected folder contains the earlier copy.',
+        );
+      }
+      openDirectoryWorkspace(workspaceId, copiedFile);
+    });
   } catch (error) {
     showProjectIssue(error);
   } finally {
@@ -1488,10 +1533,10 @@ async function useBrowserStorage(): Promise<void> {
   }
 }
 
-function openDirectoryWorkspace(workspaceId: string): void {
+function openDirectoryWorkspace(workspaceId: string, file?: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set('workspace', workspaceId);
-  url.hash = '';
+  url.hash = file ? fileRoute(file) : '';
   window.location.replace(url);
 }
 
@@ -1503,10 +1548,7 @@ function openBrowserWorkspace(): void {
 }
 
 function setProjectLocationBusy(busy: boolean): void {
-  openFolderButton.disabled = busy || !supportsProjectDirectories();
-  reconnectFolderButton.disabled = busy;
-  reloadFolderButton.disabled = busy;
-  browserStorageButton.disabled = busy;
+  runInAction(() => projectLocationBusy.set(busy));
 }
 
 async function resetExamples(): Promise<void> {
@@ -1706,10 +1748,7 @@ async function activateProjectFile(
 }
 
 function showProjectIssue(error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
-  refreshViewportFeedback();
-  errorBar.textContent = message;
-  errorBar.hidden = false;
+  projectDirectory.showError(error);
 }
 
 function activeDesignContext(
@@ -1732,7 +1771,6 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   const file = previewState.file;
   if (!file) {
     compiler.cancel();
-    errorBar.hidden = true;
     restoreModelStatus();
     return;
   }
@@ -1745,7 +1783,6 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   if (designContextId) {
     renderCurrentPanels();
   }
-  errorBar.hidden = true;
 
   const stopRestore = reaction(
     () => compiler.restored,
@@ -1841,25 +1878,19 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
         if (following.view) viewport.setView(resolveRenderView(following.view));
       }
     }
-    if (!(await presentModelDiagnostic(request))) return;
+    refreshViewportFeedback();
     restoreModelStatus();
   } catch (error) {
     if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
     compilingDesignContextId = undefined;
-    const diagnostic =
-      error instanceof ModelDiagnosticError ? error.diagnostic : undefined;
+    const diagnostic = diagnosticFromError(error, 'project');
     if (previewState.pendingFile || previewState.retainingView)
       clearPresentedView();
     previewState.fail(diagnostic);
     finishContextualTool();
     sketchEditor.invalidate();
     renderCurrentPanels();
-    if (!(await presentModelDiagnostic(request))) return;
-    if (!diagnostic) {
-      errorBar.textContent =
-        error instanceof Error ? error.message : String(error);
-      errorBar.hidden = error instanceof PackageInstallationError;
-    }
+    refreshViewportFeedback();
     restoreModelStatus();
   } finally {
     stopRestore();
@@ -1883,33 +1914,11 @@ function activatePreviewFile(reload = false): void {
   else clearPresentedView();
   renderElementsPanel();
   renderDesignArguments(null);
-  errorBar.hidden = true;
 }
 
 function clearPresentedView(): void {
   sketchEditor.hide();
   viewport.renderModule(null);
-}
-
-async function presentModelDiagnostic(
-  request: ModelPreviewRequest,
-): Promise<boolean> {
-  const {diagnostic} = previewState;
-  refreshViewportFeedback();
-  if (!diagnostic || diagnostic.sourceRef) {
-    errorBar.hidden = true;
-    return true;
-  }
-  const hasLanguageError = await codeEditor.hasLanguageError();
-  if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
-    return false;
-  errorBar.hidden = hasLanguageError;
-  if (!hasLanguageError) {
-    errorBar.textContent = [diagnostic.summary, diagnostic.details]
-      .filter(Boolean)
-      .join('\n');
-  }
-  return true;
 }
 
 function activeViewportDiagnostic(): ModelDiagnostic | undefined {
@@ -2804,7 +2813,6 @@ function syncTopologyReferenceSelectionProvider(
     availableIds,
     selectedIds,
   };
-  errorBar.hidden = true;
 }
 
 function syncEdgeSelectionProvider(
@@ -2907,7 +2915,6 @@ function startEdgeSelection(
     selectedEdgeIds,
     hasExplicitEdgeSelection: edgeSessionHasExplicitEdgeSelection(session),
   };
-  errorBar.hidden = true;
   renderContextualToolPanel();
 }
 
@@ -3153,7 +3160,6 @@ function commitEdgeOperationChange(
   intent: ToolIntent,
 ): void {
   if (edgeSelectionTool !== tool) return;
-  errorBar.hidden = true;
   const committed = commitToolSession(
     toolEngine.begin(
       `viewport.edge-operation:${tool.targetId}:${tool.evaluationIndex}`,
@@ -3401,7 +3407,6 @@ function handlePositionTool(event: TransformGizmoEvent): void {
     positionToolSession = toolEngine.begin(
       `viewport.${event.binding.mode}:${event.binding.axis}:${positionBindingId(event.binding)}`,
     );
-    errorBar.hidden = true;
     return;
   }
 

@@ -4,6 +4,7 @@ import {chromium, type Browser, type Page} from 'playwright-core';
 
 declare const window: Window & {
   clearCachePhases: string[];
+  releaseExportRead?: () => void;
   explorerAccess: {lists: string[]; reads: string[]};
   explorerApp: {
     codeEditor: import('../../src/editor.ts').CodeEditor;
@@ -510,7 +511,7 @@ test(
       'Open folder',
       'New file',
       'New folder',
-      'Refresh files',
+      'Refresh files and dependencies',
     ]) {
       const button = (await explorer
         .getByRole('button', {name, exact: true})
@@ -520,12 +521,21 @@ test(
           button.x + button.width <= bounds.x + bounds.width,
       );
     }
-    assert.ok(await location.isDisabled());
+    assert.ok(await location.isEnabled());
+    await location.click();
+    await actions
+      .getByRole('button', {name: 'Copy to local folder and open', exact: true})
+      .waitFor();
+    await page.keyboard.press('Escape');
     await separator.press('End');
     await mockLocalDirectories(page);
     const localURL = new URL(process.env.CODE3D_TEST_URL!);
     localURL.searchParams.set('workspace', 'explorer-folder');
     await page.goto(localURL.href);
+    await page
+      .getByRole('dialog', {name: 'Create examples', exact: true})
+      .getByRole('button', {name: 'Create examples', exact: true})
+      .click();
     await active(page, undefined);
     assert.equal(await location.innerText(), 'explorer-folder');
     await explorer
@@ -858,7 +868,10 @@ test(
       await fs.remove('/README.md');
     });
     await page
-      .getByRole('button', {name: 'Refresh files', exact: true})
+      .getByRole('button', {
+        name: 'Refresh files and dependencies',
+        exact: true,
+      })
       .click();
     await row(page, 'external.txt').waitFor();
     assert.equal(await row(page, 'README.md').count(), 0);
@@ -1648,5 +1661,275 @@ test(
     );
     await page.clock.runFor(3100);
     assert.equal(await status.isVisible(), false);
+  },
+);
+
+test(
+  'browser storage copies project bytes and examples to a local folder without generated files',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t, [
+      {path: '/examples/sample.ts', source: 'export const sample = 1;'},
+    ]);
+    await mockLocalDirectories(page);
+    await page.reload();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    await page.evaluate(async () => {
+      sessionStorage.setItem('nextFolder', 'exported-project');
+      const {projectFileSystem: files, codeEditor} = window.explorerApp;
+      await files.createDirectory('/assets/empty');
+      await files.writeFile(
+        '/assets/image.bin',
+        new Uint8Array([0, 255, 128, 1]),
+      );
+      await files.writeFile('/.config/settings.json', '{"keep":true}');
+      for (const path of [
+        '/node_modules/ignore.ts',
+        '/examples/node_modules/ignore.ts',
+        '/.code3d/internal',
+        '/examples/.code3d/internal',
+        '/code3d-lock.json',
+        '/examples/code3d-lock.json',
+      ])
+        await files.writeFile(path, 'skip');
+      await window.explorerApp.activateProjectFile('/src/part.ts');
+      codeEditor.editor.setValue('export const size = 42;\n');
+    });
+    await page.locator('#project-location').click();
+    await page
+      .getByRole('button', {name: 'Copy to local folder and open', exact: true})
+      .click();
+    await page.waitForURL(
+      url => url.searchParams.get('workspace') === 'exported-project',
+    );
+    await page.locator('#project-location[data-kind="local"]').waitFor();
+    assert.ok(page.url().endsWith('#/file/src/part.ts'));
+    assert.deepEqual(
+      await page.evaluate(async () => {
+        const root = await (
+          await navigator.storage.getDirectory()
+        ).getDirectoryHandle('exported-project');
+        const examples = await root.getDirectoryHandle('examples');
+        const assets = await root.getDirectoryHandle('assets');
+        const text = async (
+          directory: FileSystemDirectoryHandle,
+          name: string,
+        ) => (await (await directory.getFileHandle(name)).getFile()).text();
+        const exists = async (
+          directory: FileSystemDirectoryHandle,
+          name: string,
+          kind: 'file' | 'directory',
+        ) => {
+          try {
+            if (kind === 'file') await directory.getFileHandle(name);
+            else await directory.getDirectoryHandle(name);
+            return true;
+          } catch (error) {
+            if (error instanceof DOMException && error.name === 'NotFoundError')
+              return false;
+            throw error;
+          }
+        };
+        return {
+          part: await text(await root.getDirectoryHandle('src'), 'part.ts'),
+          example: await text(examples, 'sample.ts'),
+          config: await text(
+            await root.getDirectoryHandle('.config'),
+            'settings.json',
+          ),
+          bytes: [
+            ...new Uint8Array(
+              await (
+                await (await assets.getFileHandle('image.bin')).getFile()
+              ).arrayBuffer(),
+            ),
+          ],
+          empty: (await assets.getDirectoryHandle('empty')).kind,
+          generated: await Promise.all([
+            exists(root, 'node_modules', 'directory'),
+            exists(root, 'code3d-lock.json', 'file'),
+            exists(examples, 'node_modules', 'directory'),
+            exists(examples, '.code3d', 'directory'),
+            exists(examples, 'code3d-lock.json', 'file'),
+            exists(
+              await root.getDirectoryHandle('.code3d'),
+              'internal',
+              'file',
+            ),
+          ]),
+        };
+      }),
+      {
+        part: 'export const size = 42;\n',
+        example: 'export const sample = 1;',
+        config: '{"keep":true}',
+        bytes: [0, 255, 128, 1],
+        empty: 'directory',
+        generated: [false, false, false, false, false, false],
+      },
+    );
+    await page.locator('#project-location').click();
+    assert.equal(
+      await page
+        .getByRole('button', {
+          name: 'Copy to local folder and open',
+          exact: true,
+        })
+        .count(),
+      0,
+    );
+    await page
+      .getByRole('button', {name: 'Use browser storage', exact: true})
+      .click();
+    await page.locator('#project-location[data-kind="browser"]').waitFor();
+    assert.equal(
+      await page.evaluate(async () =>
+        new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile('/src/part.ts'),
+        ),
+      ),
+      'export const size = 42;\n',
+    );
+    assert.deepEqual(
+      await page.evaluate(async () => [
+        ...(await window.explorerApp.projectFileSystem.readFile(
+          '/assets/image.bin',
+        ))!,
+      ]),
+      [0, 255, 128, 1],
+    );
+  },
+);
+
+test(
+  'copy to local cancels safely and rejects nonempty targets and failed reads',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await mockLocalDirectories(page);
+    await page.reload();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    const originalUrl = page.url();
+    const copy = async () => {
+      await page.locator('#project-location').click();
+      await page
+        .getByRole('button', {
+          name: 'Copy to local folder and open',
+          exact: true,
+        })
+        .click();
+      await page.waitForFunction(
+        () =>
+          !(document.getElementById('project-location') as HTMLButtonElement)
+            .disabled,
+      );
+    };
+    await page.evaluate(() =>
+      Object.defineProperty(window, 'showDirectoryPicker', {
+        configurable: true,
+        value: async () => {
+          throw new DOMException('Cancelled', 'AbortError');
+        },
+      }),
+    );
+    await copy();
+    assert.equal(page.url(), originalUrl);
+    await mockLocalDirectories(page);
+    await page.evaluate(async () => {
+      sessionStorage.setItem('nextFolder', 'occupied');
+      const directory = await (
+        await navigator.storage.getDirectory()
+      ).getDirectoryHandle('occupied', {create: true});
+      const output = await (
+        await directory.getFileHandle('keep.txt', {create: true})
+      ).createWritable();
+      await output.write('keep');
+      await output.close();
+    });
+    await copy();
+    await page
+      .getByText(
+        'Choose an empty folder to copy this project. Existing files were not changed.',
+        {exact: true},
+      )
+      .waitFor();
+    assert.equal(page.url(), originalUrl);
+    assert.equal(
+      await page.evaluate(async () => {
+        const directory = await (
+          await navigator.storage.getDirectory()
+        ).getDirectoryHandle('occupied');
+        return (
+          await (await directory.getFileHandle('keep.txt')).getFile()
+        ).text();
+      }),
+      'keep',
+    );
+    await page.evaluate(() => {
+      sessionStorage.setItem('nextFolder', 'failed');
+      const files = window.explorerApp.projectFileSystem;
+      const read = files.readFile.bind(files);
+      files.readFile = async path => {
+        if (path === '/README.md') throw new Error('Read failed for export');
+        return read(path);
+      };
+    });
+    await copy();
+    await page.getByText(/Copy failed.*Read failed for export/).waitFor();
+    assert.equal(page.url(), originalUrl);
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.codeEditor.editor.getValue(),
+      ),
+      "import {box} from '@code3d/core';\nexport default box(10, 6, 8);\n",
+    );
+  },
+);
+
+test(
+  'copy to local preserves edits made while the copy is in flight',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await mockLocalDirectories(page);
+    await page.reload();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    const originalUrl = page.url();
+    await page.evaluate(() => {
+      sessionStorage.setItem('nextFolder', 'edited-during-copy');
+      const files = window.explorerApp.projectFileSystem;
+      const read = files.readFile.bind(files);
+      files.readFile = async path => {
+        if (path === '/README.md')
+          await new Promise<void>(resolve => {
+            window.releaseExportRead = resolve;
+          });
+        return read(path);
+      };
+    });
+    await page.locator('#project-location').click();
+    await page
+      .getByRole('button', {name: 'Copy to local folder and open', exact: true})
+      .click();
+    await page.waitForFunction(() => !!window.releaseExportRead);
+    assert.equal(await page.locator('#open-folder-button').isDisabled(), true);
+    await page.evaluate(() => {
+      window.explorerApp.codeEditor.editor.setValue(
+        'export const latest = 123;',
+      );
+      window.releaseExportRead!();
+    });
+    await page.getByText(/The project changed while copying/).waitFor();
+    assert.equal(page.url(), originalUrl);
+    assert.equal(await page.locator('#open-folder-button').isEnabled(), true);
+    assert.equal(
+      await page.evaluate(async () => {
+        await window.explorerApp.agentProject.flush();
+        return new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile('/model.ts'),
+        );
+      }),
+      'export const latest = 123;',
+    );
   },
 );

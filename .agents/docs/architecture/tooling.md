@@ -385,8 +385,10 @@ ProjectTree 接管创建输入的确认、取消和校验，因为 Pierre 的 re
 常规重命名仍使用 Pierre 原生路径。验证见[文件浏览器](../../../packages/app/test/browser/project-explorer.test.ts)。
 
 诊断从最内层求值边界附上原 SourceRef，外层不覆盖已有精确位置。源码诊断进入
-Monaco marker，无法归属源码的项目/Worker 错误才使用全局入口；安装失败由包
-状态处理。viewport 诊断卡片仅接受显式 `viewport: 'sketch-source-sync'` 的草图同步提示，
+Monaco marker；运行时创建及设置失败在 ProjectExecutor 的初始化边界补充 Core 导入位置，
+不覆盖已有精确位置。无法归属源码的模型/Worker 错误仍进入 ModelPreviewState，
+由 Model error 的详情保留原始文字，不生成全局悬浮错误条。文件操作错误进入
+ProjectTree 的 observable 状态消息，清除与展示通过同一订阅更新，销毁时释放订阅；安装失败由包状态处理。viewport 诊断卡片仅接受显式 `viewport: 'sketch-source-sync'` 的草图同步提示，
 不再因模型关联或阶段预览失败而展示普通异常。顶部状态独立按求值归属判断错误，
 不依赖卡片白名单；交互提交错误仍使用单独的工具反馈条。
 ModelPreviewState 的 statusDiagnostic 从当前 presentation 派生，顶部 Model error

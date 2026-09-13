@@ -15,6 +15,7 @@ import {
   action,
   autorun,
   makeObservable,
+  observable,
   observableRef,
   runInAction,
 } from 'mobx';
@@ -78,6 +79,7 @@ export class ProjectTree {
   private indexing = false;
   private indexed = false;
   private clipboard?: {kind: 'copy' | 'move'; paths: readonly string[]};
+  private statusMessage: string | undefined;
   private readonly status = document.createElement('div');
   private removeMenu?: () => void;
   private closeMenu?: ContextMenuOpenContext['close'];
@@ -90,7 +92,16 @@ export class ProjectTree {
     private readonly container: HTMLElement,
     private readonly options: ProjectTreeOptions,
   ) {
-    makeObservable<this, 'agentLocations' | 'clipboard' | 'copy'>(this, {
+    makeObservable<
+      this,
+      | 'agentLocations'
+      | 'clipboard'
+      | 'copy'
+      | 'statusMessage'
+      | 'setStatusMessage'
+    >(this, {
+      statusMessage: observable,
+      setStatusMessage: action,
       agentLocations: observableRef,
       clipboard: observableRef,
       setAgentLocations: action,
@@ -98,7 +109,7 @@ export class ProjectTree {
     });
     container.tabIndex = -1;
     this.status.className = 'project-status';
-    this.status.hidden = true;
+    this.setStatusMessage(undefined);
     this.status.setAttribute('role', 'status');
     this.packageStatus.className = 'project-status package-status';
     this.packageStatus.hidden = true;
@@ -257,6 +268,10 @@ export class ProjectTree {
     this.tree.render({fileTreeContainer: container});
     const diagnosticStyles = document.createElement('style');
     container.shadowRoot!.append(diagnosticStyles);
+    const stopStatus = autorun(() => {
+      this.status.textContent = this.statusMessage ?? '';
+      this.status.hidden = this.statusMessage === undefined;
+    });
     const stopDecorations = autorun(() => {
       // Pierre invokes decorations during its own render; read their inputs here.
       this.agentLocations;
@@ -343,7 +358,7 @@ export class ProjectTree {
         if (input) {
           input.setCustomValidity('');
           input.removeAttribute('aria-invalid');
-          this.status.hidden = true;
+          this.setStatusMessage(undefined);
         }
       },
       {signal: listeners.signal},
@@ -403,6 +418,7 @@ export class ProjectTree {
         listeners.abort();
         this.finishCreation();
         stopDecorations();
+        stopStatus();
         diagnosticStyles.remove();
         this.closeMenu?.({restoreFocus: false});
         this.tree.cleanUp();
@@ -669,11 +685,15 @@ export class ProjectTree {
     this.tree.openSearch();
   }
 
+  private setStatusMessage(message: string | undefined): void {
+    this.statusMessage = message;
+  }
+
   showError(error: unknown): void {
     if (error instanceof PackageInstallationError) return;
-    this.status.textContent =
-      error instanceof Error ? error.message : String(error);
-    this.status.hidden = false;
+    this.setStatusMessage(
+      error instanceof Error ? error.message : String(error),
+    );
   }
 
   async create(kind: ProjectEntry['kind'], directory?: string): Promise<void> {
@@ -723,7 +743,7 @@ export class ProjectTree {
   }
 
   private openFile(path: string, takeFocus: boolean): void {
-    this.status.hidden = true;
+    this.setStatusMessage(undefined);
     void this.options
       .onOpenFile(path, takeFocus)
       .catch(error => this.showError(error));
@@ -732,7 +752,7 @@ export class ProjectTree {
   private async perform(operation: ProjectEntryOperation): Promise<boolean> {
     if (this.busy) return false;
     this.busy = true;
-    this.status.hidden = true;
+    this.setStatusMessage(undefined);
     this.container.inert = true;
     this.container.setAttribute('aria-busy', 'true');
     this.options.onBusy(true);
@@ -758,7 +778,7 @@ export class ProjectTree {
   ): Promise<void> {
     if (this.runningPackageOperation) return;
     this.runningPackageOperation = true;
-    this.status.hidden = true;
+    this.setStatusMessage(undefined);
     if (!this.packageProgress.size) this.packageStatus.hidden = true;
     try {
       await operation();
@@ -972,7 +992,7 @@ export class ProjectTree {
     if (!path && this.options.onClearBuildCache) {
       separator();
       action('Clear build cache', () => {
-        this.status.hidden = true;
+        this.setStatusMessage(undefined);
         void this.options.onClearBuildCache!().catch(error =>
           this.showError(error),
         );
@@ -1205,7 +1225,7 @@ export class ProjectTree {
         name = `${stem}-${suffix++}${extension}`;
       const entry = {path: normalizeProjectPath(`${directory}/${name}`), kind};
       this.creation = {entry, finish: resolve};
-      this.status.hidden = true;
+      this.setStatusMessage(undefined);
       this.tree.closeSearch();
       this.tree.add(treePath(entry));
       if (!this.tree.startRenaming(treePath(entry), {removeIfCanceled: true})) {
