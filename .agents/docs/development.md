@@ -69,12 +69,16 @@ PlaneGCS 漏发 `dist/planegcs_dist/planegcs.d.ts`，仓库补丁补齐其模块
 ## 版本发布
 
 版本 tag 标记本次发布对应的提交，npm 发包是版本发布中交付公开包的步骤。
-App 与网站由 [Build workflow](../../.github/workflows/build.yml) 在主分支更新后按部署配置发布；
-npm 包由下面的 tag workflow 发布，分别核验上传与部署结果。
+App 与网站默认在本地构建并通过既有 Wrangler 授权部署；已验证且对应发布提交的
+现成产物直接复用，不为发布再等待远端构建并下载一遍。npm 包由下面的 tag workflow
+可信发布，分别核验上传与部署结果。
 [独立 CI](../../.github/workflows/ci.yml) 在分支 push、pull request 与手工触发时完整运行
 格式、类型、单元、真实 npm 产物消费、浏览器示例和网站构建检查。CI 异步运行，
-不通过 `needs`、`workflow_run` 或 agent 人工等待成为发布门槛。Build 仅在 main
-更新或手工触发时构建、部署网站；版本 tag 只触发 npm Publish。
+不通过 `needs`、`workflow_run` 或 agent 人工等待成为发布门槛。
+[Build workflow](../../.github/workflows/build.yml) 可在 main 更新或手工触发时构建网站，
+配置了 Cloudflare CI 凭据才自动部署；该可选路径不替代默认的本地发布。版本 tag
+只触发 npm Publish。开始发布时先核对实际部署途径和凭据是否存在，不到构建结束才
+发现 deploy 被跳过；个人 Wrangler OAuth 不复制到 GitHub secrets。
 
 ### 准备版本
 
@@ -99,8 +103,11 @@ npm 包由下面的 tag workflow 发布，分别核验上传与部署结果。
 4. 按[交付流程](../skills/worktree-development/references/delivery-subagent.md)完成已授权的
    提交与合并，在已验证的发布提交上创建并推送 `v<版本号>` tag。
    Publish 以 tag 对应的提交构建、打包与上传。示例锁引用本批新包时，先推送该 tag，
-   确认 npm 包已公开且锁的完整性一致，再推送同一主分支提交触发网站部署；
+   确认 npm 包已公开且锁的完整性一致，再推送同一主分支提交并部署网站产物；
    避免网站对用户提供尚不可安装的锁。此顺序只依赖发布结果，不依赖完整 CI。
+   网站使用与发布提交一致的本地已验证产物；公开 Markdown 的源码链接也必须指向
+   已推送且对应产物的提交。现成产物满足这些条件时不重建；只有已明确选择远端构建
+   或正在恢复已有远端产物时才下载它继续部署，不把远端构建设为本地部署前置步骤。
 
 公开包发布按 `dependencies`、`peerDependencies` 与 `optionalDependencies` 的反向依赖闭包联动。
 Core 发布新版本时，依赖它的 Materials、Screws 同步更新版本和 Core 最低版本并纳入本批；
