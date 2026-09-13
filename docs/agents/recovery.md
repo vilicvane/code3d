@@ -28,7 +28,7 @@ includes the JSON pipe. Recovery for a failed result lookup retains the ID being
 looked up, rather than asking for a receipt of the lookup itself.
 
 ```sh
-echo '{"operation":"result","requestId":"model-edit-001"}' | npx --yes @code3d/cli project.c3d.json
+echo '{"operation":"result","requestId":"model-edit-001"}' | npx --yes @code3d/cli@latest project.c3d.json
 ```
 
 `result` queries the original request without rerunning it. Repeating identical

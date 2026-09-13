@@ -5,10 +5,10 @@
 ## Read context and project files
 
 ```sh
-echo '{"operation":"context"}' | npx --yes @code3d/cli project.c3d.json
-echo '{"operation":"fs.list","path":"/"}' | npx --yes @code3d/cli project.c3d.json
-echo '{"operation":"fs.read","path":"/model.ts"}' | npx --yes @code3d/cli project.c3d.json
-echo '{"operation":"fs.stat","path":"/model.ts"}' | npx --yes @code3d/cli project.c3d.json
+echo '{"operation":"context"}' | npx --yes @code3d/cli@latest project.c3d.json
+echo '{"operation":"fs.list","path":"/"}' | npx --yes @code3d/cli@latest project.c3d.json
+echo '{"operation":"fs.read","path":"/model.ts"}' | npx --yes @code3d/cli@latest project.c3d.json
+echo '{"operation":"fs.stat","path":"/model.ts"}' | npx --yes @code3d/cli@latest project.c3d.json
 ```
 
 `context` returns `data.file` and `data.cursor` (or `null`). Both are `null`
@@ -46,7 +46,7 @@ Write the payload to a local JSON file:
 Choose and retain a unique request ID **before** submitting a change:
 
 ```sh
-npx --yes @code3d/cli project.c3d.json --request-id model-edit-001 < /tmp/change.json
+npx --yes @code3d/cli@latest project.c3d.json --request-id model-edit-001 < /tmp/change.json
 ```
 
 Each file uses full UTF-8 content and its current
@@ -105,7 +105,7 @@ example above, save this payload as `/tmp/add-dependency.json`:
 ```
 
 ```sh
-npx --yes @code3d/cli project.c3d.json --request-id dependency-edit-001 < /tmp/add-dependency.json
+npx --yes @code3d/cli@latest project.c3d.json --request-id dependency-edit-001 < /tmp/add-dependency.json
 ```
 
 If the manifest already exists, merge the dependency into its full contents and

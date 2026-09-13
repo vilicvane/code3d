@@ -14,7 +14,7 @@ request; arrays, batches and JSON Lines are not currently supported.
 Use a pipe for a small request, or redirect a local request file for source changes:
 
 ```sh
-npx --yes @code3d/cli project.c3d.json --request-id edit-001 < /tmp/request.json
+npx --yes @code3d/cli@latest project.c3d.json --request-id edit-001 < /tmp/request.json
 ```
 
 The JSON contains the operation and all its parameters. The CLI's execution

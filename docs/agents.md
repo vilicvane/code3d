@@ -21,13 +21,14 @@ first; use the topic directory below when a task needs more detail.
 
 Save the complete private JSON supplied in the user's prompt to a configuration
 file outside committed source. Use its absolute path in place of `project.c3d.json`
-throughout these examples. Node.js 24+ is required.
+throughout these examples. Node.js 24+ is required. Keep the explicit `@latest`
+suffix when invoking the CLI so npm resolves the current published release.
 
 Start the service using your current session's managed process tool, keeping its
 stdin or PTY open and retaining the process handle:
 
 ```sh
-npx --yes @code3d/cli /absolute/path/to/project.c3d.json serve
+npx --yes @code3d/cli@latest /absolute/path/to/project.c3d.json serve
 ```
 
 Wait for the JSON `listening` event. Reuse a service with the same config; restart
@@ -42,9 +43,9 @@ do not detach it, use `nohup`, or restart the agent conversation. See
 First obtain the current file and user selection, then read the relevant files:
 
 ```sh
-echo '{"operation":"context"}' | npx --yes @code3d/cli project.c3d.json
-echo '{"operation":"fs.list","path":"/"}' | npx --yes @code3d/cli project.c3d.json
-echo '{"operation":"fs.read","path":"/model.ts"}' | npx --yes @code3d/cli project.c3d.json
+echo '{"operation":"context"}' | npx --yes @code3d/cli@latest project.c3d.json
+echo '{"operation":"fs.list","path":"/"}' | npx --yes @code3d/cli@latest project.c3d.json
+echo '{"operation":"fs.read","path":"/model.ts"}' | npx --yes @code3d/cli@latest project.c3d.json
 ```
 
 Use the file returned by `context`, or choose one from the listing if no file is
@@ -80,7 +81,7 @@ and exactly one capturing group identifies your selection. This selects the box
 for observation; it does not take over the user's editor cursor.
 
 ```sh
-npx --yes @code3d/cli project.c3d.json --request-id model-edit-001 < /tmp/change.json
+npx --yes @code3d/cli@latest project.c3d.json --request-id model-edit-001 < /tmp/change.json
 ```
 
 Use a new ID for a new edit. The CLI reads one JSON document until EOF and returns
@@ -92,7 +93,7 @@ task needs geometric or TypeScript evidence.
 If the response is lost, restore the connection and query the original ID:
 
 ```sh
-echo '{"operation":"result","requestId":"model-edit-001"}' | npx --yes @code3d/cli project.c3d.json
+echo '{"operation":"result","requestId":"model-edit-001"}' | npx --yes @code3d/cli@latest project.c3d.json
 ```
 
 Do not assume the change failed. Follow the response's recovery instructions and
