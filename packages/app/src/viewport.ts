@@ -406,6 +406,7 @@ export class ModelViewport {
       this.rendering.updateCameraRange(
         this.controls.focus,
         this.controls.object.position.distanceTo(this.controls.focus),
+        this.root,
       );
       this.refreshTopologyHover();
     });
@@ -2146,6 +2147,7 @@ export class ModelViewport {
     this.rendering.updateCameraRange(
       this.controls.focus,
       this.controls.object.position.distanceTo(this.controls.focus),
+      this.root,
     );
     this.coordinateReference?.update();
     this.rendering.renderFrame(() => {

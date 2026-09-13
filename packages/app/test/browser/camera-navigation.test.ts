@@ -133,9 +133,10 @@ test(
     const distant = await cameraState(page);
     assert.ok(distant.distance > 2000);
     assert.ok(distant.far > distant.distance);
-    assert.ok(
-      distant.fogNear > distant.distance,
-      'Distance fog must not hide the focused model',
+    assert.equal(
+      distant.fog,
+      null,
+      'Model geometry must not fade with distance',
     );
     assert.ok(
       [...distant.position, ...distant.quaternion].every(Number.isFinite),
@@ -957,7 +958,6 @@ async function cameraState(page: Page) {
     const viewport = window.navigationApp.viewport;
     const camera = viewport['camera'];
     const target = viewport['controls'].focus;
-    const fog = viewport['scene'].fog as import('three').Fog;
     return {
       position: camera.position.toArray(),
       up: camera.up.toArray(),
@@ -968,7 +968,7 @@ async function cameraState(page: Page) {
       viewHeight: viewport['controls'].capturePose().viewHeight,
       near: camera.near,
       far: camera.far,
-      fogNear: fog.near,
+      fog: viewport['scene'].fog,
     };
   });
 }

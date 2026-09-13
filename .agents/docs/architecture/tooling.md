@@ -289,3 +289,9 @@ after release. The contextual panel and readout share a flex stack; hidden panel
 consume no space. Both containers share their width, padding, border, translucent background,
 backdrop blur and shadow, and each readout row uses
 `field: old + delta = new` with a signed operator and the unit after the result. No synthetic source tool or second preview value store is needed.
+
+### 模型可见范围
+
+模型场景不启用全局距离雾效；仅自适应网格在 shader 中独立淡出。相机远裁剪面同时
+覆盖视距范围和当前模型根节点的世界包围球，随模型与相机变动派生，不建立另一份
+响应式模型尺寸状态；避免放大大尺度模型的局部时让远端消失。PNG 复用无雾场景。
