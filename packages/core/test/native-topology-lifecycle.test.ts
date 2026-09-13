@@ -173,7 +173,7 @@ for (const failTopology of [false, true]) {
           {
             shape: geometry.shape,
             topology: geometry.topology,
-            index: 1,
+            namespace: 1,
           },
           [0, 3, 0],
         ));

@@ -80,7 +80,7 @@ test('rounded topology preserves number and path IDs and applies the same scene 
       edges.items.map(edge => edge.id),
       modelTopologyIds(rounded, 'edge'),
     );
-    assert.ok(edges.items.some(edge => Array.isArray(edge.id)));
+    assert.ok(edges.items.every(edge => typeof edge.id === 'number'));
     const id = modelObjectRuntimeInfo(models[2]).nodeId;
     const transform: TopologyInspectionOptions['transform'] = {
       position: [20, 0, 0],

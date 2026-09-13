@@ -62,7 +62,11 @@ export function loftWithTopology(
       ruled,
       holes.map(wires => wires[0]),
     );
-    return booleanWithTopology(outer, inner, 'cut');
+    return booleanWithTopology(
+      {...outer, namespace: 'intermediate'},
+      {...inner, namespace: 'intermediate'},
+      'cut',
+    );
   } finally {
     inner?.shape.delete();
     outer?.shape.delete();

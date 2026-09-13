@@ -51,8 +51,8 @@ const openEnds = body.shell(1, [
 ```
 
 The outer array lists two openings; each inner array is one surface ID.
-After shelling, one-to-one inherited topology gains another input prefix.
-Offset walls receive new numeric IDs. Pick later fillet or chamfer edges
+After shelling, one-to-one inherited topology keeps its complete ID.
+Offset walls receive fresh numeric IDs without reusing retired ones. Pick later fillet or chamfer edges
 from the shell result. See [topology paths](../topology/#ids-belong-to-a-model)
 and the [loft cap example](../../../examples/topology-paths/).
 

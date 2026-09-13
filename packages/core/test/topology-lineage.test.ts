@@ -32,8 +32,13 @@ import {
 } from '../bld/library/kernel-cache.js';
 import {
   topologySurfaceDirections,
+  transferShapeTopology,
   withTopologyShape,
 } from '../bld/library/topology.js';
+import {
+  decodeKernelArtifact,
+  encodeKernelArtifact,
+} from '../bld/library/kernel-artifact-codec.js';
 
 afterEach(() => clearKernelOperationCache());
 
@@ -44,7 +49,7 @@ test('topology paths compare by value and reject malformed author IDs', () => {
   assert.ok(!sameTopologyId(1, [1, 1]));
   const model = box(8, 8, 8).fillet(0.5, [1]);
   try {
-    assert.deepEqual(model.surface([1, 1]).id, [1, 1]);
+    assert.equal(model.surface(1).id, 1);
     for (const id of [
       0,
       -1,
@@ -304,21 +309,106 @@ test('splits and merges retire ambiguous sources instead of choosing an input', 
   }
 });
 
-test('single-input modifications prefix inherited paths and accept path selections', () => {
+for (const operation of ['fillet', 'chamfer'] as const) {
+  test(`${operation} retains the six original column faces and adds four new IDs`, () => {
+    const source = box(50, 3000, 100);
+    const before = createModelSnapshotter()(source).mesh;
+    const result = source[operation](5, [2, 4, 6, 8]);
+    try {
+      assert.deepEqual(
+        result
+          .surfaces()
+          .map(face => face.id)
+          .sort((a, b) => Number(a) - Number(b)),
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      );
+      const {shape, topology} = modelGeometry(result).value;
+      const ends = topologySurfaceDirections(shape, topology.surfaces, [3, 4]);
+      assert.deepEqual(
+        ends.map(face => face.direction[1]),
+        [-1, 1],
+      );
+      for (const face of ends)
+        assert.ok(Math.hypot(face.direction[0], face.direction[2]) < 1e-8);
+      assert.deepEqual(
+        ends.map(face => face.position[1]),
+        [-1500, 1500],
+      );
+      assert.deepEqual(createModelSnapshotter()(source).mesh, before);
+      assertMeshIds(result);
+    } finally {
+      disposeModelObjects([source, result]);
+    }
+  });
+}
+
+test('local edits preserve existing input paths from a loft', () => {
+  const start = rectangle(30, 20);
+  const end = rectangle(30, 20).originOffset(0, -80, 0);
+  const source = loft([start, end]);
+  const result = source.fillet(1, [[1, 1]]);
+  try {
+    assert.deepEqual(result.surface([1, 1]).id, [1, 1]);
+    assert.deepEqual(result.surface([2, 1]).id, [2, 1]);
+    assert.deepEqual(result.edge([2, 1]).id, [2, 1]);
+    assert.throws(() => result.edge([1, 1]), /Unknown or retired/);
+    assert.throws(() => result.surface([1, 1, 1]), /Unknown or retired/);
+    assertMeshIds(result);
+  } finally {
+    disposeModelObjects([start, end, source, result]);
+  }
+});
+
+test('local IDs stay retired after deletion, artifact restoration and further edits', () => {
+  const source = box(10, 20, 30);
+  const {shape, topology} = modelGeometry(source).value;
+  try {
+    withTopologyShape(shape, topology, {kind: 'surface', id: 3}, face => {
+      const retained = transferShapeTopology(
+        [{shape, topology, namespace: 'preserve'}],
+        face,
+        () => [],
+      );
+      assert.deepEqual(retained.surfaces.ids, [3]);
+      // No new faces were allocated by this edit, including at the highest ID.
+      const restored = decodeKernelArtifact<typeof retained>(
+        encodeKernelArtifact('topology-test', retained),
+        'topology-test',
+      );
+      const expanded = transferShapeTopology(
+        [{shape: face, topology: restored, namespace: 'preserve'}],
+        shape,
+        () => [],
+      );
+      assert.deepEqual(expanded.surfaces.ids, [7, 8, 3, 9, 10, 11]);
+      assert.equal(expanded.surfaces.nextId, 12);
+      assert.deepEqual(topology.surfaces.ids, [1, 2, 3, 4, 5, 6]);
+    });
+  } finally {
+    disposeModelObjects([source]);
+  }
+});
+
+test('successive local modifications retain IDs and retire the selected edge', () => {
   const source = box(40, 10, 40);
   const rounded = source.fillet(2, [2, 3, 4, 6, 7, 8, 11, 12]);
-  const chamfered = rounded.chamfer(1, [
-    [1, 10],
-    [1, 10],
-  ]);
+  const chamfered = rounded.chamfer(1, [10, 10]);
   try {
-    assert.deepEqual(chamfered.surface([1, 1, 1]).id, [1, 1, 1]);
+    assert.equal(chamfered.surface(1).id, 1);
+    for (const surface of rounded.surfaces())
+      assert.deepEqual(chamfered.surface(surface.id).id, surface.id);
     assert.deepEqual(
       createModelSnapshotter()(chamfered).operation.selections[0].ids,
-      [[1, 10]],
+      [10],
     );
-    assert.throws(() => chamfered.edge([1, 1, 10]), /Unknown or retired/);
-    assert.ok(modelGeometry(chamfered).value.topology.edges.ids.includes(1));
+    assert.throws(() => chamfered.edge(10), /Unknown or retired/);
+    assert.ok(
+      modelGeometry(chamfered).value.topology.edges.ids.some(
+        id =>
+          typeof id === 'number' &&
+          id >= modelGeometry(rounded).value.topology.edges.nextId,
+      ),
+    );
     assertMeshIds(chamfered);
   } finally {
     disposeModelObjects([source, rounded, chamfered]);
@@ -346,7 +436,7 @@ function assertMeshIds(model: Model) {
   }
 }
 
-test('shell accepts loft cap paths and adds one operation level to retained boundaries', () => {
+test('shell accepts loft cap paths and retains their original namespace', () => {
   const start = rectangle(28, 20);
   const end = rectangle(18, 12).relate(p => p.on(point([0, 32, 0]).up));
   const body = loft([start, end]);
@@ -369,8 +459,8 @@ test('shell accepts loft cap paths and adds one operation level to retained boun
         [2, 1],
       ],
     );
-    assert.deepEqual(closed.surface([1, 1, 1]).id, [1, 1, 1]);
-    assert.deepEqual(closed.surface([1, 2, 1]).id, [1, 2, 1]);
+    assert.deepEqual(closed.surface([1, 1]).id, [1, 1]);
+    assert.deepEqual(closed.surface([2, 1]).id, [2, 1]);
     assert.ok(
       modelGeometry(closed).value.topology.surfaces.ids.some(
         id => typeof id === 'number',

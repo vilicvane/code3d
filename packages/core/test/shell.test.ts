@@ -146,7 +146,7 @@ test('negative thickness offsets outward with rounded joins and preserves the or
       assert.ok(typeof id === 'number');
       assert.ok(
         modelGeometry(closed).value.topology.surfaces.ids.some(candidate =>
-          sameTopologyId(candidate, [1, id]),
+          sameTopologyId(candidate, id),
         ),
       );
     }
@@ -278,18 +278,16 @@ test('shell preserves one-to-one topology and caches canonical selections throug
     assert.deepEqual(topology, modelGeometry(moved).value.topology);
     for (const id of [1, 2, 3, 4])
       assert.ok(
-        topology.surfaces.ids.some(candidate =>
-          sameTopologyId(candidate, [1, id]),
-        ),
+        topology.surfaces.ids.some(candidate => sameTopologyId(candidate, id)),
       );
     // A removed cap's one-to-one Modified history identifies the remaining rim.
     for (const id of [5, 6])
       assert.ok(
-        topology.surfaces.ids.some(candidate =>
-          sameTopologyId(candidate, [1, id]),
-        ),
+        topology.surfaces.ids.some(candidate => sameTopologyId(candidate, id)),
       );
-    assert.ok(topology.surfaces.ids.some(id => typeof id === 'number'));
+    assert.ok(
+      topology.surfaces.ids.some(id => typeof id === 'number' && id > 6),
+    );
     clearKernelOperationCache();
     const replay = base.shell(1, [5, 6]);
     try {
@@ -353,7 +351,7 @@ test('failed offsets never enter the cache and leave inputs usable for correctio
       assert.throws(() => base.shell(11), /Could not construct shell/);
       // OCCT reports IsDone on this offset but its face topology is invalid.
       assert.throws(
-        () => rounded.shell(1, [[1, 6]]),
+        () => rounded.shell(1, [6]),
         /invalid or self-intersecting/,
       );
     }

@@ -480,9 +480,11 @@ selection behavior and derived-model identity.
 `TopologyId` (also used by `VertexId`, `EdgeId`, and `SurfaceId`) is a
 positive integer or a flat numeric source path. A loft cap can be selected with
 `body.surface([1, 1])`; a mixed selection uses an outer list, such as
-`body.surfaces([1, [1, 1], [2, 1]])`. Each topology-changing operation prefixes
-one-to-one inherited IDs with its one-based input index; new or ambiguous
-elements receive numeric IDs in that result. Transforms preserve complete IDs.
+`body.surfaces([1, [1, 1], [2, 1]])`. Loft, extrusion and Boolean operations prefix
+one-to-one inherited IDs with the one-based input index. Local edits (`fillet`,
+`chamfer`, `shell`) preserve inherited IDs, including existing paths; their new
+or ambiguous elements receive fresh numbers without reusing retired IDs.
+Transforms preserve complete IDs.
 
 A surface can query its edges and vertices; an edge can query its vertices.
 These queries retain the source model's IDs and validate membership.

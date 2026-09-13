@@ -140,12 +140,15 @@ async function clickId(
 
 async function expectExpression(page: Page, expression: string) {
   await page.waitForFunction(
+    // Source edits preserve the surrounding comma spacing; selection identity
+    // is the same for [2,1] and [2, 1].
     (expression: string) =>
       window.topologyTestApp.codeEditor.editor
         .getModel()!
         .getValue()
+        .replace(/\s+/g, '')
         .includes(expression),
-    expression,
+    expression.replace(/\s+/g, ''),
   );
   await page.getByText('Ready', {exact: true}).waitFor();
 }
