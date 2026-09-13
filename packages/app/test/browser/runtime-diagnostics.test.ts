@@ -473,3 +473,118 @@ test(
     );
   },
 );
+
+for (const located of [true, false]) {
+  test(
+    `runtime setup errors ${located ? 'navigate to the Core import' : 'remain available without a source location'} without a global error bar`,
+    {timeout: 90_000},
+    async t => {
+      assert.ok(process.env.CODE3D_TEST_URL);
+      const browser = await chromium.connectOverCDP(
+        process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+      );
+      t.after(() => browser.close());
+      const context = await browser.newContext({
+        viewport: {width: 1400, height: 900},
+      });
+      t.after(() => context.close());
+      const page = await context.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', error => errors.push(error.message));
+      page.on('console', message => {
+        if (
+          ['error', 'warning'].includes(message.type()) &&
+          /mobx|reaction/i.test(message.text())
+        )
+          errors.push(message.text());
+      });
+      t.after(() => assert.deepEqual(errors, []));
+      const source = located
+        ? "// setup failure\nimport {box} from '@code3d/core';\n\nexport default box(1, 2, 3);"
+        : 'export const value = 1;';
+      await page.route('**/src/project/default-project.ts*', route =>
+        route.fulfill({
+          contentType: 'text/javascript',
+          body: `export const defaultProject = ${JSON.stringify({files: [{path: '/model.ts', source}]})};`,
+        }),
+      );
+      await page.route('**/src/project/bundled-examples.ts*', route =>
+        route.fulfill({
+          contentType: 'text/javascript',
+          body: 'export const bundledExamples = {directory:"/examples",revision:"empty",files:[]};',
+        }),
+      );
+      // Reproduce an installed runtime without the method used by current App settings.
+      await page.route('**/src/model/project-runtime.ts*', async route => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          body:
+            (await response.text()) +
+            `
+        const createRuntime = ProjectRuntime.create;
+        ProjectRuntime.create = async function(...args) {
+          const runtime = await createRuntime.apply(this, args);
+          return Object.assign(runtime, {tooling: {...runtime.tooling, setKernelCacheBudget: undefined}});
+        };
+      `,
+        });
+      });
+      await page.route('**/src/main.ts*', async route => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          body:
+            (await response.text()) +
+            '\nwindow.diagnosticFixture = {codeEditor,previewState,projectDirectory};',
+        });
+      });
+      await page.goto(
+        new URL('/#/file/model.ts', process.env.CODE3D_TEST_URL).href,
+      );
+      const status = page.locator('#viewport-status[data-state=error]');
+      await status.waitFor({timeout: 60_000});
+      assert.match(
+        (await status.getAttribute('title')) ?? '',
+        /setKernelCacheBudget.*not a function/,
+      );
+      assert.equal(await page.locator('#error-bar').count(), 0);
+      const diagnostic = await page.evaluate(
+        () => window.diagnosticFixture.previewState.diagnostic,
+      );
+      assert.equal(diagnostic?.kind, 'module');
+      if (located) {
+        assert.equal(diagnostic?.sourceRef?.file, '/model.ts');
+        assert.equal(
+          source.slice(
+            diagnostic!.sourceRef!.start,
+            diagnostic!.sourceRef!.end,
+          ),
+          "'@code3d/core'",
+        );
+        await page.waitForFunction(
+          () =>
+            window.diagnosticFixture.codeEditor.diagnosticCounts.get(
+              '/model.ts',
+            )?.errors === 1,
+        );
+        await page.evaluate(() =>
+          window.diagnosticFixture.codeEditor.editor.setPosition({
+            lineNumber: 4,
+            column: 1,
+          }),
+        );
+        await status.click();
+        await page.waitForFunction(
+          () =>
+            window.diagnosticFixture.codeEditor.editor.getPosition()
+              ?.lineNumber === 2,
+        );
+        assert.equal(await status.getAttribute('role'), 'button');
+      } else {
+        assert.equal(diagnostic?.sourceRef, undefined);
+        assert.equal(await status.getAttribute('role'), 'status');
+      }
+    },
+  );
+}

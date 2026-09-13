@@ -45,40 +45,46 @@ export class ProjectExecutor {
     checkCancelled: () => void = () => {},
     settings?: ExecutionSettings,
   ): Promise<ModelModule> {
-    await this.storage?.ready;
-    checkCancelled();
-    this.disposeGeometry();
-    if (this.identity !== artifact.dependencies.id) {
-      this.disposeRuntime();
-      onProgress?.('initializing-runtime');
-      this.runtime = await ProjectRuntime.create(
-        artifact.dependencies,
-        this.evaluator,
-      ).catch(error => {
-        const diagnostic = diagnosticFromError(error, 'module');
-        throw new ModelDiagnosticError({
-          ...diagnostic,
-          sourceRef: diagnostic.sourceRef ?? artifact.runtimeSourceRef,
-        });
-      });
-      this.identity = artifact.dependencies.id;
-      this.executor = createModelExecutor(this.runtime.tooling, this.evaluator);
-      this.snapshotPool = new SnapshotWorkerPool(
-        this.runtime.tooling,
-        this.runtime.snapshotRuntime,
-        this.snapshotOptions,
+    try {
+      await this.storage?.ready;
+      checkCancelled();
+      this.disposeGeometry();
+      if (this.identity !== artifact.dependencies.id) {
+        this.disposeRuntime();
+        onProgress?.('initializing-runtime');
+        this.runtime = await ProjectRuntime.create(
+          artifact.dependencies,
+          this.evaluator,
+        );
+        this.executor = createModelExecutor(
+          this.runtime.tooling,
+          this.evaluator,
+        );
+        this.snapshotPool = new SnapshotWorkerPool(
+          this.runtime.tooling,
+          this.runtime.snapshotRuntime,
+          this.snapshotOptions,
+        );
+        this.identity = artifact.dependencies.id;
+      }
+      const runtime = this.runtime!;
+      if (settings) {
+        runtime.tooling.setKernelCacheBudget(settings.memoryCacheBytes);
+        this.snapshotPool!.setConcurrency(settings.snapshotConcurrency);
+      }
+      runtime.resources.install(artifact.resources);
+      this.resourceStats = artifact.resourceStats;
+      runtime.tooling.setKernelArtifactStore(
+        this.storage?.scope(runtime.artifactIdentity),
       );
+    } catch (error) {
+      const diagnostic = diagnosticFromError(error, 'module');
+      throw new ModelDiagnosticError({
+        ...diagnostic,
+        sourceRef: diagnostic.sourceRef ?? artifact.runtimeSourceRef,
+      });
     }
     const runtime = this.runtime!;
-    if (settings) {
-      runtime.tooling.setKernelCacheBudget(settings.memoryCacheBytes);
-      this.snapshotPool!.setConcurrency(settings.snapshotConcurrency);
-    }
-    runtime.resources.install(artifact.resources);
-    this.resourceStats = artifact.resourceStats;
-    runtime.tooling.setKernelArtifactStore(
-      this.storage?.scope(runtime.artifactIdentity),
-    );
     try {
       for (const path of artifact.staticPackages) {
         checkCancelled();

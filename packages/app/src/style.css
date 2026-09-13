@@ -1112,24 +1112,6 @@ kbd {
   white-space: pre-wrap;
 }
 
-.error-bar {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  left: 12px;
-  z-index: 10;
-  max-height: 110px;
-  padding: 10px 12px;
-  overflow: auto;
-  color: #ffb7aa;
-  border: 1px solid #743e36;
-  border-radius: 4px;
-  background: #2b1b18ee;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px;
-  line-height: 1.5;
-}
-
 .viewport-host,
 .agent-render-host {
   position: relative;

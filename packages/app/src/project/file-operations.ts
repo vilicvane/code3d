@@ -75,6 +75,51 @@ export async function searchProjectEntries(
   }
 }
 
+/** Export project bytes, including hidden configuration and empty directories. */
+export async function copyProjectToEmptyDirectory(
+  source: ProjectFileSystem,
+  target: ProjectFileSystem,
+): Promise<void> {
+  if ((await target.list('/')).length) {
+    throw new Error(
+      'Choose an empty folder to copy this project. Existing files were not changed.',
+    );
+  }
+  const excluded = new Set(['node_modules', '.code3d', 'code3d-lock.json']);
+  let pending = ['/'];
+  try {
+    while (pending.length) {
+      const children = (
+        await mapProjectIO(pending, async directory =>
+          (await source.list(directory))
+            .filter(entry => !excluded.has(entry.name))
+            .map(entry => ({
+              ...entry,
+              path: normalizeProjectPath(`${directory}/${entry.name}`),
+            })),
+        )
+      ).flat();
+      await mapProjectIO(children, async entry => {
+        if (entry.kind === 'directory') {
+          await target.createDirectory(entry.path);
+        } else {
+          const bytes = await source.readFile(entry.path);
+          if (!bytes) throw new Error(`Project file not found: ${entry.path}`);
+          await target.writeFile(entry.path, bytes);
+        }
+      });
+      pending = children
+        .filter(entry => entry.kind === 'directory')
+        .map(entry => entry.path);
+    }
+  } catch (error) {
+    throw new Error(
+      `Copy failed. Browser storage is unchanged; the selected folder may contain an incomplete copy. ${error instanceof Error ? error.message : String(error)}`,
+      {cause: error},
+    );
+  }
+}
+
 async function copyProjectFiles(
   fileSystem: ProjectFileSystem,
   from: string,

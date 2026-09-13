@@ -194,14 +194,29 @@ checking declaration-file internals by default. If your code directly imports
 an implementation source file, that file becomes a dependency and is checked
 normally. Actual errors remain visible even in read-only files.
 
+Model errors appear in the editor when a source location is available. Hover
+**Model error** to read the error, or click it to jump to that location.
+Runtime initialization errors link to the relevant Core import when available.
+Errors without a source location remain in the status details. File operation
+errors appear in the project explorer; errors do not open a global floating bar.
+
 ## Local folder
+
+To copy your browser project to disk, click **Browser storage** in the explorer
+header and choose **Copy to local folder and open**, then select an empty folder.
+The App copies project files, binary resources, configuration, empty directories,
+and examples. It excludes `node_modules`, `.code3d` internal data, and
+`code3d-lock.json` at every level. Install dependencies locally as needed.
+After copying succeeds, the App opens the local project with the current file
+selected when that file was copied. The original browser project remains available. Cancellation or failure
+keeps browser storage open; a failed copy may leave partial files in the target.
 
 Choose **Open folder** in the explorer header to connect the App to a real directory.
 The selected directory keeps its own files. When opening an empty directory,
 the App asks whether to create the bundled `/examples` folder. Declining is remembered
 for that project, so reloading does not ask again or create examples later.
 Nonempty directories open without this prompt and do not receive examples automatically.
-Opening a folder never copies files from the previous project or browser storage.
+The **Open folder** button never copies files from the previous project or browser storage.
 Only the App's own `.code3d` metadata is ignored when checking whether a directory is empty.
 Create your own files in the explorer.
 
@@ -228,7 +243,7 @@ the entire directory into memory. **Reload folder** reloads the workspace.
 Each connected directory gets its own workspace URL. Click the storage location
 in the explorer header to access **Reload folder**, **Reconnect folder** when the
 browser requires fresh permission, or **Use browser storage** to return the current
-tab to browser persistence. Switching workspaces clears the previous file selection.
+tab to browser persistence. These workspace switches clear the previous file selection.
 
 Local folders require a browser with File System Access support and a secure
 context. Browser storage remains available when folder access is unsupported.
