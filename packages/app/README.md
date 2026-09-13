@@ -116,5 +116,6 @@ Every example has native geometry tests and an App open/edit/Undo test. Run
 `npm run test:run --workspace @code3d/app` for native tests,
 `npm run test:examples:packages --workspace @code3d/app` for clean npm consumers,
 and `CODE3D_TEST_URL=http://127.0.0.1:<reserved-port>/ npm run test:examples:browser
---workspace @code3d/app` against the task server and host Chrome. Build and package
-publication workflows run the example gates too.
+--workspace @code3d/app` against the task server and host Chrome. The independent CI
+workflow runs every example asynchronously; website and npm publication workflows
+build and publish without waiting for that test run.

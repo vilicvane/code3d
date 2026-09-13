@@ -1,9 +1,8 @@
-name: Build
+name: Build and deploy website
 
 on:
   push:
-    branches: ['**']
-  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -30,29 +29,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check formatting
-        run: npm run lint-prettier
-
-      - name: Test worktree coordination
-        run: python3 -B -m unittest discover -s .agents/skills/worktree-development/tests
-
-      - name: Check test types and run workspace tests
-        run: npm test
-
-      - name: Verify installed npm tarballs
-        run: npm run test:packages
-
-      - name: Verify examples in clean npm projects
-        run: npm run test:examples:packages --workspace @code3d/app
+      - name: Build public packages
+        run: npm run build:packages
 
       - name: Build app and render-only entry
         run: npm run build --workspace @code3d/app
 
       - name: Install render browser
         run: npx playwright-core install --with-deps chromium
-
-      - name: Exercise every example in the App
-        run: npm run test:examples:browser --workspace @code3d/app
 
       - name: Generate website model images
         run: npm run render:web-images
@@ -95,7 +79,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Download verified website artifact
+      - name: Download website artifact
         uses: actions/download-artifact@v4
         with:
           name: code3d-www

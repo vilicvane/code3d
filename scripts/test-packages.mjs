@@ -214,10 +214,6 @@ try {
       await rm(releaseConsumer, {recursive: true, force: true});
     }
   }
-  await writeFile(
-    path.join(artifactsDirectory, 'manifest.json'),
-    JSON.stringify(artifacts, null, 2) + '\n',
-  );
   console.log(
     `All ${artifacts.length} installed tarballs, public entries, declaration maps, cache identity, text, native resources and CLI passed.`,
   );

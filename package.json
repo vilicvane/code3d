@@ -25,7 +25,8 @@
     "test:types": "npm run test:types --workspaces --if-present",
     "test": "npm run build:packages && npm run test:types && npm run test:release && npm run test:run --workspaces --if-present",
     "test:packages": "node scripts/test-packages.mjs",
-    "test:release": "node --test test/package-publishing.test.mjs"
+    "test:release": "node --test test/package-publishing.test.mjs",
+    "pack:packages": "node scripts/package-artifacts.mjs"
   },
   "workspaces": [
     "packages/agent",

@@ -1,8 +1,8 @@
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {mkdir, readFile, rm} from 'node:fs/promises';
+import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 
 export const root = fileURLToPath(new URL('..', import.meta.url));
@@ -120,5 +120,15 @@ export async function packPackages() {
       `${packed.id}: ${packed.files.filter(file => /\.m?js$/.test(file.path)).length} JS files, ${packed.entryCount} files, ${packed.size} packed bytes`,
     );
   }
+  await writeFile(
+    path.join(artifactsDirectory, 'manifest.json'),
+    JSON.stringify(artifacts, null, 2) + '\n',
+  );
   return artifacts;
 }
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+)
+  await packPackages();
