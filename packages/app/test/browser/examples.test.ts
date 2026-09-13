@@ -174,25 +174,36 @@ for (const {file} of exampleEntries) {
 }
 
 async function geometrySignature(page: Page) {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
     const module = window.exampleApp.viewport['module']!;
+    // Keep geometry comparisons in the browser. JSON-expanding typed arrays
+    // duplicates large meshes and sends their entire contents over CDP.
+    const digest = async (values?: Float32Array) => {
+      if (!values) return undefined;
+      const hash = await crypto.subtle.digest('SHA-256', values.slice());
+      return Array.from(new Uint8Array(hash), value =>
+        value.toString(16).padStart(2, '0'),
+      ).join('');
+    };
     // The traced object graph also contains contextual sketch frames. Compare
     // exported geometry recursively, not which helper frames were evaluated.
-    const geometry = (
+    const geometry = async (
       node: import('@code3d/core/tooling').ModelSnapshotObject,
-    ): unknown => ({
+    ): Promise<unknown> => ({
       kind: node.kind,
-      vertices: node.mesh?.vertices,
-      edges: node.mesh?.edges,
-      points: node.mesh?.topologyVertices,
+      vertices: await digest(node.mesh?.vertices),
+      edges: await digest(node.mesh?.edges),
+      points: await digest(node.mesh?.topologyVertices),
       pose: node.compositionTransform,
-      children: node.children.map(geometry),
+      children: await Promise.all(node.children.map(geometry)),
     });
     return JSON.stringify(
-      [...module.exports].map(([name, id]) => [
-        name,
-        geometry(module.objects.get(id)!),
-      ]),
+      await Promise.all(
+        [...module.exports].map(async ([name, id]) => [
+          name,
+          await geometry(module.objects.get(id)!),
+        ]),
+      ),
     );
   });
 }
