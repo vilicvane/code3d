@@ -107,6 +107,8 @@ function topologyShapes(shape: AnyShape, kind: TopologyKind): AnyShape[] {
 type StableTopology = Readonly<{
   /** IDs aligned with the corresponding shape traversal order. */
   ids: readonly TopologyId[];
+  /** Next local ID; retained across edits so retired IDs cannot be reused. */
+  nextId: number;
 }>;
 
 export type VertexTopology = StableTopology;
@@ -519,7 +521,7 @@ function modifyEdges(
     return {
       shape: result,
       topology: transferShapeTopology(
-        [{shape, topology: source, index: 1}],
+        [{shape, topology: source, namespace: 'preserve'}],
         result,
         builder,
       ),
@@ -616,8 +618,8 @@ export function assertTopologyId(kind: TopologyKind, id: TopologyId): void {
 export type TopologyInput = Readonly<{
   shape: AnyShape;
   topology: ShapeTopology;
-  /** Omitted only for intermediate results inside a single operation. */
-  index?: number;
+  /** Input prefix, unchanged namespace for edits, or an internal operation step. */
+  namespace: number | 'preserve' | 'intermediate';
 }>;
 
 /** Returns owned handles, released by the transfer after matching. */
@@ -636,23 +638,26 @@ export function transferShapeTopology(
   const transfer = (kind: TopologyKind): StableTopology => {
     const originals: AnyShape[][] = [];
     const results = topologyShapes(output, kind);
+    let nextId = 1;
     try {
       const candidates = inputs.flatMap((input, inputIndex) => {
         const shapes = topologyShapes(input.shape, kind);
         originals.push(shapes);
         const source = input.topology[topologyMetadata[kind].plural];
         assertTopologyLength(kind, shapes, source);
+        if (input.namespace === 'preserve')
+          nextId = Math.max(nextId, source.nextId);
         return shapes.map((shape, index) => {
           const id = source.ids[index];
           // Numeric elements in an internal prefix are still new to this
           // operation. Reallocate them with the final traversal, without exposing
           // internal creation steps or reserving numbers for discarded geometry.
           const inherited =
-            input.index !== undefined
-              ? inheritedTopologyId(input.index, id)
-              : typeof id === 'number'
-                ? undefined
-                : id;
+            typeof input.namespace === 'number'
+              ? inheritedTopologyId(input.namespace, id)
+              : input.namespace === 'preserve' || typeof id !== 'number'
+                ? id
+                : undefined;
           const unchanged = matchingOutputShapes(shape.wrapped, results);
           if (unchanged.length) return {id: inherited, matches: unchanged};
           if (typeof history !== 'function') {
@@ -693,10 +698,8 @@ export function transferShapeTopology(
           inherited.set(index, candidate.id);
         }
       }
-      let nextId = 1;
-      return stableTopology(
-        results.map((_, index) => inherited.get(index) ?? nextId++),
-      );
+      const ids = results.map((_, index) => inherited.get(index) ?? nextId++);
+      return stableTopology(ids, nextId);
     } finally {
       originals.forEach(deleteShapes);
       deleteShapes(results);
@@ -769,11 +772,17 @@ function stableGroupIds(
 function initialTopology(
   shapes: readonly (ReplicadVertex | ReplicadEdge | ReplicadFace)[],
 ): StableTopology {
-  return stableTopology(shapes.map((_, index) => index + 1));
+  return stableTopology(
+    shapes.map((_, index) => index + 1),
+    shapes.length + 1,
+  );
 }
 
-function stableTopology(ids: readonly TopologyId[]): StableTopology {
-  return {ids};
+function stableTopology(
+  ids: readonly TopologyId[],
+  nextId: number,
+): StableTopology {
+  return {ids, nextId};
 }
 
 function shapeTopology(

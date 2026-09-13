@@ -591,7 +591,7 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
     [
       'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, cut, group} from "@code3d/core";',
       'import {ISO4762} from "@code3d/screws";',
-      `let plate = box(40, 10, 40).fillet(${radius}, [2, 3, 4, 6, 7, 8, 11, 12]).chamfer(1.2, [[1, 10]]);`,
+      `let plate = box(40, 10, 40).fillet(${radius}, [2, 3, 4, 6, 7, 8, 11, 12]).chamfer(1.2, [10]);`,
       'const hole = ISO4762.clearanceHole("M6", 10).relate(tool => tool.shaftBottom.on(plate.down.flip()));',
       'plate = cut(plate, [hole]).material("#666");',
       'const screw = ISO4762.screw("M6", 18).material("#999").relate(part => [part.headBottom.on(hole.counterboreBottom.flip()), offset(0, -0.5, 0)]);',

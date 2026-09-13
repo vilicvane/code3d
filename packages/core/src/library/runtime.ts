@@ -3183,7 +3183,7 @@ export class ModelObject<
           {
             shape: source.value.shape,
             topology: source.value.topology,
-            index: 1,
+            namespace: 1,
           },
           direction,
         ),
@@ -3661,12 +3661,12 @@ export class ModelObject<
                 {
                   shape: geometry.value.shape,
                   topology: geometry.value.topology,
-                  index: otherIndex === 0 ? 1 : undefined,
+                  namespace: otherIndex === 0 ? 1 : 'intermediate',
                 },
                 {
                   shape: operand.value,
                   topology: otherGeometry.value.topology,
-                  index: otherIndex + 2,
+                  namespace: otherIndex + 2,
                 },
                 operation,
               );
@@ -5461,7 +5461,7 @@ function buildLoftGeometry(
   const inputs: {
     shape: ReplicadFace;
     topology: ShapeTopology;
-    index: number;
+    namespace: number;
   }[] = [];
   let spineWire: ReplicadWire | undefined;
   try {
@@ -5472,7 +5472,7 @@ function buildLoftGeometry(
           section.transform,
         ),
         topology: section.geometry.value.topology,
-        index: index + 1,
+        namespace: index + 1,
       });
     }
     if (spine) {

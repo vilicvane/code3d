@@ -98,6 +98,8 @@ Interpret positions in their reported coordinate frame. A model has its own loca
 geometry, while its placement among other models belongs to the composition.
 An isolated observation can therefore differ from the same part in an assembly.
 Use returned topology IDs and source bindings in their actual model scope.
+Local edits (`fillet`, `chamfer`, `shell`) preserve one-to-one IDs; new elements
+get fresh numbers. Splits, merges and deletions can still retire an ID.
 
 The user can follow your activity. Reads can open files, lists can reveal folders,
 and accepted source/cursor changes can synchronize the model. Explicit render

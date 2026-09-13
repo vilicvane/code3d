@@ -114,7 +114,9 @@ including in mixed `Model[]` collections. Nesting preserves each group's hierarc
 `expose()` adds named references when callers need to address members.
 
 A topology ID belongs to its owning model and element kind. It is a number or a
-flat numeric path, such as `.edge([1, 3])`. Operations track unambiguous ancestry;
+flat numeric path, such as `.edge([1, 3])`. Local edits (`fillet`, `chamfer`, `shell`)
+preserve one-to-one IDs and allocate fresh IDs for new elements without reusing
+retired numbers. Loft, extrusion and Booleans prefix inherited IDs by input;
 transforms preserve complete paths. Inspect the result after topology changes
 instead of assuming IDs from a different model still apply.
 

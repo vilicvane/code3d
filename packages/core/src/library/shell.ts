@@ -119,7 +119,7 @@ function openShell(
     return {
       shape: result,
       topology: transferShapeTopology(
-        [{shape, topology, index: 1}],
+        [{shape, topology, namespace: 'preserve'}],
         result,
         builder,
       ),
@@ -202,12 +202,12 @@ function closedShell(
       } finally {
         shells.delete();
       }
-      // Original boundaries retain their input paths for either direction. Offset
+      // Original boundaries retain their IDs for either direction. Offset
       // boundaries are new topology, even when OCCT has generation history.
       return {
         shape: result,
         topology: transferShapeTopology(
-          [{shape, topology, index: 1}],
+          [{shape, topology, namespace: 'preserve'}],
           result,
           cut,
         ),

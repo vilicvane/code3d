@@ -63,9 +63,10 @@ available to correct the thickness or openings.
 Edge, face, and vertex IDs have separate namespaces within each model. An ID
 is not a position in a JavaScript array or a globally unique identifier.
 
-Primitives use numbers starting at `1`. An operation that changes topology gives
-an inherited element a path: `[inputIndex, ...previousId]`, with input indices
-starting at `1`. New elements receive numeric IDs starting at `1` in that result.
+Primitives use numbers starting at `1`. Constructors such as loft, extrusion and
+Boolean operations create a new namespace. Inherited elements receive paths
+`[inputIndex, ...previousId]`, with input indices starting at `1`; new elements
+receive numeric IDs starting at `1` in that result.
 
 For `loft([start, end])`, the two cap faces are `surface([1, 1])` and
 `surface([2, 1])`; side faces are `surface(1)`, `surface(2)`, and so on. Changing
@@ -73,18 +74,22 @@ the number of side faces does not move the cap IDs. Boolean operations use the
 same rule for every input, including cutting tools. Edges and vertices follow
 the same rules in their own namespaces.
 
-Single-input operations (`fillet`, `chamfer`, and `shell`) also add a path level.
-After a fillet, an unambiguous original `E10` becomes `E[1,10]`. A later chamfer selects it with
-`rounded.chamfer(0.5, [[1, 10]])`. The outer array is the selection list;
-`[1, 10]` inside it is one edge ID. A subsequent operation prefixes the path
-again, such as `[1, 1, 10]`.
+Local edits (`fillet`, `chamfer`, and `shell`) keep the input namespace. A
+one-to-one original `E10` remains `E10`, so a later chamfer can select it with
+`rounded.chamfer(0.5, [10])`. Existing paths also remain unchanged: a loft cap
+`S[2,1]` keeps that ID after a fillet. New elements use fresh numeric IDs above
+all numbers previously allocated in this namespace, including retired IDs.
+
+For example, `box(50, 3000, 100).fillet(5, [2, 4, 6, 8])` retains faces
+`S1`–`S6` and adds four rounded faces `S7`–`S10`. The two end faces are still
+`S3` and `S4`; rounding their corners does not break their one-to-one identity.
 
 In the [topology paths example](../../../examples/topology-paths/), inspect
 `inlet`, `outlet`, and `side` to compare inherited cap IDs with a new side
 face. The viewport labels paths as S[1,1] or E[1,10]; selections write the
 corresponding arrays into source.
 
-Only one-to-one descendants inherit a path. Deleted elements have no descendant;
+Only one-to-one descendants inherit an ID. Deleted elements have no descendant;
 ambiguous splits and merges receive new numeric IDs. A middle loft section is
 not a cap, and a section edge split by loft compatibility does not retain a
 single edge identity. New-element numbering follows deterministic construction
@@ -94,9 +99,9 @@ Rotation, scaling, placement, and exposed references keep complete IDs. Always
 select IDs from the model passed into the operation being edited; IDs are not
 interchangeable between a source and its result.
 
-Shelling follows the same history rules: an unchanged boundary inherits
-`[1, ...previousId]`, and offset walls get new numeric IDs. An opening rim can
-inherit its former cap's surface path when the kernel records a one-to-one
+Shelling follows the same history rules: an unchanged boundary retains its ID,
+and offset walls get new numeric IDs. An opening rim can
+inherit its former cap's surface ID when the kernel records a one-to-one
 modification. To open both ends of a two-section loft, use
 `body.shell(1, [[1, 1], [2, 1]])`.
 
@@ -114,7 +119,7 @@ chamfer's all-edge behavior.
 Continue querying a selected face or edge:
 
 ```ts
-const face = base.surface([1, 1]);
+const face = base.surface(1);
 const boundary = face.edges();
 const corners = boundary[0].vertices();
 const center = face.center;
