@@ -81,6 +81,64 @@ export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
 export const pin = extrude(circle(2), -10);
 ```
 
+## Measurements
+
+`distance(a, b, axis?)` returns a non-negative `number` from the models and
+relations available at the call. It accepts vertex, edge, face and solid models,
+non-empty groups, finite topology references, directional bounds, and point
+anchors such as `center`, `start` and exposed mounting points.
+
+| Axis                            | Result                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------- |
+| Omitted                         | Shortest distance between the actual finite geometries                                      |
+| `'x'`, `'y'`, `'z'`             | Gap between the geometries' projection intervals along a fixed solve-frame axis             |
+| `[x, y, z]`                     | The same projection gap along a finite, non-zero direction vector, normalized automatically |
+| Straight edge or axis reference | Projection gap along that reference's solved direction                                      |
+
+Intersecting or touching geometries have zero shortest distance, including a
+point inside a solid. A face measures its trimmed surface, including holes;
+it does not represent the volume enclosed by its parent solid. Projected intervals
+that overlap have zero gap, even if the geometries do not touch in space.
+Groups measure their actual members; their projected interval spans the full
+group, including spaces between disconnected members. Exchanging operands or
+reversing an axis does not change the non-negative result. An axis's position
+does not affect the measurement.
+
+Queries solve the inputs' existing relationship closure without requiring
+`group()`. Unrelated models use coincident origins and matching axes. String
+and vector axes belong to that common solve frame, not the camera or implicitly
+the first operand's local frame. A referenced axis carries its owning model's
+solved orientation. For a specific assembled occurrence, expose its geometry
+through the containing group and measure those references.
+
+```ts
+import {box, distance, group, offset} from '@code3d/core';
+
+const left = box(8, 30, 32);
+const right = box(8, 30, 32).relate(self => [
+  self.on(left.right),
+  offset(60, 0, 0),
+]);
+const length = distance(left.right, right.left, 'x');
+const beam = box(length, 10, 24).relate(self => self.on(left.right));
+export default group([left, right, beam]);
+```
+
+The result is an ordinary number. Later relations and derived model values do
+not update an earlier measurement, and no reverse dependency is solved. Arrange
+measurement and construction in source order; re-running the source computes
+fresh values. Relations returned by a `relate` callback are attached only after
+that callback returns. The query does not see constraints still being built in it.
+
+Infinite reference planes and axes cannot be distance operands: select a finite
+face or edge instead. A straight infinite axis is supported as the third argument.
+An empty group, zero direction or curved axis reports an error. Geometric query
+results reuse the shared computation cache; point-to-point measurements use
+ordinary arithmetic.
+
+Try the [fitted beam example](../../../examples/distance/) and
+[measurement workflow](../../guides/relations/#measure-before-building-a-part).
+
 ## Independent placement transformations
 
 `relate` callbacks return a `Constraint`, a `Transformation`, or a readonly array of both.

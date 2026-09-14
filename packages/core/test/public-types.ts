@@ -1,5 +1,10 @@
 import {
   box,
+  distance,
+  group,
+  line,
+  type Anchor,
+  type DistanceAxis,
   extrude,
   sketch,
   type SketchConstraint,
@@ -154,3 +159,19 @@ sketch([['arc', 1, [2, 10, [10, 0], 4, 'ccw']]]);
 // @ts-expect-error Sweep references a local arc ID, not a point handle.
 const invalidSweep: SketchConstraint = ['sweep', sketchBase.point(1), 90];
 void invalidSweep;
+
+export function measured(a: Anchor, b: Anchor, axis?: DistanceAxis): number {
+  return distance(a, b, axis);
+}
+const geometry = group([solid]).expose({body: solid});
+const axis = line([1, 0, 0]);
+distance(geometry, solid);
+distance(geometry.body.surface(1), solid.vertex(1), axis);
+distance(solid.left, solid.right, 'x');
+distance(solid.center, solid.vertex(1), [1, 2, 3]);
+// @ts-expect-error A face is not an axis direction.
+distance(solid, geometry, solid.up);
+// @ts-expect-error Named directions are x, y or z.
+distance(solid, geometry, 'horizontal');
+// @ts-expect-error Geometry operands must carry model/reference ownership.
+distance([0, 0, 0], solid);

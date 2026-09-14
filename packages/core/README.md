@@ -75,6 +75,19 @@ Build readable models from named intermediate values and public operations. A
 profile followed by extrusion, or solids combined with Boolean operations,
 keeps the construction understandable and editable by both people and agents.
 
+## Measure geometry for another part
+
+`distance(a, b, axis?)` measures models, finite topology, bounds or point anchors
+in their solved placement and returns a normal non-negative number. Omit the axis
+for shortest geometric distance; supply `x`, `y`, `z`, a direction vector or a
+straight edge/axis reference for the gap between projected intervals. Overlap
+returns zero. Existing relations are resolved on demand, before any group is
+needed; subsequent relations do not update the number.
+
+See the [measurement reference](../web/src/content/docs/docs/reference/core.md#measurements)
+and the [fitted beam example](../app/examples/operations/distance.ts). They cover
+finite geometry, nested occurrences, axis frames and source-order dependencies.
+
 ## Find the modeling API
 
 | Task                                                                            | Start here                                                                           |

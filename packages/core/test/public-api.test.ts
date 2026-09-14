@@ -25,6 +25,7 @@ const authoringValues = [
   'coil',
   'cut',
   'cylinder',
+  'distance',
   'ellipse',
   'extrude',
   'font',

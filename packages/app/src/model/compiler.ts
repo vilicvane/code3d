@@ -6,6 +6,7 @@ import {
   type EdgeId,
   type ElementKind,
   type ElementSnapshot,
+  type DistanceSnapshot,
   type ModelOperationInputRole,
   type ModelOperationKind,
   type ModelOperationSnapshot,
@@ -77,6 +78,7 @@ export type TopologySelectionScope = Readonly<{
 }>;
 
 export type SourceTargetEvaluation = Readonly<{
+  measurement?: DistanceSnapshot;
   sketchIds?: readonly string[];
   /** A container's members share relation placement, unlike a single value. */
   isCollection?: boolean;
@@ -146,6 +148,7 @@ export type SourceTarget = Readonly<{
   id: string;
   kind:
     | 'value'
+    | 'measurement'
     | 'constraint'
     | 'transformation'
     | 'element'
@@ -1223,6 +1226,38 @@ export function createModelCompiler() {
     factory: ts.NodeFactory,
   ): ts.CallExpression {
     const id = stableSourceId('element', original.name, sourceFile);
+    const receiver = original.expression;
+    if (
+      receiver.kind !== ts.SyntaxKind.SuperKeyword &&
+      !ts.isOptionalChain(receiver)
+    ) {
+      const tracedReceiver = factory.createCallExpression(
+        factory.createPropertyAccessExpression(
+          factory.createIdentifier('__code3d'),
+          'elementReceiver',
+        ),
+        undefined,
+        [
+          factory.createStringLiteral(sourceFile.fileName),
+          factory.createNumericLiteral(receiver.getStart(sourceFile)),
+          factory.createNumericLiteral(receiver.getEnd()),
+          factory.createStringLiteral(`${id}:receiver`),
+          visited.expression,
+        ],
+      );
+      visited = ts.isPropertyAccessChain(visited)
+        ? factory.updatePropertyAccessChain(
+            visited,
+            tracedReceiver,
+            visited.questionDotToken,
+            visited.name,
+          )
+        : factory.updatePropertyAccessExpression(
+            visited,
+            tracedReceiver,
+            visited.name,
+          );
+    }
     return factory.createCallExpression(
       factory.createPropertyAccessExpression(
         factory.createIdentifier('__code3d'),

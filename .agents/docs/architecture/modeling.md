@@ -65,6 +65,29 @@ loft 使用第一截面，extrude 保留输入面。group 将求解位姿统一�
 [constraint-preview](../../../packages/core/test/constraint-preview.test.ts)及
 [group-origins](../../../packages/core/test/group-origins.test.ts)。
 
+## 同步测量
+
+`distance(a, b, axis?)` 在调用时沿输入及轴引用的现有关系闭包求解，返回普通非负
+number；不修改模型，不维护响应式尺寸，不回溯后续关系。未约束模型沿用默认
+共同原点与轴向。具体组合实例通过外层 expose 引用测量。
+
+无轴时逐对查询实际有限几何的最短距离；点间直接算术，其他几何使用
+BRepExtrema_DistShapeShape 并缓存距离与最近端点。指定轴时将各输入几何变换到轴参考架，
+复用解析 transformed-bounds 查询，计算整体投影区间间隔。投影区间可以覆盖
+离散成员间空隙，空间距离仍按真实成员取最小值。显式 bound 是有限矩形，
+退化时为线段或点；纯参考轴仅支持方向参数，无限平面不作为有限测量输入。
+
+暴露的 group 引用保留各成员的有限拓扑来源和局部摆放；原点、旋转、缩放及
+后续 expose 统一变换这些来源，bounds 与 distance 共用它们。group 本身仍保持
+嵌套层级，测量不重求其内部装配。查询借用源几何，临时拓扑、变换和距离求解器
+句柄按作用域释放，不把模型身份放入几何数值缓存键。
+
+视口测量事件保留当前共同求解位姿和有限元素快照，独立于返回的 number；
+参与对象与绘制规则见[相关实体表](tooling.md#相关实体与源码预览范围)。
+
+实现与回归见 [distance tests](../../../packages/core/test/distance.test.ts)，
+公开语义见 [Measurements](../../../packages/web/src/content/docs/docs/reference/core.md#measurements)。
+
 ## 拓扑与维度
 
 点、曲线、面、实体及其拓扑引用都可作为源码值被观察。引用携带有限几何和来源，

@@ -132,10 +132,17 @@ export async function measureRelationFocus() {
       for (const token of tokens) {
         viewport.selectBySourceOffset('/main.ts', source.indexOf(token) + 1);
         const scope = viewport.sourceContext!;
-        const constraint = evaluatedConstraint(
-          module.objects,
-          scope.evaluation,
-        )!;
+        const current = evaluatedConstraint(module.objects, scope.evaluation);
+        const spatial = token === 'offset(';
+        // Independent transformations keep self and context, with no current
+        // constraint. The earlier relation only identifies the sample's parts.
+        const constraint =
+          current ??
+          (spatial
+            ? module.objects.get(scope.evaluation.relationOwnerNodeId!)
+                ?.constraints[0]
+            : undefined);
+        if (!constraint) throw new Error(`Missing sample relation at ${token}`);
         const primary = focusedConstraintSide(scope.evaluation, constraint);
         viewport['root'].updateMatrixWorld(true);
         const ownerId = scope.evaluation.relationOwnerNodeId!;

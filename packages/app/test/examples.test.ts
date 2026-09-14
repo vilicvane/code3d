@@ -1,3 +1,4 @@
+import {distance} from '@code3d/core';
 import {replicad} from '@code3d/core/replicad';
 import {modelGeometry} from '../../core/test/model-test.ts';
 import assert from 'node:assert/strict';
@@ -36,6 +37,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'constraints/combined-constraints.ts': ['default', 2],
   'constraints/transformations.ts': ['default', 2],
   'operations/group.ts': ['default', 2],
+  'operations/distance.ts': ['default', 3],
   'materials.ts': ['plain', 1],
   'text.ts': ['lettering', 4],
   'operations/rotate.ts': ['default', 1],
@@ -174,6 +176,26 @@ for (const entry of exampleEntries) {
     try {
       const snapshot = createModelSnapshotter();
       for (const value of values) validateGeometry(snapshot(value));
+      if (entry.file === 'operations/distance.ts') {
+        for (const [gap, depth] of [
+          [60, 32],
+          [95, 48],
+        ]) {
+          const result = exports.fittedBeam(gap, depth);
+          retained.push(result);
+          assert.ok(
+            Math.abs(distance(result.supportA, result.supportB, 'x') - gap) <
+              1e-6,
+          );
+          assert.ok(distance(result.beam.left, result.supportA.right) < 1e-6);
+          assert.ok(distance(result.beam.right, result.supportB.left) < 1e-6);
+          assert.ok(
+            Math.abs(
+              distance(result.beam.front, result.beam.back, 'z') - (depth - 8),
+            ) < 1e-6,
+          );
+        }
+      }
       const expected = expectedSolids[entry.file];
       assert.ok(
         expected,

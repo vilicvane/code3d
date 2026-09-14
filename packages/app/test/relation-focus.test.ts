@@ -312,3 +312,16 @@ test('joint placement highlights only the focused relation, while self and trans
     assert.ok(evaluation.relationPreview, token);
   }
 });
+
+test('an explicit external model receiver keeps its relation markers while bare self does not', async () => {
+  const source = `import {box,group} from '@code3d/core'; const base=box(20,10,20); const part=box(2,2,2).relate(self=>base.on(self.up)); export default group([base,part]);`;
+  const module = await compile(source);
+  const scope = at(module, source, 'base.on(');
+  assert.equal(scope.evaluation.constraintFocus, 'source');
+  const drawn = decorations.relationSourceDecoration.decorations(scope);
+  assert.ok(drawn.length > 0);
+  assert.deepEqual(
+    new Set(drawn.map(value => value.nodeId)),
+    new Set([scope.constraint.source.nodeId, scope.constraint.target.nodeId]),
+  );
+});

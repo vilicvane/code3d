@@ -171,6 +171,26 @@ export type ElementSnapshot = Readonly<{
     TopologySelection;
 }>;
 
+/** A finite measurement in the common frame solved at the time of the call. */
+export type DistanceSnapshot = Readonly<{
+  value: number;
+  start: Vec3;
+  end: Vec3;
+  axis?: Vec3;
+  axisName?: 'x' | 'y' | 'z';
+  operands: readonly Readonly<{
+    nodeId: string;
+    elements: readonly ElementSnapshot[];
+  }>[];
+  placements: readonly Readonly<{nodeId: string; transform: Transform}>[];
+}>;
+
+type DistanceObserver = (
+  snapshot: DistanceSnapshot,
+  objects: readonly RelationObject[],
+) => void;
+let observeDistance: DistanceObserver | undefined;
+
 export type ConstraintAnchorSnapshot = Readonly<{
   nodeId: string;
   name: string;
@@ -406,6 +426,7 @@ type StoredElement = Readonly<{
   facing?: 1 | -1;
   direction?: 1 | -1;
   topology?: StoredTopology;
+  parts?: readonly StoredTopology[];
   members?: StoredElements;
 }>;
 
@@ -610,11 +631,22 @@ let operationTraces = new WeakMap<StoredOperation, OperationTrace>();
  * Finish in finally after snapshotting to retain this evaluation's kernel work.
  * An optional cancellation check may throw before any kernel operation starts;
  * complete results survive cancellation, and cleanup removes the check.
+ * The optional distance observer receives call-time geometry snapshots; cleanup
+ * also releases its evaluation scope, while distance() still returns a number.
  */
-export function beginModelEvaluation(checkCancelled?: () => void): () => void {
+export function beginModelEvaluation(
+  checkCancelled?: () => void,
+  distanceObserver?: DistanceObserver,
+): () => void {
   valueTraces = new WeakMap();
   operationTraces = new WeakMap();
-  return beginKernelOperationEvaluation(checkCancelled);
+  const previous = observeDistance;
+  observeDistance = distanceObserver;
+  const finish = beginKernelOperationEvaluation(checkCancelled);
+  return () => {
+    observeDistance = previous;
+    finish();
+  };
 }
 
 function valueTrace(value: object): ValueTrace {
@@ -741,6 +773,9 @@ export interface FaceAnchor extends Anchor<'face'> {
   flip(): this;
 }
 
+/** Fixed solve-frame direction, or the solved direction of a straight edge/axis. */
+export type DistanceAxis = 'x' | 'y' | 'z' | Vec3 | LineAnchor;
+
 const boundKind = Symbol('boundKind');
 export interface Bound extends FaceAnchor {
   readonly [boundKind]: true;
@@ -805,7 +840,7 @@ export type ExposedValue<Value> = Value extends {
           : Kind extends 'vertex'
             ? Vertex
             : Kind extends 'group'
-              ? Anchor<'frame'>
+              ? Anchor<'frame'> & DirectionalBounds
               : Anchor) &
       Elements
   : Value extends Anchor
@@ -1470,10 +1505,13 @@ function rotationPointReference(point: PointAnchor): AnchorReference {
   return reference;
 }
 
-function rotationAxisReference(axis: LineAnchor): AnchorReference {
+function straightAxisReference(
+  axis: LineAnchor,
+  operation = 'axisLine()',
+): AnchorReference {
   const reference = anchorReference(axis);
   if (reference.kind !== 'line')
-    throw new Error('axisLine() requires an axis or straight edge.');
+    throw new Error(`${operation} requires an axis or straight edge.`);
   const geometry =
     reference.topology?.source[modelGeometry]()?.value ??
     (reference.whole && isModelObject(reference.model)
@@ -1490,7 +1528,7 @@ function rotationAxisReference(axis: LineAnchor): AnchorReference {
       : (geometry.shape as ReplicadEdge).geomType === 'LINE';
     if (!straight)
       throw new Error(
-        'axisLine() requires a straight axis; curved edges do not define one rotation axis.',
+        `${operation} requires a straight axis; curved edges do not define one axis.`,
       );
   }
   return reference;
@@ -1652,7 +1690,7 @@ export function axisEdge(id: EdgeId): AxisChain {
 export function axisLine(axis: LineAnchor): AxisChain {
   return new AxisChain(new TransformationRotation(), {
     kind: 'axisLine',
-    axis: rotationAxisReference(axis),
+    axis: straightAxisReference(axis),
   });
 }
 
@@ -2836,6 +2874,7 @@ export class ModelObject<
         kind,
         transform: frame,
         topology,
+        parts,
         members: nested,
         bound,
         facing,
@@ -2852,7 +2891,15 @@ export class ModelObject<
           this.solvePose(context!),
         );
       return transformElement(
-        {kind, transform: frame, topology, members: nested, bound, facing},
+        {
+          kind,
+          transform: frame,
+          topology,
+          parts,
+          members: nested,
+          bound,
+          facing,
+        },
         transform,
       );
     });
@@ -2901,7 +2948,11 @@ export class ModelObject<
   /** @internal */
   exposedElement(): StoredElement {
     if (this.kind === 'group')
-      return {...this.geometryAnchor, members: this.elements};
+      return {
+        ...this.geometryAnchor,
+        parts: this.geometryParts(),
+        members: this.elements,
+      };
     const geometry = this.requireGeometry().value;
     const kind = (
       this.kind === 'face' ? 'surface' : this.kind
@@ -3720,6 +3771,226 @@ export class ModelObject<
     return members;
   }
 
+  /** Finite members in this value's saved local assembly, without re-solving children. */
+  private geometryParts(transform = identityRigidTransform): StoredTopology[] {
+    if (this.geometry)
+      return [{source: this, selection: {kind: 'solid'}, transform, scale: 1}];
+    return this.children.flatMap(child =>
+      child.geometryParts(
+        composeTransforms(transform, child.solvePose(this.assembly!)),
+      ),
+    );
+  }
+
+  /** @internal */
+  static distance(a: Anchor, b: Anchor, axis?: DistanceAxis): number {
+    const left = anchorReference(a),
+      right = anchorReference(b);
+    const axisReference =
+      axis !== undefined && typeof axis !== 'string' && !Array.isArray(axis)
+        ? straightAxisReference(axis as LineAnchor, 'distance() axis')
+        : undefined;
+    const context = ModelObject.createSolveContext([
+      left.model,
+      right.model,
+      ...(axisReference ? [axisReference.model] : []),
+    ]);
+    const topologyParts = (reference: AnchorReference) =>
+      reference.topology
+        ? [reference.topology]
+        : (reference.parts ??
+          (reference.whole && reference.model instanceof ModelObject
+            ? reference.model.geometryParts()
+            : undefined));
+    const parts = (reference: AnchorReference): DistancePart[] => {
+      const pose = reference.model.solvePose(context);
+      const frame = composeTransforms(pose, reference.transform);
+      if (reference.kind === 'point') return [{points: [frame.position]}];
+      const topology = topologyParts(reference);
+      if (topology)
+        return topology.map(part => ({
+          geometry: part.source.requireGeometry(),
+          selection: part.selection,
+          scale: part.scale,
+          transform: composeTransforms(pose, part.transform),
+        }));
+      if (reference.bound) {
+        const [x, z] = reference.bound.size;
+        const corners: Vec3[] =
+          x === 0 && z === 0
+            ? [origin]
+            : x === 0
+              ? [
+                  [0, 0, -z / 2],
+                  [0, 0, z / 2],
+                ]
+              : z === 0
+                ? [
+                    [-x / 2, 0, 0],
+                    [x / 2, 0, 0],
+                  ]
+                : [
+                    [-x / 2, 0, -z / 2],
+                    [x / 2, 0, -z / 2],
+                    [x / 2, 0, z / 2],
+                    [-x / 2, 0, z / 2],
+                  ];
+        return [
+          {
+            points: corners.map(
+              point => composeTransforms(frame, translation(point)).position,
+            ),
+          },
+        ];
+      }
+      throw new Error(
+        'distance() requires finite geometry or a point; select an edge or face instead of an infinite axis or plane.',
+      );
+    };
+    const first = parts(left),
+      second = parts(right);
+    if (!first.length || !second.length)
+      throw new Error('distance() cannot measure an empty group.');
+    const record = (result: DistanceResult, direction?: Vec3): number => {
+      if (observeDistance) {
+        const operands = [left, right].map(reference => {
+          const topology = topologyParts(reference);
+          const elements =
+            topology && reference.kind !== 'point'
+              ? topology.map(
+                  part =>
+                    snapshotElements({
+                      [reference.name]: {
+                        ...reference,
+                        topology: part,
+                        members: undefined,
+                      },
+                    })[0],
+                )
+              : [
+                  snapshotElements({
+                    [reference.name]: {...reference, members: undefined},
+                  })[0],
+                ];
+          return {nodeId: reference.model.nodeId, elements};
+        });
+        observeDistance(
+          {
+            ...result,
+            axis: direction,
+            axisName: typeof axis === 'string' ? axis : undefined,
+            operands,
+            placements: [...context.poses].map(([model, pose]) => ({
+              nodeId: model.nodeId,
+              transform: toTransform(pose),
+            })),
+          },
+          [...context.poses.keys()],
+        );
+      }
+      return result.value;
+    };
+    if (axis === undefined) {
+      let result: DistanceResult | undefined;
+      for (const a of first)
+        for (const b of second) {
+          const candidate =
+            'points' in a &&
+            a.points.length === 1 &&
+            'points' in b &&
+            b.points.length === 1
+              ? {
+                  value: Math.hypot(
+                    ...a.points[0].map((value, i) => value - b.points[0][i]),
+                  ),
+                  start: a.points[0],
+                  end: b.points[0],
+                }
+              : distanceBetweenParts(a, b).value;
+          if (!result || candidate.value < result.value) result = candidate;
+          if (result.value === 0) return record(result);
+        }
+      return record(result!);
+    }
+    const direction = axisReference
+      ? rotateVector(
+          [0, 1, 0],
+          composeTransforms(
+            axisReference.model.solvePose(context),
+            axisReference.transform,
+          ).quaternion,
+        )
+      : typeof axis === 'string'
+        ? distanceAxes[axis]
+        : (axis as Vec3);
+    assertFiniteVector('distance() axis', direction);
+    const magnitude = Math.hypot(...direction);
+    if (magnitude === 0) throw new Error('distance() axis must be non-zero.');
+    const normalized = direction.map(
+      value => value / magnitude,
+    ) as unknown as Vec3;
+    const project = invertTransform(frameFromYAxis(origin, normalized));
+    const projectedBounds = (parts: DistancePart[]): LocalBounds => {
+      const bounds = parts.map(part => {
+        if ('points' in part)
+          return pointBounds(
+            part.points.map(
+              point => composeTransforms(project, translation(point)).position,
+            ),
+          );
+        return evaluateSnapshotQuery(
+          boundsQuery(
+            part.geometry,
+            composeTransforms(project, part.transform),
+            part.selection,
+            part.scale,
+          ),
+        ) as LocalBounds;
+      });
+      return [
+        [0, 1, 2].map(i =>
+          Math.min(...bounds.map(value => value[0][i])),
+        ) as unknown as Vec3,
+        [0, 1, 2].map(i =>
+          Math.max(...bounds.map(value => value[1][i])),
+        ) as unknown as Vec3,
+      ];
+    };
+    const aBounds = projectedBounds(first),
+      bBounds = projectedBounds(second);
+    const [aMin, aMax] = [aBounds[0][1], aBounds[1][1]],
+      [bMin, bMax] = [bBounds[0][1], bBounds[1][1]];
+    const overlap = (Math.max(aMin, bMin) + Math.min(aMax, bMax)) / 2;
+    const [start, end] =
+      bMin > aMax
+        ? [aMax, bMin]
+        : aMin > bMax
+          ? [aMin, bMax]
+          : [overlap, overlap];
+    // Place the axis-parallel dimension within the shared transverse bounds.
+    // A point inside the other operand's projection then anchors the line at
+    // that point. Disjoint bounds use the midpoint of their nearest limits;
+    // projected endpoints remain reference positions for general geometry.
+    const center = [0, 1, 2].map(
+      i =>
+        (Math.max(aBounds[0][i], bBounds[0][i]) +
+          Math.min(aBounds[1][i], bBounds[1][i])) /
+        2,
+    );
+    const unproject = invertTransform(project);
+    const at = (y: number) =>
+      composeTransforms(unproject, translation([center[0], y, center[2]]))
+        .position;
+    return record(
+      {
+        value: Math.max(0, bMin - aMax, aMin - bMax),
+        start: at(start),
+        end: at(end),
+      },
+      normalized,
+    );
+  }
+
   /** Bounds of the selected finite geometry after a rigid transform. */
   private [referenceBoundsParts](
     reference: StoredAnchor,
@@ -3754,6 +4025,15 @@ export class ModelObject<
         ),
       ];
     }
+    if (reference.parts)
+      return reference.parts.map(part =>
+        boundsQuery(
+          part.source.requireGeometry(),
+          composeTransforms(transform, part.transform),
+          part.selection,
+          part.scale,
+        ),
+      );
     return [{bounds: super[referenceBounds](reference, transform)}];
   }
 
@@ -3856,7 +4136,7 @@ export class ModelObject<
   }
 
   protected override edgeReference(id: EdgeId): RelationReference {
-    return {...rotationAxisReference(this.edge(id)), model: undefined};
+    return {...straightAxisReference(this.edge(id)), model: undefined};
   }
 
   protected override vertexPosition(id: VertexId): Vec3 {
@@ -4572,6 +4852,16 @@ export function group(children: readonly Model[], name = 'Group'): GroupModel {
   }) as unknown as GroupModel;
 }
 
+/**
+ * Measure finite models, topology, bounds or point references in their solved placement.
+ * Without axis, returns the shortest geometric distance. With axis, returns the
+ * gap between projected intervals (zero when they overlap). The result is a
+ * non-negative number computed now; later relations do not update it.
+ */
+export function distance(a: Anchor, b: Anchor, axis?: DistanceAxis): number {
+  return ModelObject.distance(a, b, axis);
+}
+
 export function union(operands: readonly SolidModel<{}>[]): SolidModel {
   const {first, others} = booleanOperands('union', operands);
   return first[combineModels]('fuse', others);
@@ -4754,6 +5044,106 @@ type SnapshotQueryInput = {
   geometry: {shape: AnyShape; topology?: ShapeTopology};
   query: SnapshotQuery;
 };
+
+type DistancePart =
+  | Readonly<{points: readonly Vec3[]}>
+  | Readonly<{
+      geometry: ModelGeometry;
+      selection: TopologySelection;
+      transform: RigidTransform;
+      scale: number;
+    }>;
+
+type DistanceResult = Readonly<{value: number; start: Vec3; end: Vec3}>;
+
+const distanceAxes = {x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1]} as const;
+
+function withDistanceShape<T>(
+  part: DistancePart,
+  visit: (shape: AnyShape) => T,
+): T {
+  if (!('points' in part))
+    return withTransformedGeometry(part.geometry.value, part, visit);
+  const points = part.points;
+  if (points.length <= 2) {
+    const shape =
+      points.length === 1
+        ? makeVertex(toPoint(points[0]))
+        : makeLine(toPoint(points[0]), toPoint(points[1]));
+    try {
+      return visit(shape);
+    } finally {
+      shape.delete();
+    }
+  }
+  const edges: ReplicadEdge[] = [];
+  let wire: ReplicadWire | undefined;
+  let face: ReplicadFace | undefined;
+  try {
+    points.forEach((point, index) =>
+      edges.push(
+        makeLine(toPoint(point), toPoint(points[(index + 1) % points.length])),
+      ),
+    );
+    wire = assembleWire(edges);
+    face = makeFace(wire);
+    return visit(face);
+  } finally {
+    face?.delete();
+    wire?.delete();
+    edges.forEach(edge => edge.delete());
+  }
+}
+
+const distanceBetweenParts = cachedArtifact(
+  (a: DistancePart, b: DistancePart): DistanceResult =>
+    withDistanceShape(a, left =>
+      withDistanceShape(b, right => {
+        const query = new (getOC().BRepExtrema_DistShapeShape)();
+        try {
+          query.LoadS1(left.wrapped);
+          query.LoadS2(right.wrapped);
+          query.Perform();
+          if (!query.IsDone())
+            throw new Error('distance() could not measure these geometries.');
+          const first = query.PointOnShape1(1),
+            second = query.PointOnShape2(1);
+          try {
+            return {
+              value: query.Value(),
+              start: [first.X(), first.Y(), first.Z()],
+              end: [second.X(), second.Y(), second.Z()],
+            };
+          } finally {
+            first.delete();
+            second.delete();
+          }
+        } finally {
+          query.delete();
+        }
+      }),
+    ),
+  {
+    key: (a, b) =>
+      kernelOperationKey(
+        'distance-witnesses',
+        [a, b].map(part =>
+          'points' in part
+            ? ['points', part.points]
+            : [
+                'shape',
+                part.geometry.id,
+                part.selection.kind,
+                part.selection.kind === 'solid' ? null : part.selection.id,
+                part.transform.position,
+                part.transform.quaternion,
+                part.scale,
+              ],
+        ),
+        [a, b].flatMap(part => ('points' in part ? [] : [part.geometry])),
+      ),
+  },
+);
 
 function boundsQuery(
   geometry: ModelGeometry,
@@ -5047,6 +5437,7 @@ export const authoringApi = Object.freeze({
   frustum,
   regularPrism,
   group,
+  distance,
   union,
   cut,
   intersect,
@@ -5571,6 +5962,19 @@ function computeTransformedBounds(
   geometry: SnapshotQueryInput['geometry'],
   query: Extract<SnapshotQuery, {kind: 'bounds'}>,
 ): LocalBounds {
+  return withTransformedGeometry(geometry, query, shapeBounds);
+}
+
+/** Borrow the input, and release all selected/transformed handles after the query. */
+function withTransformedGeometry<T>(
+  geometry: SnapshotQueryInput['geometry'],
+  query: Readonly<{
+    transform: RigidTransform;
+    selection: TopologySelection;
+    scale: number;
+  }>,
+  visit: (shape: AnyShape) => T,
+): T {
   const {transform, selection, scale} = query;
   return withTopologyShape(
     geometry.shape,
@@ -5581,7 +5985,7 @@ function computeTransformedBounds(
       try {
         const moved = shapeWithTransform(scaled, transform);
         try {
-          return shapeBounds(moved);
+          return visit(moved);
         } finally {
           moved.delete();
         }
@@ -5717,6 +6121,10 @@ function transformElement(
           transform: composeTransforms(transform, element.topology.transform),
         }
       : undefined,
+    parts: element.parts?.map(part => ({
+      ...part,
+      transform: composeTransforms(transform, part.transform),
+    })),
     members: element.members
       ? Object.fromEntries(
           Object.entries(element.members).map(([name, member]) => [
@@ -5747,6 +6155,11 @@ function scaleElement(element: StoredElement, factor: number): StoredElement {
           transform: scaleFrame(element.topology.transform, factor),
         }
       : undefined,
+    parts: element.parts?.map(part => ({
+      ...part,
+      scale: part.scale * factor,
+      transform: scaleFrame(part.transform, factor),
+    })),
     members: element.members
       ? scaleElements(element.members, factor)
       : undefined,

@@ -27,6 +27,7 @@ task benefits from several forms of evidence.
 | Need                                                               | Read                                                                                                                                                                                            |
 | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Primitives, Boolean operations, profiles, extrusion or loft        | [Core README](../../packages/core/README.md) and [modeling reference](../../packages/web/src/content/docs/docs/reference/core.md)                                                               |
+| Measure geometry and derive another part's dimensions              | [Measurements](../../packages/web/src/content/docs/docs/reference/core.md#measurements) and [fitted beam](../../packages/app/examples/operations/distance.ts)                                   |
 | Place parts against each other or align geometric elements         | [Relations](../../packages/web/src/content/docs/docs/guides/relations.mdx)                                                                                                                      |
 | Understand local geometry, composition placement or origin changes | [Coordinate concepts](../../packages/web/src/content/docs/docs/concepts/local-coordinates.md) and [origin operations](../../packages/web/src/content/docs/docs/guides/origins-and-rotation.mdx) |
 | Select or expose edges, vertices and surfaces                      | [Topology](../../packages/web/src/content/docs/docs/guides/topology.md) and [agent observations](observation.md)                                                                                |
@@ -106,3 +107,14 @@ and accepted source/cursor changes can synchronize the model. Explicit render
 view/mode requests also synchronize while following; observation defaults do not
 force those settings onto the user's viewport. The user remains free to navigate
 and edit. Use [file versions](files.md) to handle concurrent changes.
+
+Selecting a `distance(...)` source call renders both measured elements over dimmed
+owners and the call-time relation context, plus a gray dashed measurement line, endpoint ticks and numeric value.
+Axis letters X/Y/Z share the viewport axis colors. Inside an argument, model
+variables and element references keep their own focus while the measurement
+remains visible. The other measured element uses secondary emphasis; a bound
+shows its normal direction only when that bound is explicitly selected.
+Plain distance uses closest points; an axis uses projected interval limits, which
+need not be points on the geometry. This passive preview follows the call's runtime
+instance, does not change model parameters, and does not include later consumers of
+the returned number. It is included in annotated PNG output, not CAD geometry.

@@ -261,6 +261,34 @@ export default hollow;`;
   }
 });
 
+test('expose references do not add unassembled peers when inspecting its group receiver', async () => {
+  const source = `import {box, group, offset} from '@code3d/core';
+    const left=box(8,30,32);
+    const right=box(8,30,32).relate(self=>[self.on(left.right),offset(60,0,0)]);
+    const beam=box(60,10,24).relate(self=>self.on(left.right));
+    export default group([left,right,beam]).expose({supportA:left,supportB:right,beam});`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  for (const token of ['group([', 'expose({']) {
+    const target = defined(
+      ModelViewport.prototype['sourceTargetAt'].call(
+        {module},
+        '/model.ts',
+        source.indexOf(token) + 1,
+      ),
+    );
+    assert.deepEqual(target.contextTargetIds, [], token);
+    const nodes = target.evaluations[0].nodeIds.map(id =>
+      module.objects.get(id)!,
+    );
+    assert.equal(nodes.length, 1);
+    assert.equal(nodes[0].children.length, 3);
+  }
+});
+
 test('exposed topology retains its geometry, placement and child selection scope', async () => {
   const source = `import {rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, box, group, point} from '@code3d/core';
 const part = box(10, 20, 30);
@@ -1671,6 +1699,9 @@ test('input observation preserves getters, this, argument order, and optional ca
     'missing?.originOffset(reads++, 0, 0);',
     'base.originOffset?.(0, 1, 0);',
     'if (reads !== 1) throw Error("optional arguments");',
+    'const bound = container.model.right;',
+    'if (reads !== 2) throw Error("member receiver evaluated twice");',
+    'missing?.right.flip();',
     'export default group([first]);',
   ].join('\n');
   const module = await compileProject(

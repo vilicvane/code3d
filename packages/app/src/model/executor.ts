@@ -9,6 +9,7 @@ import {
   type EdgeId,
   type ElementKind,
   type ElementSnapshot,
+  type DistanceSnapshot,
   type ModelObject,
   type ModelOperationInputRole,
   type ModelOperationSnapshot,
@@ -98,6 +99,8 @@ type SourceInputTrace = Readonly<{
   sourceRef: SourceRef;
   isCollection: boolean;
   objects: readonly RelationObject[];
+  topologyReferences: readonly TopologyValueReference[];
+  anchorReferences: readonly AnchorValueReference[];
   contextId: string;
   runtime: RuntimeReach;
 }>;
@@ -157,6 +160,9 @@ type TraceFrame = Readonly<{
 }>;
 
 type SourceExecutionTrace = {
+  measurement?: DistanceSnapshot;
+  measurementCount?: number;
+  callRef: SourceRef;
   siteId: string;
   execution: number;
   contextId: string;
@@ -249,6 +255,7 @@ export function createModelExecutor(
         execution,
         contextId: context.id,
         sourceRef: location,
+        callRef: callLocation,
         outcome: 'entered',
         order: nextSourceReachOrder(),
         parameters,
@@ -280,6 +287,8 @@ export function createModelExecutor(
         traceFrames.pop();
         parameterFrames.pop();
       }
+      if (executionTrace.measurement?.value !== result)
+        executionTrace.measurement = undefined;
       executionTrace.outcome = 'completed';
       executionTrace.order = nextSourceReachOrder();
       const runtime = sourceExecutionRuntime(executionTrace);
@@ -509,7 +518,14 @@ export function createModelExecutor(
         );
         return value;
       }
-      const objects = modelObjectsIn(value).filter(
+      const topologyReferences: TopologyValueReference[] = [];
+      const anchorReferences: AnchorValueReference[] = [];
+      const objects = modelObjectsIn(
+        value,
+        new Set(),
+        topologyReferences,
+        anchorReferences,
+      ).filter(
         object =>
           !executionTrace.inputs.some(
             input =>
@@ -528,6 +544,8 @@ export function createModelExecutor(
           sourceRef: sourceRef(file, start, end),
           isCollection: !isModelObject(value) && !modelElementReference(value),
           objects,
+          topologyReferences,
+          anchorReferences,
           contextId: executionTrace.contextId,
           runtime: completedRuntimeReach(),
         });
@@ -563,6 +581,29 @@ export function createModelExecutor(
         if (model) tracedObjects.add(model);
       }
       return traceRuntime.input(file, start, end, siteId, id, value);
+    },
+
+    elementReceiver<T>(
+      file: string,
+      start: number,
+      end: number,
+      id: string,
+      value: T,
+    ): T {
+      if (!isModelObject(value) && !modelElementReference(value)) return value;
+      const location = sourceRef(file, start, end);
+      const context =
+        currentEvaluationContext() ??
+        callEvaluationContext(id, nextTraceExecution(id), 'receiver', location);
+      recordSourceValue(
+        id,
+        'value',
+        location,
+        value,
+        context.id,
+        completedRuntimeReach(),
+      );
+      return value;
     },
 
     element<T>(
@@ -988,7 +1029,19 @@ export function createModelExecutor(
       try {
         onProgress?.('evaluating-model');
         checkCancelled();
-        finishEvaluation = beginModelEvaluation(checkCancelled);
+        finishEvaluation = beginModelEvaluation(
+          checkCancelled,
+          (snapshot, objects) => {
+            const trace = traceFrames.at(-1)?.trace;
+            if (!trace) return;
+            // A package helper may make several uninstrumented measurements.
+            // Only a single forwarded scalar has an unambiguous visual result.
+            trace.measurementCount = (trace.measurementCount ?? 0) + 1;
+            trace.measurement =
+              trace.measurementCount === 1 ? snapshot : undefined;
+            objects.forEach(object => tracedObjects.add(object));
+          },
+        );
         const result = await evaluator.evaluate(artifact.source, {
           __code3d: traceRuntime,
           __code3dAssetUrl: assetUrl,
@@ -1419,6 +1472,8 @@ export function createModelExecutor(
             )
           : trace.objects,
         isCollection: role ? undefined : trace.isCollection,
+        topologyReferences: trace.topologyReferences,
+        anchorReferences: trace.anchorReferences,
         contextId: trace.contextId,
         runtime: trace.runtime,
       });
@@ -2044,7 +2099,11 @@ export function createModelExecutor(
     );
 
     function withConstraintContext(target: SourceTarget): SourceTarget {
-      if (target.kind === 'constraint' || target.kind === 'transformation')
+      if (
+        target.kind === 'measurement' ||
+        target.kind === 'constraint' ||
+        target.kind === 'transformation'
+      )
         return target;
       const scopeRef = parameterScopes.get(target.id);
       const containing = [
@@ -2225,7 +2284,77 @@ export function createModelExecutor(
       return {...target, evaluations, contextTargetIds: [...contextTargetIds]};
     }
 
+    const measurementTargets: SourceTarget[] = [...executionsBySite].flatMap(
+      ([siteId, executions]) => {
+        const measured = executions.filter(
+          execution =>
+            execution.measurement && execution.outcome === 'completed',
+        );
+        return measured.length
+          ? [
+              {
+                id: `source:measurement:${siteId}`,
+                kind: 'measurement' as const,
+                sourceRef: measured[0].callRef,
+                functionId: designFunctionAt(
+                  measured[0].callRef,
+                  designArguments,
+                ),
+                contextTargetIds: [],
+                evaluations: measured.map(execution => ({
+                  measurement: execution.measurement!,
+                  runtime: sourceExecutionRuntime(execution),
+                  contextId: execution.contextId,
+                  nodeIds: execution.measurement!.placements.map(
+                    value => value.nodeId,
+                  ),
+                })),
+              },
+            ]
+          : [];
+      },
+    );
+    function withMeasurementContext(target: SourceTarget): SourceTarget {
+      if (target.kind === 'measurement') return target;
+      const containing = measurementTargets
+        .filter(
+          measurement =>
+            measurement.sourceRef.file === target.sourceRef.file &&
+            measurement.sourceRef.start <= target.sourceRef.start &&
+            target.sourceRef.end <= measurement.sourceRef.end,
+        )
+        .sort((a, b) => sourceSpan(a.sourceRef) - sourceSpan(b.sourceRef));
+      if (!containing.length) return target;
+      return {
+        ...target,
+        contextTargetIds: [],
+        evaluations: target.evaluations.map(evaluation => {
+          // An argument belongs to the first enclosing call to finish in this
+          // execution context, including repeated calls to the same source site.
+          const owner = containing[0].evaluations
+            .filter(
+              candidate =>
+                candidate.contextId === evaluation.contextId &&
+                candidate.runtime.order >= evaluation.runtime.order,
+            )
+            .sort((a, b) => a.runtime.order - b.runtime.order)[0];
+          if (!owner) return evaluation;
+          const focusNodeIds =
+            evaluation.valueNodeIds ??
+            evaluation.focusNodeIds ??
+            evaluation.nodeIds;
+          return {
+            ...evaluation,
+            measurement: owner.measurement,
+            valueNodeIds: focusNodeIds,
+            focusNodeIds,
+            nodeIds: [...new Set([...owner.nodeIds, ...focusNodeIds])],
+          };
+        }),
+      };
+    }
     const targets: SourceTarget[] = [
+      ...measurementTargets,
       ...elementTargets,
       ...constraintTargets,
       ...transformationTargets,
@@ -2261,12 +2390,14 @@ export function createModelExecutor(
               isCollection: evaluation.collection
                 ? true
                 : evaluation.isCollection,
+              topologyReferences: evaluation.topologyReferences,
+              anchorReferences: evaluation.anchorReferences,
               contextId: evaluation.contextId,
             })),
             contextTargetIds: operationInputTargets
               .filter(
                 candidate =>
-                  candidate !== target && sharesOperation(candidate, target),
+                  candidate !== target && sharesComposition(candidate, target),
               )
               .map(candidate => candidate.id),
             operation: target.operation,
@@ -2274,7 +2405,8 @@ export function createModelExecutor(
       ),
     ]
       .map(withConstraintContext)
-      .map(withOperationContext);
+      .map(withOperationContext)
+      .map(withMeasurementContext);
     // Array gaps own their insertion prefix, not the final stage of a nearby call.
     for (const site of relationArraySites) {
       const self = valueTargets.find(
@@ -2721,6 +2853,8 @@ export function createModelExecutor(
         isCollection?: boolean;
         objects: readonly RelationObject[];
         collection?: readonly RelationObject[];
+        topologyReferences: readonly TopologyValueReference[];
+        anchorReferences: readonly AnchorValueReference[];
         contextId: string;
         runtime: RuntimeReach;
       }>
@@ -2750,16 +2884,21 @@ export function createModelExecutor(
       )[0]?.functionId;
   }
 
-  function sharesOperation(
+  function sharesComposition(
     left: MutableSourceInputTarget,
     right: MutableSourceInputTarget,
   ) {
+    // Derivation sources and named references do not assemble peer geometry.
     const rightIds = new Set(
-      right.evaluations.map(evaluation => evaluation.callId),
+      right.evaluations
+        .filter(evaluation => isCompositionInputRole(evaluation.role))
+        .map(evaluation => evaluation.callId),
     );
     return left.evaluations.some(
       evaluation =>
-        evaluation.operationId !== undefined && rightIds.has(evaluation.callId),
+        evaluation.operationId !== undefined &&
+        isCompositionInputRole(evaluation.role) &&
+        rightIds.has(evaluation.callId),
     );
   }
 

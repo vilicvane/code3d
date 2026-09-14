@@ -101,6 +101,7 @@ export type {
   RelationTraceReference,
   ElementKind,
   ElementSnapshot,
+  DistanceSnapshot,
   ModelElementReference,
   ModelGeometryKind,
   ModelGeometrySnapshot,
