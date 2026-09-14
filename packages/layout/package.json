@@ -1,6 +1,6 @@
 {
   "name": "@code3d/layout",
-  "version": "0.0.1-alpha.8",
+  "version": "0.0.1-alpha.9",
   "publishConfig": {
     "access": "public"
   },
@@ -26,7 +26,7 @@
     "src"
   ],
   "peerDependencies": {
-    "@code3d/core": "^0.0.1-alpha.8"
+    "@code3d/core": "^0.0.1-alpha.9"
   },
   "devDependencies": {
     "@code3d/core": "*"
