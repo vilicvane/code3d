@@ -7,7 +7,7 @@ import {
   type Vec3,
 } from '@code3d/core/tooling';
 import type {SourceDecorationProvider} from '../viewport-decoration';
-import type {SourceTargetEvaluation} from './compiler';
+import type {ModelModule, SourceTargetEvaluation} from './compiler';
 import {
   finiteElementDecorations,
   namedElementDecorations,
@@ -28,6 +28,7 @@ export const measurementSourceDecoration: SourceDecorationProvider = {
     const point = (position: Vec3) =>
       composeTransforms(local, {position, quaternion: [0, 0, 0, 1]}).position;
     const focused = focusedElements(evaluation, measurement);
+    const models = measuredModelIds(module, measurement);
     const elements = new Map<
       string,
       {
@@ -38,6 +39,7 @@ export const measurementSourceDecoration: SourceDecorationProvider = {
       }
     >();
     for (const operand of measurement.operands) {
+      if (models.has(operand.nodeId) && operand.whole) continue;
       for (const element of operand.elements) {
         elements.set(elementKey(operand.nodeId, element), {
           nodeId: operand.nodeId,
@@ -96,6 +98,21 @@ export const measurementSourceDecoration: SourceDecorationProvider = {
     ];
   },
 };
+
+/** Whole bodies use their existing model rendering, not overlapping face fills. */
+export function measuredModelIds(
+  module: ModelModule,
+  measurement: DistanceSnapshot | undefined,
+): ReadonlySet<string> {
+  return new Set(
+    measurement?.operands.flatMap(operand => {
+      const kind = module.objects.get(operand.nodeId)?.kind;
+      return operand.whole && (kind === 'solid' || kind === 'group')
+        ? [operand.nodeId]
+        : [];
+    }),
+  );
+}
 
 function focusedElements(
   evaluation: SourceTargetEvaluation,

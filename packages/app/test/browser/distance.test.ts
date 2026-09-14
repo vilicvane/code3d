@@ -97,6 +97,44 @@ test(
       if (kind === 'element' && operand === 0)
         await page.screenshot({path: '/tmp/code3d-distance-element-focus.png'});
     }
+    for (const [token, operand] of [
+      ['distance(left, right)', undefined],
+      ['left, right', 0],
+      ['right);', 1],
+      ['tubeA, tubeB', 0],
+      ['tubeB);', 1],
+    ] as const) {
+      const selected = await page.evaluate(async token => {
+        const path = '/test/browser/distance-fixture.ts';
+        const fixture: typeof import('./distance-fixture.ts') = await import(
+          path
+        );
+        return fixture.selectDistance(token, true);
+      }, token);
+      assert.equal(
+        selected.focusKind,
+        operand === undefined ? 'measurement' : 'value',
+      );
+      assert.deepEqual(
+        selected.focused,
+        operand === undefined ? undefined : [selected.operands[operand]],
+      );
+      assert.ok(selected.surfaces.some(value => value > 0.18));
+      assert.equal(
+        selected.highlights.filter(d => d.kind === 'mesh').length,
+        0,
+      );
+      assert.equal(selected.modelFaces.length, 2);
+      for (const face of selected.modelFaces) {
+        const primary =
+          operand === undefined || face.nodeId === selected.operands[operand];
+        assert.equal(face.color, primary ? '708090' : '788078');
+        assert.ok(primary ? face.opacity > 0.18 : face.opacity === 0.18);
+      }
+      await page.screenshot({
+        path: `/tmp/code3d-distance-${token.startsWith('tube') ? 'hollow' : 'solid'}-focus-${operand}.png`,
+      });
+    }
     const sameOwner = await page.evaluate(async () => {
       const path = '/test/browser/distance-fixture.ts';
       const fixture: typeof import('./distance-fixture.ts') = await import(
@@ -143,7 +181,7 @@ test(
       ['distance(a,a)', '0', 'anchor'],
       ['distance(edge,b)', '', 'edges'],
       ['distance(left.surface', '', 'mesh'],
-      ['distance(cluster,probe)', '', 'mesh'],
+      ['distance(cluster,probe)', '', 'anchor'],
       ["distance(left.up,left.up,'y')", '0 · Y', 'surface'],
     ]) {
       const sample = await page.evaluate(async token => {

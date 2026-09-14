@@ -12,6 +12,9 @@ const source = `import {box,distance,group,offset,point,line} from '@code3d/core
   const left=box(8,30,32).material('#708090');
   const right=box(8,30,32).relate(self=>[self.on(left.right),offset(60,0,0)]).material('#708090');
   const gap=distance(left.right,right.left,'x');
+  distance(left, right);
+  const tubeA=box(5,10,80).shell(0.5,[5,6]).rotate(-90,0,0).material('#708090');
+  const tubeB=tubeA.originOffset(-25,0,0); distance(tubeA, tubeB);
   const a=point([0,0,0]), b=point([3,4,0]); distance(a,b); distance(a,a);
   const edge=line([0,0,0],[8,4,0]); distance(edge,b);
   distance(left.surface(1),right.surface(1));
@@ -107,7 +110,11 @@ export function measureDistance() {
     ).flatMap(instance => {
       const decoration = instance.object.children[0].userData.decoration;
       if (decoration.kind === 'measurement') return [];
-      const drawn: {nodeId: string; kind: string; opacity: number}[] = [];
+      const drawn: {
+        nodeId: string;
+        kind: string;
+        opacity: number;
+      }[] = [];
       instance.object.traverse(object => {
         if (!(object instanceof THREE.Mesh) || Array.isArray(object.material))
           return;
@@ -140,6 +147,28 @@ export function measureDistance() {
       .get('source-context:measurement')!
       .map(value => value.object.children[0].userData.decoration.kind),
     surfaces,
+    modelFaces: [
+      ...viewport['occurrences'].values(),
+      ...viewport['contextOccurrences'].values(),
+    ].flatMap(occurrence => {
+      if (!occurrence.node.mesh) return [];
+      const faces: {nodeId: string; opacity: number; color: string}[] = [];
+      occurrence.object.traverse(object => {
+        if (
+          !(object instanceof THREE.Mesh) ||
+          object instanceof LineSegments2 ||
+          Array.isArray(object.material) ||
+          !('color' in object.material)
+        )
+          return;
+        faces.push({
+          nodeId: occurrence.node.nodeId,
+          opacity: object.material.opacity,
+          color: (object.material.color as THREE.Color).getHexString(),
+        });
+      });
+      return faces;
+    }),
     tools: viewport.sourceContext!.target.tool,
     position: viewport['root'].children.map(value => value.position.toArray()),
     corners: (

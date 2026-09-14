@@ -220,22 +220,22 @@ example, including parameter tools, placement, and colors.
 The cursor selects an operation and a runtime occurrence. Related context depends
 on that operation; it is not every model in the file.
 
-| Source focus                                   | Related context and emphasis                                                                                                                         |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Standalone model value                         | That value in its local frame; a collection retains its members' composition positions                                                               |
-| A constructor directly inside a composition    | The current result plus the other inputs of that composition                                                                                         |
-| `group`, `union`, `cut`, or `intersect` result | The resulting model; select an input to inspect its peers                                                                                            |
-| Composition input or array member              | The selected input and dimmed peers from the same call; Boolean previews also show relevant overlap geometry                                         |
-| Origin changes, rotation, or scaling           | The current step and peers from later compositions that consume it                                                                                   |
-| `relate(...)` call                             | The related result, references from this call at secondary emphasis, and dimmed composition peers                                                    |
-| `on` or `align`                                | The focused element, the other side at secondary emphasis, and dimmed surrounding models                                                             |
-| Vertex, edge, or face topology reference       | The selected topology against its dimmed owner, within any enclosing operation context                                                               |
-| Named point, axis, or bound reference          | The reference marker and its owner; a standalone reference keeps the model's normal appearance                                                       |
-| Fillet or chamfer result                       | The result with faint original geometry and the original selected edges                                                                              |
-| Loft or extrude input                          | The selected input, other inputs from that call, and a result overlay                                                                                |
-| `expose(...)` call or receiver                 | The existing model and assembled members; named references do not add separate copies                                                                |
-| `distance(...)` call or whitespace             | Both measured elements, the line and value, with dimmed owners and call-time relation context                                                        |
-| Inside a `distance(...)` argument              | The selected model or element, the other measured element at secondary emphasis, and the same measurement line; a selected bound shows its direction |
+| Source focus                                   | Related context and emphasis                                                                                                                                                                 |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Standalone model value                         | That value in its local frame; a collection retains its members' composition positions                                                                                                       |
+| A constructor directly inside a composition    | The current result plus the other inputs of that composition                                                                                                                                 |
+| `group`, `union`, `cut`, or `intersect` result | The resulting model; select an input to inspect its peers                                                                                                                                    |
+| Composition input or array member              | The selected input and dimmed peers from the same call; Boolean previews also show relevant overlap geometry                                                                                 |
+| Origin changes, rotation, or scaling           | The current step and peers from later compositions that consume it                                                                                                                           |
+| `relate(...)` call                             | The related result, references from this call at secondary emphasis, and dimmed composition peers                                                                                            |
+| `on` or `align`                                | The focused element, the other side at secondary emphasis, and dimmed surrounding models                                                                                                     |
+| Vertex, edge, or face topology reference       | The selected topology against its dimmed owner, within any enclosing operation context                                                                                                       |
+| Named point, axis, or bound reference          | The reference marker and its owner; a standalone reference keeps the model's normal appearance                                                                                               |
+| Fillet or chamfer result                       | The result with faint original geometry and the original selected edges                                                                                                                      |
+| Loft or extrude input                          | The selected input, other inputs from that call, and a result overlay                                                                                                                        |
+| `expose(...)` call or receiver                 | The existing model and assembled members; named references do not add separate copies                                                                                                        |
+| `distance(...)` call or whitespace             | Both measured objects, the line and value; whole models retain their appearance, while element owners and relation context are dimmed                                                        |
+| Inside a `distance(...)` argument              | The selected model with the other model dimmed, or the selected element with the other element at secondary emphasis; the measurement stays visible and a selected bound shows its direction |
 
 A placement step keeps its own stage even if a later consumer moves the value
 again. A measurement keeps the geometry and positions at the time it ran; models

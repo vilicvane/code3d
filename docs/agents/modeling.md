@@ -108,11 +108,13 @@ view/mode requests also synchronize while following; observation defaults do not
 force those settings onto the user's viewport. The user remains free to navigate
 and edit. Use [file versions](files.md) to handle concurrent changes.
 
-Selecting a `distance(...)` source call renders both measured elements over dimmed
-owners and the call-time relation context, plus a gray dashed measurement line, endpoint ticks and numeric value.
+Selecting a `distance(...)` source call emphasizes both measured objects against the
+dimmed call-time relation context, plus a gray dashed measurement line, endpoint ticks and numeric value.
+Whole solids and groups retain their model appearance without a face-selection overlay;
+measured elements are highlighted over dimmed owners.
 Axis letters X/Y/Z share the viewport axis colors. Inside an argument, model
 variables and element references keep their own focus while the measurement
-remains visible. The other measured element uses secondary emphasis; a bound
+remains visible. The other whole model is dimmed; the other measured element uses secondary emphasis. A bound
 shows its normal direction only when that bound is explicitly selected.
 Plain distance uses closest points; an axis uses projected interval limits, which
 need not be points on the geometry. This passive preview follows the call's runtime
