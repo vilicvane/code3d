@@ -253,6 +253,26 @@ test('measurement traces preserve exact witnesses on cache hits and stop with ev
   assert.equal(snapshots.length, 4);
 });
 
+test('measurement snapshots distinguish whole models from exposed geometry references', () => {
+  const body = keep(box(8, 30, 32));
+  const assembly = keep(group([body]).expose({part: body}));
+  const snapshots: DistanceSnapshot[] = [];
+  const finish = beginModelEvaluation(undefined, snapshot =>
+    snapshots.push(snapshot),
+  );
+  try {
+    distance(body, body.right);
+    distance(assembly, assembly.part);
+  } finally {
+    finish();
+  }
+  for (const snapshot of snapshots)
+    assert.deepEqual(
+      snapshot.operands.map(value => value.whole),
+      [true, false],
+    );
+});
+
 test('contained and touching geometry produce zero-length witness segments', () => {
   const solid = keep(sphere(2)),
     inside = keep(point()),

@@ -97,6 +97,31 @@ test('distance retains its solved context while arguments focus their own models
   }
 });
 
+test('whole-solid distance arguments use model focus without redundant face highlights', async () => {
+  const source = `import {box,distance,group} from '@code3d/core';
+    const left=box(8,30,32), right=box(8,30,32).originOffset(-68,0,0);
+    distance(left, right); export default group([left,right]);`;
+  const module = await compile(source);
+  for (const [token, operand] of [
+    ['left, right', 0],
+    ['right);', 1],
+  ] as const) {
+    const scope = at(module, source, token);
+    assert.equal(scope.target.kind, 'value', token);
+    const measurement = scope.evaluation.measurement!;
+    assert.deepEqual(
+      scope.evaluation.focusNodeIds,
+      [measurement.operands[operand].nodeId],
+      token,
+    );
+    assert.ok(measurement.operands.every(value => value.whole));
+    assert.equal(
+      provider.decorations(scope).filter(d => d.kind === 'mesh').length,
+      0,
+    );
+  }
+});
+
 test('equal results and repeated calls keep distinct participants and runtime evaluations', async () => {
   const source = `import {point,distance,group} from '@code3d/core';
     const a=point(), b=point([3,4,0]), c=point([0,0,5]);
@@ -195,7 +220,10 @@ test('whole and exposed nested groups preserve actual part topology for highligh
     assert.equal(measurement.value, 5);
     assert.equal(measurement.operands[0].elements.length, 2);
     const drawings = provider.decorations(scope);
-    assert.equal(drawings.filter(value => value.kind === 'mesh').length, 2);
+    assert.equal(
+      drawings.filter(value => value.kind === 'mesh').length,
+      token.includes('.cluster') ? 2 : 0,
+    );
     assert.ok(
       drawings.some(
         value => value.kind === 'anchor' && value.elementKind === 'point',

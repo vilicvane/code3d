@@ -180,6 +180,8 @@ export type DistanceSnapshot = Readonly<{
   axisName?: 'x' | 'y' | 'z';
   operands: readonly Readonly<{
     nodeId: string;
+    /** The entire model, rather than a named or topology reference. */
+    whole: boolean;
     elements: readonly ElementSnapshot[];
   }>[];
   placements: readonly Readonly<{nodeId: string; transform: Transform}>[];
@@ -3913,7 +3915,11 @@ export class ModelObject<
                     [reference.name]: {...reference, members: undefined},
                   })[0],
                 ];
-          return {nodeId: reference.model.nodeId, elements};
+          return {
+            nodeId: reference.model.nodeId,
+            whole: reference.whole === true,
+            elements,
+          };
         });
         observeDistance(
           {

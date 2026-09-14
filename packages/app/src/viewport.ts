@@ -1,4 +1,5 @@
 import {MeasurementDecorationObject} from './rendering/measurement-decoration';
+import {measuredModelIds} from './model/measurement-decorations';
 import {committedSpatialObject} from './tools/spatial-edit';
 import {
   isCompositionInputRole,
@@ -1478,6 +1479,10 @@ export class ModelViewport {
         value.transform,
       ]),
     );
+    const measuredModels = measuredModelIds(
+      this.module!,
+      evaluation.measurement,
+    );
     const relatedNodes = this.resolveNodes(evaluation.nodeIds)
       .filter(
         node =>
@@ -1548,7 +1553,9 @@ export class ModelViewport {
           `context/${index}`,
           targetId,
           placement,
-          secondaryNodeIds.has(node.nodeId) ? 'secondary' : 'context',
+          !evaluation.measurement && secondaryNodeIds.has(node.nodeId)
+            ? 'secondary'
+            : 'context',
         ),
       );
     });
@@ -1581,7 +1588,9 @@ export class ModelViewport {
           evaluation.anchorReferences?.length;
         applySourceEmphasis(
           object,
-          focusNodeIds?.includes(node.nodeId) && !elementFocus
+          !elementFocus &&
+            (focusNodeIds?.includes(node.nodeId) ||
+              (!focusNodeIds?.length && measuredModels.has(node.nodeId)))
             ? 'primary'
             : 'context',
         );
