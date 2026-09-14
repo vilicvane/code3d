@@ -147,6 +147,9 @@ Publish 只构建、打包、校验发布范围与产物完整性，并上传对
 上传阶段不重新打包或执行 lifecycle scripts。
 已公开版本仅在完整性与本批已验证产物一致时跳过；默认 dist-tag 为 `latest`，包的 `publishConfig.tag` 可覆盖。
 新包必须先在 npm 完成首次创建并配置 trusted publisher；CI 会在上传本批任何包前检查这一前提。
+首次创建直接上传本批已验证的正式 tarball，随后立即配置 direct publish trust；
+不发布空壳或另造占位版本。先准备产物和连续操作，再发起敏感授权，避免消耗
+网页提供的短期免重复 2FA 窗口。该包随后由 workflow 按完整性核对并跳过已上传版本。
 Trusted Publisher 必须允许 direct publishing；只允许 staged publishing 的配置不能运行本流程。
 使用 `npm trust list <package> --json` 读取已有 claims，保留仓库、workflow、environment，
 通过 `npm trust github <package> --repo vilicvane/code3d --file publish.yml --allow-publish --yes`
