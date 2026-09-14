@@ -11,7 +11,7 @@ import source from '../../../../../../app/examples/constraints/combined-constrai
 import transformations from '../../../../../../app/examples/constraints/transformations.ts?raw';
 
 A relation describes how one part sits against another. It is attached to a
-model value and resolved when the parts are composed. The part keeps its own
+model value and resolved when the parts are composed or their relative geometry is queried. The part keeps its own
 [local coordinates](../../concepts/local-coordinates/): `originOffset()` changes
 those geometry coordinates, while a relation's `offset()` participates in
 placement. Consecutive constraints are solved together; independent transformations
@@ -353,3 +353,49 @@ To change the standalone geometry and its origin, see
 
 See [code and geometry](../../concepts/code-and-geometry/) for the distinction
 between a model value and its runtime context.
+
+## Measure before building a part
+
+Use `distance(a, b, axis?)` when another part's dimensions depend on existing
+geometry. The query resolves the inputs' current relations and returns an
+ordinary number; a group is not required before measuring.
+
+<ModelExample id="distance" />
+
+In this example, change `gap` to resize the opening and its beam. The beam reads
+the X gap between the two facing bounds and the support's Z depth, then builds
+with those dimensions. Its height remains fixed. The Arguments presets show
+two sizes of the same assembly.
+
+Omit the axis for the shortest spatial distance, or provide `x`, `y`, `z`, a
+direction vector, or a straight edge/axis reference for the gap between projected
+intervals. Use topology faces when their actual trimmed shape matters; a
+directional bound measures its rectangular extent. See the
+[measurement reference](../../reference/core/#measurements) for supported inputs
+and coordinate rules.
+
+Measurements follow source order. Adding a later relation does not retroactively
+change a computed length. For a repeated part already in a group, expose the
+intended occurrence and measure that reference.
+
+Place the cursor anywhere inside a `distance(...)` call to inspect the measurement
+in the viewport. Both measured elements are highlighted against dimmed related
+models, with a distance line and numeric label. The preview uses the solved
+positions at that call, even before a `group` exists. A projected measurement is
+marked with its axis: the line spans the projection intervals, so its endpoints
+need not lie on the selected geometry. The line is placed within the shared
+transverse bounds when possible: for a point inside a face’s projection, it starts
+at the point and reaches the face along the measurement axis. Overlapping
+intervals on the measurement axis show zero.
+
+Inside the call, selecting a model variable emphasizes that model. Selecting an
+element reference emphasizes that element while the other measured element stays
+visible at secondary emphasis. An explicitly selected bound also shows its normal
+direction; other measured bounds keep only their face and corner markers. The
+measurement line stays visible as you move between arguments.
+
+Measurements use a gray dashed line with short ticks at both ends and a neutral
+numeric label. The X, Y, or Z letter uses the matching viewport axis color; custom
+directions keep a neutral `axis` label. Dash spacing, endpoint ticks, and text
+keep their screen size as you zoom and are included in annotated image exports. This preview is passive; measurement
+parameter controls and element-picking tools are not yet available.

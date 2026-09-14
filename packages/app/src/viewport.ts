@@ -1,3 +1,4 @@
+import {MeasurementDecorationObject} from './rendering/measurement-decoration';
 import {committedSpatialObject} from './tools/spatial-edit';
 import {
   isCompositionInputRole,
@@ -160,6 +161,7 @@ type DecorationInstance = Readonly<{
   occurrenceKey: string;
   frame: 'geometry' | 'operation';
   anchor?: AnchorDecorationObject;
+  measurement?: MeasurementDecorationObject;
   corners?: ScreenSpaceCornerLines;
   bounds?: boolean;
   visibility?: 'without-object-bounds' | 'without-topology-selection';
@@ -783,6 +785,14 @@ export class ModelViewport {
     const target = this.sourceTargetAt(file, offset, module, preferredSource);
     if (!target) return;
     const current = module === this.module ? this.sourceContext : undefined;
+    const matchingMeasurementIndex = current?.evaluation.measurement
+      ? target.evaluations.findIndex(
+          evaluation =>
+            evaluation.measurement === current.evaluation.measurement &&
+            (!preferredContextId ||
+              evaluation.contextId === preferredContextId),
+        )
+      : -1;
     const owner =
       current && module
         ? contextualToolScope(module, current).evaluation.relationOwnerNodeId
@@ -811,13 +821,15 @@ export class ModelViewport {
         ? this.selectedViewTarget.evaluationIndex
         : -1;
     const preferredEvaluationIndex =
-      matchingOwnerIndex >= 0
-        ? matchingOwnerIndex
-        : matchingContextIndex >= 0
-          ? matchingContextIndex
-          : retainedEvaluationIndex >= 0
-            ? retainedEvaluationIndex
-            : 0;
+      matchingMeasurementIndex >= 0
+        ? matchingMeasurementIndex
+        : matchingOwnerIndex >= 0
+          ? matchingOwnerIndex
+          : matchingContextIndex >= 0
+            ? matchingContextIndex
+            : retainedEvaluationIndex >= 0
+              ? retainedEvaluationIndex
+              : 0;
     const evaluationIndex = target.evaluations[preferredEvaluationIndex]
       ? preferredEvaluationIndex
       : 0;
@@ -1192,7 +1204,9 @@ export class ModelViewport {
                             this.camera,
                             occurrence.object.matrixWorld,
                           )
-                        : new AnchorDecorationObject(projected);
+                        : projected.kind === 'measurement'
+                          ? new MeasurementDecorationObject(projected)
+                          : new AnchorDecorationObject(projected);
           const object = new THREE.Group();
           object.matrixAutoUpdate = false;
           object.add(decorationObject);
@@ -1207,6 +1221,10 @@ export class ModelViewport {
             bounds: decoration.kind === 'bounds',
             anchor:
               decorationObject instanceof AnchorDecorationObject
+                ? decorationObject
+                : undefined,
+            measurement:
+              decorationObject instanceof MeasurementDecorationObject
                 ? decorationObject
                 : undefined,
             corners: decorationObject.children.find(
@@ -1228,6 +1246,10 @@ export class ModelViewport {
             this.camera,
             this.renderer.domElement.clientHeight,
           );
+          instance.measurement?.update(
+            this.camera,
+            this.renderer.domElement.clientHeight,
+          );
           return instance;
         });
     });
@@ -1240,7 +1262,8 @@ export class ModelViewport {
     if (!instances) {
       return;
     }
-    instances.forEach(({object}) => {
+    instances.forEach(({object, measurement}) => {
+      measurement?.dispose();
       object.removeFromParent();
       disposeObject(object);
     });
@@ -1449,11 +1472,22 @@ export class ModelViewport {
     selectedKey?: string,
     focusNodeIds = evaluation.focusNodeIds,
   ): void {
+    const placements = new Map(
+      evaluation.measurement?.placements.map(value => [
+        value.nodeId,
+        value.transform,
+      ]),
+    );
     const relatedNodes = this.resolveNodes(evaluation.nodeIds)
       .filter(
         node =>
           !evaluation.relationPreviewDiagnostic ||
           node.nodeId !== evaluation.relationOwnerNodeId,
+      )
+      .map(node =>
+        placements.has(node.nodeId)
+          ? {...node, compositionTransform: placements.get(node.nodeId)!}
+          : node,
       )
       .map(node =>
         node.nodeId === evaluation.relationPreview?.nodeId
@@ -1493,7 +1527,8 @@ export class ModelViewport {
       });
     const layeredScene = focusNodes.length + contextNodes.length > 1;
     this.selectionEmphasized =
-      focusNodeIds !== undefined || target.kind !== 'constraint';
+      (!evaluation.measurement || !!focusNodeIds?.length) &&
+      (focusNodeIds !== undefined || target.kind !== 'constraint');
     this.renderedViewTarget = renderedViewTarget;
     this.resetRenderedView();
     const constraints = evaluatedConstraints(this.module!.objects, evaluation);
@@ -1532,12 +1567,25 @@ export class ModelViewport {
         operationRole,
       );
       // The current relation provider already owns both element highlights.
-      const references = relationContext
-        ? []
-        : (evaluation.topologyReferences?.filter(
-            reference => reference.nodeId === node.nodeId,
-          ) ?? []);
-      if (relationContext) {
+      const references =
+        relationContext || evaluation.measurement
+          ? []
+          : (evaluation.topologyReferences?.filter(
+              reference => reference.nodeId === node.nodeId,
+            ) ?? []);
+      if (evaluation.measurement) {
+        const elementFocus =
+          evaluation.element ||
+          evaluation.selection ||
+          evaluation.topologyReferences?.length ||
+          evaluation.anchorReferences?.length;
+        applySourceEmphasis(
+          object,
+          focusNodeIds?.includes(node.nodeId) && !elementFocus
+            ? 'primary'
+            : 'context',
+        );
+      } else if (relationContext) {
         applySourceEmphasis(object, 'primary');
       } else if (
         references.length > 0 ||
@@ -2478,6 +2526,7 @@ export class ModelViewport {
     for (const instances of this.decorationLayers.values()) {
       for (const instance of instances) {
         instance.anchor?.update(camera, viewportHeight);
+        instance.measurement?.update(camera, viewportHeight);
         instance.corners?.update(camera, viewportWidth, viewportHeight);
       }
     }
@@ -2590,7 +2639,8 @@ function sourceTargetPriority(target: SourceTarget): number {
 export function sourceTargetPlacement(
   evaluation: SourceTargetEvaluation,
 ): ModelPlacement {
-  return evaluation.isCollection ||
+  return evaluation.measurement !== undefined ||
+    evaluation.isCollection ||
     evaluation.constraintId !== undefined ||
     evaluation.transformationId !== undefined ||
     evaluation.relationContext !== undefined ||

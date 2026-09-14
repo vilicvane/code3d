@@ -1,3 +1,4 @@
+import {measurementSourceDecoration} from './measurement-decorations';
 import {
   elementSourceDecoration,
   relationSourceDecoration,
@@ -12,6 +13,7 @@ import {
 } from './operation-decorations';
 
 export const sourceDecorationProviders = [
+  measurementSourceDecoration,
   booleanOperationSourceDecoration,
   edgeModificationSourceDecoration,
   loftResultSourceDecoration,

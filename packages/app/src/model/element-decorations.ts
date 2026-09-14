@@ -55,7 +55,7 @@ const boundSurfaceAppearance = {
   shading: 'unlit',
 } as const;
 
-function sourceElementReferences(evaluation: SourceTargetEvaluation) {
+export function sourceElementReferences(evaluation: SourceTargetEvaluation) {
   if (evaluation.element && evaluation.topologyReferences?.length) return [];
   return evaluation.element
     ? [evaluation.element]
@@ -65,6 +65,7 @@ function sourceElementReferences(evaluation: SourceTargetEvaluation) {
 export const elementSourceDecoration = {
   id: 'named-element',
   decorations({module, evaluation}) {
+    if (evaluation.measurement) return [];
     if (evaluatedConstraints(module.objects, evaluation).length > 0) return [];
     return sourceElementReferences(evaluation).flatMap(reference => {
       const node = module.objects.get(reference.nodeId);
@@ -364,7 +365,7 @@ function boundMesh(element: ElementSnapshot): RenderMesh {
   };
 }
 
-const secondaryRelationMarkerOpacity = 0.7;
+export const secondaryElementMarkerOpacity = 0.7;
 
 export const relationSourceDecoration: SourceDecorationProvider = {
   id: 'relation-geometry',
@@ -377,6 +378,9 @@ export const relationSourceDecoration: SourceDecorationProvider = {
       target.tool?.signature.name === 'offset' ||
       evaluation.relationSpatial ||
       (target.kind === 'value' &&
+        (evaluation.valueNodeIds ?? evaluation.focusNodeIds ?? []).includes(
+          evaluation.relationOwnerNodeId ?? '',
+        ) &&
         evaluation.constraintFocus !== 'target' &&
         !evaluation.element &&
         !evaluation.anchorReferences?.length &&
@@ -410,7 +414,7 @@ export const relationSourceDecoration: SourceDecorationProvider = {
                   : []),
                 ...namedElementDecorations(node, element),
               ];
-        const opacity = side === focus ? 1 : secondaryRelationMarkerOpacity;
+        const opacity = side === focus ? 1 : secondaryElementMarkerOpacity;
         return decorations.map(decoration => ({
           ...decoration,
           id: `${constraint.id}:${side}:${decoration.id}`,
@@ -426,6 +430,91 @@ export const relationSourceDecoration: SourceDecorationProvider = {
     });
   },
 };
+
+/** Highlight finite operands using the same bound, point and true-face styles as relations. */
+export function finiteElementDecorations(
+  module: ModelModule,
+  node: ModelSnapshotObject,
+  element: ElementSnapshot,
+): readonly ViewportDecoration[] {
+  const topology = element.topology;
+  const mesh = topology && module.objects.get(topology.geometryNodeId)?.mesh;
+  if (!topology || !mesh)
+    return namedElementDecorations(node, element).filter(
+      decoration => !element.bound || decoration.kind !== 'anchor',
+    );
+  const base = {
+    nodeId: node.nodeId,
+    id: element.name,
+    transform: topology.transform,
+  };
+  if (topology.kind === 'vertex')
+    return [
+      {
+        ...base,
+        kind: 'topology',
+        mesh,
+        topologyKind: 'vertex',
+        ids: [topology.id],
+        appearance: elementAppearance,
+      },
+    ];
+  if (
+    topology.kind === 'edge' ||
+    (topology.kind === 'solid' && !mesh.triangles.length)
+  )
+    return mesh.edges.length
+      ? [
+          {
+            ...base,
+            kind: 'edges',
+            mesh,
+            edgeIds: topology.kind === 'edge' ? [topology.id] : undefined,
+            appearance: elementAppearance,
+          },
+        ]
+      : [
+          {
+            ...base,
+            kind: 'topology',
+            mesh,
+            topologyKind: 'vertex',
+            ids: mesh.vertexIds,
+            appearance: elementAppearance,
+          },
+        ];
+  return [
+    {
+      ...base,
+      kind: 'mesh',
+      mesh:
+        topology.kind === 'surface'
+          ? selectedSurfaceMesh(mesh, topology.id)
+          : mesh,
+      appearance: faceAppearance,
+    },
+  ];
+}
+
+function selectedSurfaceMesh(
+  mesh: RenderMesh,
+  id: import('@code3d/core/tooling').TopologyId,
+): RenderMesh {
+  const groups = mesh.surfaceGroups.filter(
+    group => JSON.stringify(group.surfaceId) === JSON.stringify(id),
+  );
+  const triangles = new Uint32Array(
+    groups.flatMap(group => [
+      ...mesh.triangles.slice(group.start, group.start + group.count),
+    ]),
+  );
+  return {
+    ...mesh,
+    triangles,
+    edges: boundaryEdges(mesh.vertices, triangles),
+    edgeGroups: [],
+  };
+}
 
 function alignedElementDecorations(
   module: ModelModule,
@@ -463,23 +552,7 @@ function alignedElementDecorations(
       ...anchors,
     ];
   if (topology.kind === 'surface') {
-    const groups = geometry.mesh.surfaceGroups.filter(
-      group => JSON.stringify(group.surfaceId) === JSON.stringify(topology.id),
-    );
-    const triangles = new Uint32Array(
-      groups.flatMap(group => [
-        ...geometry.mesh!.triangles.slice(
-          group.start,
-          group.start + group.count,
-        ),
-      ]),
-    );
-    const mesh = {
-      ...geometry.mesh,
-      triangles,
-      edges: boundaryEdges(geometry.mesh.vertices, triangles),
-      edgeGroups: [],
-    };
+    const mesh = selectedSurfaceMesh(geometry.mesh, topology.id);
     return [
       {
         kind: 'mesh',

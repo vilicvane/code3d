@@ -76,6 +76,19 @@ export const renderSamples = [
     tags: ['inspect', 'edit', 'reuse'],
   },
   {
+    id: 'distance',
+    title: 'Fit a beam to a measured opening',
+    description:
+      'Measure an assembly gap and use it as a normal model dimension, with an optional projection axis.',
+    category: 'Practical models',
+    file: 'operations/distance.ts',
+    focus: {
+      context: "const length = distance(left.right, right.left, 'x');",
+      token: 'distance',
+    },
+    tags: ['distance', 'parameters', 'assembly'],
+  },
+  {
     id: 'intersect',
     title: 'Intersect',
     description: 'Keep the common volume of a box and an offset sphere.',
@@ -337,6 +350,7 @@ export const exampleEntries = [
   {
     file: 'operations/group.ts',
   },
+  {file: 'operations/distance.ts'},
   {
     file: 'materials.ts',
   },

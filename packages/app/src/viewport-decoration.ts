@@ -121,7 +121,18 @@ export type ViewportDimensionDecoration = ViewportDecorationBase &
     appearance: ViewportDecorationAppearance;
   }>;
 
+export type ViewportMeasurementDecoration = ViewportDecorationBase &
+  Readonly<{
+    kind: 'measurement';
+    start: Vec3;
+    end: Vec3;
+    value: number;
+    axisLabel?: string;
+    appearance: ViewportDecorationAppearance;
+  }>;
+
 export type ViewportDecoration =
+  | ViewportMeasurementDecoration
   | ViewportMeshDecoration
   | ViewportEdgeDecoration
   | ViewportSurfaceDecoration
