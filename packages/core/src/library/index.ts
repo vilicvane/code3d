@@ -78,6 +78,7 @@ export type {
   MergedElements,
   Model,
   ModelCapabilities,
+  ModelBounds,
   ModelElementKind,
   ModelForKind,
   ModelGeometryKind,

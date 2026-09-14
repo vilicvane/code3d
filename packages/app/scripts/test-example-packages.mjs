@@ -88,9 +88,10 @@ for (const manifestPath of manifests) {
       import model from './model.ts';
       import {createModelSnapshotter} from '@code3d/core/tooling';
       const result = createModelSnapshotter()(model);
-      assert.equal(result.kind, 'group');
-      assert.ok(result.children.length >= 2);
-      for (const child of result.children) assert.ok(child.mesh.triangles.length > 0);
+      assert.equal(result.kind, ${JSON.stringify(manifestPath === 'npm/package.json' ? 'solid' : 'group')});
+      const solids = result.kind === 'group' ? result.children : [result];
+      assert.ok(solids.length >= ${manifestPath === 'npm/package.json' ? 1 : 2});
+      for (const child of solids) assert.ok(child.mesh.triangles.length > 0);
     `,
     );
     await run(process.execPath, ['verify.mjs'], directory);

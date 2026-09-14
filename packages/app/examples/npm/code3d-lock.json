@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "@code3d/core": "latest",
-    "just-range": "4.2.0"
+    "@ctrl/tinycolor": "4.2.0"
   },
   "optional": [],
   "resolutions": {
@@ -9,8 +9,8 @@
       "@code3d/core": {
         "installUrl": "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.7/"
       },
-      "just-range": {
-        "installUrl": "https://registry.npmjs.org/just-range/4.2.0/"
+      "@ctrl/tinycolor": {
+        "installUrl": "https://registry.npmjs.org/%40ctrl%2Ftinycolor/4.2.0/"
       }
     },
     "secondary": {
@@ -227,11 +227,11 @@
       "tarball": "https://registry.npmjs.org/three/-/three-0.185.1.tgz",
       "integrity": "sha512-5aojFCXKwnjBRZvUnt3WFfEcvUJgkN5LlijRFN95hMy8WVkG4I0QNcJE+OuWvuJ0bOdStrbfXn0pkd6/QyiAlg=="
     },
-    "https://registry.npmjs.org/just-range/4.2.0/": {
-      "name": "just-range",
+    "https://registry.npmjs.org/%40ctrl%2Ftinycolor/4.2.0/": {
+      "name": "@ctrl/tinycolor",
       "version": "4.2.0",
-      "tarball": "https://registry.npmjs.org/just-range/-/just-range-4.2.0.tgz",
-      "integrity": "sha512-z2Ip8H2j7a9Vr8rKFi0IZf4IXn2Yuq2lGZFS41GjfPwksoHWTaTx1xIjU6C0HyQ1jBXEoz/FzjS5eyVXeW19tg=="
+      "tarball": "https://registry.npmjs.org/@ctrl/tinycolor/-/tinycolor-4.2.0.tgz",
+      "integrity": "sha512-kzyuwOAQnXJNLS9PSyrk0CWk35nWJW/zl/6KvnTBMFK65gm7U1/Z5BqjxeapjZCIhQcM/DsrEmcbRwDyXyXK4A=="
     }
   },
   "omitted": {}

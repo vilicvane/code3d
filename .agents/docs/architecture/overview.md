@@ -6,15 +6,15 @@ GUI 修改经过源码事务写回同一项目，下一次正常求值产生新�
 
 ## 包边界
 
-| 包                 | 职责与实现入口                                                                                                                                                     |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Core               | [作者 API](../../../packages/core/src/library/index.ts)、几何与关系语义；[tooling](../../../packages/core/src/tooling/index.ts)提供求值、trace、快照和内核安装集成 |
-| OpenCascade        | [固定内核构建](../../../packages/opencascade/README.md)及其加载器、WASM 和来源记录                                                                                 |
-| Screws / Materials | 使用公开 Core 入口实现可复用模型与材质；共享选定的 Core 和 Three.js 实例                                                                                           |
-| App                | [项目适配](../../../packages/app/src/project/)、[编译和快照](../../../packages/app/src/model/)、编辑器、工具与视口                                                 |
-| Agent / CLI        | [连接协议及桥接](../../../packages/agent/README.md)与[命令行客户端](../../../packages/cli/README.md)；App 拥有真实项目、源码修改与模型观察                         |
-| Web                | [官网和文档发布](../../../packages/web/README.md)，组合独立 App 构建产物                                                                                           |
-| Solver             | 独立的 [OndselSolver 包](../../../packages/solver/README.md)；当前 Core/App 的关系求解不加载它，草图使用 PlaneGCS                                                  |
+| 包                          | 职责与实现入口                                                                                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Core                        | [作者 API](../../../packages/core/src/library/index.ts)、几何与关系语义；[tooling](../../../packages/core/src/tooling/index.ts)提供求值、trace、快照和内核安装集成 |
+| OpenCascade                 | [固定内核构建](../../../packages/opencascade/README.md)及其加载器、WASM 和来源记录                                                                                 |
+| Layout / Screws / Materials | 使用公开 Core 入口实现排布、可复用模型与材质；共享选定的 Core 和 Three.js 实例                                                                                     |
+| App                         | [项目适配](../../../packages/app/src/project/)、[编译和快照](../../../packages/app/src/model/)、编辑器、工具与视口                                                 |
+| Agent / CLI                 | [连接协议及桥接](../../../packages/agent/README.md)与[命令行客户端](../../../packages/cli/README.md)；App 拥有真实项目、源码修改与模型观察                         |
+| Web                         | [官网和文档发布](../../../packages/web/README.md)，组合独立 App 构建产物                                                                                           |
+| Solver                      | 独立的 [OndselSolver 包](../../../packages/solver/README.md)；当前 Core/App 的关系求解不加载它，草图使用 PlaneGCS                                                  |
 
 Core root 只公开作者建模 API。`@code3d/core/tooling` 服务 App 集成，不能因为 App
 需要某个内部字段就把它加入作者类型。公开签名涉及的命名类型须从相应入口导出。

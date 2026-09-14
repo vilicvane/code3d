@@ -1,11 +1,7 @@
-import {box, group} from '@code3d/core';
-import range from 'just-range';
+import {box} from '@code3d/core';
+import {TinyColor} from '@ctrl/tinycolor';
 
-// Browser storage installs dependencies from this folder's package.json.
-// For a local folder, run npm install here, then Reload folder in the App.
-// F12 on range opens the installed package's definitions and source.
-const posts = range(5).map(index =>
-  box(8, 20, 8).originOffset(-index * 16, 0, 0),
-);
-
-export default group(posts, 'Using just-range');
+// This project installs a browser-compatible npm package automatically.
+// Use F12 on TinyColor to inspect its installed declarations.
+const color = new TinyColor('#2898d5').lighten(15).toHexString();
+export default box(24, 16, 12).fillet(2).material(color);

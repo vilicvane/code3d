@@ -117,6 +117,7 @@ files and prepare a new edit against their current versions.
 - [@code3d/core](../packages/core/README.md) is the main modeling API. Build
   solids and profiles, combine them with Boolean operations and relations, and
   turn editable sketches into geometry.
+- [@code3d/layout](../packages/layout/README.md) supplies collection layouts with Flex, Grid, precise linear steps and radial patterns; `repeat` supplies known quantities, while `fillFlex` and `fillGrid` calculate how many copies fit.
 - [@code3d/materials](../packages/materials/README.md) supplies reusable
   material presets such as aluminum, plastic and glass for model appearance.
 - [@code3d/screws](../packages/screws/README.md) provides standard screw models

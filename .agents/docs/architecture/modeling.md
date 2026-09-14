@@ -142,3 +142,32 @@ HarfBuzz 排版提供真实二次/三次曲线，non-zero winding 布尔合并�
 为准。实现与回归见 [font](../../../packages/core/src/library/font.ts)、
 [text](../../../packages/core/src/library/text.ts)、[text tests](../../../packages/core/test/text.test.ts)
 和 [third-party notices](../../../packages/core/THIRD_PARTY.md)。
+
+## 排布与几何查询
+
+`@code3d/layout` 使用公开 Core `originOffset` 和模型 `rotate` 表达共享局部坐标中的
+排布，不追加无约束 relate，不依赖 tooling 或持有 MobX 状态。`repeat(model, count)`
+统一已知数量输入；`linear`/`radial`/`flex`/`grid` 消费集合并保留数量与类型。
+`fillFlex`/`fillGrid` 只负责从所选轴的目标边界、原型尺寸、净间距计算容量，再复用
+对应布局路径；计数只处理浮点舍入误差，不量化尺寸，也不检查任意实体内部空间。
+
+模型和目标空间是独立参数，决定排布的配置统一命名为 `*LayoutConfig`，配置对象必填。
+linear/radial/flex/fillFlex 显式指定 axis，grid/fillGrid 显式指定 axes；Flex 换行或
+横轴对齐时必须指定 crossAxis，不推测另一个轴。fillFlex 显式指定 gap；fillGrid
+指定统一 gap 或同时指定 columnGap/rowGap，紧密填充写零。Grid columns 必填且
+没有单列兜底，缺少的行仍由集合长度推导。padding=0、start 对齐、wrap/rotate=false、
+径向起始角 0 和整圈 360 保留默认。flex/grid
+支持内容尺寸与显式目标空间两种调用形式。无目标时，边界布局从局部零点及 padding
+开始；有目标时使用其自身 `.bounds()`。Flex 的主轴 axis、横轴 crossAxis 独立定义，
+单行横向对齐可选；wrap 使用逐行主轴分配和行间 alignContent。Grid 先按行列归属
+测量 track minimum，再解析 auto/固定/fr 轨道，最后分别对齐轨道与格内模型。
+对应 fill 调用复用这些步骤；fillFlex 限单行，fillGrid 计算两个轴的完整网格数量。
+全部几何保持固定尺寸，显式轨道或目标空间不能容纳时报告错误。
+
+精确 step 使用 linear，多个轴通过组合 linear 表达；radial 的 rotate 布尔值控制
+是否按样本角旋转，额外朝向通过预旋转模型表达。无外部关系时，返回模型原点重合，
+直接 group 即保留布局。已有外部关系仍按 Core 组合规则求解，不计入 Layout 的
+局部测量；排布装配件时先 group，再对完成布局整体 relate。
+
+公开模型方法 `.bounds(relativeTo?)` 和 `.position(relativeTo)` 与具名引用共用
+成员 occurrence 和外部关系的坐标解析，前者测量有限几何，后者只返回模型原点。

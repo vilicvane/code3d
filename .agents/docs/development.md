@@ -50,7 +50,7 @@ Core 内联 `flo-boolean` 的计算依赖与 `@ctrl/tinycolor`，CLI 内联 `com
 `.cache/bundle-metafile.json`，不随 npm 包发布。
 
 `npm run test:packages` 在已经构建后生成 `dist/packages` 中的真实 tarball，将全部公开包
-安装到独立临时项目，验证公开入口、声明导航、内核/缓存身份、文字、Screws、WASM 和 CLI。
+安装到独立临时项目，验证公开入口、声明导航、内核/缓存身份、文字、Layout、Screws、WASM 和 CLI。
 声明检查使用 ESNext/DOM 标准库与 Bundler 解析且不跳过库检查；Core 显式携带 HarfBuzz 声明所需的
 Emscripten 全局类型和 Replicad 声明所需的 Manifold 类型依赖；后者不进入运行时 JS
 bundle。内部抽象成员与实现使用相同的声明裁剪规则。
@@ -110,7 +110,7 @@ App 与网站默认在本地构建并通过既有 Wrangler 授权部署；已验
    或正在恢复已有远端产物时才下载它继续部署，不把远端构建设为本地部署前置步骤。
 
 公开包发布按 `dependencies`、`peerDependencies` 与 `optionalDependencies` 的反向依赖闭包联动。
-Core 发布新版本时，依赖它的 Materials、Screws 同步更新版本和 Core 最低版本并纳入本批；
+Core 发布新版本时，依赖它的 Layout、Materials、Screws 同步更新版本和 Core 最低版本并纳入本批；
 传递消费者继续递归纳入。`peerDependenciesMeta` 的可选 peer 只表示可以不安装该依赖，
 不能取消安装后需要使用当前版本的关系。private App/Web 和 `devDependencies` 不触发公开包联动。
 

@@ -2036,7 +2036,7 @@ function design(part) { return part.fillet(0.5); }`;
   assert.deepEqual(module.designArguments, []);
 });
 
-test('the npm documentation example compiles with the installed just-range package', async () => {
+test('the npm documentation example compiles with the installed tinycolor package', async () => {
   const document = await readFile(
     new URL(
       '../../web/src/content/docs/docs/getting-started/files.md',
@@ -2046,7 +2046,7 @@ test('the npm documentation example compiles with the installed just-range packa
   );
   const source = [...document.matchAll(/\`\`\`ts\n([\s\S]*?)\`\`\`/g)]
     .map(match => match[1])
-    .find(source => source.includes("from 'just-range'"));
+    .find(source => source.includes("from '@ctrl/tinycolor'"));
   assert.ok(source);
   const module = await compileProject(
     {files: [{path: '/model.ts', source}]},
@@ -2732,4 +2732,21 @@ export default part;`;
       );
     }
   }
+});
+
+test('model measurement methods drive dimensions in an ordinary author program', async () => {
+  const source = `import {box, group, offset, rotate} from '@code3d/core';
+const frame = group([]);
+const part = box(2, 4, 6).relate(() => [rotate(0, 0, 90), offset(10, 20, 30)]);
+const local = part.bounds();
+const placed = part.bounds(frame);
+const origin = part.position(frame);
+if (local.size[0] !== 2 || Math.abs(placed.size[0] - 4) > 1e-5 || origin[0] !== 10) throw new Error('Incorrect measurement frame');
+export default box(...placed.size);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  assert.ok(module.fallback?.mesh);
 });

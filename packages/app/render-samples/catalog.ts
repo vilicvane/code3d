@@ -3,6 +3,38 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'layout-fill-grid',
+    title: 'Fill a grid within bounds',
+    description:
+      'Calculate a complete grid of tiles from the available width, depth and minimum gaps.',
+    category: 'Practical models',
+    file: 'layout/fill-grid.ts',
+    focus: {context: 'export default group(', token: 'group'},
+    view: {direction: [0.5, 1, 1.3], up: [0, 1, 0]},
+    tags: ['layout', 'grid', 'fill', 'bounds'],
+  },
+  {
+    id: 'layout-grille',
+    title: 'Grilles within bounds',
+    description:
+      'Distribute six slats across a target width, or pack a fixed gap and align the row to the right.',
+    category: 'Practical models',
+    file: 'layout/grille.ts',
+    focus: {context: 'export default group(', token: 'group'},
+    view: {direction: [0.5, 1, 1.3], up: [0, 1, 0]},
+    tags: ['layout', 'bounds', 'gap', 'justifyContent'],
+  },
+  {
+    id: 'layout-radial',
+    title: 'Radial layout',
+    description:
+      'Repeat fins around a circle and rotate each by its sample angle. Layout also supports flex, grid and automatic filling.',
+    category: 'Practical models',
+    file: 'layout/radial.ts',
+    focus: {context: 'const fins = radial(', token: 'radial'},
+    tags: ['layout', 'radial', 'arrays'],
+  },
+  {
     id: 'desktop-controller',
     title: 'A complete desktop controller',
     description:
@@ -377,6 +409,15 @@ export const exampleEntries = [
   {
     file: 'npm/model.ts',
   },
+  {file: 'layout/linear.ts'},
+  {file: 'layout/grille.ts'},
+  {file: 'layout/grid.ts'},
+  {file: 'layout/radial.ts'},
+  {file: 'layout/flex.ts'},
+  {file: 'layout/flex-space.ts'},
+  {file: 'layout/flex-wrap.ts'},
+  {file: 'layout/fill-grid.ts'},
+
   {
     file: 'sketches/constraints.ts',
   },
@@ -407,7 +448,7 @@ export const movedExamplePaths: Readonly<Record<string, string>> = {
     '/examples/assemblies/screw-box/box.ts',
   '/examples/assemblies/fastener-joint/model.ts':
     '/examples/assemblies/screw-box/model.ts',
-  '/examples/patterns/post-array/model.ts': '/examples/npm/model.ts',
+  '/examples/patterns/post-array/model.ts': '/examples/layout/linear.ts',
 
   '/examples/basics/boolean-operations.ts': '/examples/operations/cut.ts',
   '/examples/basics/group-origins.ts': '/examples/operations/group.ts',
