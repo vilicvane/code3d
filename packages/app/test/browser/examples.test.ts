@@ -726,38 +726,34 @@ async function verifyPackageNavigation(page: Page) {
     editor.setPosition(
       editor
         .getModel()!
-        .getPositionAt(editor.getValue().indexOf('import range') + 8),
+        .getPositionAt(editor.getValue().indexOf('TinyColor') + 1),
     );
     editor.focus();
   });
   await page.keyboard.press('F12');
-  await page
-    .locator('.reference-zone-widget .monaco-list-row')
-    .filter({hasText: 'function range'})
-    .first()
-    .dblclick();
+  // TinyColor has one definition, so F12 opens its declaration directly.
   await page.waitForFunction(() =>
     window.exampleApp.codeEditor
       .currentFile()
-      ?.endsWith('/just-range/index.d.ts'),
+      ?.endsWith('/@ctrl/tinycolor/dist/index.d.ts'),
   );
   assert.match(
     await page.evaluate(() => window.exampleApp.codeEditor.editor.getValue()),
-    /declare function range/,
+    /declare class TinyColor/,
   );
   await page.evaluate(() =>
     window.exampleApp.codeEditor.openFile(
-      '/examples/npm/node_modules/just-range/index.mjs',
+      '/examples/npm/node_modules/@ctrl/tinycolor/dist/module/index.js',
     ),
   );
   await page.waitForFunction(() =>
     window.exampleApp.codeEditor
       .currentFile()
-      ?.endsWith('/just-range/index.mjs'),
+      ?.endsWith('/@ctrl/tinycolor/dist/module/index.js'),
   );
   assert.match(
     await page.evaluate(() => window.exampleApp.codeEditor.editor.getValue()),
-    /function range/,
+    /class TinyColor/,
   );
   assert.equal(
     await page.evaluate(

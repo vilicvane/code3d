@@ -879,6 +879,13 @@ export type ModelForKind<
           ? GroupModel<Elements>
           : never;
 
+/** Tight axis-aligned bounds in the selected model coordinate frame. */
+export type ModelBounds = Readonly<{
+  minimum: Vec3;
+  maximum: Vec3;
+  size: Vec3;
+}>;
+
 export interface ModelCapabilities<
   Elements extends NamedElements,
   Kind extends ModelKind,
@@ -886,6 +893,10 @@ export interface ModelCapabilities<
   extends Anchor<ModelElementKind<Kind>>, DirectionalBounds {
   readonly [modelKind]: Kind;
   readonly [modelNamedElements]: Elements;
+  /** Measure finite geometry in this model's local frame, or in relativeTo's frame. */
+  bounds(relativeTo?: Model): ModelBounds;
+  /** Model-origin coordinates in relativeTo's local frame, including placement. */
+  position(relativeTo: Model): Vec3;
   relate(
     build: (
       self: ModelForKind<Elements, Kind>,
@@ -2859,48 +2870,78 @@ export class ModelObject<
     >;
   }
 
-  /** Resolve both own and occurrence references into this model's local frame. */
-  private localElements(sources: readonly Anchor[]): StoredElement[] {
+  /**
+   * Measure finite geometry in this model's local frame, or in relativeTo's frame.
+   * An explicit reference includes solved placement and nested group occurrences.
+   * Empty groups have no finite bounds.
+   */
+  bounds(relativeTo?: Model): ModelBounds {
+    const target =
+      relativeTo === undefined
+        ? this
+        : requireModelObject(relativeTo, 'bounds requires a reference model.');
+    const transform = target.localFrames([this])[0];
+    const [minimum, maximum] = this[referenceBounds](
+      this.relationAnchorReference(),
+      transform,
+    );
+    return {
+      minimum,
+      maximum,
+      size: [
+        maximum[0] - minimum[0],
+        maximum[1] - minimum[1],
+        maximum[2] - minimum[2],
+      ],
+    };
+  }
+
+  /**
+   * Model-origin coordinates in relativeTo's local frame, including placement.
+   * This model's origin in its own frame is always [0, 0, 0], even for point models.
+   */
+  position(relativeTo: Model): Vec3 {
+    const target = requireModelObject(
+      relativeTo,
+      'position requires a reference model.',
+    );
+    return target.localFrames([this])[0].position;
+  }
+
+  /** Resolve source frames without losing nested occurrence positions. */
+  private localFrames(sources: readonly RelationObject[]): RigidTransform[] {
     const members = this.memberPoses();
-    const external = sources
-      .map(source => anchorReference(source).model)
-      .filter(model => !members.has(model));
+    const external = sources.filter(model => !members.has(model));
     const context = external.length
       ? ModelObject.createSolveContext([this, ...external])
       : undefined;
     return sources.map(source => {
-      const reference = anchorReference(source);
-      const {
-        kind,
-        transform: frame,
-        topology,
-        parts,
-        members: nested,
-        bound,
-        facing,
-      } = source instanceof ModelObject ? source.exposedElement() : reference;
-      const memberPose = members.get(reference.model);
+      const memberPose = members.get(source);
       if (memberPose === null)
         throw new Error(
           "The point or element belongs to multiple occurrences. Expose it through the intended child model's named reference.",
         );
-      const transform =
+      return (
         memberPose ??
-        relativeTransform(
-          reference.model.solvePose(context!),
-          this.solvePose(context!),
-        );
+        relativeTransform(source.solvePose(context!), this.solvePose(context!))
+      );
+    });
+  }
+
+  /** Resolve both own and occurrence references into this model's local frame. */
+  private localElements(sources: readonly Anchor[]): StoredElement[] {
+    const references = sources.map(anchorReference);
+    const transforms = this.localFrames(
+      references.map(reference => reference.model),
+    );
+    return sources.map((source, index) => {
+      const {kind, transform, topology, parts, members, bound, facing} =
+        source instanceof ModelObject
+          ? source.exposedElement()
+          : references[index];
       return transformElement(
-        {
-          kind,
-          transform: frame,
-          topology,
-          parts,
-          members: nested,
-          bound,
-          facing,
-        },
-        transform,
+        {kind, transform, topology, parts, members, bound, facing},
+        transforms[index],
       );
     });
   }

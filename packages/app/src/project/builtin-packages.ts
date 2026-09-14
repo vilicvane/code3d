@@ -1,6 +1,7 @@
 /** Public modeling packages provided together by the zero-install App. */
 export const builtinPackageNames = [
   '@code3d/core',
+  '@code3d/layout',
   '@code3d/screws',
   '@code3d/materials',
 ] as const;

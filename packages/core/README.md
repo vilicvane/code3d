@@ -311,3 +311,29 @@ npm test --workspace @code3d/core
 
 Use the [agent entry](../../docs/agents.md) to work on a project through the CLI,
 or the [App README](../app/README.md) to develop the editor and visualization.
+
+## Geometry measurements
+
+`model.bounds(relativeTo?)` returns readonly `minimum`, `maximum` and `size`
+XYZ vectors for tight finite geometry bounds. By default it uses the model's
+own local frame. An explicit reference includes solved placement and nested
+member occurrences in that reference's frame. Empty groups have no finite
+bounds; a source occurring more than once in the reference is ambiguous.
+
+`model.position(relativeTo)` returns the model origin in the explicit reference's
+local frame. A model's origin in its own frame is always `[0, 0, 0]`, including
+point models whose geometry may be offset from that origin. Neither query
+changes the model or its placement. These methods are available on every model
+kind, including groups. As model members, `bounds` and `position` are reserved
+names and cannot be used as exposed element names.
+
+```ts
+import {box, group, offset} from '@code3d/core';
+
+const base = box(20, 4, 20);
+const part = box(8, 12, 4).relate(self => [self.on(base.up), offset(20, 0, 0)]);
+const size = part.bounds().size; // [8, 12, 4]
+const origin = part.position(base); // [20, 8, 0]
+const minimum = part.bounds(base).minimum; // [16, 2, -2]
+export default group([base, part]);
+```

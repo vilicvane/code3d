@@ -51,7 +51,16 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'annotations.ts': ['default', 1],
   'expose.ts': ['model', 3],
   'primitives/custom-primitives.ts': ['customPrimitivesExample', 3],
-  'npm/model.ts': ['default', 5],
+  'npm/model.ts': ['default', 1],
+  'layout/linear.ts': ['default', 5],
+  'layout/grille.ts': ['default', 13],
+  'layout/grid.ts': ['default', 12],
+  'layout/radial.ts': ['default', 12],
+  'layout/flex.ts': ['default', 3],
+  'layout/flex-space.ts': ['default', 3],
+  'layout/flex-wrap.ts': ['default', 5],
+  'layout/fill-grid.ts': ['default', 13],
+
   'projects/desktop-controller/enclosure.ts': ['default', 1],
   'projects/desktop-controller/panel.ts': ['default', 5],
   'projects/desktop-controller/model.ts': ['default', 17],
@@ -205,6 +214,11 @@ for (const entry of exampleEntries) {
         validateGeometry(snapshot(exports[expected[0]])),
         expected[1],
       );
+      if (entry.file === 'layout/grille.ts') {
+        const bounds = exports.default.bounds();
+        assert.deepEqual(bounds.minimum, [0, -1, -18]);
+        assert.deepEqual(bounds.maximum, [100, 21, 18]);
+      }
       if (entry.file === 'operations/union.ts') {
         assert.ok(
           Math.abs(volume(exports.default) - (30 * 8 * 20 + Math.PI * 25 * 8)) <

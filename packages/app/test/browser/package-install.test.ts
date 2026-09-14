@@ -96,11 +96,14 @@ test(
         ),
         lock: !!(await files.stat(root + '/code3d-lock.json')),
         package: !!(await files.stat(
-          root + '/node_modules/just-range/index.mjs',
+          root + '/node_modules/@ctrl/tinycolor/dist/module/index.js',
         )),
       };
     });
-    assert.match(installed.source, /import range from 'just-range'/);
+    assert.match(
+      installed.source,
+      /import \{TinyColor\} from '@ctrl\/tinycolor'/,
+    );
     assert.match(installed.manifest, /\n  "private": true,/);
     assert.equal(installed.lock, true);
     assert.equal(installed.package, true);
@@ -117,7 +120,7 @@ test(
         });
       try {
         const model = codeEditor.editor.getModel()!;
-        model.setValue(model.getValue().replace('count = 5', 'count = 6'));
+        model.setValue(model.getValue().replace('lighten(15)', 'lighten(20)'));
         await runModel();
         return phases;
       } finally {
@@ -130,15 +133,19 @@ test(
       requestCount,
       'source edits do not request npm metadata or archives again',
     );
-    assert.deepEqual(editPhases, ['compiling-model', 'evaluating-model']);
+    assert.deepEqual(editPhases, [
+      'loading-runtime',
+      'reading-files',
+      'compiling-model',
+      'evaluating-model',
+      'preparing-preview',
+    ]);
 
     await page
       .getByRole('treeitem', {name: 'package.json', exact: true})
       .click();
     await page.waitForFunction(() =>
-      window.packageApp.codeEditor
-        .currentFile()
-        ?.endsWith('/post-array/package.json'),
+      window.packageApp.codeEditor.currentFile()?.endsWith('/npm/package.json'),
     );
     assert.equal(
       await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
@@ -163,27 +170,28 @@ test(
       const {editor} = window.packageApp.codeEditor;
       const model = editor.getModel()!;
       editor.setPosition(
-        model.getPositionAt(model.getValue().indexOf('range') + 1),
+        model.getPositionAt(model.getValue().indexOf('TinyColor') + 1),
       );
       editor.focus();
     });
-    await page.keyboard.press('F12');
+    // Explicit Peek also covers a package with just one definition.
+    await page.keyboard.press('Alt+F12');
     await page.locator('.reference-zone-widget').waitFor();
     await page
       .locator('.reference-zone-widget .monaco-list-row')
-      .filter({hasText: 'function range'})
+      .filter({hasText: 'class TinyColor'})
       .first()
       .dblclick();
     await page.waitForFunction(() =>
       window.packageApp.codeEditor
         .currentFile()
-        ?.endsWith('/just-range/index.d.ts'),
+        ?.endsWith('/@ctrl/tinycolor/dist/index.d.ts'),
     );
     const definitionPath = await page.evaluate(() =>
       window.packageApp.codeEditor.currentFile()!,
     );
     assert.ok(
-      definitionPath.includes('just-range@4.2.0') &&
+      definitionPath.includes('@ctrl+tinycolor@4.2.0') &&
         !definitionPath.includes('%'),
       'package directory names retain readable @ characters',
     );
@@ -200,22 +208,22 @@ test(
     );
     assert.match(
       await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
-      /declare function range/,
+      /declare class TinyColor/,
     );
 
     // The package's implementation is also a directly addressable, read-only document.
     await page.goto(
       process.env.CODE3D_TEST_URL +
-        '#/file/examples/npm/node_modules/just-range/index.mjs',
+        '#/file/examples/npm/node_modules/@ctrl/tinycolor/dist/module/index.js',
     );
     await page.waitForFunction(() =>
       window.packageApp?.codeEditor
         .currentFile()
-        ?.endsWith('/just-range/index.mjs'),
+        ?.endsWith('/@ctrl/tinycolor/dist/module/index.js'),
     );
     assert.match(
       await page.evaluate(() => window.packageApp.codeEditor.editor.getValue()),
-      /function range/,
+      /class TinyColor/,
     );
     assert.equal(
       await page.evaluate(

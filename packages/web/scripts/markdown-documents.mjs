@@ -10,7 +10,7 @@ import GithubSlugger from 'github-slugger';
 import {renderSamples} from '../../app/render-samples/catalog.ts';
 
 export const repository = fileURLToPath(new URL('../../../', import.meta.url));
-export const featuredPackages = ['core', 'materials', 'screws'];
+export const featuredPackages = ['core', 'layout', 'materials', 'screws'];
 const contentRoot = 'packages/web/src/content/docs/docs/';
 const origin = 'https://code3d.invalid';
 

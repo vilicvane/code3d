@@ -6,6 +6,7 @@
     {"path": "packages/core/src/tooling"},
     {"path": "packages/core/src/node"},
     {"path": "packages/screws/src/library"},
+    {"path": "packages/layout/src/library"},
     {"path": "packages/materials/src/library"}
   ],
   "files": []

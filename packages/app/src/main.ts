@@ -663,7 +663,7 @@ async function installProjectPackage(selectedDirectory: string): Promise<void> {
     title: 'Install package',
     message: `In ${directory}`,
     label: 'Package',
-    placeholder: 'just-range or @scope/package@version',
+    placeholder: '@ctrl/tinycolor or @scope/package@version',
     submit: 'Install',
     trim: true,
     validate: value => {

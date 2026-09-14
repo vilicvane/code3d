@@ -1,0 +1,179 @@
+---
+title: Layout
+description: Arrange model collections with Flex, Grid, linear steps and circles, or calculate how many copies fit in a target space.
+---
+
+import ModelExample from '../../../../components/ModelExample.astro';
+import SourceCode from '../../../../components/SourceCode.astro';
+import linearSource from '../../../../../../app/examples/layout/linear.ts?raw';
+import gridSource from '../../../../../../app/examples/layout/grid.ts?raw';
+import flexSource from '../../../../../../app/examples/layout/flex.ts?raw';
+import flexSpaceSource from '../../../../../../app/examples/layout/flex-space.ts?raw';
+import flexWrapSource from '../../../../../../app/examples/layout/flex-wrap.ts?raw';
+
+`@code3d/layout` separates arranging a known collection from calculating how many
+copies fit. The App includes it with built-in Core; installed projects need both
+`@code3d/core` and `@code3d/layout`.
+
+`repeat(model, count)` supplies an explicit quantity. `linear`, `radial`, `flex`
+and `grid` arrange that collection, or an existing array of different models.
+`fillFlex` and `fillGrid` calculate a maximum complete quantity before using the
+same layout rules. All layout results are readonly arrays of new model values,
+preserving kinds, named references and input order. Inputs remain unchanged.
+
+Every layout and fill call requires configuration. Directions are explicit:
+`axis` for Linear, Radial and Flex, and `axes` for Grid. Filling also requires
+explicit spacing; use zero for touching copies.
+
+## Flex and target spaces
+
+`flex(items, config)` arranges fixed-size bounds along an axis, starting at local
+zero with enough space for the content. `flex(items, space, config)` uses the
+target model's local bounds. The target stays a separate argument and is not
+included in the returned array.
+
+`axis` is required. `gap` is nonnegative boundary-to-boundary clearance, default
+zero. `padding` is a number for both ends or `{start, end}` for asymmetric insets.
+
+<SourceCode source={flexSource} file="layout/flex.ts" />
+
+`justifyContent` allocates unused space after model widths and minimum gaps:
+
+| Value           | Effect                                                       |
+| --------------- | ------------------------------------------------------------ |
+| `start`         | Keep gap and place unused space after the row.               |
+| `center`        | Keep gap and split unused space between both ends.           |
+| `end`           | Keep gap and place unused space before the row.              |
+| `space-between` | Share extra space between items, touching both padded edges. |
+| `space-around`  | Give each item equal surrounding space.                      |
+| `space-evenly`  | Give both ends and each internal gap equal extra space.      |
+
+The default is `start`, for both layout and filling. A singleton with
+`space-between` uses start; with `space-around` or `space-evenly`, it is centered.
+Padding defines the usable interval; alignment may leave more space at an end.
+
+`alignItems: 'start' | 'center' | 'end'` aligns models in the cross interval of the
+container. This requires an explicit `crossAxis` different from `axis`.
+`crossPadding` has the same form as `padding`. Without a target, the cross interval
+starts at zero and fits the largest item. Without `alignItems`, single-line Flex
+preserves cross coordinates. The third axis is always preserved.
+
+<SourceCode source={flexSpaceSource} file="layout/flex-space.ts" />
+
+## Fill a row
+
+`fillFlex(model, space, config)` fills one axis with complete copies at the given
+minimum gap, then applies Flex alignment. The returned array's length is the
+computed quantity; if no copy fits, it is empty. Both `axis` and `gap` are required;
+use `gap: 0` for touching copies. Cross alignment also requires `crossAxis`.
+
+Here the turquoise row uses `flex(repeat(slat, 6), space, config)`: six slats,
+left clearance 5, right flush, internal gaps 7. The amber row uses `fillFlex` with
+gap 5 and end alignment: six fit, leaving a total clearance of 15 on the left.
+
+<ModelExample id="layout-grille" />
+
+The target bounds only constrain the main axis unless cross alignment is
+requested. No model is stretched, clipped or omitted to make a known collection
+fit. An undersized target produces an error. Filling uses scale-relative
+floating-point tolerance without rounding dimensions to a fixed decimal precision.
+
+## Wrap Flex lines
+
+`wrap: true` requires a target space and an explicit `crossAxis`. Items fill a line until the next cannot fit,
+then continue along `crossAxis`. Each line uses its tallest cross-axis item.
+`rowGap` controls clearance between lines and defaults to `gap`.
+
+`justifyContent` applies separately to each line. `alignItems` defaults to `start`
+inside wrapped lines; `alignContent` distributes the lines in the cross interval,
+using the same six alignment values. With wrapping disabled, `alignContent` and
+`rowGap` have no effect. `fillFlex` supports only a single line.
+
+<SourceCode source={flexWrapSource} file="layout/flex-wrap.ts" />
+
+## Grid and grid filling
+
+`grid(items, config)` and `grid(items, space, config)` place models into shared
+column and row tracks. Inputs fill columns first, then start the next row.
+`axes` is required, for example `['x', 'z']`; the remaining coordinate is preserved.
+
+`columns` is required. A number means that many content-sized columns. An explicit
+list can contain fixed sizes, `'auto'` for the largest item, and `{fr: weight}` for
+a weighted share of available space. `rows` uses the same forms; missing rows are
+added automatically to accommodate all inputs.
+
+For example, `columns: [20, 'auto', {fr: 2}]` defines three columns with different
+sizing rules. Fractional tracks respect the model bounds as minimum sizes.
+Without a target, they use the smallest common fractional unit that fits them.
+Changing a cell's size does not scale its model.
+
+<SourceCode source={gridSource} file="layout/grid.ts" />
+
+`gap`, or separate `columnGap` and `rowGap`, defines clearance between **tracks**.
+Smaller models inside those cells can have larger actual clearances.
+`padding` is a number for all sides or an object such as
+`{columns: {start: 5}, rows: 2}`.
+
+- `justifyContent` / `alignContent` align the complete columns / rows in the
+  target, using the same six values as Flex.
+- `justifyItems` / `alignItems` align models within cells, using `start`, `center`
+  or `end`.
+
+All four default to `start`. An explicit cell must accommodate its models;
+tracks and gaps must fit a provided target. These are fixed-size modeling layouts,
+without CSS text units, writing modes, implicit geometry resizing or clipping.
+
+`fillGrid(model, space, config)` computes both track counts from the prototype's
+bounds, padding and gaps. It accepts Grid's spacing and alignment configuration,
+without `columns` or `rows`. Specify `axes` and either a shared `gap` or both
+`columnGap` and `rowGap`; a shared gap can still be overridden per direction.
+Touching copies require explicit zero spacing. Its result follows the same
+column-first order.
+
+<ModelExample id="layout-fill-grid" />
+
+Filling checks the selected axes of the target's bounding box. It does not detect
+holes in a solid, perform arbitrary-shape packing or calculate radial capacity.
+
+## Exact steps and circles
+
+`linear(items, {axis, step})` displaces input i by `i * step`, independent of its
+size. The first input keeps its geometry coordinates. Steps can be negative or
+zero; unlike gap-based layouts, changing a model's width does not change the pitch.
+Compose grouped linear layouts along different axes for exact multi-axis arrays.
+
+<SourceCode source={linearSource} file="layout/linear.ts" />
+
+`radial(items, {radius, axis, startAngle, sweepAngle, rotate})` uses the collection
+length to place its members around local zero. `radius` and `axis` are required;
+the start angle defaults to zero, and the sweep to 360 degrees. Y circles start at +X toward
+−Z; X circles start at +Y toward +Z; Z circles start at +X toward +Y.
+
+Full circles omit the duplicate endpoint; partial arcs include both endpoints.
+Sweeps can be positive, negative or zero, within one full turn. A singleton uses
+the start angle. `rotate: true` rotates each input by its sample angle before
+placing it; the default `false` preserves its orientation. Rotate the prototype
+itself when you need an additional orientation such as a 90-degree turn.
+
+<ModelExample id="layout-radial" />
+
+## Coordinates and composition
+
+All tools measure local geometry with `.bounds()` and express results in shared
+layout coordinates. A displacement uses `originOffset` with the opposite sign;
+radial rotation uses the model's `rotate`. The original models remain unchanged.
+With no external relations, all output origins coincide, so `group(items)` retains
+the complete layout without an empty reference group.
+
+External relations still apply when models are composed. To repeat an assembled
+set of parts, group them first. To place a complete layout relative to another
+model, group the output and relate that group. Bounds-based layouts require finite
+geometry; empty groups cannot be measured. Empty input collections return empty
+arrays. Filling requires positive model width or positive gap on each fill axis.
+
+Core models also provide `.bounds(relativeTo?)` and `.position(relativeTo)` for
+inspecting composed results. The former measures geometry; the latter measures
+an origin in an explicit reference frame.
+
+See the [Layout package reference](/docs/packages/layout.md) for all signatures and
+[coordinate concepts](../../concepts/local-coordinates/) for origin semantics.

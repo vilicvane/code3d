@@ -92,7 +92,7 @@ example above, save this payload as `/tmp/add-dependency.json`:
       {
         "path": "/package.json",
         "version": null,
-        "content": "{\n  \"private\": true,\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"just-range\": \"4.2.0\"\n  }\n}\n"
+        "content": "{\n  \"private\": true,\n  \"type\": \"module\",\n  \"dependencies\": {\n    \"@ctrl/tinycolor\": \"4.2.0\"\n  }\n}\n"
       }
     ],
     "cursor": {

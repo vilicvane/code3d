@@ -14,7 +14,11 @@ for (const name of selected) {
     assert.match(help, /Usage: c3d/);
   } else await import(name);
 }
-if (selected.has('@code3d/core') || selected.has('@code3d/screws')) {
+if (
+  selected.has('@code3d/core') ||
+  selected.has('@code3d/screws') ||
+  selected.has('@code3d/layout')
+) {
   const core = await import('@code3d/core');
   const tooling = await import('@code3d/core/tooling');
   const models = [];
@@ -30,6 +34,17 @@ if (selected.has('@code3d/core') || selected.has('@code3d/screws')) {
     }
     if (selected.has('@code3d/screws'))
       models.push((await import('@code3d/screws')).ISO4762.screw('M3', 8));
+    if (selected.has('@code3d/layout')) {
+      const layout = await import('@code3d/layout');
+      models.push(
+        core.group(
+          layout.linear(layout.repeat(core.box(2, 3, 4), 3), {
+            axis: 'x',
+            step: 8,
+          }),
+        ),
+      );
+    }
     const snapshot = tooling.createModelSnapshotter();
     for (const model of models) {
       assert.ok(tooling.isModelObject(model));

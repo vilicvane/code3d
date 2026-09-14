@@ -57,7 +57,7 @@ Folder selection and access permissions use your browser's system dialogs.
 
 Right-click a folder or `package.json` in the file explorer and choose
 **Install package**. Enter a browser-compatible npm package name, optionally
-with a version or range, such as `just-range@4.2.0` or `@scope/package@^2`.
+with a version or range, such as `@ctrl/tinycolor@4.2.0` or `@scope/package@^2`.
 A name without a version uses `latest`; the lock records the resolved version.
 
 If the selected folder has no `package.json`, Code3D creates one in that folder
@@ -120,9 +120,8 @@ dependencies, or refreshing changed packages, configuration or external files.
 Changing a dimension or expression does not repeat that preparation.
 
 Try `/examples/npm/model.ts` in the App's file explorer. This
-bundled example has its own `package.json` and uses `just-range` from npm to
-place a row of posts. Select the `postArray()` call to edit the count, spacing
-and height in the parameter panel. The example is included in every browser
+bundled example has its own `package.json` and uses `@ctrl/tinycolor` from npm to
+lighten a box's material color. Use F12 on `TinyColor` to inspect its declarations. The example is included in every browser
 workspace; it does not depend on files from another browser profile.
 In a local project, run `npm install` inside `examples/npm`,
 then choose **Reload folder** before running this example.
@@ -160,7 +159,7 @@ resolving versions again. A failed download or installation preserves the
 previous installation and lock.
 
 Packages are linked from `node_modules/<package>` to a version-specific directory
-such as `node_modules/.code3d/just-range@4.2.0/node_modules/just-range`.
+such as `node_modules/.code3d/@ctrl+tinycolor@4.2.0/node_modules/@ctrl/tinycolor`.
 Scoped packages use readable names such as `@scope+name@1.0.0` in this store.
 The explorer and editor show filesystem names; URL escaping such as `%40` for
 `@` is only used when representing a path in a URL.
@@ -254,7 +253,7 @@ context. Browser storage remains available when folder access is unsupported.
 
 You can start without installing packages. When the model’s package scope and its ancestors do
 not declare `@code3d/core` (or there is no `package.json`), the App provides
-built-in `@code3d/core`, `@code3d/screws` and `@code3d/materials`, with matching
+built-in `@code3d/core`, `@code3d/layout`, `@code3d/screws` and `@code3d/materials`, with matching
 editor types.
 The built-in modeling packages remain available without declaring them.
 Declaring your own modeling runtime requires those packages to be available in
@@ -262,7 +261,7 @@ the npm registry (browser storage) or already installed (local folders).
 
 Declaring `@code3d/core` in `dependencies`, `devDependencies`, `peerDependencies`
 or `optionalDependencies` switches the complete modeling runtime to your
-project's installed packages. Install `@code3d/screws` or
+project's installed packages. Install `@code3d/layout`, `@code3d/screws` or
 `@code3d/materials` too if your model imports them. Missing declared packages produce an error; the App does not silently use
 its built-in copies. Choose **Reload folder** after external dependency changes.
 
@@ -273,24 +272,18 @@ the project dependencies; Node does not have the App's built-in package view.
 For example, install a browser-compatible utility in your own project directory:
 
 ```bash
-npm install just-range
+npm install @ctrl/tinycolor
 ```
 
 Open that folder in the App (or choose **Reload folder** if it is already open),
 then use the package in a TypeScript file:
 
 ```ts
-import range from 'just-range';
-import {box, group} from '@code3d/core';
+import {box} from '@code3d/core';
+import {TinyColor} from '@ctrl/tinycolor';
 
-const baseHeight = 4;
-const postHeight = 10;
-const base = box(50, baseHeight, 16).originOffset(0, baseHeight / 2, 0);
-const posts = range(3).map(index =>
-  box(6, postHeight, 6).originOffset((1 - index) * 16, -postHeight / 2, 0),
-);
-
-group([base, ...posts]);
+const color = new TinyColor('#2898d5').lighten(15).toHexString();
+export default box(24, 16, 12).fillet(2).material(color);
 ```
 
 The App reads installed package code and declarations for execution and editor

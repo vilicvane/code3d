@@ -8,6 +8,7 @@ import * as interop from '@code3d/core/replicad';
 import * as three from '@code3d/core/three';
 import * as nativeThree from 'three';
 import * as nativeReplicad from 'replicad';
+import * as layout from '@code3d/layout';
 import * as materials from '@code3d/materials';
 import * as screws from '@code3d/screws';
 import * as ISO4762 from '@code3d/screws/iso4762';
@@ -95,7 +96,63 @@ try {
     ...core.text('B8i', core.font(new URL('./font.ttf', import.meta.url)), 10),
   );
   assert.equal(shapes.length, 6);
+  const posts = layout.linear(layout.repeat(shapes[0], 3), {
+    axis: 'x',
+    step: 8,
+  });
+  const assembly = core.group(posts);
+  assert.deepEqual(assembly.bounds().size, [18, 3, 4]);
+  assert.deepEqual(posts[2].position(assembly), [0, 0, 0]);
+  assert.deepEqual(posts[2].bounds().minimum, [15, -1.5, -2]);
   shapes.push(...core.extrude(shapes.slice(2), 2));
+  shapes.push(assembly);
+  const space = core.box(30, 3, 4);
+  const packed = layout.fillFlex(shapes[0], space, {
+    axis: 'x',
+    gap: 3,
+    padding: {start: 2},
+    justifyContent: 'end',
+  });
+  assert.equal(packed.length, 6);
+  assert.deepEqual(packed[0].bounds(space).minimum, [-12, -1.5, -2]);
+  assert.deepEqual(packed.at(-1).bounds(space).maximum, [15, 1.5, 2]);
+  const counted = layout.flex([shapes[0], shapes[0], shapes[0]], space, {
+    axis: 'x',
+    padding: {start: 2, end: 1},
+    justifyContent: 'space-between',
+  });
+  assert.deepEqual(counted[0].bounds(space).minimum, [-13, -1.5, -2]);
+  assert.deepEqual(counted.at(-1).bounds(space).maximum, [14, 1.5, 2]);
+  const tileSpace = core.box(10, 3, 12);
+  const tiles = layout.fillGrid(shapes[0], tileSpace, {
+    axes: ['x', 'z'],
+    gap: 1,
+  });
+  assert.equal(tiles.length, 6);
+  const tileGroup = core.group(tiles);
+  assert.deepEqual(tileGroup.bounds().size, [8, 3, 9]);
+  const cells = layout.grid(layout.repeat(shapes[0], 4), tileSpace, {
+    axes: ['x', 'z'],
+    columns: [{fr: 1}, {fr: 1}],
+    rows: 2,
+    justifyItems: 'center',
+  });
+  assert.equal(cells.length, 4);
+  const circular = layout.radial(layout.repeat(shapes[0], 4), {
+    axis: 'y',
+    radius: 5,
+    rotate: true,
+  });
+  assert.equal(circular.length, 4);
+  shapes.push(
+    space,
+    tileSpace,
+    core.group(packed),
+    core.group(counted),
+    tileGroup,
+    core.group(cells),
+    core.group(circular),
+  );
   shapes.push(
     ISO4762.screw('M3', 8),
     ISO10642.screw('M3', 10),
@@ -116,7 +173,7 @@ try {
   }
   assert.ok(tooling.kernelOperationCacheStats().persistentWrites > 0);
   console.log(
-    'Installed Node/browser/tooling share state; text topology, extrusion and Screws evaluate successfully.',
+    'Installed Node/browser/tooling share state; text topology, extrusion, Layout and Screws evaluate successfully.',
   );
 } finally {
   tooling.disposeModelObjects(shapes);

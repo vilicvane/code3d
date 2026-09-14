@@ -9,6 +9,7 @@ import {
   axisLine,
   bezier,
   box,
+  type ModelBounds,
   circle,
   coil,
   cut,
@@ -686,3 +687,11 @@ axisEdge(1).pivotOffset(1, 2, 3);
 
 // @ts-expect-error Constraints cannot be translated by a method.
 constraint.offset(1, 2, 3);
+
+const measuredBounds: ModelBounds = box(1, 2, 3).bounds();
+const measuredPosition: Vec3 = box(1, 2, 3).position(group([]));
+// @ts-expect-error Measurements are readonly values.
+measuredBounds.size[0] = 10;
+// @ts-expect-error Model position requires an explicit reference frame.
+box(1, 2, 3).position();
+void measuredPosition;

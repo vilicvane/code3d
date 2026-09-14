@@ -32,10 +32,16 @@ task benefits from several forms of evidence.
 | Understand local geometry, composition placement or origin changes | [Coordinate concepts](../../packages/web/src/content/docs/docs/concepts/local-coordinates.md) and [origin operations](../../packages/web/src/content/docs/docs/guides/origins-and-rotation.mdx) |
 | Select or expose edges, vertices and surfaces                      | [Topology](../../packages/web/src/content/docs/docs/guides/topology.md) and [agent observations](observation.md)                                                                                |
 | Create editable profiles and inspect their constraints             | [Sketch workflow](sketches.md)                                                                                                                                                                  |
+| Arrange collections with Flex/Grid or fill target bounds           | [Layout README](../../packages/layout/README.md)                                                                                                                                                |
 | Add realistic material presets                                     | [Materials README](../../packages/materials/README.md)                                                                                                                                          |
 | Add standard fasteners or matching holes                           | [Screws README](../../packages/screws/README.md)                                                                                                                                                |
 | Reuse a parametric design or expose editing controls               | [Reusable models](../../packages/web/src/content/docs/docs/guides/reusable-models.mdx) and [model tools](../../packages/web/src/content/docs/docs/guides/model-tools.mdx)                       |
 | Extend the modeling runtime                                        | [Custom primitives](../../packages/web/src/content/docs/docs/guides/custom-primitives.mdx)                                                                                                      |
+
+Layout configuration is required: specify `axis` for Linear/Radial/Flex and `axes`
+for Grid. Filling also needs explicit spacing (`gap: 0` for touching copies).
+Flex cross alignment or wrapping requires `crossAxis`; see the Layout reference
+for directional grid gaps and other controls.
 
 Check the [current limitations](../../packages/web/src/content/docs/docs/reference/limitations.md)
 before promising a feature.
