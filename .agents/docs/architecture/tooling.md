@@ -516,3 +516,10 @@ Arguments 与 Elements 仅通过 hover 临时展开、点击固定/收起，Esc 
 DockPanelController 持有 observable 展开状态，autorun 更新 DOM，协调器仅协调
 互斥的临时展开及生命周期；不保留数字快捷键配置与查找索引。页面释放时销毁
 订阅、关闭计时器和移除面板/全局 pointer 监听。其他工具的 Alt 行为独立处理。
+
+### Agent snapshot preview session
+
+AgentRenderView 观察 activeAgentIds，在本次视图生命周期首次有活跃 agent 时
+记录 connectedThisSession。持久化历史加载不会自行显示小窗；连接激活后断连
+不清除此事实，页面刷新则重新开始。该会话事实与用户关闭小窗的 dismissedFrames
+独立，连接本身不会取消用户关闭选择，历史图像与筛选/时间轴位置也不受断连影响。

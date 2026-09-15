@@ -53,6 +53,7 @@ export class AgentRenderView {
   private selected: string | undefined = undefined;
   private dismissedFrames: ReadonlySet<string> | undefined = undefined;
   private opened = false;
+  private connectedThisSession = false;
   private following = true;
   private agent = '';
 
@@ -66,6 +67,7 @@ export class AgentRenderView {
       | 'selected'
       | 'dismissedFrames'
       | 'opened'
+      | 'connectedThisSession'
       | 'following'
       | 'agent'
       | 'items'
@@ -79,6 +81,7 @@ export class AgentRenderView {
       selected: observable,
       dismissedFrames: observableRef,
       opened: observable,
+      connectedThisSession: observable,
       following: observable,
       agent: observable,
       items: computed,
@@ -218,15 +221,17 @@ export class AgentRenderView {
         scheduler: queueMicrotask,
       },
     );
-    // Presence changes only affect labels, not frame selection or timeline scroll.
+    // First activity unlocks restored snapshots for this page; disconnecting keeps
+    // them available. Later presence changes only update identity labels.
     this.stopPresence = reaction(
       () => connections.activeAgentIds,
-      agents => {
+      action(agents => {
+        if (agents.size) this.connectedThisSession = true;
         for (const label of [this.previewName, this.name])
           label.dataset.active = String(
             agents.has(label.dataset.agentId ?? ''),
           );
-      },
+      }),
       {name: 'AgentRenderView.presence', fireImmediately: true},
     );
     window.addEventListener('pagehide', () => this.dispose(), {
@@ -254,6 +259,7 @@ export class AgentRenderView {
 
   private get previewHidden(): boolean {
     return (
+      !this.connectedThisSession ||
       this.opened ||
       (!!this.dismissedFrames &&
         this.history.items.every(item => this.dismissedFrames!.has(item.id)))
@@ -322,7 +328,7 @@ export class AgentRenderView {
       this.thumbnails.delete(id);
     }
     const latest = all.at(-1);
-    this.root.hidden = !latest;
+    this.root.hidden = !latest || !this.connectedThisSession;
     if (!latest) {
       for (const [child, inert] of this.inactive) child.inert = inert;
       this.inactive.clear();

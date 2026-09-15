@@ -9,6 +9,7 @@ import {runCli, startServe} from '../../../cli/test/process.ts';
 import {reserveLocalPort} from './local-port.ts';
 
 declare const window: Window & {
+  agentTestConnections: {activeAgentIds: Set<string>};
   agentTestEditor: import('../../src/editor.ts').CodeEditor;
   agentTestCamera: import('three').PerspectiveCamera;
   agentTestView: import('../../src/ui/agent-renders.ts').AgentRenderView;
@@ -468,12 +469,12 @@ test(
     );
 
     await page.reload();
-    await preview.waitFor();
-    assert.equal(await dotOpacity(previewLabel, true), '0.4');
     await page
       .locator('.agent-status[data-state="online"]')
       .waitFor({state: 'attached'});
+    assert.equal(await preview.isVisible(), false);
     await cli(1, {operation: 'context'});
+    await preview.waitFor();
     assert.equal(await dotOpacity(previewLabel, true), '1');
     await preview.click();
     await waitCount('4 / 4');
@@ -531,12 +532,12 @@ test(
     await preview.click();
     await waitCount('3 / 3');
     await page.reload();
-    await preview.waitFor();
-    assert.equal(await dotOpacity(previewLabel, true), '0.4');
     await page
       .locator('.agent-status[data-state="online"]')
       .waitFor({state: 'attached'});
+    assert.equal(await preview.isVisible(), false);
     await cli(0, {operation: 'context'});
+    await preview.waitFor();
     assert.equal(await dotOpacity(previewLabel, true), '1');
     await preview.click();
     await waitCount('3 / 3');
@@ -586,11 +587,16 @@ test(
     await page.evaluate(async () => {
       const {AgentRenderHistory} = await import('/src/agent/render-history.ts');
       const {AgentRenderView} = await import('/src/ui/agent-renders.ts');
+      const mobxUrl = '/@id/mobx';
+      const {observable}: typeof import('mobx') = await import(mobxUrl);
+      window.agentTestConnections = observable({
+        activeAgentIds: new Set<string>(),
+      });
       window.agentTestHistory = new AgentRenderHistory();
       window.agentTestView = new AgentRenderView(
         document.querySelector<HTMLElement>('main')!,
         window.agentTestHistory,
-        {activeAgentIds: new Set<string>()},
+        window.agentTestConnections,
       );
     });
     const add = (start: number, end: number, agent = 'Euler') =>
@@ -634,7 +640,36 @@ test(
     });
     await add(1, 2);
     await add(3, 3, 'Noether');
-    await page.locator('.agent-render-preview').click();
+    const preview = page.locator('.agent-render-preview');
+    assert.equal(await preview.isVisible(), false);
+    const connect = async (active: boolean) =>
+      page.evaluate(async active => {
+        const mobxUrl = '/@id/mobx';
+        const {runInAction}: typeof import('mobx') = await import(mobxUrl);
+        runInAction(() => {
+          window.agentTestConnections.activeAgentIds = new Set(
+            active ? ['Euler'] : [],
+          );
+        });
+      }, active);
+    await connect(true);
+    await preview.waitFor();
+    await connect(false);
+    assert.equal(await preview.isVisible(), true);
+    // Recreating the view models a fresh page with restored history, offline.
+    await page.evaluate(async () => {
+      window.agentTestView.dispose();
+      const {AgentRenderView} = await import('/src/ui/agent-renders.ts');
+      window.agentTestView = new AgentRenderView(
+        document.querySelector<HTMLElement>('main')!,
+        window.agentTestHistory,
+        window.agentTestConnections,
+      );
+    });
+    assert.equal(await preview.isVisible(), false);
+    await connect(true);
+    await preview.waitFor();
+    await preview.click();
     assert.equal(
       await page
         .getByRole('button', {name: 'Back to live view', exact: true})
