@@ -15,6 +15,8 @@ description: 'code3d 的局部坐标、原点与相对位置约定。设计、�
 
 `relate()` 表达与其他元素之间的约束关系；其中的 `offset`、`rotate` 是关系求解后的后续变换。这里的“独立 Transformation”指它与 Constraint 分别作为数组项，不代表应将无约束的 relate 当作通用几何变换。独立建模与排布使用 `originOffset()`、模型 `rotate()` 等局部几何操作；先组合完整布局，再用 relate 表达整体与外部元素的关系。测试中覆盖求解器默认位姿的输入，不能作为实际建模用法的依据。
 
+`relate` 的回调参数表示返回的新模型或草图参考架，每条约束必须涉及该值。外部变量与其元素引用始终保留原值身份，即使它就是调用 relate 的原 receiver；不得自动重绑定为 self。约束存储、源码 trace、阶段预览、pivotPoint 与 axisLine 统一遵守此规则。选新值的元素用回调参数，引用旧值则保持外部变量。
+
 relate 中连续的约束共同求解位姿；初段未约束自由度采用求解器默认结果，后段继承前段姿态。Constraint 仅表达 on/align，不提供 offset、rotate 或 pivot/axis 选择器。相对变换只能通过独立 Transformation 数组项表达，作用于前面同段的联合解，允许离开此前接触位置。变换严格按数组顺序执行；随后出现约束时进入新段，不把此前约束跨段收集回去。连续 relate 调用接续同一排列。零位移和零角度不增加位置或朝向条件。 混合求解收尾时，保留前段未约束的平移需让与之对齐的其他零件共同参与平移自由度；不能冻结从属零件后单独回正被引用的零件。
 
 独立 `offset` 沿该组合求解参考架的固定轴移动，不跟随 self 的朝向，也不是视口世界轴。独立 `rotate` 默认绕 self 当前原点和局部 XYZ 轴；pivot/pivotVertex/pivotPoint 改中心；pivotPoint 接受点引用并保留 self XYZ 旋转轴。axisEdge 使用 self 直边 ID，axisLine 使用线引用的已求解摆放。group 构造、嵌套与原点操作统一重表达该参考架及位姿。固定轴平移与当前自原点旋转可能交换，不能据此重排操作。模型本身不提供 offset；构造函数只生成由 relate 消费的描述值。完成的独立 offset/rotate 不再提供任何链式变换方法；pivot/pivotVertex/pivotPoint 的未完成选择可接一次 pivotOffset，axisEdge/axisLine 可接一次 axisOffset，之后只能用 rotate 完成。多个独立操作写为数组项，不能从 offset 进入 rotate 或反向接链。

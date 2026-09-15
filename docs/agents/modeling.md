@@ -48,6 +48,11 @@ before promising a feature.
 
 ## Place a constrained part
 
+`part.relate(self => ...)` returns a new value. Every constraint must involve
+the callback value; external variables, including `part`, keep their original
+identity. Select the new value's elements and rotation references through `self`.
+This rule also applies to sketch frames.
+
 Use `relate` for composition placement and `originOffset` to change local
 geometry coordinates. Constraints only describe `on`/`align`; they have no
 chained offset, rotation or pivot/axis selectors. Consecutive constraints solve jointly. Independent Core

@@ -89,7 +89,10 @@ export type SketchOptions = Readonly<{
 export interface Sketch {
   /** The unbounded local XZ plane (+Y normal), independent of closed regions. */
   readonly plane: FaceAnchor;
-  /** Relates this immutable sketch's frame without changing its two-dimensional data. */
+  /**
+   * Relates a new frame without changing this sketch's two-dimensional data.
+   * Each constraint must involve callback self; external references keep their identity.
+   */
   relate(build: (self: Sketch) => Relation | readonly Relation[]): Sketch;
   /** References a point defined in this layer. */
   point(id: number): SketchPoint;

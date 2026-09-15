@@ -120,6 +120,38 @@ for (const method of ['on', 'align'] as const) {
   }
 }
 
+test('relate distinguishes the new self from its original receiver alias in source focus', async () => {
+  const source = `import {box, group, offset} from '@code3d/core';
+    const side = box(2, 250, 250);
+    const leftSide = side;
+    const rightSide = side.relate(self => [
+      self.on(leftSide.right), offset(160, 0, 0)
+    ]);
+    export default group([leftSide, rightSide]);`;
+  const module = await compile(source);
+  const own = at(module, source, 'on(');
+  const other = at(module, source, 'leftSide.right');
+  const selfId = own.constraint.source.nodeId;
+  const originalId = own.constraint.target.nodeId;
+  assert.notEqual(selfId, originalId);
+  assert.deepEqual(own.evaluation.focusNodeIds, [selfId]);
+  assert.deepEqual(other.evaluation.focusNodeIds, [originalId]);
+  assert.equal(own.evaluation.relationOwnerNodeId, selfId);
+  assert.equal(other.evaluation.relationOwnerNodeId, selfId);
+  assert.equal(own.evaluation.relationPreviewDiagnostic, undefined);
+  assert.equal(other.evaluation.relationPreviewDiagnostic, undefined);
+  assert.deepEqual(
+    defined(own.evaluation.relationPreview).compositionTransform.position,
+    [2, 0, 0],
+  );
+  const shift = at(module, source, 'offset(160');
+  assert.deepEqual(shift.evaluation.focusNodeIds, [selfId]);
+  assert.deepEqual(
+    defined(shift.evaluation.relationPreview).compositionTransform.position,
+    [162, 0, 0],
+  );
+});
+
 test('on applies one opacity factor to complete source and target groups without named duplicates', async () => {
   const source = `import {offset, box,group} from '@code3d/core'; const base=group([box(20,10,30)]); const part=group([box(8,6,4)]).relate(self=>[self.on( base.up ), offset(2,0,0)]); export default group([base,part]);`;
   const module = await compile(source);
