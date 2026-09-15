@@ -751,6 +751,7 @@ const defaultModelNames = {
 } as const satisfies Record<ModelKind, string>;
 
 const anchorKind = Symbol('anchorKind');
+const coordinateFrame = Symbol('coordinateFrame');
 const anchorReferenceValue = Symbol('anchorReference');
 const modelKind = Symbol('modelKind');
 const modelNamedElements = Symbol('modelNamedElements');
@@ -764,9 +765,18 @@ export interface Anchor<Kind extends ElementKind = ElementKind> {
     this: Anchor<'point' | 'line' | 'face'>,
     target: Anchor<'point' | 'line' | 'face'>,
   ): Constraint;
+  /** Coincide origins and all coordinate axes. */
+  align(this: FrameAnchor, target: FrameAnchor): Constraint;
 }
 
 export interface PointAnchor extends Anchor<'point'> {}
+
+/** A coordinate-system reference, independent of model geometry. */
+export interface FrameAnchor extends Anchor<'frame'> {
+  readonly [coordinateFrame]: true;
+  /** The frame's zero-point reference; it has no model geometry. */
+  readonly origin: PointAnchor;
+}
 
 export interface LineAnchor extends Anchor<'line'> {
   /** Reverse direction without changing geometry or the reference coordinate axes. */
@@ -898,6 +908,10 @@ export interface ModelCapabilities<
   extends Anchor<ModelElementKind<Kind>>, DirectionalBounds {
   readonly [modelKind]: Kind;
   readonly [modelNamedElements]: Elements;
+  /** The same reference as frame.origin; not a point model or geometry center. */
+  readonly origin: PointAnchor;
+  /** Reference to the model's local zero and XYZ axes, independent of geometry. */
+  readonly frame: FrameAnchor;
   /** Measure finite geometry in this model's local frame, or in relativeTo's frame. */
   bounds(relativeTo?: Model): ModelBounds;
   /** Model-origin coordinates in relativeTo's local frame, including placement. */
@@ -1142,12 +1156,25 @@ class ModelAnchor<
     );
   }
 
-  align(target: Anchor<'point' | 'line' | 'face'>): Constraint {
+  align(target: Anchor): Constraint {
     return Constraint.create(
       this[anchorReferenceValue],
       anchorReference(target),
       'align',
     );
+  }
+}
+
+class ModelFrameAnchor extends ModelAnchor<'frame'> implements FrameAnchor {
+  readonly [coordinateFrame] = true;
+  readonly origin: PointAnchor;
+
+  constructor(reference: AnchorReference) {
+    super(reference);
+    this.origin = modelAnchor(reference.model, `${reference.name}.origin`, {
+      kind: 'point',
+      transform: reference.transform,
+    });
   }
 }
 
@@ -1463,9 +1490,19 @@ export class Constraint extends RelationExpression {
   ): Constraint {
     if (kind === 'on')
       source.model[referenceBounds](source, identityRigidTransform);
-    else if (source.kind === 'frame' || target.kind === 'frame')
+    else if (
+      (source.kind === 'frame' || target.kind === 'frame') &&
+      (source.kind !== 'frame' ||
+        target.kind !== 'frame' ||
+        source.whole ||
+        target.whole ||
+        source.topology ||
+        target.topology ||
+        source.parts ||
+        target.parts)
+    )
       throw new Error(
-        'align() requires points, curves, or surfaces; select geometry on a solid or group.',
+        'align() requires compatible geometry or two coordinate frame references; select .frame on a model.',
       );
     return new Constraint({kind, source, target});
   }
@@ -2419,24 +2456,37 @@ export abstract class RelationObject {
         name: model.name,
         relations: programs[index].constraints.map(constraint =>
           constraint.kind === 'align'
-            ? {
-                kind: 'align',
-                id: constraint.id,
-                source: {
-                  body: indices.get(constraint.source.model ?? model)!,
-                  geometry: (
-                    constraint.source.model ?? model
-                  ).alignmentGeometry(constraint.source),
-                  transform: constraint.source.transform,
-                },
-                target: {
-                  body: indices.get(constraint.target.model ?? model)!,
-                  geometry: (
-                    constraint.target.model ?? model
-                  ).alignmentGeometry(constraint.target),
-                  transform: constraint.target.transform,
-                },
-              }
+            ? constraint.source.kind === 'frame'
+              ? {
+                  kind: 'frame',
+                  id: constraint.id,
+                  source: {
+                    body: indices.get(constraint.source.model ?? model)!,
+                    transform: constraint.source.transform,
+                  },
+                  target: {
+                    body: indices.get(constraint.target.model ?? model)!,
+                    transform: constraint.target.transform,
+                  },
+                }
+              : {
+                  kind: 'align',
+                  id: constraint.id,
+                  source: {
+                    body: indices.get(constraint.source.model ?? model)!,
+                    geometry: (
+                      constraint.source.model ?? model
+                    ).alignmentGeometry(constraint.source),
+                    transform: constraint.source.transform,
+                  },
+                  target: {
+                    body: indices.get(constraint.target.model ?? model)!,
+                    geometry: (
+                      constraint.target.model ?? model
+                    ).alignmentGeometry(constraint.target),
+                    transform: constraint.target.transform,
+                  },
+                }
             : {
                 kind: 'on',
                 id: constraint.id,
@@ -2705,6 +2755,7 @@ export class ModelObject<
   private readonly geometryAnchor: StoredElement;
   private readonly elements: StoredElements;
   private readonly operation: StoredOperation;
+  #frame?: FrameAnchor;
 
   /** @internal */
   [modelGeometry](): ModelGeometry | undefined {
@@ -2773,6 +2824,19 @@ export class ModelObject<
     return new ModelObject<Elements, Kind>(init);
   }
 
+  get origin(): PointAnchor {
+    return this.frame.origin;
+  }
+
+  get frame(): FrameAnchor {
+    return (this.#frame ??= new ModelFrameAnchor({
+      model: this,
+      name: 'frame',
+      kind: 'frame',
+      transform: identityRigidTransform,
+    }));
+  }
+
   get up(): Bound {
     return directionalBound(this.relationAnchorReference(), 'up');
   }
@@ -2804,7 +2868,7 @@ export class ModelObject<
     return {model: this, name: 'geometry', ...this.geometryAnchor, whole: true};
   }
 
-  align(target: Anchor<'point' | 'line' | 'face'>): Constraint {
+  align(target: Anchor): Constraint {
     return Constraint.create(
       this.relationAnchorReference(),
       anchorReference(target),
@@ -6105,7 +6169,9 @@ function modelAnchor<Kind extends ElementKind>(
   return (
     element.topology
       ? new ModelTopologyElement(reference)
-      : new ModelAnchor<Kind>(reference)
+      : element.kind === 'frame'
+        ? new ModelFrameAnchor(reference)
+        : new ModelAnchor<Kind>(reference)
   ) as Anchor<Kind>;
 }
 

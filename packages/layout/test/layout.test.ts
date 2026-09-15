@@ -8,11 +8,13 @@ import {
   line,
   point,
   rectangle,
+  rotate,
   type Model,
 } from '@code3d/core';
 import {
   clearKernelOperationCache,
   modelElementReference,
+  rotateVector,
 } from '@code3d/core/tooling';
 import {
   repeat,
@@ -54,6 +56,71 @@ const center = (model: Model) => {
 const snapshot = createModelSnapshotter();
 const space = (x: number, z = 20) =>
   keep(box(x, 20, z).originOffset(-x / 2, 0, -z / 2));
+
+test('space layouts follow a related construction frame without outputting its geometry', () => {
+  const host = keep(
+    box(4, 20, 50).relate(self => self.origin.align(point([20, 30, 40]))),
+  );
+  const target = keep(
+    box(40, 10, 25).relate(self => [
+      self.vertex(3).align(host.vertex(7)),
+      rotate(20, 35, 15),
+    ]),
+  );
+  const prototype = keep(box(2, 10, 5));
+  for (const models of [
+    flex(repeat(prototype, 4), target, {axis: 'x', gap: 5}),
+    fillFlex(prototype, target, {axis: 'x', gap: 5}),
+    grid(repeat(prototype, 4), target, {axes: ['x', 'z'], columns: 2, gap: 5}),
+    fillGrid(prototype, target, {axes: ['x', 'z'], gap: 5}),
+  ]) {
+    retain(models);
+    const targetPose = snapshot(target).compositionTransform;
+    for (const model of models) {
+      near(model.position(target), [0, 0, 0]);
+      const pose = snapshot(model).compositionTransform;
+      near(pose.position, targetPose.position);
+      for (const axis of [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ] as const)
+        near(
+          rotateVector(axis, pose.quaternion),
+          rotateVector(axis, targetPose.quaternion),
+        );
+      near(model.bounds(target).minimum, model.bounds().minimum);
+    }
+    const scene = keep(group([host, ...models]));
+    const output = snapshot(scene);
+    assert.equal(output.children.length, 1 + models.length);
+    assert.equal(
+      output.children.every(child => child.kind === 'solid'),
+      true,
+    );
+    assert.equal(
+      output.children.some(child => child.nodeId === snapshot(target).nodeId),
+      false,
+    );
+  }
+});
+
+test('ventilation fins use the target vertex constraint and preserve its unused end space', () => {
+  const leftSide = keep(
+    box(4, 20, 50).relate(self => self.origin.align(point([20, 30, 40]))),
+  );
+  const target = keep(
+    box(40, 10, 25).relate(self => self.vertex(3).align(leftSide.vertex(7))),
+  );
+  const fins = retain(
+    fillFlex(keep(box(2, 10, 25)), target, {axis: 'x', gap: 5}),
+  );
+  assert.equal(fins.length, 6);
+  near(fins[0].bounds(leftSide).minimum, target.bounds(leftSide).minimum);
+  near(fins.at(-1)!.bounds(leftSide).maximum, [39, 10, 25]);
+  const scene = keep(group([leftSide, ...fins]));
+  assert.equal(snapshot(scene).children.length, 7);
+});
 
 test('repeat supplies an explicit quantity without changing geometry', () => {
   const model = keep(box(2, 4, 6).originOffset(3, 2, 1));

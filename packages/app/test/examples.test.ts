@@ -54,6 +54,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'npm/model.ts': ['default', 1],
   'layout/linear.ts': ['default', 5],
   'layout/grille.ts': ['default', 13],
+  'layout/ventilation.ts': ['default', 9],
   'layout/grid.ts': ['default', 12],
   'layout/radial.ts': ['default', 12],
   'layout/flex.ts': ['default', 3],
@@ -218,6 +219,24 @@ for (const entry of exampleEntries) {
         const bounds = exports.default.bounds();
         assert.deepEqual(bounds.minimum, [0, -1, -18]);
         assert.deepEqual(bounds.maximum, [100, 21, 18]);
+      }
+      if (entry.file === 'layout/ventilation.ts') {
+        const bounds = exports.default.bounds();
+        const near = (value: number, expected: number) =>
+          assert.ok(Math.abs(value - expected) < 1e-6);
+        bounds.minimum.forEach((value: number, index: number) =>
+          near(value, [-24, -2, -15][index]),
+        );
+        bounds.maximum.forEach((value: number, index: number) =>
+          near(value, [24, 22, 15][index]),
+        );
+        const children = snapshot(exports.default).children;
+        assert.equal(
+          children.length,
+          9,
+          'The construction space is not an output child',
+        );
+        near(children[3].compositionTransform.position[1], 17);
       }
       if (entry.file === 'operations/union.ts') {
         assert.ok(

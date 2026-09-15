@@ -207,11 +207,20 @@ external relations are not part of these measurements. Layout expresses geometry
 at `p + delta` using `originOffset(-delta)` and uses model `rotate` for radial
 orientation. A model's local origin remains zero.
 
-For inputs without external relations, all result origins coincide and
-`group(items)` preserves the complete layout without an empty reference group.
-Core's existing relations still apply during composition: to repeat an assembled
-set of parts, group them first; to position a completed layout relative to another
-model, group the output and relate that group.
+With a target `space`, Flex, Grid and both filling tools attach each result's
+`frame` to `space.frame`. Axes and bounds are measured in the space's local
+coordinates; the results follow its solved position and orientation in the
+composition. The space is only a reference dependency: include `...items` with
+your other parts without including the construction space itself. Layout does
+not recenter each item; its origin corresponds to the space's origin, which can
+differ from the space's bounding-box center.
+
+Without a target or external input relations, result origins coincide and
+`group(items)` preserves the complete local layout. Existing input relations
+remain constraints and must be compatible with the target frame. To repeat an
+assembled set of parts, group them first. A group captures its assembly in the
+first member's local frame; to place that new group in another assembly, relate
+the group itself, for example `self.frame.align(space.frame)`.
 
 Bounds-based tools need finite geometry; empty groups cannot be measured. Empty
 collections produce empty results. Gaps, padding and radii must be finite and

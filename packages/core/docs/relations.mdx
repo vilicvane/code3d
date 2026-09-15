@@ -116,6 +116,27 @@ geometric incompatibility, and numerical nonconvergence have separate errors.
 To adjust a multi-constraint result visually, select self. The App edits or adds
 an independent transformation after the joint constraint segment.
 
+## Align coordinate systems
+
+All models, including groups, expose `frame` and `origin` references.
+`model.origin` is the same reference as `model.frame.origin`; neither reference
+adds geometry to the result.
+
+```ts
+const positioned = part.relate(self => self.origin.align(base.origin));
+const mounted = part.relate(self => self.frame.align(base.frame));
+```
+
+Origin alignment leaves orientation free. Frame alignment coincides the origins
+and the corresponding X/Y/Z directions, fixing all six relative degrees of
+freedom. It uses the target's solved placement, including its relations to other
+models. The target can remain a reference dependency without being included in
+the output group. Both constraints participate in the same joint solve as other
+`align` and `on` constraints.
+
+Named frames work the same way: `assembly.expose({mount: part.frame})` provides
+`assembly.mount` and `assembly.mount.origin` in the assembly's coordinates.
+
 ## Choose a rotation pivot or axis
 
 ```ts

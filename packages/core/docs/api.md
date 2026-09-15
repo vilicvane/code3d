@@ -439,6 +439,17 @@ conversion, use the [export scale](../../web/src/content/docs/docs/guides/export
 
 ## Origins and rotation
 
+Every model, including groups, has a `frame: FrameAnchor` coordinate reference.
+`frame.origin: PointAnchor` references its zero point; `model.origin` returns
+that same reference. These references have no geometry and cannot be added as
+models to a group. A point model's geometry may be away from its own origin.
+
+`self.origin.align(other.origin)` constrains only position.
+`self.frame.align(other.frame)` constrains position and all three axis directions.
+Use `.frame` explicitly: aligning curves or surfaces still refers to their
+underlying geometry. Frames support `expose`, including `.origin` on the exposed
+frame, and retain their occurrence and transform through composition.
+
 All models provide `originPoint()`, `originOffset()` and `rotate()`. Solids, faces,
 curves and points additionally provide vertex/center selection:
 

@@ -597,6 +597,24 @@ point().align(box(1, 1, 1));
 point().center.reverse();
 void [alignPoint, alignCurve, alignSurface];
 
+const coordinateModel = group([box(2, 3, 4)]);
+const coordinateFrame: import('@code3d/core').FrameAnchor =
+  coordinateModel.frame;
+const coordinateOrigin: import('@code3d/core').PointAnchor =
+  coordinateFrame.origin;
+coordinateModel.relate(self => self.frame.align(coordinateFrame));
+coordinateModel.relate(self => self.origin.align(coordinateOrigin));
+const coordinateExposed = coordinateModel.expose({mount: coordinateFrame});
+coordinateExposed.mount.origin.align(coordinateOrigin);
+// @ts-expect-error Coordinate references are not model geometry.
+group([coordinateModel.origin]);
+// @ts-expect-error Frames align only to other coordinate frames.
+coordinateFrame.align(coordinateOrigin);
+// @ts-expect-error Select .frame explicitly on a solid or group.
+coordinateModel.align(coordinateFrame);
+// @ts-expect-error An origin is not a frame.
+coordinateOrigin.align(coordinateFrame);
+
 // @ts-expect-error Positions use an array, not scalar coordinates.
 point(1, 2, 3);
 // @ts-expect-error A line endpoint is a position array.

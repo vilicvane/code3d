@@ -53,6 +53,13 @@ the callback value; external variables, including `part`, keep their original
 identity. Select the new value's elements and rotation references through `self`.
 This rule also applies to sketch frames.
 
+`model.frame` references the model's coordinate system;
+`model.origin` is the same non-geometric reference as `model.frame.origin`.
+Use `self.frame.align(target.frame)` to match complete placement, or
+`self.origin.align(target.origin)` to match only origin position. Layout calls
+with a target space follow its frame automatically; spread the returned models
+into the final group without including the construction space.
+
 Use `relate` for composition placement and `originOffset` to change local
 geometry coordinates. Constraints only describe `on`/`align`; they have no
 chained offset, rotation or pivot/axis selectors. Consecutive constraints solve jointly. Independent Core

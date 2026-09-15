@@ -45,7 +45,13 @@ type AlignRelation = Readonly<{
   source: AlignEndpoint;
   target: AlignEndpoint;
 }>;
-type Relation = (BoundRelation & {kind: 'on'}) | AlignRelation;
+type FrameRelation = Readonly<{
+  kind: 'frame';
+  id: string;
+  source: Omit<AlignEndpoint, 'geometry'>;
+  target: Omit<AlignEndpoint, 'geometry'>;
+}>;
+type Relation = (BoundRelation & {kind: 'on'}) | AlignRelation | FrameRelation;
 export type Body = Readonly<{
   name: string;
   relations: readonly Relation[];
@@ -293,7 +299,7 @@ export function solveBodies(
     owner: number,
   ) => unplace(pose, owner, poses);
   const flexible = bodies.map(body =>
-    body.relations.some(r => r.kind === 'align'),
+    body.relations.some(r => r.kind !== 'on'),
   );
   // Stable ordering and deduplication keep repeated conditions from biasing seeds.
   const relations = bodies.flatMap((body, owner) =>
@@ -309,10 +315,25 @@ export function solveBodies(
   let poses = bodies.map(body => body.initial ?? identityRigidTransform);
   for (const owner of active) poses[owner] = place(poses[owner], owner, poses);
   for (const {owner, relation} of unique) {
-    if (relation.kind !== 'align') continue;
+    if (relation.kind === 'on') continue;
     const sourceSelf = relation.source.body === owner;
     if (relation.target.body === relation.source.body) continue;
     const baseline = baselinePose(poses[owner], poses, owner);
+    if (relation.kind === 'frame') {
+      const source = composeTransforms(
+        sourceSelf ? baseline : poses[relation.source.body],
+        relation.source.transform,
+      );
+      const target = composeTransforms(
+        relation.target.body === owner ? baseline : poses[relation.target.body],
+        relation.target.transform,
+      );
+      const seed = sourceSelf
+        ? composeTransforms(target, invertTransform(source))
+        : composeTransforms(source, invertTransform(target));
+      poses[owner] = place(composeTransforms(seed, baseline), owner, poses);
+      continue;
+    }
     const source = transformGeometry(
         relation.source.geometry,
         relation.source.body === owner ? baseline : poses[relation.source.body],
@@ -363,6 +384,18 @@ export function solveBodies(
           transformGeometry(r.source.geometry, source),
           transformGeometry(r.target.geometry, target),
         );
+      if (r.kind === 'frame') {
+        const a = composeTransforms(source, r.source.transform);
+        const b = composeTransforms(target, r.target.transform);
+        const relative = composeTransforms(invertTransform(b), a);
+        // q and -q denote the same orientation. The local rotation error has
+        // three independent components; the exact seed also handles half turns.
+        const sign = relative.quaternion[3] < 0 ? -1 : 1;
+        return [
+          ...subtract(a.position, b.position),
+          ...relative.quaternion.slice(0, 3).map(value => 2 * sign * value),
+        ];
+      }
       const frame = composeTransforms(target, r.target.transform);
       const relative = composeTransforms(
         invertTransform(rotation(frame.quaternion)),

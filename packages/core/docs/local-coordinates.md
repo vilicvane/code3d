@@ -64,6 +64,22 @@ topology vertex, and `originCenter()` for the existing center anchor. The last
 two require geometry and are not available on groups. A carried center anchor
 is not necessarily the center of the current axis-aligned bounding box.
 
+## Coordinate references
+
+Every model, including a group, provides `model.frame`, a reference to its local
+coordinate system. `model.frame.origin` references that frame's zero point;
+`model.origin` is the same reference. Neither is a geometric model.
+For `point([10, 0, 0])`, the geometry is at X = 10 while its frame origin is zero.
+Changing local geometry with `rotate()` does not rotate the model's coordinate
+axes. Placement through `relate()` determines the frame's pose in a composition.
+
+Use `self.origin.align(other.origin)` to coincide just the origins, or
+`self.frame.align(other.frame)` to coincide both origins and all three axes.
+Coordinate references can be named with `expose`; an exposed frame and its
+`.origin` follow the selected occurrence through nested groups and transforms.
+A newly read `model.origin` always references the current local zero. Previously
+selected references retain their meaning through subsequent origin edits.
+
 ## Changing the origin changes point coordinates
 
 `originOffset(dx, dy, dz)` chooses a new origin at that displacement in the

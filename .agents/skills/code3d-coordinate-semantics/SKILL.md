@@ -23,6 +23,16 @@ relate 中连续的约束共同求解位姿；初段未约束自由度采用求�
 
 ## 原点
 
+所有模型（包括 group）的 `frame` 引用其局部坐标系；`frame.origin` 引用该架的零点，
+`model.origin` 直接返回同一个引用。两者不是几何模型，不生成输出几何。origin 引用可
+作点位置约束；frame.align 只接受另一个 frame，同时对齐原点及全部轴向。不能将
+模型自身的几何 align 隐式解释成坐标系对齐。expose 的 frame.origin 从同一个已转换
+参考架派生，保留 occurrence；重新读取模型 frame 使用当前局部零点及 XYZ 轴，
+原点编辑前选定的参考则沿已有锚点重表达规则保留原含义。
+
+Layout 带 space 的 flex/grid/fillFlex/fillGrid 在其局部 bounds 中排布，并使用
+frame.align 关联目标空间的求解位姿；目标仅为引用依赖，无须加入输出几何。
+
 原点定义模型坐标，在自身坐标系中恒为零。`originOffset(d)` 保持轴向，使内部点的坐标变为：
 
 ```text

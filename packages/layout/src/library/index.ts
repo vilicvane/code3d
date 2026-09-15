@@ -103,6 +103,12 @@ function translated<T extends Model>(model: T, delta: Vec3): T {
   // originOffset(d) expresses the same geometry at p - d.
   return model.originOffset(-delta[0], -delta[1], -delta[2]) as T;
 }
+function placed<T extends Model>(model: T, delta: Vec3, space?: Model): T {
+  const result = translated(model, delta);
+  return (
+    space ? result.relate(self => self.frame.align(space.frame)) : result
+  ) as T;
+}
 function axisDelta(axis: Axis, distance: number): Vec3 {
   const delta: [number, number, number] = [0, 0, 0];
   delta[axisIndex(axis)] = distance;
@@ -265,7 +271,7 @@ export function flex<const Models extends readonly Model[]>(
   models: Models,
   config: FlexLayoutConfig,
 ): Arranged<Models>;
-/** Arrange fixed-size inputs within a model's local bounds. */
+/** Arrange within space's local bounds, following its solved position and axes. */
 export function flex<const Models extends readonly Model[]>(
   models: Models,
   space: Model,
@@ -363,7 +369,7 @@ export function flex<const Models extends readonly Model[]>(
     crossStart += heights[lineIndex] + (lineSpacing?.gap ?? 0);
   }
   return models.map((model, index) =>
-    translated(model, deltas[index]),
+    placed(model, deltas[index], space),
   ) as unknown as Arranged<Models>;
 }
 
@@ -484,7 +490,7 @@ export function grid<const Models extends readonly Model[]>(
   models: Models,
   config: GridLayoutConfig,
 ): Arranged<Models>;
-/** Arrange grid tracks and their inputs within a model's local bounds. */
+/** Arrange grid tracks within space's local bounds and follow its solved frame. */
 export function grid<const Models extends readonly Model[]>(
   models: Models,
   space: Model,
@@ -558,7 +564,7 @@ export function grid<const Models extends readonly Model[]>(
         config.alignItems ?? 'start',
       ) -
       box.minimum[rowAxis];
-    return translated(model, delta);
+    return placed(model, delta, space);
   }) as unknown as Arranged<Models>;
 }
 
