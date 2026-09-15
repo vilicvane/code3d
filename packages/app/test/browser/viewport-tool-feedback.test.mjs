@@ -30,7 +30,7 @@ async function open(t) {
       response,
       body:
         (await response.text()) +
-        '\nwindow.feedbackApp = {codeEditor, viewport, sketchEditor, toolEngine, toolFeedback, handlePositionTool, previewState};',
+        '\nwindow.feedbackApp = {codeEditor, viewport, sketchEditor, toolEngine, toolFeedback, handlePositionTool, previewState, dockPanels};',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL, {timeout: 30000});
@@ -225,7 +225,7 @@ export function profile(radius:number) {
     );
     await page.locator('#design-arguments-handle').waitFor();
     assert.equal(await page.locator('#elements-panel').isVisible(), false);
-    await page.keyboard.press('Alt+1');
+    await page.locator('#design-arguments-handle').click();
     await page.locator('.design-argument-option').first().waitFor();
     assert.equal(await page.locator('.design-argument-option').count(), 2);
     await page.getByRole('button', {name: /profile\(12\)/}).click();
@@ -284,7 +284,7 @@ export default design();`;
         await page.locator('#design-arguments-count').innerText(),
         '1',
       );
-      await page.keyboard.press('Alt+1');
+      await page.locator('#design-arguments-handle').click();
       await page.locator('.design-argument-option').waitFor();
       await page.evaluate(() => {
         const editor = window.feedbackApp.codeEditor.editor;
@@ -314,3 +314,76 @@ export default design();`;
     },
   );
 }
+
+test(
+  'dock panels use hover, click and Escape without Alt number shortcuts',
+  {timeout: 60000},
+  async t => {
+    const page = await open(t);
+    await source(
+      page,
+      `import {box} from '@code3d/core';
+/** @code3d.arguments [4] */
+export function design(size=4) { return box(size,4,5); }
+export default design();`,
+      'box(size',
+    );
+    const argumentsPanel = page.locator('#design-arguments-panel');
+    const elementsPanel = page.locator('#elements-panel');
+    assert.equal(await page.locator('[data-dock-shortcut]').count(), 0);
+    for (const panel of [argumentsPanel, elementsPanel]) {
+      assert.equal(await panel.getAttribute('data-panel-state'), 'collapsed');
+      assert.equal(
+        await panel.locator('.dock-panel-handle').getAttribute('title'),
+        null,
+      );
+    }
+    await page.keyboard.press('Alt+1');
+    await page.keyboard.press('Alt+2');
+    for (const panel of [argumentsPanel, elementsPanel])
+      assert.equal(await panel.getAttribute('data-panel-state'), 'collapsed');
+    await argumentsPanel.hover();
+    assert.equal(await argumentsPanel.getAttribute('data-panel-state'), 'peek');
+    await elementsPanel.hover();
+    assert.equal(
+      await argumentsPanel.getAttribute('data-panel-state'),
+      'collapsed',
+    );
+    assert.equal(await elementsPanel.getAttribute('data-panel-state'), 'peek');
+    await page.keyboard.press('Escape');
+    assert.equal(
+      await elementsPanel.getAttribute('data-panel-state'),
+      'collapsed',
+    );
+    await elementsPanel.locator('.dock-panel-handle').click();
+    await page.mouse.move(10, 10);
+    await page.keyboard.press('Escape');
+    assert.equal(
+      await elementsPanel.getAttribute('data-panel-state'),
+      'pinned',
+    );
+    await page.keyboard.press('Alt+2');
+    assert.equal(
+      await elementsPanel.getAttribute('data-panel-state'),
+      'pinned',
+    );
+    await elementsPanel.locator('.dock-panel-handle').click();
+    assert.equal(
+      await elementsPanel.getAttribute('data-panel-state'),
+      'collapsed',
+    );
+    await argumentsPanel.locator('.dock-panel-handle').focus();
+    await page.keyboard.press('Enter');
+    assert.equal(
+      await argumentsPanel.getAttribute('data-panel-state'),
+      'pinned',
+    );
+    await page.evaluate(() => window.feedbackApp.dockPanels.dispose());
+    await argumentsPanel.locator('.dock-panel-handle').click();
+    assert.equal(
+      await argumentsPanel.getAttribute('data-panel-state'),
+      'pinned',
+    );
+    await page.screenshot({path: '/tmp/code3d-dock-without-shortcuts.png'});
+  },
+);

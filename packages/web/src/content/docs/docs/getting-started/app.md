@@ -239,7 +239,8 @@ preserves the view, and orbiting keeps the chosen edge stable. These guides
 appear in **Modeling** mode and disappear in **Render** mode.
 
 Sketch and 3D views share the **Arguments** selector in the lower-right corner.
-Use **Alt+1** to open it and switch the evaluated argument set of a function
+Hover over its handle to preview it, or click to pin it open and switch the
+evaluated argument set of a function
 with `@code3d.arguments`. The selector is hidden when the current context
 has no candidate argument sets.
 
@@ -453,6 +454,10 @@ Position handles, including origin and relationship offsets, move in increments
 of the current minor grid spacing. Each drag keeps its starting grid and reference
 frame, with snapping always enabled. XYZ distance inputs use the current minor
 grid step and accept exact values; rotation inputs and handles keep their angle steps.
+
+Both panels open on hover and pin open on click. Press Escape to close a
+temporary hover panel. The Elements panel fits its current contents. Longer lists scroll within the
+panel while the heading and category tabs stay visible.
 
 See [selecting topology](../../../../../../core/docs/topology.md) for a complete tool workflow.
 
