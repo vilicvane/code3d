@@ -504,9 +504,12 @@ solution in the target reference frame. Explicit zero changes nothing; use
 point or axis alignment for centering. `bound.flip()` reverses contact
 facing without changing geometry or reference axes.
 
-`relate` owns self's placement, allowing `self.on(base.up)`,
-`part.relate(() => part.on(base.up))`, and `base.on(self.up)` in the callback.
-Returned relations must involve self or the original receiver.
+`relate` returns a new model, represented by its callback parameter `self`.
+Every returned constraint must involve that value, as in `self.on(base.up)`
+or `base.on(self.up)`. External variables keep their original identity, including
+the receiver of `relate`: `part.relate(self => self.on(part.right))` places a
+new part against the original. Select the new part's topology and rotation
+references through `self`; references selected from `part` belong to the original.
 
 `pointOrCurveOrSurface.align(target)` solves geometric position and orientation.
 Same-dimensional references coincide; a lower-dimensional reference lies on the

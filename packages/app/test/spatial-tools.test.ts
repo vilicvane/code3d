@@ -1074,9 +1074,10 @@ test('pivot coordinates have an independent drag and preserve the local frame', 
 
 for (const [geometry, id] of [
   ['box(8, 6, 4)', 3],
-  ['box(8, 6, 4).shell(1)', [1, 3]],
+  ['box(8, 6, 4).shell(1)', 3],
+  ['box(8, 6, 4).cut([box(2, 2, 2)])', [1, 3]],
 ] as const) {
-  test(`pivotVertex selects self topology ${JSON.stringify(id)} when self is the target of on`, async () => {
+  test(`pivotVertex selects self topology ${JSON.stringify(id)} of ${geometry} when self is the target of on`, async () => {
     const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const base = box(20, 10, 30); const part = ${geometry}.relate(self => [base.on(self.up), pivotVertex(${JSON.stringify(id)}).rotate(0, 0, 45)]);`;
     const {module, node, target, evaluation, bindings} = await relationTool(
       source,

@@ -133,3 +133,53 @@ test('frame alignment participates in joint geometric constraints and reports co
     /[Cc]onflict|incompatible/,
   );
 });
+
+test('coordinate constraints keep original receivers and derived targets as external values', () => {
+  const original = box(2, 4, 6);
+  const derived = original.relate(self => [
+    self.origin.align(point([12, 7, -4])),
+    rotate(23, 41, 79),
+  ]);
+  const originalSnapshot = snapshot(original);
+  for (const target of [original, derived]) {
+    const targetSnapshot = snapshot(target);
+    for (const reverse of [false, true]) {
+      for (const kind of ['frame', 'origin'] as const) {
+        const placed = original.relate(self => {
+          const source = reverse ? target : self;
+          const destination = reverse ? self : target;
+          return kind === 'frame'
+            ? source.frame.align(destination.frame)
+            : source.origin.align(destination.origin);
+        });
+        const output = snapshot(placed);
+        const constraint = output.constraints[0];
+        assert.equal(
+          constraint.source.nodeId,
+          reverse ? targetSnapshot.nodeId : output.nodeId,
+        );
+        assert.equal(
+          constraint.target.nodeId,
+          reverse ? output.nodeId : targetSnapshot.nodeId,
+        );
+        if (kind === 'frame') sameFrame(pose(placed), pose(target));
+        else {
+          near(pose(placed).position, pose(target).position);
+          near(pose(placed).quaternion, [0, 0, 0, 1]);
+        }
+        near(placed.position(target), [0, 0, 0]);
+        assert.equal(snapshot(group([original, placed])).children.length, 2);
+      }
+    }
+    assert.deepEqual(snapshot(target), targetSnapshot);
+  }
+  assert.deepEqual(snapshot(original), originalSnapshot);
+  assert.throws(
+    () => original.relate(() => original.frame.align(derived.frame)),
+    /must involve self/,
+  );
+  assert.throws(
+    () => original.relate(() => original.origin.align(derived.origin)),
+    /must involve self/,
+  );
+});

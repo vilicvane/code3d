@@ -583,7 +583,10 @@ type TransformationSpatialSelection = Readonly<{
   kind: RelationSpatialReference['kind'];
   pivot: PivotSelection;
 }>;
-type RelateContext = Readonly<{self: RelationObject; original: RelationObject}>;
+type RelateContext = Readonly<{
+  self: RelationObject;
+  inheritedPlacements: readonly StoredPlacement[];
+}>;
 let activeRelate: RelateContext | undefined;
 
 type StoredOperationInput = Readonly<{
@@ -913,6 +916,10 @@ export interface ModelCapabilities<
   bounds(relativeTo?: Model): ModelBounds;
   /** Model-origin coordinates in relativeTo's local frame, including placement. */
   position(relativeTo: Model): Vec3;
+  /**
+   * Place a new value represented by callback self; each constraint must involve it.
+   * External model and element references retain their original identity.
+   */
   relate(
     build: (
       self: ModelForKind<Elements, Kind>,
@@ -1374,32 +1381,28 @@ export abstract class RelationExpression {
         transformationId: this.relationId,
         self: this.context?.self,
       };
-    const rebind = (model: RelationObject) =>
-      model === this.context?.original ? this.context.self : model;
     return {
       kind: 'constraint',
       constraintId: this.relationId,
-      source: rebind(this.definition.source.model),
-      target: rebind(this.definition.target.model),
+      source: this.definition.source.model,
+      target: this.definition.target.model,
       self: this.context?.self,
     };
   }
   /** @internal */
-  storeFor(model: RelationObject, original: RelationObject): StoredPlacement {
-    const isSelf = (candidate: RelationObject | undefined) =>
-      candidate === model || candidate === original;
+  storeFor(model: RelationObject): StoredPlacement {
     const bind = (reference: RelationReference): RelationReference => ({
       ...reference,
-      model: isSelf(reference.model) ? undefined : reference.model,
+      model: reference.model === model ? undefined : reference.model,
     });
     const definition = this.definition;
     if (
       definition.kind !== 'transformation' &&
-      !isSelf(definition.source.model) &&
-      !isSelf(definition.target.model)
+      definition.source.model !== model &&
+      definition.target.model !== model
     )
       throw new Error(
-        'The constraint returned by relate() must involve self or the original receiver.',
+        'The constraint returned by relate() must involve self (the callback parameter). External model references keep their original identity.',
       );
     const stored: StoredPlacement =
       definition.kind === 'transformation'
@@ -1446,15 +1449,14 @@ export abstract class RelationExpression {
           pivot: mapSelectionReference(pivot, reference => ({
             ...reference,
             model:
-              reference.model === this.context!.self ||
-              reference.model === this.context!.original
+              reference.model === this.context!.self
                 ? undefined
                 : reference.model,
           })),
         }
       : this.spatialOperation;
     return this.context.self[previewRelation](
-      this.storeFor(this.context.self, this.context.original),
+      this.storeFor(this.context.self),
       selection,
       preceding,
     );
@@ -1830,11 +1832,10 @@ export abstract class RelationObject {
 
   /** Store relations only after the complete callback has returned. */
   protected addRelations(
-    original: RelationObject,
     build: () => Relation | readonly Relation[],
   ): readonly RelationObject[] {
     const previous = activeRelate;
-    activeRelate = {self: this, original};
+    activeRelate = {self: this, inheritedPlacements: this.placements};
     let built: Relation | readonly Relation[];
     try {
       built = build();
@@ -1852,9 +1853,9 @@ export abstract class RelationObject {
         throw new Error(
           'relate() requires a completed Constraint or Transformation; finish the pivot or axis selector with rotate().',
         );
-      return constraint.storeFor(this, original);
+      return constraint.storeFor(this);
     });
-    this.placements.push(...stored);
+    this.placements = [...this.placements, ...stored];
     return uniqueModels(stored.flatMap(constraintReferences));
   }
 
@@ -2009,18 +2010,14 @@ export abstract class RelationObject {
     constraint: StoredPlacement | undefined,
     selection: TransformationSpatialSelection | undefined,
     preceding: readonly RelationExpression[] = [],
-    original?: RelationObject,
+    inheritedPlacements?: readonly StoredPlacement[],
   ): RelationPreview {
     // Keep inherited and sibling relations in the solve. The selected step
     // limits the placement prefix; geometry and node identity stay shared.
-    let placements = [...(original ?? this).placements];
+    let placements = [...(inheritedPlacements ?? this.placements)];
     const index = placements.findIndex(value => value.id === constraint?.id);
     if (index < 0) {
-      placements.push(
-        ...preceding.map(value =>
-          value.storeFor(this, value.continuationArguments()[1]!.original),
-        ),
-      );
+      placements.push(...preceding.map(value => value.storeFor(this)));
       if (constraint) placements.push(constraint);
     } else if (constraint) {
       placements[index] = constraint;
@@ -2694,7 +2691,7 @@ export class SketchFrame extends RelationObject {
     build: (frame: SketchFrame) => Relation | readonly Relation[],
   ): SketchFrame {
     const related = new SketchFrame(this);
-    related.addRelations(this, () => build(related));
+    related.addRelations(() => build(related));
     return related;
   }
 
@@ -2895,7 +2892,7 @@ export class ModelObject<
       {model: this, role: 'source', index: 0},
     ]);
     const related = this.copy({}, operation);
-    const references = related.addRelations(this, () => build(related));
+    const references = related.addRelations(() => build(related));
     operation.inputs.push(
       ...references.map((model, index) => ({
         model,
@@ -5089,7 +5086,7 @@ export function relationSelectionPreview(
     undefined,
     undefined,
     preceding,
-    (preceding[0] ?? context)?.continuationArguments()[1]?.original,
+    (preceding[0] ?? context)?.continuationArguments()[1]?.inheritedPlacements,
   );
 }
 

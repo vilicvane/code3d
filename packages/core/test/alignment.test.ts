@@ -50,13 +50,16 @@ test('point coincidence translates self on either written side and preserves ori
   for (const build of [
     (s: typeof original) => s.align(target),
     (s: typeof original) => target.align(s),
-    () => original.align(target),
   ]) {
     const placed = original.relate(build);
     near(position(placed), [9, 18, 27]);
     near(pose(placed).quaternion, [0, 0, 0, 1]);
   }
   near(position(original), [0, 0, 0]);
+  assert.throws(
+    () => original.relate(() => original.align(target)),
+    /must involve self/,
+  );
 });
 
 test('point on a supporting line ignores trims and direction without introducing rotation', () => {

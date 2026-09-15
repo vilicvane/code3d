@@ -10,6 +10,10 @@ sidebar:
 Operations produce new model values. Building another result must not change an
 already-observable model's geometry, material, topology, or relations.
 
+In `part.relate(self => ...)`, the callback parameter represents the new value.
+`part` and any aliases or element references selected from it still refer to the
+original value. Each constraint must involve the callback value.
+
 A model's local geometry and its placement in a composition are separate.
 `relate()` records how a part is placed when composed with other parts; observing
 that part alone shows its local geometry. `originOffset()` changes geometry

@@ -73,19 +73,44 @@ test('empty and open sketches relate without a B-Rep face or changed geometry', 
   }
 });
 
-test('plane relations rebind the original receiver and accept either written side', () => {
+test('plane relations require callback self and accept either written side', () => {
   const original = sketch();
   const target = rectangle(20, 20).originOffset(0, -7, 0);
   for (const build of [
     (s: Sketch) => s.plane.align(target),
     (s: Sketch) => target.align(s.plane),
-    () => original.plane.align(target),
   ])
     near(pose(original.relate(build)).position, [0, 7, 0]);
   assert.throws(
     () => original.relate(() => target.align(rectangle(1, 1))),
     /involve self/,
   );
+  assert.throws(
+    () => original.relate(() => original.plane.align(target)),
+    /involve self/,
+  );
+});
+
+test('derived sketch frames keep references to the original plane external', () => {
+  const original = sketch();
+  const before = sketchFrame(original).toSnapshot();
+  const placed = original.relate(self => [
+    self.plane.align(original.plane),
+    offset(0, 7, 0),
+  ]);
+  const reversed = original.relate(self => [
+    original.plane.align(self.plane),
+    offset(0, 14, 0),
+  ]);
+  near(pose(placed).position, [0, 7, 0]);
+  near(pose(reversed).position, [0, 14, 0]);
+  const forward = sketchFrame(placed).toSnapshot();
+  const reverse = sketchFrame(reversed).toSnapshot();
+  assert.equal(forward.constraints[0].source.nodeId, forward.nodeId);
+  assert.equal(forward.constraints[0].target.nodeId, before.nodeId);
+  assert.equal(reverse.constraints[0].source.nodeId, before.nodeId);
+  assert.equal(reverse.constraints[0].target.nodeId, reverse.nodeId);
+  assert.deepEqual(sketchFrame(original).toSnapshot(), before);
 });
 
 test('directed planes, target-frame offset and pivot rotations reuse the model relation solver', () => {

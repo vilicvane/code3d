@@ -5,6 +5,7 @@ import {
   line,
   offset,
   pivot,
+  pivotPoint,
   axisLine,
   rotate,
   type Constraint,
@@ -14,10 +15,13 @@ import {
 } from '@code3d/core';
 import {
   relationPreview,
+  relationTraceReference,
+  relationSelectionPreview,
+  composeTransforms,
   type RelationExpression,
   type Transform,
 } from '@code3d/core/tooling';
-import {createModelSnapshotter} from './model-test.ts';
+import {createModelSnapshotter, modelObject} from './model-test.ts';
 
 const snapshot = createModelSnapshotter();
 const near = (actual: readonly number[], expected: readonly number[]) =>
@@ -150,6 +154,91 @@ test('reverse-written align retains self as the owner of later independent rotat
   );
   assert.equal(preview.spatial?.nodeId, snapshot(placed).nodeId);
 });
+
+test('insertion previews retain inherited placements without including later callback steps', () => {
+  const base = box(10, 10, 10);
+  const original = box(2, 2, 2).relate(self => [
+    self.center.align(base.center),
+    offset(0, 6, 0),
+  ]);
+  const before = snapshot(original);
+  let contact!: Constraint;
+  let shift!: Transformation;
+  const placed = original.relate(self => {
+    contact = self.on(original.right);
+    shift = offset(5, 0, 0);
+    return [contact, shift, offset(100, 0, 0)];
+  });
+  for (const [preceding, expected] of [
+    [[], [0, 6, 0]],
+    [[contact], [2, 6, 0]],
+    [
+      [contact, shift],
+      [7, 6, 0],
+    ],
+  ] as const) {
+    const preview = relationSelectionPreview(
+      modelObject(placed),
+      preceding,
+      contact,
+    );
+    near(preview.object.compositionTransform.position, expected);
+    assert.equal(
+      preview.object.constraints[0].source.nodeId,
+      snapshot(placed).nodeId,
+    );
+  }
+  near(snapshot(placed).compositionTransform.position, [107, 6, 0]);
+  assert.deepEqual(snapshot(original), before);
+});
+
+for (const selector of ['point', 'axis'] as const) {
+  test(`original ${selector} references stay external in relation traces and staged rotation previews`, () => {
+    const original = box(2, 250, 250);
+    const before = snapshot(original);
+    let contact!: Constraint;
+    let shift!: Transformation;
+    let turn!: Transformation;
+    let center!: RelationExpression;
+    const placed = original.relate(self => {
+      contact = self.on(original.right);
+      shift = offset(160, 0, 0);
+      if (selector === 'point') {
+        const selection = pivotPoint(original.center);
+        center = selection;
+        turn = selection.rotate(0, 90, 0);
+      } else {
+        const selection = axisLine(original.axis);
+        center = selection;
+        turn = selection.rotate(90);
+      }
+      return [contact, shift, turn];
+    });
+    const trace = relationTraceReference(contact);
+    assert.ok(trace.kind === 'constraint');
+    assert.equal(trace.source, trace.self);
+    assert.equal(trace.source.nodeId, snapshot(placed).nodeId);
+    assert.equal(trace.target.nodeId, before.nodeId);
+
+    near(previewOf(contact).object.compositionTransform.position, [2, 0, 0]);
+    near(previewOf(shift).object.compositionTransform.position, [162, 0, 0]);
+    near(previewOf(turn).object.compositionTransform.position, [0, 0, -162]);
+    samePose(
+      previewOf(turn).object.compositionTransform,
+      snapshot(placed).compositionTransform,
+    );
+    const preview = previewOf(center);
+    assert.ok(preview.spatial);
+    near(
+      composeTransforms(preview.object.compositionTransform, {
+        position: preview.spatial.spatial.origin,
+        quaternion: [0, 0, 0, 1],
+      }).position,
+      [0, 0, 0],
+    );
+    assert.deepEqual(snapshot(original), before);
+  });
+}
 
 test('constraints expose no chained transformations or rotation selectors', () => {
   const part = box(2, 2, 2),

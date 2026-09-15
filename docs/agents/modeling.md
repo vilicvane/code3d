@@ -48,6 +48,11 @@ before promising a feature.
 
 ## Place a constrained part
 
+`part.relate(self => ...)` returns a new value. Every constraint must involve
+the callback value; external variables, including `part`, keep their original
+identity. Select the new value's elements and rotation references through `self`.
+This rule also applies to sketch frames.
+
 `model.frame` references the model's coordinate system;
 `model.origin` is the same non-geometric reference as `model.frame.origin`.
 Use `self.frame.align(target.frame)` to match complete placement, or
