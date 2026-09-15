@@ -1,6 +1,8 @@
 ---
 title: Selecting vertices, edges, and faces
 description: Pick topology for fillets, chamfers, shells, origins, and relation anchors.
+sidebar:
+  order: 6
 ---
 
 Start with a box:
@@ -47,7 +49,7 @@ const sealed = box(40, 24, 30).shell(1.5);
 ```
 
 For this box, S4 is its +Y face. Removing it makes an open enclosure. Follow the
-[hollow-part guide](../shells/) for the runnable example. Place the
+[hollow-part guide](shells.mdx) for the runnable example. Place the
 cursor inside `shell(...)` to adjust **Wall thickness** and toggle **Openings**
 on the input model while viewing the result. IDs belong to that input model.
 The picker retains removed faces so you can close an opening again.
@@ -84,7 +86,7 @@ For example, `box(50, 3000, 100).fillet(5, [2, 4, 6, 8])` retains faces
 `S1`–`S6` and adds four rounded faces `S7`–`S10`. The two end faces are still
 `S3` and `S4`; rounding their corners does not break their one-to-one identity.
 
-In the [topology paths example](../../../examples/topology-paths/), inspect
+In the [topology paths example](/examples/topology-paths/), inspect
 `inlet`, `outlet`, and `side` to compare inherited cap IDs with a new side
 face. The viewport labels paths as S[1,1] or E[1,10]; selections write the
 corresponding arrays into source.
@@ -137,11 +139,11 @@ half-length point. Calculated points do not acquire vertex IDs; `.vertices()`
 returns the actual topology, including a single vertex on a closed edge.
 
 To choose a vertex as a rotation pivot, use `.originVertex(id)`. See
-[origins and rotation](../origins-and-rotation/).
+[origins and rotation](origins-and-rotation.mdx).
 
 A named element exposed by a reusable part usually communicates intent better
 than a caller maintaining its internal topology IDs. See
-[reusable models](../reusable-models/).
+[reusable models](../../web/src/content/docs/docs/guides/reusable-models.mdx).
 
 ## Recover from an operation failure
 

@@ -1,51 +1,19 @@
-import {glob, readFile, stat} from 'node:fs/promises';
-import {execFileSync} from 'node:child_process';
+import {readFile} from 'node:fs/promises';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {fromMarkdown} from 'mdast-util-from-markdown';
 import {toMarkdown} from 'mdast-util-to-markdown';
 import {mdxjs} from 'micromark-extension-mdxjs';
 import {mdxFromMarkdown} from 'mdast-util-mdx';
 import GithubSlugger from 'github-slugger';
+import {load as parseYaml} from 'js-yaml';
 import {renderSamples} from '../../app/render-samples/catalog.ts';
 
-export const repository = fileURLToPath(new URL('../../../', import.meta.url));
-export const featuredPackages = ['core', 'layout', 'materials', 'screws'];
-const contentRoot = 'packages/web/src/content/docs/docs/';
-const origin = 'https://code3d.invalid';
-
-export async function markdownDocuments(
-  root = repository,
-  sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
-    cwd: root,
-    encoding: 'utf8',
-    timeout: 10_000,
-  }).trim(),
-) {
-  const documents = [];
-  for await (const source of glob(
-    [
-      'docs/**/*.md',
-      ...featuredPackages.map(name => `packages/${name}/README.md`),
-      `${contentRoot}**/*.{md,mdx}`,
-    ],
-    {cwd: root},
-  )) {
-    let route;
-    let html;
-    if (source.startsWith(contentRoot)) {
-      const name = source.slice(contentRoot.length).replace(/\.mdx?$/, '');
-      route = `/docs/${name}.md`;
-      html = `/docs/${name === 'index' ? '' : name + '/'}`;
-    } else if (source.endsWith('/README.md')) {
-      route = `/docs/packages/${source.split('/')[1]}.md`;
-    } else {
-      route = '/' + source;
-    }
-    documents.push({source, route, html, repository: root, sourceCommit});
-  }
-  return documents.sort((a, b) => a.route.localeCompare(b.route));
-}
+import {publishLink} from './document-sources.mjs';
+export {
+  repository,
+  featuredPackages,
+  markdownDocuments,
+} from './document-sources.mjs';
 
 function walk(node, visit) {
   visit(node);
@@ -74,48 +42,6 @@ export function markdownHeadings(markdown) {
     ids.add(slugger.slug(text));
   });
   return ids;
-}
-
-function relativeUrl(route, target) {
-  const url = new URL(target, origin);
-  let relative = path.posix.relative(path.posix.dirname(route), url.pathname);
-  if (url.pathname.endsWith('/')) relative = relative ? relative + '/' : './';
-  return (relative || path.posix.basename(route)) + url.search + url.hash;
-}
-
-async function publishLink(href, document, documents) {
-  if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href) || href.startsWith('#'))
-    return href;
-  const url = new URL(href, new URL('/' + document.source, origin));
-  const local = decodeURIComponent(url.pathname.slice(1));
-  const target = documents.find(item => item.source === local);
-  if (target)
-    return relativeUrl(document.route, target.route + url.search + url.hash);
-
-  // Website prose uses links relative to its HTML page, while repository docs
-  // and READMEs link to real source files.
-  const pageUrl = new URL(
-    href,
-    new URL(document.html || document.route, origin),
-  );
-  const page = documents.find(
-    item => item.html === pageUrl.pathname || item.route === pageUrl.pathname,
-  );
-  if (page)
-    return relativeUrl(
-      document.route,
-      page.route + pageUrl.search + pageUrl.hash,
-    );
-  if (href.startsWith('/') || document.html)
-    return relativeUrl(document.route, pageUrl.href);
-
-  const info = await stat(path.join(document.repository, local)).catch(() => {
-    throw new Error(`${document.source}: missing source link ${href}`);
-  });
-  const encoded = local.split('/').map(encodeURIComponent).join('/');
-  return info.isDirectory()
-    ? `https://github.com/vilicvane/code3d/tree/${document.sourceCommit}/${encoded}${url.hash}`
-    : `https://raw.githubusercontent.com/vilicvane/code3d/${document.sourceCommit}/${encoded}${url.hash}`;
 }
 
 function expressionValue(node) {
@@ -212,10 +138,10 @@ export async function renderMarkdown(document, documents) {
   markdown = markdown.replace(
     /^---\r?\n([\s\S]*?)\r?\n---\r?\n/,
     (_, metadata) => {
-      const title = metadata.match(/^title: (.+)$/m)?.[1];
-      if (!title)
+      const {title} = parseYaml(metadata);
+      if (typeof title !== 'string' || !title.trim())
         throw new Error(`${document.source}: Markdown export needs a title`);
-      return `# ${title}\n`;
+      return `# ${title.trim()}\n`;
     },
   );
   if (document.source.endsWith('.mdx'))
@@ -241,5 +167,10 @@ export async function renderMarkdown(document, documents) {
       replacement +
       markdown.slice(node.position.end.offset);
   }
+  if (document.package)
+    markdown = markdown.replace(
+      /^(# .+\n)/,
+      `$1\n${document.package.name} · v${document.package.version}\n`,
+    );
   return markdown.trim() + '\n';
 }

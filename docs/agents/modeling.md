@@ -24,26 +24,26 @@ task benefits from several forms of evidence.
 
 ## Find the right modeling tools
 
-| Need                                                               | Read                                                                                                                                                                                            |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Primitives, Boolean operations, profiles, extrusion or loft        | [Core README](../../packages/core/README.md) and [modeling reference](../../packages/web/src/content/docs/docs/reference/core.md)                                                               |
-| Measure geometry and derive another part's dimensions              | [Measurements](../../packages/web/src/content/docs/docs/reference/core.md#measurements) and [fitted beam](../../packages/app/examples/operations/distance.ts)                                   |
-| Place parts against each other or align geometric elements         | [Relations](../../packages/web/src/content/docs/docs/guides/relations.mdx)                                                                                                                      |
-| Understand local geometry, composition placement or origin changes | [Coordinate concepts](../../packages/web/src/content/docs/docs/concepts/local-coordinates.md) and [origin operations](../../packages/web/src/content/docs/docs/guides/origins-and-rotation.mdx) |
-| Select or expose edges, vertices and surfaces                      | [Topology](../../packages/web/src/content/docs/docs/guides/topology.md) and [agent observations](observation.md)                                                                                |
-| Create editable profiles and inspect their constraints             | [Sketch workflow](sketches.md)                                                                                                                                                                  |
-| Arrange collections with Flex/Grid or fill target bounds           | [Layout README](../../packages/layout/README.md)                                                                                                                                                |
-| Add realistic material presets                                     | [Materials README](../../packages/materials/README.md)                                                                                                                                          |
-| Add standard fasteners or matching holes                           | [Screws README](../../packages/screws/README.md)                                                                                                                                                |
-| Reuse a parametric design or expose editing controls               | [Reusable models](../../packages/web/src/content/docs/docs/guides/reusable-models.mdx) and [model tools](../../packages/web/src/content/docs/docs/guides/model-tools.mdx)                       |
-| Extend the modeling runtime                                        | [Custom primitives](../../packages/web/src/content/docs/docs/guides/custom-primitives.mdx)                                                                                                      |
+| Need                                                               | Read                                                                                                                                                                      |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Primitives, Boolean operations, profiles, extrusion or loft        | [Core README](../../packages/core/README.md) and [modeling reference](../../packages/core/docs/api.md)                                                                    |
+| Measure geometry and derive another part's dimensions              | [Measurements](../../packages/core/docs/api.md#measurements) and [fitted beam](../../packages/app/examples/operations/distance.ts)                                        |
+| Place parts against each other or align geometric elements         | [Relations](../../packages/core/docs/relations.mdx)                                                                                                                       |
+| Understand local geometry, composition placement or origin changes | [Coordinate concepts](../../packages/core/docs/local-coordinates.md) and [origin operations](../../packages/core/docs/origins-and-rotation.mdx)                           |
+| Select or expose edges, vertices and surfaces                      | [Topology](../../packages/core/docs/topology.md) and [agent observations](observation.md)                                                                                 |
+| Create editable profiles and inspect their constraints             | [Sketch workflow](sketches.md)                                                                                                                                            |
+| Arrange collections with Flex/Grid or fill target bounds           | [Layout README](../../packages/layout/README.md)                                                                                                                          |
+| Add realistic material presets                                     | [Materials README](../../packages/materials/README.md)                                                                                                                    |
+| Add standard fasteners or matching holes                           | [Screws README](../../packages/screws/README.md)                                                                                                                          |
+| Reuse a parametric design or expose editing controls               | [Reusable models](../../packages/web/src/content/docs/docs/guides/reusable-models.mdx) and [model tools](../../packages/web/src/content/docs/docs/guides/model-tools.mdx) |
+| Extend the modeling runtime                                        | [Custom primitives](../../packages/core/docs/custom-primitives.mdx)                                                                                                       |
 
 Layout configuration is required: specify `axis` for Linear/Radial/Flex and `axes`
 for Grid. Filling also needs explicit spacing (`gap: 0` for touching copies).
 Flex cross alignment or wrapping requires `crossAxis`; see the Layout reference
 for directional grid gaps and other controls.
 
-Check the [current limitations](../../packages/web/src/content/docs/docs/reference/limitations.md)
+Check the [current limitations](../../packages/web/src/content/docs/docs/getting-started/limitations.md)
 before promising a feature.
 
 ## Place a constrained part
@@ -69,7 +69,7 @@ axes; axis selectors accept one `axisOffset(dx, dy, dz)` in the selected axis fr
 These retain the reference and move the rotation center or axis, not the part.
 Completed transformations have no chaining methods; combine steps as array items,
 for example `[offset(0, 8, 0), rotate(0, 25, 0)]`. Read the
-[placement rules](../../packages/web/src/content/docs/docs/guides/relations.mdx#transform-a-joint-result)
+[placement rules](../../packages/core/docs/relations.mdx#transform-a-joint-result)
 before mixing these operations. Shared source, including a loop callback, changes
 all of its runtime instances.
 
@@ -78,8 +78,8 @@ all of its runtime instances.
 Use `cache()` for deterministic synchronous data and `definePrimitive()` for
 custom Replicad solids. Both reuse repeated calls, so pass changing captured state
 as arguments; treat cached data as immutable and keep native shapes behind the
-primitive builder. Read the [cache contract](../../packages/web/src/content/docs/docs/reference/core.md#cached-computations)
-when introducing either API. For lettering, the [text reference](../../packages/web/src/content/docs/docs/reference/core.md#text)
+primitive builder. Read the [cache contract](../../packages/core/docs/api.md#cached-computations)
+when introducing either API. For lettering, the [text reference](../../packages/core/docs/api.md#text)
 covers synchronous font resources, Google Fonts and batch extrusion.
 
 ## Explore dependencies

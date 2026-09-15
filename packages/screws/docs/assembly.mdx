@@ -1,0 +1,26 @@
+---
+title: Screw box assembly
+description: Build a box, lid and matching screw holes with named mounting references.
+sidebar:
+  order: 3
+---
+
+import ModelExample from '../../web/src/components/ModelExample.astro';
+
+## Screw and clearance tool
+
+`ISO4762.screw('M6', 18)` creates a socket cap screw.
+`ISO4762.clearanceHole('M6', 10)` creates its clearance and counterbore tool.
+The hole is a model used with `cut(stock, [hole])` and provides named mounting
+references.
+
+<ModelExample id="screw-box" />
+
+The lid exposes four seats from the holes' `counterboreBottom` references.
+Each screw's `headBottom` meets one seat, and the lid's `mountingFace` meets
+the box's `lidSeat`. Set `gap` to 0 to close the box or lift the lid and screws
+together to inspect the holes. The box models blind tapping pilots; internal
+thread geometry is omitted.
+
+See [clearance holes and mounting](clearance-holes.md) for recess options and references,
+and [standards and specifications](standards.md) to choose a fastener.

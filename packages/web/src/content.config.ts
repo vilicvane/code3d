@@ -1,6 +1,7 @@
 import {defineCollection} from 'astro:content';
 import {z} from 'astro/zod';
-import {docsLoader, i18nLoader} from '@astrojs/starlight/loaders';
+import {i18nLoader} from '@astrojs/starlight/loaders';
+import {docsLoader} from '../scripts/docs-loader';
 import {docsSchema, i18nSchema} from '@astrojs/starlight/schema';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
@@ -61,7 +62,14 @@ const examples = defineCollection({
 });
 
 export const collections = {
-  docs: defineCollection({loader: docsLoader(), schema: docsSchema()}),
+  docs: defineCollection({
+    loader: docsLoader(),
+    schema: docsSchema({
+      extend: z.object({
+        package: z.object({name: z.string(), version: z.string()}).optional(),
+      }),
+    }),
+  }),
   i18n: defineCollection({loader: i18nLoader(), schema: i18nSchema()}),
   examples,
 };

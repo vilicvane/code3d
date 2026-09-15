@@ -1,11 +1,13 @@
 ---
 title: Building custom primitives
 description: Bring a Replicad solid into Code3D with normal model capabilities and parameter tools.
+sidebar:
+  order: 10
 ---
 
-import ModelExample from '../../../../components/ModelExample.astro';
+import ModelExample from '../../web/src/components/ModelExample.astro';
 
-Start with the built-in [modeling operations](../../reference/core/) when they
+Start with the built-in [modeling operations](api.md) when they
 fit the part. For other solid geometry, `definePrimitive` wraps a synchronous
 Replicad builder as a normal Code3D model.
 
@@ -47,10 +49,10 @@ builders and their dependencies for persistent reuse; dynamic closures and
 ordinary Node calls use function object identity for memory reuse.
 
 Primitives share the same memory and disk budgets as Core computations and
-Screws. Use [`cache()`](../../reference/core/#cached-computations) for ordinary
+Screws. Use [`cache()`](api.md#cached-computations) for ordinary
 data computations; geometry needs `definePrimitive()` so Core manages its native
 resources.
 
 Your function stays ordinary TypeScript and can be exported for other modules.
-See [adding tools to model functions](../model-tools/) for annotation rules and
-[reusable models](../reusable-models/) for naming attachment points.
+See [adding tools to model functions](../../web/src/content/docs/docs/guides/model-tools.mdx) for annotation rules and
+[reusable models](../../web/src/content/docs/docs/guides/reusable-models.mdx) for naming attachment points.

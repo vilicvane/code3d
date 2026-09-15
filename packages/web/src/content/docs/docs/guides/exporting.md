@@ -18,7 +18,7 @@ A standalone part exports in its own local coordinates. Origin edits are
 included: `originOffset(dx, dy, dz)` changes its points to
 `p - [dx, dy, dz]`. Export a composition to include the parts' resolved
 placement. Output scale and up-axis conversion apply to that selected geometry.
-See [local coordinates and placement](../../concepts/local-coordinates/).
+See [local coordinates and placement](../../../../../../core/docs/local-coordinates.md).
 
 The dialog captures the current model context. If you edit or recompile the
 model, close and reopen the dialog before exporting again.

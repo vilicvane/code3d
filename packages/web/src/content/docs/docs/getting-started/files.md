@@ -360,4 +360,4 @@ Open the local URL shown in the terminal. The repository builds the modeling
 packages before starting the App.
 
 The App is a browser runtime, not a general Node.js environment.
-See [current limitations](../../reference/limitations/).
+See [current limitations](limitations.md).

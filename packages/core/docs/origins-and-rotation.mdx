@@ -1,20 +1,22 @@
 ---
 title: Choosing an origin and rotating a part
 description: Set a pivot, rotate geometry, and adjust both directly in the viewport.
+sidebar:
+  order: 5
 ---
 
-import ModelExample from '../../../../components/ModelExample.astro';
+import ModelExample from '../../web/src/components/ModelExample.astro';
 
 The origin defines local coordinates and is always zero in the resulting model.
 An origin offset `d` changes every point coordinate from `p` to `p - d`, preserving
 the shape. `rotate` turns the geometry around that local zero; a
-[relation](../relations/) places the resulting part in a composition. For
+[relation](relations.mdx) places the resulting part in a composition. For
 positions, dimensions, and reference axes, start with
-[local coordinates and placement](../../concepts/local-coordinates/).
+[local coordinates and placement](local-coordinates.md).
 
 <ModelExample id="rotate" />
 
-The [rotation example](../../../examples/rotate/) focuses on `rotate` alone.
+The [rotation example](/examples/rotate/) focuses on `rotate` alone.
 The companion [origin source](https://github.com/vilicvane/code3d/blob/main/packages/app/examples/operations/origin.ts)
 lets you inspect the origin operations below independently.
 
@@ -22,7 +24,7 @@ lets you inspect the origin operations below independently.
 
 Place the cursor in `blank.originVertex(3)`. Pick a vertex in the viewport to
 use it as the origin. The ID belongs to the operation's input model, just like
-other [topology selections](../topology/).
+other [topology selections](topology.md).
 
 Use `.originPoint(pointRef)` to select a center, named point, or topology vertex
 on any model, including a group member. Use `.originOffset(dx, dy, dz)` to move the origin by a displacement or `.originCenter()` to make
@@ -81,7 +83,7 @@ frame, without its assembly placement.
 Origin edits update the local coordinates of geometry, bounds and named
 references together. The model's `up` direction remains local +Y even after
 geometry rotates. For a rotation that only affects composition, use a
-[constraint pivot or axis](../relations/#choose-a-rotation-pivot-or-axis), with
+[constraint pivot or axis](relations.mdx#choose-a-rotation-pivot-or-axis), with
 coordinates written as `pivot([x, y, z])`.
 
 ## Finish or cancel a drag
@@ -94,12 +96,12 @@ written to source.
 When possible, a drag changes a unique safe upstream parameter. Otherwise it
 adjusts the current expression by a numeric increment. Entering a number in a
 panel can instead replace that expression: see
-[what a panel can edit](../model-tools/#what-a-panel-can-edit).
+[what a panel can edit](../../web/src/content/docs/docs/guides/model-tools.mdx#what-a-panel-can-edit).
 
 Solids, faces, curves, and points provide all these operations. Groups provide
-`originPoint()`, `originOffset()` and `rotate()`; their default origin comes from the first member's local coordinate frame. See [group origins](../../concepts/local-coordinates/#group-origins)
+`originPoint()`, `originOffset()` and `rotate()`; their default origin comes from the first member's local coordinate frame. See [group origins](local-coordinates.md#group-origins)
 for direct assembly and instance selection. To rotate the whole assembly about
 a member point, use `assembly.originPoint(part.center).rotate(0, 0, 30)`. Its
 internal placements remain intact, including nested groups; angle inputs and
-rotation rings work the same way as on a single part. See the [API reference](../../reference/core/#origins-and-rotation)
+rotation rings work the same way as on a single part. See the [API reference](api.md#origins-and-rotation)
 for the complete method list.

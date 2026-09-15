@@ -139,7 +139,7 @@ an expression keeps the last 3D preview. An empty sketch still opens its drawing
 tools. Selecting an editable call that fails also opens the viewport and its
 parameter panel, so you can correct the arguments without first producing a
 valid model. Dimension-based primitives such as `box()` provide
-[runtime defaults](../../reference/core/#runtime-defaults-while-editing) for a
+[runtime defaults](../../../../../../core/docs/api.md#runtime-defaults-while-editing) for a
 preview while the editor continues to report missing required arguments.
 
 - Place the editor cursor in an expression to inspect its runtime object.
@@ -219,10 +219,10 @@ Each independent transformation shows its own stage, before later steps in the a
 constraints in the same continuous segment remain active and are solved together in each preview. Independent transformations separate successive segments. The current pair's markers
 distinguish the selected side from its counterpart and the dimmed surrounding
 objects. See
-[inspecting relation scope](../../guides/relations/#inspect-the-right-scope).
+[inspecting relation scope](../../../../../../core/docs/relations.mdx#inspect-the-right-scope).
 
 Inspection does not automatically add a parameter panel or a drag handle.
-Panels use [parameter annotations](../../guides/model-tools/), while spatial
+Panels use [parameter annotations](../guides/model-tools.mdx), while spatial
 handles require an operation with supported positioning or rotation semantics.
 
 ## Use a contextual tool
@@ -269,7 +269,7 @@ available for vertex selection; finish the selector with `rotate(...)` to comple
 the transformation.
 Origin operations offer an origin marker
 and arrows, while `rotate` offers angle inputs and rotation rings. Try the
-[origin and rotation guide](../../guides/origins-and-rotation/).
+[origin and rotation guide](../../../../../../core/docs/origins-and-rotation.mdx).
 In a composition preview, selecting a member or subgroup positioned with
 `relate()` shows translation arrows by default. The toolbar above the parameter
 panel provides **Translate**, **Rotate about point**, and **Rotate about axis**;
@@ -359,7 +359,7 @@ You can fill an incomplete call such as `box()` in order with `Tab`; the next
 argument becomes available as each earlier one is added.
 
 Your own functions can offer the same dimension inputs. See
-[adding tools to model functions](../../guides/model-tools/).
+[adding tools to model functions](../guides/model-tools.mdx).
 
 For multiple constraints, select self to move their joint result. The App edits
 or inserts an independent `offset`/`rotate` in the returned array and adds its
@@ -368,7 +368,7 @@ inserts a new array item immediately after it; it does not chain methods onto th
 completed transformation. The tool stays within the current placement segment.
 Editing a shared callback changes every runtime instance, including a `map` of
 screws; their previews use each instance's own frame. [Try independent
-transformations](../../guides/relations/#transform-a-joint-result).
+transformations](../../../../../../core/docs/relations.mdx#transform-a-joint-result).
 
 ## Understand feedback
 
@@ -454,18 +454,18 @@ of the current minor grid spacing. Each drag keeps its starting grid and referen
 frame, with snapping always enabled. XYZ distance inputs use the current minor
 grid step and accept exact values; rotation inputs and handles keep their angle steps.
 
-See [selecting topology](../../guides/topology/) for a complete tool workflow.
+See [selecting topology](../../../../../../core/docs/topology.md) for a complete tool workflow.
 
 ## Export a model or image
 
 Right-click the viewport and choose **Export model…** for STEP, STL, or 3MF,
 or **Export image…** for PNG. Model export follows the foreground source
-context you are inspecting. See [exporting models](../../guides/exporting/)
+context you are inspecting. See [exporting models](../guides/exporting.md)
 for format, scale, and orientation settings.
 
 ## Work with a local agent
 
 Use **Connect Agent** to name an agent and copy its private connection prompt.
 The agent starts a session-managed local CLI service and operates on the open
-project without restarting its conversation. See the [agent guide](../../guides/agents/)
+project without restarting its conversation. See the [agent guide](../guides/agents.mdx)
 for connection, following an agent, image history, and access management.

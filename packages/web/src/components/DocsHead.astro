@@ -2,6 +2,12 @@
 import DefaultHead from '@astrojs/starlight/components/Head.astro';
 import Fonts from './Fonts.astro';
 import {sitePath} from '../lib/site';
+import {comparisonMetadata} from '../lib/comparisons';
+const comparison = comparisonMetadata(
+  Astro.locals.starlightRoute.entry,
+  Astro.site,
+  import.meta.env.BASE_URL,
+);
 ---
 
 <DefaultHead><slot /></DefaultHead>
@@ -10,3 +16,8 @@ import {sitePath} from '../lib/site';
   property="og:image"
   content={new URL(sitePath('og-image.png'), Astro.site ?? Astro.url).href}
 />
+{
+  comparison?.jsonLd && (
+    <script is:inline type="application/ld+json" set:html={comparison.jsonLd} />
+  )
+}

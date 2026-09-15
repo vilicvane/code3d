@@ -4,6 +4,13 @@ import sitemap from '@astrojs/sitemap';
 import {cp, access, writeFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import sirv from 'sirv';
+import {satteri} from '@astrojs/markdown-satteri';
+import {htmlDocuments} from './scripts/html-documents.mjs';
+import {
+  featuredPackages,
+  markdownDocuments,
+  markdownHeaderRules,
+} from './scripts/document-sources.mjs';
 import {
   appIsolationHeaders,
   appIsolationRules,
@@ -23,9 +30,11 @@ export default defineConfig({
   outDir: './dist/www',
   trailingSlash: 'always',
   devToolbar: {enabled: false},
+  markdown: {processor: satteri({mdastPlugins: [htmlDocuments]})},
   integrations: [
     starlight({
       disable404Route: true,
+      markdown: {processedDirs: featuredPackages.map(name => `../${name}`)},
       title: 'Code3D',
       description: 'Solid modeling with TypeScript and direct manipulation.',
       favicon: '/favicon.svg',
@@ -46,6 +55,7 @@ export default defineConfig({
       components: {
         Header: './src/components/DocsHeader.astro',
         Head: './src/components/DocsHead.astro',
+        PageTitle: './src/components/DocsPageTitle.astro',
       },
       editLink: {
         baseUrl: 'https://github.com/vilicvane/code3d/edit/main/packages/web/',
@@ -74,38 +84,40 @@ export default defineConfig({
             {slug: 'docs/getting-started/first-model'},
             {slug: 'docs/getting-started/app'},
             {slug: 'docs/getting-started/files'},
+            {slug: 'docs/getting-started/limitations'},
           ],
+        },
+        {
+          label: 'Packages',
+          items: featuredPackages.map(name => ({
+            label: `@code3d/${name}`,
+            collapsed: true,
+            items: [
+              {slug: `docs/packages/${name}`, label: 'Overview'},
+              {autogenerate: {directory: `../${name}/docs`}},
+            ],
+          })),
         },
         {
           label: 'Guides',
           items: [
             {slug: 'docs/guides/practical-models'},
             {slug: 'docs/guides/agents'},
-            {slug: 'docs/guides/relations'},
-            {slug: 'docs/guides/origins-and-rotation'},
-            {slug: 'docs/guides/topology'},
-            {slug: 'docs/guides/shells'},
             {slug: 'docs/guides/reusable-models'},
             {slug: 'docs/guides/model-tools'},
-            {slug: 'docs/guides/custom-primitives'},
             {slug: 'docs/guides/exporting'},
           ],
         },
         {
           label: 'Concepts',
-          items: [
-            {slug: 'docs/concepts/code-and-geometry'},
-            {slug: 'docs/concepts/local-coordinates'},
-          ],
+          items: [{slug: 'docs/concepts/code-and-geometry'}],
         },
         {
-          label: 'Reference',
+          label: 'Comparisons',
+          collapsed: true,
           items: [
-            {slug: 'docs/reference/core'},
-            {slug: 'docs/reference/layout'},
-            {slug: 'docs/reference/screws'},
-            {slug: 'docs/reference/materials'},
-            {slug: 'docs/reference/limitations'},
+            {slug: 'docs/comparisons', label: 'Overview'},
+            {autogenerate: {directory: 'docs/comparisons'}},
           ],
         },
       ],
@@ -125,7 +137,11 @@ export default defineConfig({
           await cp(appDirectory, new URL('app/', dir), {recursive: true});
           await writeFile(
             new URL('_headers', dir),
-            appIsolationRules(`${sitePath('app')}/*`),
+            appIsolationRules(`${sitePath('app')}/*`) +
+              (configuredUrl
+                ? '\n' +
+                  markdownHeaderRules(await markdownDocuments(), configuredUrl)
+                : ''),
           );
         },
       },

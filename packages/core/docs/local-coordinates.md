@@ -1,6 +1,8 @@
 ---
 title: Local coordinates and placement
 description: Understand positions, origin offsets, model axes, and where a part sits in a composition.
+sidebar:
+  order: 3
 ---
 
 Every model has its own local coordinates. Its origin is `[0, 0, 0]`.
@@ -83,7 +85,7 @@ their meaning. Successive origin offsets add and opposite offsets cancel.
 
 Use `originPoint(pointRef)` on any model to make a referenced point zero.
 For geometric models, `originVertex(id)` selects an own topology vertex and
-`originCenter()` selects the carried center anchor. The [origin and rotation guide](../../guides/origins-and-rotation/)
+`originCenter()` selects the carried center anchor. The [origin and rotation guide](origins-and-rotation.mdx)
 shows how to select and drag these in the viewport.
 
 ## The origin, center, and axes have different roles
@@ -101,7 +103,7 @@ The model's XYZ axes remain its local coordinate axes. `up` means local +Y
 even after the geometry rotates. A line's tangent or a face's normal belongs
 to that geometric reference and can point in a different direction. Relation
 offsets use the target reference's axes; an explicit `pivot([x, y, z])` uses
-self's model coordinates. See [relations](../../guides/relations/) for those
+self's model coordinates. See [relations](relations.mdx) for those
 placement rules.
 
 ## Placing a part in a composition
@@ -114,7 +116,7 @@ in its placement conditions.
 
 Several relations on one model are solved together. Their offsets belong to
 those conditions, and any remaining freedom uses the solver's default result.
-See [combining conditions](../../guides/relations/#combine-conditions) before
+See [combining conditions](relations.mdx#combine-conditions) before
 using an offset in a system with multiple relations.
 
 New model values also have a coordinate frame:
@@ -127,7 +129,7 @@ New model values also have a coordinate frame:
 
 Export uses these same coordinates: a standalone part has local geometry,
 and a composition includes its parts' resolved placement. The chosen output
-scale and up axis are applied afterward. See [exporting models](../../guides/exporting/).
+scale and up axis are applied afterward. See [exporting models](../../web/src/content/docs/docs/guides/exporting.md).
 
 ## Group origins
 
