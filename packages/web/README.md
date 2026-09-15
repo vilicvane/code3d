@@ -92,6 +92,22 @@ See the [project documentation maintenance rules](../../.agents/skills/code3d-pr
 
 - User documentation: `src/content/docs/docs/` (the inner directory is the
   `/docs/` URL prefix).
+- Product comparisons: `src/content/docs/docs/comparisons/`. Keep one competitor
+  per page and an overview linking to each. These cross-product guides belong to
+  the website, while package API documentation stays in package READMEs and docs.
+  Cite official sources beside factual claims and update the reviewed date when
+  rechecking them. Distinguish libraries, their editors, and ecosystem integrations.
+  Write primarily for programmers who want to model with code and agents. Compare
+  the program's role, model persistence and graphical writeback, not only whether
+  a language or API is supported.
+  Describe actual workflows and both products' fit without unsupported absence,
+  performance, or feature-parity claims. Link canonical runnable examples instead
+  of maintaining comparison-only model copies. HTML, Markdown, search and sitemap
+  use the existing document pipeline.
+  Use a marketing voice grounded in the reader's work: lead with the concrete
+  benefit of Code3D for that audience, explain the mechanism, and offer a relevant
+  example to try. Keep recommendations honest and avoid generic feature checklists
+  or repeatedly interrupting the value proposition with unrelated caveats.
 - Executable examples: `../app/examples/`. The shared catalog stores paths
   relative to this directory, grouped by modeling topic, shared by the website and
   App; do not copy a model just to add it to the gallery.
@@ -125,6 +141,36 @@ App and the image renderer share `../app/src/model/source-decorations.ts` so
 relation, bound, operation, and origin markers appear consistently in both.
 
 ## Build and verify
+
+Comparison pages keep concise H1s and sidebar labels, while native frontmatter
+`head` title overrides and `description` explain the searcher's concrete reason
+to choose Code3D. Cover each product's alternative/comparison intent on its
+existing page; do not create near-duplicate keyword landing pages. The current
+positioning targets programmers looking for interactive code CAD, reusable model
+interfaces, and AI-assisted authoring. This selection is based on qualitative
+search-result review, not measured keyword volume or a ranking guarantee.
+
+Use `lastUpdated` for the actual editorial review date and keep it consistent
+with the visible byline. The shared comparison metadata supplies both visible
+breadcrumbs and JSON-LD: `Article` for a product comparison, `CollectionPage` for
+the overview, and `BreadcrumbList` for navigation. Do not invent ratings,
+publication dates or reviews. Titles, descriptions and schema describe visible
+content; follow [Google's title guidance](https://developers.google.com/search/docs/appearance/title-link)
+and [breadcrumb guidance](https://developers.google.com/search/docs/appearance/structured-data/breadcrumb).
+
+For every Markdown document with an HTML counterpart, the shared document
+catalog generates a `Link: <HTML URL>; rel="canonical"` header. Astro dev emits it
+when a site is configured; production writes exact rules into Cloudflare's
+`_headers`, alongside App's existing isolation headers. Markdown-only agent
+instructions retain their own URLs. This follows Google's
+[canonical guidance for alternate formats](https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls)
+without blocking agents or crawlers from the Markdown sources.
+
+After deploying, check the live HTML, Markdown response headers, sitemap and
+robots rules. Search Console indexing and performance are separate observations;
+do not report a successful build or Pagefind query as Google indexing. If Search
+Console access is available, inspect the published URLs and submit the sitemap
+there; indexing timing remains up to the search engine.
 
 ```bash
 npm run build --workspace @code3d/web

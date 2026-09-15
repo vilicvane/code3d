@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parse} from 'parse5';
+import {markdownHeaderRules} from './document-sources.mjs';
 import {
   featuredPackages,
   markdownDocuments,
@@ -19,6 +20,18 @@ const base = site.pathname.replace(/\/$/, '');
 const pages = new Map();
 const issues = [];
 const documents = await markdownDocuments();
+if (process.env.CODE3D_SITE_URL) {
+  const headers = await readFile(path.join(directory, '_headers'), 'utf8');
+  assert.ok(
+    headers.includes(markdownHeaderRules(documents, site)),
+    'Missing Markdown canonical header rules',
+  );
+  assert.ok(
+    headers.split('\n').filter(line => line && !/^\s|#/.test(line)).length <=
+      100,
+    'Cloudflare supports at most 100 header rules',
+  );
+}
 for (const document of documents) {
   const file = document.route.slice(1);
   const markdown = await readFile(path.join(directory, file), 'utf8');
@@ -180,6 +193,76 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
     );
   }
   const route = '/' + file.replace(/index\.html$/, '');
+  if (
+    route === '/docs/comparisons/' ||
+    route.startsWith('/docs/comparisons/')
+  ) {
+    const tags = [];
+    const headings = [];
+    const structured = [];
+    let visibleText = '';
+    walk(document, node => {
+      const attrs = Object.fromEntries(
+        (node.attrs || []).map(a => [a.name, a.value]),
+      );
+      if (node.nodeName === '#text') visibleText += node.value;
+      if (node.tagName === 'meta' || node.tagName === 'link') tags.push(attrs);
+      if (node.tagName === 'h1') headings.push(node);
+      if (node.tagName === 'script' && attrs.type === 'application/ld+json')
+        structured.push(
+          JSON.parse(node.childNodes.map(child => child.value || '').join('')),
+        );
+    });
+    assert.equal(headings.length, 1, `${file}: comparison must have one H1`);
+    assert.equal(
+      tags.filter(tag => tag.name === 'description' && tag.content).length,
+      1,
+      `${file}: missing or duplicate description`,
+    );
+    assert.ok(
+      !tags.some(tag => tag.name === 'robots' && /noindex/.test(tag.content)),
+      `${file}: comparison is not indexable`,
+    );
+    if (process.env.CODE3D_SITE_URL) {
+      const canonical = site.origin + base + route;
+      assert.deepEqual(
+        tags.filter(tag => tag.rel === 'canonical').map(tag => tag.href),
+        [canonical],
+        `${file}: wrong canonical`,
+      );
+      assert.equal(
+        structured.length,
+        1,
+        `${file}: missing or duplicate JSON-LD`,
+      );
+      const [content, breadcrumb] = structured[0]['@graph'];
+      assert.equal(content.url, canonical);
+      assert.equal(breadcrumb['@type'], 'BreadcrumbList');
+      assert.equal(breadcrumb.itemListElement.at(-1).item, canonical);
+      assert.ok(
+        breadcrumb.itemListElement.every(
+          item =>
+            references.includes(new URL(item.item).pathname) ||
+            item.item === canonical,
+        ),
+      );
+      if (route === '/docs/comparisons/') {
+        assert.equal(content['@type'], 'CollectionPage');
+      } else {
+        assert.equal(content['@type'], 'Article');
+        assert.equal(content.author.name, 'Code3D');
+        assert.ok(visibleText.includes('By Code3D'));
+        const reviewed = new Date(content.dateModified).toLocaleDateString(
+          'en-US',
+          {month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC'},
+        );
+        assert.ok(
+          visibleText.includes(`Reviewed ${reviewed}`),
+          `${file}: metadata date differs from visible review date`,
+        );
+      }
+    }
+  }
   const packageDocument = documents.find(
     item => item.html === route && item.package,
   );

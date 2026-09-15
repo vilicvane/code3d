@@ -15,6 +15,22 @@ export const websiteDocumentPatterns = [
 ];
 const origin = 'https://code3d.invalid';
 
+export function markdownCanonical(document, site) {
+  if (!document.html) return;
+  return new URL(document.html.slice(1), site.href.replace(/\/?$/, '/')).href;
+}
+
+export function markdownHeaderRules(documents, site) {
+  const base = site.pathname.replace(/\/$/, '');
+  return documents
+    .filter(document => document.html)
+    .map(
+      document =>
+        `${base}${document.route}\n  Link: <${markdownCanonical(document, site)}>; rel="canonical"\n`,
+    )
+    .join('\n');
+}
+
 export function documentLocation(source) {
   if (source.startsWith(contentRoot)) {
     const name = source.slice(contentRoot.length).replace(/\.mdx?$/, '');

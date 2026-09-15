@@ -6,7 +6,11 @@ import {fileURLToPath} from 'node:url';
 import sirv from 'sirv';
 import {satteri} from '@astrojs/markdown-satteri';
 import {htmlDocuments} from './scripts/html-documents.mjs';
-import {featuredPackages} from './scripts/document-sources.mjs';
+import {
+  featuredPackages,
+  markdownDocuments,
+  markdownHeaderRules,
+} from './scripts/document-sources.mjs';
 import {
   appIsolationHeaders,
   appIsolationRules,
@@ -108,6 +112,14 @@ export default defineConfig({
           label: 'Concepts',
           items: [{slug: 'docs/concepts/code-and-geometry'}],
         },
+        {
+          label: 'Comparisons',
+          collapsed: true,
+          items: [
+            {slug: 'docs/comparisons', label: 'Overview'},
+            {autogenerate: {directory: 'docs/comparisons'}},
+          ],
+        },
       ],
     }),
     ...(configuredUrl ? [sitemap()] : []),
@@ -125,7 +137,11 @@ export default defineConfig({
           await cp(appDirectory, new URL('app/', dir), {recursive: true});
           await writeFile(
             new URL('_headers', dir),
-            appIsolationRules(`${sitePath('app')}/*`),
+            appIsolationRules(`${sitePath('app')}/*`) +
+              (configuredUrl
+                ? '\n' +
+                  markdownHeaderRules(await markdownDocuments(), configuredUrl)
+                : ''),
           );
         },
       },

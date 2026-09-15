@@ -1,9 +1,32 @@
 ---
 import PageTitle from '@astrojs/starlight/components/PageTitle.astro';
+import {comparisonMetadata} from '../lib/comparisons';
 
 const metadata = Astro.locals.starlightRoute.entry.data.package;
+const comparison = comparisonMetadata(
+  Astro.locals.starlightRoute.entry,
+  Astro.site,
+  import.meta.env.BASE_URL,
+);
 ---
 
+{
+  comparison && (
+    <nav aria-label="Breadcrumb" class="comparison-breadcrumbs">
+      <ol>
+        {comparison.breadcrumbs.map((item, index) => (
+          <li>
+            {index === comparison.breadcrumbs.length - 1 ? (
+              <span aria-current="page">{item.name}</span>
+            ) : (
+              <a href={item.path}>{item.name}</a>
+            )}
+          </li>
+        ))}
+      </ol>
+    </nav>
+  )
+}
 <PageTitle />
 {
   metadata && (
@@ -17,6 +40,25 @@ const metadata = Astro.locals.starlightRoute.entry.data.package;
 }
 
 <style>
+  .comparison-breadcrumbs {
+    margin-bottom: 1rem;
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+  }
+  .comparison-breadcrumbs ol {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0;
+    list-style: none;
+  }
+  .comparison-breadcrumbs li + li::before {
+    content: '/';
+    margin-right: 0.5rem;
+  }
+  .comparison-breadcrumbs a {
+    color: inherit;
+  }
   .package-version {
     display: flex;
     flex-wrap: wrap;
