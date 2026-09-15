@@ -322,7 +322,6 @@ app.innerHTML = `
                 <span>ARGUMENTS</span>
                 <span class="dock-panel-handle-meta">
                   <span id="design-arguments-count">0</span>
-                  <kbd data-dock-shortcut></kbd>
                 </span>
               </button>
               <div class="dock-panel-body design-arguments" id="design-arguments" hidden>
@@ -338,7 +337,6 @@ app.innerHTML = `
                 <span>ELEMENTS</span>
                 <span class="dock-panel-handle-meta">
                   <span id="elements-count">0</span>
-                  <kbd data-dock-shortcut></kbd>
                 </span>
               </button>
               <div class="dock-panel-body elements" id="elements" hidden></div>
@@ -453,13 +451,11 @@ dockPanels.register({
   root: requiredElement('design-arguments-panel'),
   handle: requiredElement<HTMLButtonElement>('design-arguments-handle'),
   body: requiredElement('design-arguments'),
-  shortcut: {code: 'Digit1', label: 'Alt 1', altKey: true},
 });
 dockPanels.register({
   root: requiredElement('elements-panel'),
   handle: requiredElement<HTMLButtonElement>('elements-handle'),
   body: elements,
-  shortcut: {code: 'Digit2', label: 'Alt 2', altKey: true},
 });
 
 const codeEditor = new CodeEditor(
@@ -630,6 +626,7 @@ window.addEventListener(
     stopTabDiagnostics.forEach(stop => stop());
     stopAgentFollow();
     stopAgentUpdates();
+    dockPanels.dispose();
     agentConnections.dispose();
     stopViewportModes();
     stopPreviewPresentation();

@@ -1,32 +1,26 @@
-export type DockPanelState = 'collapsed' | 'peek' | 'pinned';
+import {
+  action,
+  autorun,
+  makeObservable,
+  observableRef,
+  type IReactionDisposer,
+} from 'mobx';
 
-export type DockPanelShortcut = Readonly<{
-  code: string;
-  label: string;
-  altKey?: boolean;
-  ctrlKey?: boolean;
-  metaKey?: boolean;
-  shiftKey?: boolean;
-}>;
+export type DockPanelState = 'collapsed' | 'peek' | 'pinned';
 
 export type DockPanelConfig = Readonly<{
   root: HTMLElement;
   handle: HTMLButtonElement;
   body: HTMLElement;
-  shortcut: DockPanelShortcut;
 }>;
 
 export class DockPanelCoordinator {
-  private readonly panels = new Map<string, DockPanelController>();
+  private readonly panels = new Set<DockPanelController>();
   private transient?: DockPanelController;
 
   register(config: DockPanelConfig): DockPanelController {
-    const shortcutKey = shortcutIdentity(config.shortcut);
-    if (this.panels.has(shortcutKey)) {
-      throw new Error(`Dock panel shortcut conflict: ${config.shortcut.label}`);
-    }
     const panel = new DockPanelController(this, config);
-    this.panels.set(shortcutKey, panel);
+    this.panels.add(panel);
     return panel;
   }
 
@@ -35,12 +29,13 @@ export class DockPanelCoordinator {
       this.transient.collapseTransient();
       return true;
     }
-    const panel = this.panels.get(shortcutIdentity(event));
-    if (!panel || !panel.visible || event.repeat) {
-      return false;
-    }
-    panel.togglePinned();
-    return true;
+    return false;
+  }
+
+  dispose(): void {
+    for (const panel of this.panels) panel.dispose();
+    this.panels.clear();
+    this.transient = undefined;
   }
 
   requestPeek(panel: DockPanelController): void {
@@ -59,29 +54,27 @@ export class DockPanelCoordinator {
 }
 
 export class DockPanelController {
+  private readonly stopRender: IReactionDisposer;
   private state: DockPanelState = 'collapsed';
   private closeTimer?: number;
   private hovered = false;
+  private disposed = false;
   private readonly activePointers = new Set<number>();
 
   constructor(
     private readonly coordinator: DockPanelCoordinator,
     private readonly config: DockPanelConfig,
   ) {
-    const {root, handle, body, shortcut} = config;
+    makeObservable<this, 'state' | 'setState'>(this, {
+      state: observableRef,
+      setState: action,
+    });
+    const {root, handle, body} = config;
     if (!body.id) {
       throw new Error('Dock panel body requires an id for aria-controls.');
     }
     handle.setAttribute('aria-controls', body.id);
     handle.setAttribute('aria-expanded', 'false');
-    handle.title = `${handle.textContent?.trim() ?? 'Panel'} · ${shortcut.label}`;
-    const shortcutLabel = root.querySelector<HTMLElement>(
-      '[data-dock-shortcut]',
-    );
-    if (shortcutLabel) {
-      shortcutLabel.textContent = shortcut.label;
-    }
-
     root.addEventListener('pointerenter', this.onPointerEnter);
     root.addEventListener('pointerleave', this.onPointerLeave);
     root.addEventListener('pointerdown', this.onPointerDown);
@@ -90,11 +83,23 @@ export class DockPanelController {
     handle.addEventListener('click', this.togglePinned);
     window.addEventListener('pointerup', this.onPointerEnd, true);
     window.addEventListener('pointercancel', this.onPointerEnd, true);
-    this.render();
+    this.stopRender = autorun(() => this.render());
   }
 
-  get visible(): boolean {
-    return this.config.root.getClientRects().length > 0;
+  dispose(): void {
+    this.disposed = true;
+    this.cancelClose();
+    this.stopRender();
+    this.coordinator.releasePeek(this);
+    const {root, handle} = this.config;
+    root.removeEventListener('pointerenter', this.onPointerEnter);
+    root.removeEventListener('pointerleave', this.onPointerLeave);
+    root.removeEventListener('pointerdown', this.onPointerDown);
+    root.removeEventListener('focusin', this.cancelClose);
+    root.removeEventListener('focusout', this.onFocusOut);
+    handle.removeEventListener('click', this.togglePinned);
+    window.removeEventListener('pointerup', this.onPointerEnd, true);
+    window.removeEventListener('pointercancel', this.onPointerEnd, true);
   }
 
   togglePinned = (): void => {
@@ -142,6 +147,7 @@ export class DockPanelController {
   };
 
   private scheduleClose(): void {
+    if (this.disposed) return;
     this.cancelClose();
     if (
       this.state !== 'peek' ||
@@ -171,7 +177,6 @@ export class DockPanelController {
       this.coordinator.requestPeek(this);
     }
     this.state = state;
-    this.render();
   }
 
   private render(): void {
@@ -180,14 +185,4 @@ export class DockPanelController {
     this.config.handle.setAttribute('aria-expanded', String(expanded));
     this.config.body.hidden = !expanded;
   }
-}
-
-function shortcutIdentity(shortcut: DockPanelShortcut | KeyboardEvent): string {
-  return [
-    shortcut.altKey ? 'alt' : '',
-    shortcut.ctrlKey ? 'ctrl' : '',
-    shortcut.metaKey ? 'meta' : '',
-    shortcut.shiftKey ? 'shift' : '',
-    shortcut.code,
-  ].join('+');
 }

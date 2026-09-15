@@ -2680,19 +2680,11 @@ kbd {
   gap: 7px;
 }
 
-.dock-panel-handle kbd,
 .dock-panel-handle-meta > span {
   color: #a4aa9d;
   font-family: 'IBM Plex Mono', monospace;
   font-size: 7px;
   letter-spacing: 0;
-}
-
-.dock-panel-handle kbd {
-  padding: 1px 3px;
-  border: 1px solid #3b3e37;
-  border-radius: 2px;
-  background: #1b1d18;
 }
 
 .dock-panel-body[hidden] {
@@ -2776,7 +2768,7 @@ kbd {
 .elements {
   display: flex;
   flex-direction: column;
-  height: min(440px, calc(100vh - 180px));
+  max-height: min(440px, calc(100vh - 180px));
   padding: 10px;
   overflow: hidden;
 }

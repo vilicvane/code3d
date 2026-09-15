@@ -119,7 +119,7 @@ ToolEditPlan、ToolSession 和 host 边界。参数、表达式、实参、拓�
 拖动预览错误属于手势，释放时确认失败才报告；恢复或取消不弹错。工具不可用只影响可操作性。
 sketch 和 3D 的 Arguments 在当前候选参数组列表非空时显示，沿用既有函数上下文和标注解析，
 不单独维护第二套显示资格判断；隐藏 dock 不响应快捷键。
-sketch 复用 Arguments dock、Alt+1 和设计上下文选择；切换已编译求值也更新 sketch 与面板，
+sketch 复用 Arguments dock 和设计上下文选择；切换已编译求值也更新 sketch 与面板，
 面板层级高于 sketch 画布，3D Render 状态不隐藏 sketch Arguments。
 
 ## 参数与注释
@@ -509,3 +509,10 @@ relate 直接返回数组内的空白是 self 的插入上下文，保留实际 
 模型场景不启用全局距离雾效；仅自适应网格在 shader 中独立淡出。相机远裁剪面同时
 覆盖视距范围和当前模型根节点的世界包围球，随模型与相机变动派生，不建立另一份
 响应式模型尺寸状态；避免放大大尺度模型的局部时让远端消失。PNG 复用无雾场景。
+
+### Dock panels
+
+Arguments 与 Elements 仅通过 hover 临时展开、点击固定/收起，Esc 收起临时面板。
+DockPanelController 持有 observable 展开状态，autorun 更新 DOM，协调器仅协调
+互斥的临时展开及生命周期；不保留数字快捷键配置与查找索引。页面释放时销毁
+订阅、关闭计时器和移除面板/全局 pointer 监听。其他工具的 Alt 行为独立处理。
