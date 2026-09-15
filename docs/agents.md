@@ -114,6 +114,9 @@ files and prepare a new edit against their current versions.
 
 ## Useful modeling packages
 
+Each package README links its detailed API and usage documentation in `docs/`.
+The website publishes the same sources with the current package version.
+
 - [@code3d/core](../packages/core/README.md) is the main modeling API. Build
   solids and profiles, combine them with Boolean operations and relations, and
   turn editable sketches into geometry.

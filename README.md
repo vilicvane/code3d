@@ -28,14 +28,14 @@ TypeScript, so the model never splits into code and hidden UI state.
 
 Code3D evaluates precise B-Rep geometry with OpenCascade and exposes typed
 points, edges, faces, bounds, and frames for reusable model APIs. Hollow solids
-with [uniform walls and selected openings](https://www.code3d.org/docs/guides/shells/),
-position parts with [directional bounds and explicit rotations](https://www.code3d.org/docs/guides/relations/),
-and follow [topology source paths](https://www.code3d.org/docs/guides/topology/)
+with [uniform walls and selected openings](https://www.code3d.org/docs/packages/core/shells/),
+position parts with [directional bounds and explicit rotations](https://www.code3d.org/docs/packages/core/relations/),
+and follow [topology source paths](https://www.code3d.org/docs/packages/core/topology/)
 through derived geometry.
 
-Each model has [local coordinates](https://www.code3d.org/docs/concepts/local-coordinates/).
+Each model has [local coordinates](https://www.code3d.org/docs/packages/core/local-coordinates/).
 Choose a shared origin to assemble parts directly with `group`, rotate around
-local zero, or use relations for geometry-based placement. The [origin and rotation guide](https://www.code3d.org/docs/guides/origins-and-rotation/)
+local zero, or use relations for geometry-based placement. The [origin and rotation guide](https://www.code3d.org/docs/packages/core/origins-and-rotation/)
 shows each step with the same editable source used by the App.
 
 ## Example
@@ -96,7 +96,7 @@ and [architecture documentation](./.agents/docs/README.md).
 ## Project status
 
 Code3D is currently Prototype 01. APIs and project behavior are still evolving.
-See the [current capabilities and limitations](https://www.code3d.org/docs/reference/limitations/)
+See the [current capabilities and limitations](https://www.code3d.org/docs/getting-started/limitations/)
 before depending on it for an existing workflow.
 
 ## License

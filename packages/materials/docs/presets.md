@@ -1,23 +1,7 @@
 ---
-title: Materials
-description: Apply common plastic, metal, glass, ceramic and paint presets to models.
+title: Material presets
+description: Choose and customize plastic, metal, glass, ceramic and paint materials.
 ---
-
-Common material presets for Code3D. Each factory returns a new native Three.js
-material from `@code3d/core/three`, ready for a model's `.material()` call.
-
-```ts
-import {box} from '@code3d/core';
-import {aluminum, glass, plastic} from '@code3d/materials';
-
-const housing = box(30, 20, 12).material(aluminum());
-const cover = box(30, 2, 12).material(plastic('#8ed5d1'));
-const window = box(20, 2, 8).material(glass({thickness: 2}));
-
-const polished = aluminum({finish: 'polished'});
-const matte = plastic({color: '#e8e8e8', finish: 'matte'});
-const custom = aluminum({finish: 'polished', roughness: 0.18});
-```
 
 ## Presets
 
@@ -72,13 +56,10 @@ renderer, so the same preset responds to the environment in which it is shown.
 The package does not load textures or require a browser/WebGL context to create
 materials.
 
-See also [native materials](../core/#materials) and
-[modeling package resolution](../../getting-started/files/#modeling-packages).
-
 The App includes this package for projects using its built-in Core. For Node or
 a project with its own Core installation, install `@code3d/core` and
 `@code3d/materials` together. The peer dependency keeps a shared Three.js instance.
-See the [screw box source](https://github.com/vilicvane/code3d/blob/main/packages/app/examples/assemblies/screw-box/model.ts) for a compact example using plastic and steel, and the [Materials package README](../../packages/materials.md) for the available presets.
+Use the complete example linked below to explore all ten presets.
 
 The App uses neutral white studio lighting and a shared reflection environment.
 This keeps metal surfaces readable from different directions without adding a

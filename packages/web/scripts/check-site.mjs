@@ -28,6 +28,13 @@ for (const document of documents) {
     `${file}: stale Markdown output`,
   );
   assert.ok(markdown.startsWith('# '), `${file}: missing plain Markdown title`);
+  if (document.package)
+    assert.ok(
+      markdown.includes(
+        `${document.package.name} · v${document.package.version}`,
+      ),
+      `${file}: missing current package version`,
+    );
   pages.set(document.route, {
     file,
     ids: markdownHeadings(markdown),
@@ -173,6 +180,56 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
     );
   }
   const route = '/' + file.replace(/index\.html$/, '');
+  const packageDocument = documents.find(
+    item => item.html === route && item.package,
+  );
+  if (packageDocument) {
+    const headings = [];
+    let version = '';
+    let description = '';
+    const navigation = [];
+    function textContent(node) {
+      let value = '';
+      walk(node, child => {
+        if (child.nodeName === '#text') value += child.value;
+      });
+      return value;
+    }
+    walk(document, node => {
+      const attrs = Object.fromEntries(
+        (node.attrs || []).map(a => [a.name, a.value]),
+      );
+      if (node.tagName === 'h1') headings.push(textContent(node));
+      if (attrs.class?.split(/\s+/).includes('package-version'))
+        version = textContent(node);
+      if (node.tagName === 'meta' && attrs.name === 'description')
+        description = attrs.content;
+      if (node.tagName === 'nav' && attrs['aria-label'] === 'Main')
+        walk(node, child => {
+          const href = child.attrs?.find(a => a.name === 'href')?.value;
+          if (href) navigation.push(href);
+        });
+    });
+    assert.equal(
+      headings.length,
+      1,
+      `${file}: package page must have one title`,
+    );
+    if (packageDocument.overview)
+      assert.equal(headings[0], packageDocument.package.name);
+    assert.ok(
+      version.includes(`v${packageDocument.package.version}`),
+      `${file}: stale HTML package version`,
+    );
+    assert.ok(description, `${file}: missing search description`);
+    for (const related of documents.filter(
+      item => item.packageDirectory === packageDocument.packageDirectory,
+    ))
+      assert.ok(
+        navigation.includes(base + related.html),
+        `${file}: package sidebar is missing ${related.html}`,
+      );
+  }
   pages.set(route, {ids, references, file});
 }
 

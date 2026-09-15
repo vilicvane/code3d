@@ -1,6 +1,8 @@
 ---
 title: Modeling API
 description: A curated map of the public core modeling operations.
+sidebar:
+  order: 1
 ---
 
 Import these functions from `@code3d/core`. The editor's TypeScript signatures
@@ -28,11 +30,11 @@ Tubes are centered on Y; the inner radius must be smaller than the outer
 radius. For coils, `coilRadius` is measured to the wire centerline and
 `pitch` is the advance per turn. Fractional turns are supported; the wire
 must fit inside the coil radius and neighboring turns must remain separated.
-Use [`@code3d/screws`](../screws/) for standard fasteners and matching hole tools.
+Use [`@code3d/screws`](../../screws/docs/assembly.mdx) for standard fasteners and matching hole tools.
 
 To build a solid beyond these primitives, import `definePrimitive` and
 `replicad` from `@code3d/core/replicad`. See
-[custom primitives](../../guides/custom-primitives/) for a complete example.
+[custom primitives](custom-primitives.mdx) for a complete example.
 
 ## Profiles and curves
 
@@ -52,7 +54,7 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `loft(sections, options?)`                 | Solid through sections; optional curve spine |
 | `extrude(faceOrFaces, distance)`           | Solid extruded along one face's local normal |
 
-See [local coordinates and placement](../../concepts/local-coordinates/) for
+See [local coordinates and placement](local-coordinates.md) for
 the coordinate frame of a model, reference, or composition.
 
 Position coordinates use arrays; dimensions, offsets and angles use scalar
@@ -136,8 +138,8 @@ An empty group, zero direction or curved axis reports an error. Geometric query
 results reuse the shared computation cache; point-to-point measurements use
 ordinary arithmetic.
 
-Try the [fitted beam example](../../../examples/distance/) and
-[measurement workflow](../../guides/relations/#measure-before-building-a-part).
+Try the [fitted beam example](/examples/distance/) and
+[measurement workflow](relations.mdx#measure-before-building-a-part).
 
 ## Independent placement transformations
 
@@ -172,7 +174,7 @@ Consecutive constraints form a joint solve segment. Transformations act after
 its result; a subsequent constraint starts another segment and inherits the
 previous pose in its free directions. Independent offset uses fixed composition
 axes; rotation defaults to the current self origin and local XYZ axes. See
-[the complete placement rules](../../guides/relations/#transform-a-joint-result).
+[the complete placement rules](relations.mdx#transform-a-joint-result).
 
 ## Runtime defaults while editing
 
@@ -219,7 +221,7 @@ models still need explicit values.
 Explicit arguments remain subject to their normal validation: `box(0)`, for
 example, still reports an error. The parameter panel shows omitted defaults as
 placeholders and only writes arguments when you edit them. See
-[parameter defaults](../../guides/model-tools/#describe-an-omitted-arguments-default).
+[parameter defaults](../../web/src/content/docs/docs/guides/model-tools.mdx#describe-an-omitted-arguments-default).
 
 Spatial controls use the rendered operation's position and frame, so omitted
 arguments do not hide its translation arrows or rotation rings. Committing a
@@ -364,7 +366,7 @@ shows which operations are supported by the value you hold.
 - `.shell(thickness, removedSurfaceIds?)`: hollow one connected solid. Positive
   thickness offsets inward; negative thickness offsets outward. Selected surfaces
   become openings; omission or `[]` creates an enclosed cavity. See
-  [making hollow parts](../../guides/shells/).
+  [making hollow parts](shells.mdx).
 - `.scaled(factor)`: uniformly scale a geometric model about local coordinate zero.
 - `.material(value)`: replace the complete material with a native Three.js material
   or a CSS color shorthand; a group overrides every descendant's material.
@@ -374,7 +376,7 @@ shows which operations are supported by the value you hold.
 
 ## Materials
 
-Use [`@code3d/materials`](../materials/) for common plastic, metal, glass,
+Use [`@code3d/materials`](../../materials/docs/presets.md) for common plastic, metal, glass,
 ceramic and paint presets, such as `.material(aluminum({finish: 'polished'}))`.
 Each preset returns a native Three.js material and follows the same rules below.
 
@@ -433,7 +435,7 @@ Scaling uses local coordinate zero even after an origin edit. Geometry, named
 anchors and the `center` anchor scale together; the model origin stays zero;
 topology IDs are preserved. Groups do not provide `.scaled()`; scale their
 geometric parts before composing them. To change only an exported file's unit
-conversion, use the [export scale](../../guides/exporting/#scale-and-orientation).
+conversion, use the [export scale](../../web/src/content/docs/docs/guides/exporting.md#scale-and-orientation).
 
 ## Origins and rotation
 
@@ -468,11 +470,11 @@ internal relations. `rotate(x, y, z)` turns the solved assembly about its curren
 origin, including nested instances. `originPoint(part.center)` resolves the member's actual
 placement; repeated sources need a specific instance reference. Groups do not
 have aggregate vertex IDs, a geometric center or scaling.
-See [group coordinates](../../concepts/local-coordinates/#group-origins).
+See [group coordinates](local-coordinates.md#group-origins).
 
 For a runnable example and
 the vertex picker, origin arrows, and rotation rings, see
-[choosing an origin and rotating a part](../../guides/origins-and-rotation/).
+[choosing an origin and rotating a part](origins-and-rotation.mdx).
 
 ## Anchors and relations
 
@@ -532,7 +534,7 @@ These topology references expose readonly `kind` (`vertex`, `edge`, or
 collect edge IDs for an operation on that model. Plain named anchors such as
 `model.up` do not have these topology properties.
 
-IDs are model-local. See [topology selection](../../guides/topology/) for
+IDs are model-local. See [topology selection](topology.md) for
 selection behavior and derived-model identity.
 
 `TopologyId` (also used by `VertexId`, `EdgeId`, and `SurfaceId`) is a
@@ -551,7 +553,7 @@ These queries retain the source model's IDs and validate membership.
 Calculated points are anchors, not topology vertices.
 
 Model dimensions use a consistent coordinate scale. When
-[exporting](../../guides/exporting/#scale-and-orientation), choose how many
+[exporting](../../web/src/content/docs/docs/guides/exporting.md#scale-and-orientation), choose how many
 millimeters each model unit represents. This scales the output without changing
 the source model.
 

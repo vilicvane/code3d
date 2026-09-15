@@ -43,22 +43,47 @@ modeling language.
 ## Find what you need
 
 - **Getting started:** follow a complete modeling task and learn the App.
-- **Guides:** position and rotate parts, hollow solids, select topology, give your functions visual
-  tools, and export models.
-- **Concepts:** understand model values, local coordinates, source contexts, and GUI writeback.
-- **Reference:** look up modeling operations and current product boundaries.
+- **Guides:** reuse model functions, add visual tools, work with an agent, and export models.
+- **Concepts:** understand how source expressions and geometry stay connected.
+- **Packages:** learn the modeling API, coordinates, topology, layouts, materials and fasteners,
+  grouped by their full npm package names and labeled with their current versions.
 
-Try [making a hollow part](./guides/shells/), [bending a loft with pivot
-rotations](./guides/relations/#bend-a-loft-with-explicit-rotations), or
-[following a face's topology path](./guides/topology/#ids-belong-to-a-model).
+Try [making a hollow part](../../../../../core/docs/shells.mdx), [bending a loft with pivot
+rotations](../../../../../core/docs/relations.mdx#bend-a-loft-with-explicit-rotations), or
+[following a face's topology path](../../../../../core/docs/topology.md#ids-belong-to-a-model).
 Each guide links to a complete editable example.
 
-Learn how [local coordinates and placement](./concepts/local-coordinates/) fit
-together, then [choose an origin and rotate a part](./guides/origins-and-rotation/)
+Learn how [local coordinates and placement](../../../../../core/docs/local-coordinates.md) fit
+together, then [choose an origin and rotate a part](../../../../../core/docs/origins-and-rotation.mdx)
 with a source preview for each step.
+
+## Official packages
+
+<CardGrid>
+  <LinkCard
+    title="@code3d/core"
+    description="Create shapes and sketches, relate parts, and measure models."
+    href={sitePath('docs/packages/core/')}
+  />
+  <LinkCard
+    title="@code3d/layout"
+    description="Arrange collections with Flex and Grid, or fill a target space."
+    href={sitePath('docs/packages/layout/')}
+  />
+  <LinkCard
+    title="@code3d/materials"
+    description="Apply reusable plastic, metal, glass and other material presets."
+    href={sitePath('docs/packages/materials/')}
+  />
+  <LinkCard
+    title="@code3d/screws"
+    description="Choose standard screws and create their matching holes."
+    href={sitePath('docs/packages/screws/')}
+  />
+</CardGrid>
 
 ## Prototype 01
 
 Code3D is an early working prototype. APIs and project behavior are evolving.
-Read the [current limitations](./reference/limitations/) before depending on it
+Read the [current limitations](getting-started/limitations.md) before depending on it
 for an existing workflow.

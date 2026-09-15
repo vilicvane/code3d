@@ -36,7 +36,7 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 unique upstream value, replace a numeric argument expression from a panel, or
 adjust a spatial expression with a drag. It does not automatically invert
 arbitrary functions. An edit to a shared call or variable can affect several
-objects. See [parameter editing](../../guides/model-tools/#what-a-panel-can-edit).
+objects. See [parameter editing](../guides/model-tools.mdx#what-a-panel-can-edit).
 
 **Geometric operations can fail.** A fillet, chamfer, or shell must fit the input
 geometry. Shelling requires one connected solid and cannot remove every face.
@@ -51,7 +51,7 @@ solid. Later operations must select topology from their own input model.
 **Bound relations only translate.** Multiple positional conditions solve together
 and conflicting positions report errors. Rotation must be explicit. Directional
 bounds are the only `on` targets; finite source geometry may be a whole model or
-selected point, edge, or surface. See [positioning with relations](../../guides/relations/).
+selected point, edge, or surface. See [positioning with relations](../../../../../../core/docs/relations.mdx).
 
 **Geometric alignment supports analytic geometry.** `align` supports points,
 straight lines, circles, ellipses, planes, cylinders, and spheres. It uses the
@@ -62,7 +62,7 @@ can remain; add point relations when a specific position matters.
 For several relations involving align on one model, use numeric parameters or
 source edits so each change resolves the joint system. Spatial drags are
 available for a single align relation. See
-[geometric alignment](../../guides/relations/#align-underlying-geometry).
+[geometric alignment](../../../../../../core/docs/relations.mdx#align-underlying-geometry).
 
 **Intermediate relation stages have their own diagnostics.** Inspecting an
 early call can expose a conflict with inherited constraints even when the
@@ -73,7 +73,7 @@ the final model available for inspection.
 the project's `node_modules`, but does not provide Node's built-in APIs or
 native addons. Core, screws and materials are built in until the project declares core;
 after that, missing project packages are errors. See
-[modeling packages](../../getting-started/files/#modeling-packages). Browser
+[modeling packages](files.md#modeling-packages). Browser
 installation uses `code3d-lock.json`; npm workspaces, dependency overrides,
 local/Git dependencies, private registry authentication and lifecycle scripts
 are not supported. Local folders continue to use your own package manager.
@@ -88,7 +88,7 @@ App, while the website and documentation can be read independently.
 currently being inspected, not every model in the file. STEP supports solids,
 curves, and surfaces; STL and 3MF require solids. Check the output scale and
 orientation in the receiving application. Exporting does not validate that
-a part is printable or manufacturable. See [exporting models](../../guides/exporting/).
+a part is printable or manufacturable. See [exporting models](../guides/exporting.md).
 
 **A Worker is not a security sandbox.** It keeps modeling code off the UI
 thread and can be terminated, but only run model source you trust.

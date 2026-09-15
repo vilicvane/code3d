@@ -5,7 +5,7 @@
 ## Edit and observe sketches
 
 Use the same full-source `apply` workflow for sketch entries and constraints. Read
-the [sketch API](../../packages/web/src/content/docs/docs/reference/core.md#editable-sketch-regions) and inspect the
+the [sketch API](../../packages/core/docs/api.md#editable-sketch-regions) and inspect the
 expression with `"type": true` before choosing operations. Keep useful intermediate
 profiles named, use constraints to express design intent, and build faces or solids
 from those profiles with the core API.

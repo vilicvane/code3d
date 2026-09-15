@@ -1,15 +1,15 @@
 ---
-title: Layout
+title: Layout examples
 description: Arrange model collections with Flex, Grid, linear steps and circles, or calculate how many copies fit in a target space.
 ---
 
-import ModelExample from '../../../../components/ModelExample.astro';
-import SourceCode from '../../../../components/SourceCode.astro';
-import linearSource from '../../../../../../app/examples/layout/linear.ts?raw';
-import gridSource from '../../../../../../app/examples/layout/grid.ts?raw';
-import flexSource from '../../../../../../app/examples/layout/flex.ts?raw';
-import flexSpaceSource from '../../../../../../app/examples/layout/flex-space.ts?raw';
-import flexWrapSource from '../../../../../../app/examples/layout/flex-wrap.ts?raw';
+import ModelExample from '../../web/src/components/ModelExample.astro';
+import SourceCode from '../../web/src/components/SourceCode.astro';
+import linearSource from '../../app/examples/layout/linear.ts?raw';
+import gridSource from '../../app/examples/layout/grid.ts?raw';
+import flexSource from '../../app/examples/layout/flex.ts?raw';
+import flexSpaceSource from '../../app/examples/layout/flex-space.ts?raw';
+import flexWrapSource from '../../app/examples/layout/flex-wrap.ts?raw';
 
 `@code3d/layout` separates arranging a known collection from calculating how many
 copies fit. The App includes it with built-in Core; installed projects need both
@@ -176,4 +176,4 @@ inspecting composed results. The former measures geometry; the latter measures
 an origin in an explicit reference frame.
 
 See the [Layout package reference](/docs/packages/layout.md) for all signatures and
-[coordinate concepts](../../concepts/local-coordinates/) for origin semantics.
+[coordinate concepts](../../core/docs/local-coordinates.md) for origin semantics.

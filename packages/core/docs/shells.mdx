@@ -1,9 +1,11 @@
 ---
 title: Making hollow parts
 description: Create uniform walls and choose openings directly on a solid.
+sidebar:
+  order: 8
 ---
 
-import ModelExample from '../../../../components/ModelExample.astro';
+import ModelExample from '../../web/src/components/ModelExample.astro';
 
 Start with a solid that describes the outside of your part. Use
 `shell(thickness, removedSurfaceIds?)` to hollow it and choose which faces
@@ -53,8 +55,8 @@ const openEnds = body.shell(1, [
 The outer array lists two openings; each inner array is one surface ID.
 After shelling, one-to-one inherited topology keeps its complete ID.
 Offset walls receive fresh numeric IDs without reusing retired ones. Pick later fillet or chamfer edges
-from the shell result. See [topology paths](../topology/#ids-belong-to-a-model)
-and the [loft cap example](../../../examples/topology-paths/).
+from the shell result. See [topology paths](topology.md#ids-belong-to-a-model)
+and the [loft cap example](/examples/topology-paths/).
 
 ## Correct a failed shell
 
@@ -64,5 +66,5 @@ the input available so you can change the thickness or selected faces.
 
 On some lofts between different profile shapes, a sealed cavity succeeds
 while opening an end fails, even at smaller thicknesses. The
-[bent loft example](../../../examples/loft/) has this known
-limitation. See [geometric operation limits](../../reference/limitations/#what-to-account-for).
+[bent loft example](/examples/loft/) has this known
+limitation. See [geometric operation limits](../../web/src/content/docs/docs/getting-started/limitations.md#what-to-account-for).

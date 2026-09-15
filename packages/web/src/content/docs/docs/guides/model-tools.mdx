@@ -85,7 +85,7 @@ function makeDisc(radius = 5): ReturnType<typeof circle> {
 
 An incomplete `makeDisc()` call can preview using `5`, while TypeScript still
 asks for a radius. Built-in
-[dimension-based primitives](../../reference/core/#runtime-defaults-while-editing)
+[dimension-based primitives](../../../../../../core/docs/api.md#runtime-defaults-while-editing)
 use this behavior too.
 
 An explicit argument keeps its usual display and editing behavior, including
@@ -161,7 +161,7 @@ it matches the placeholder. In a loop or function, the edit changes that
 shared call site, not just the inspected runtime instance. Use Undo to restore
 the original expression.
 
-This differs from [dragging a position tool](../relations/#make-visual-adjustments),
+This differs from [dragging a position tool](../../../../../../core/docs/relations.mdx#make-visual-adjustments),
 which can preserve an expression by adding a numeric increment.
 
 ### Coordinate arrays
@@ -175,7 +175,7 @@ The pivot's viewport handles use the same component mapping. If the argument
 is an array expression whose individual components cannot be located in
 source, the App does not guess where to write the three coordinates. Use a
 literal array of editable components to make those controls available.
-See [local coordinates](../../concepts/local-coordinates/) for the difference
+See [local coordinates](../../../../../../core/docs/local-coordinates.md) for the difference
 between position arrays and scalar dimensions, offsets, and angles.
 
 ### Missing and spread arguments
@@ -210,7 +210,7 @@ For a `definePrimitive` result, put `@code3d.param` directly above the
 builder signature; panel defaults come from `@code3d.param`. Use ordinary calls to preview such a primitive;
 `@code3d.arguments` does not create previews of primitive factory definitions.
 
-See [custom primitives](../custom-primitives/) for the complete twisted-knob
+See [custom primitives](../../../../../../core/docs/custom-primitives.mdx) for the complete twisted-knob
 example, including parameter tools, placement, and colors.
 
 `@code3d.tool` marks a callable as a tool even when it has no numeric or topology-ID parameters. It does not make an arbitrary reference editable by itself; Core uses it for `axisLine`, whose axis is handled by the App’s rotation reference picker. Use `@code3d.param` for ordinary editable model parameters.
@@ -240,4 +240,4 @@ on that operation; it is not every model in the file.
 A placement step keeps its own stage even if a later consumer moves the value
 again. A measurement keeps the geometry and positions at the time it ran; models
 created later from its numeric result do not become part of that measurement.
-See [relations and measurements](../relations/) for the selection and coordinate rules.
+See [relations and measurements](../../../../../../core/docs/relations.mdx) for the selection and coordinate rules.

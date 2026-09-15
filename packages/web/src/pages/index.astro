@@ -10,7 +10,7 @@ import {sitePath, appUrl} from '../lib/site';
   <section class="hero shell">
     <div class="hero-topline">
       <span class="eyebrow">A solid modeler for people who code</span><a
-        href={sitePath('docs/reference/limitations/')}
+        href={sitePath('docs/getting-started/limitations/')}
         class="status-pill"><i></i> Prototype 01</a
       >
     </div>
@@ -75,7 +75,7 @@ import {sitePath, appUrl} from '../lib/site';
         </h3><p>
           Pick edges and faces, position parts, and adjust parameters in the
           viewport. Your changes return to the same TypeScript source.
-        </p><a class="text-link" href={sitePath('docs/guides/topology/')}
+        </p><a class="text-link" href={sitePath('docs/packages/core/topology/')}
           >See how selection works →</a
         >
       </article>
@@ -113,19 +113,21 @@ import {sitePath, appUrl} from '../lib/site';
         <h3>OpenCascade solids</h3><p>
           Build with B-Rep geometry, lofts, boolean operations, fillets, and
           chamfers. Hollow solids with uniform walls and choose their openings.
-          <a href={sitePath('docs/guides/shells/')}>Make a hollow part →</a>
+          <a href={sitePath('docs/packages/core/shells/')}
+            >Make a hollow part →</a
+          >
         </p>
       </article><article>
         <h3>Typed model interfaces</h3><p>
           Expose named bounds and topology for the next model to use. Position
           parts against directional bounds, align points, curves, and surfaces,
           and rotate around a chosen pivot or axis.
-          <a href={sitePath('docs/guides/relations/')}
+          <a href={sitePath('docs/packages/core/relations/')}
             >Position, align, and rotate parts →</a
           >
           Choose a corner or center as the local origin and carry those coordinates
           through later geometry operations.
-          <a href={sitePath('docs/guides/origins-and-rotation/')}
+          <a href={sitePath('docs/packages/core/origins-and-rotation/')}
             >Choose where a part turns →</a
           >
         </p>
@@ -161,7 +163,7 @@ import {sitePath, appUrl} from '../lib/site';
     </div>
     <p class="closing-note">
       Prototype 01 · APIs and project behavior are evolving.<br /><a
-        href={sitePath('docs/reference/limitations/')}
+        href={sitePath('docs/getting-started/limitations/')}
         >Explore the current capabilities and limitations.</a
       >
       <br />Read, build, and modify Code3D under its <a

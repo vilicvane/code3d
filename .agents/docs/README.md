@@ -24,7 +24,8 @@
 - `docs/` 用于对外文档；使用 Code3D 建模的 agent 从[必读入口](../../docs/agents.md)
   进入具体操作专题。人的[协作指南](../../packages/web/src/content/docs/docs/guides/agents.mdx)
   介绍产品概念，[Web 包](../../packages/web/README.md)维护发布链路。
-  各包 README 提供共享介绍，并将开发者引向本目录的相关架构专题和源码。
+  各包 README 提供共享介绍；主推建模包的 `docs/` 维护详细使用文档，供网站
+  `Packages` 与纯 Markdown 共用。开发者沿 README 进入本目录的架构专题和源码。
   对外操作说明与内部实现专题按各自读者维护，通过链接衔接。
 - [GitHub Issues](https://github.com/vilicvane/code3d/issues)记录需求、讨论、方案、
   验收和进度。未合并的工作在其 issue 中说明，不写成当前主分支的能力。

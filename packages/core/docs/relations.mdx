@@ -1,18 +1,20 @@
 ---
 title: Positioning with relations
 description: Position geometry with bound contacts, geometric alignment, and explicit rotations.
+sidebar:
+  order: 4
 ---
 
-import ModelExample from '../../../../components/ModelExample.astro';
-import SourceCode from '../../../../components/SourceCode.astro';
-import ArrowIcon from '../../../../components/ArrowIcon.astro';
-import {appUrl, sitePath} from '../../../../lib/site';
-import source from '../../../../../../app/examples/constraints/combined-constraints.ts?raw';
-import transformations from '../../../../../../app/examples/constraints/transformations.ts?raw';
+import ModelExample from '../../web/src/components/ModelExample.astro';
+import SourceCode from '../../web/src/components/SourceCode.astro';
+import ArrowIcon from '../../web/src/components/ArrowIcon.astro';
+import {appUrl, sitePath} from '../../web/src/lib/site';
+import source from '../../app/examples/constraints/combined-constraints.ts?raw';
+import transformations from '../../app/examples/constraints/transformations.ts?raw';
 
 A relation describes how one part sits against another. It is attached to a
 model value and resolved when the parts are composed or their relative geometry is queried. The part keeps its own
-[local coordinates](../../concepts/local-coordinates/): `originOffset()` changes
+[local coordinates](local-coordinates.md): `originOffset()` changes
 those geometry coordinates, while a relation's `offset()` participates in
 placement. Consecutive constraints are solved together; independent transformations
 then move that joint result.
@@ -338,7 +340,7 @@ an override for only the clicked part.
 Release to commit the preview, or press `Esc` while dragging to cancel without
 closing the panel. Use Undo after an edit has been committed. Numeric panel
 input has a different meaning when an expression appears as a placeholder:
-it [replaces the whole argument](../model-tools/#what-a-panel-can-edit).
+it [replaces the whole argument](../../web/src/content/docs/docs/guides/model-tools.mdx#what-a-panel-can-edit).
 
 Use the position toolbar above the panel to choose translation or a rotation
 variant. In either rotation tool, hold Alt to move its reference instead of
@@ -349,9 +351,9 @@ Replacing a reference within the same rotation type retains its offset and angle
 choosing a reference for the other rotation type adds a new zero-angle operation.
 
 To change the standalone geometry and its origin, see
-[origins and rotation](../origins-and-rotation/).
+[origins and rotation](origins-and-rotation.mdx).
 
-See [code and geometry](../../concepts/code-and-geometry/) for the distinction
+See [code and geometry](../../web/src/content/docs/docs/concepts/code-and-geometry.md) for the distinction
 between a model value and its runtime context.
 
 ## Measure before building a part
@@ -371,7 +373,7 @@ Omit the axis for the shortest spatial distance, or provide `x`, `y`, `z`, a
 direction vector, or a straight edge/axis reference for the gap between projected
 intervals. Use topology faces when their actual trimmed shape matters; a
 directional bound measures its rectangular extent. See the
-[measurement reference](../../reference/core/#measurements) for supported inputs
+[measurement reference](api.md#measurements) for supported inputs
 and coordinate rules.
 
 Measurements follow source order. Adding a later relation does not retroactively

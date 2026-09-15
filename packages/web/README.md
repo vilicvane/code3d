@@ -3,6 +3,12 @@
 Astro serves the custom homepage and examples. Starlight serves `/docs/`.
 App is built separately by Vite and copied into `dist/www/app/`.
 
+`Packages` groups the featured libraries under their complete npm names. Each
+package's `README.md` is its overview, and `docs/` contains detailed API and usage
+pages. Starlight and the plain Markdown endpoint read these files directly;
+there is no separate website copy of package reference prose. Package headings
+show the current version from `package.json`, with no multi-version routing.
+
 This README covers website content and publication. Repository-wide setup and
 test conventions live in the [development guide](../../.agents/docs/development.md);
 system responsibilities are indexed in the [internal documentation](../../.agents/docs/README.md).
@@ -35,13 +41,14 @@ readers, but the website publishes only the selected modeling packages.
 The [Markdown publisher](scripts/markdown-documents.mjs) serves these existing
 sources through [one static endpoint](src/pages/docs/[...document].md.ts):
 
-| Repository source                                   | Published Markdown                        |
-| --------------------------------------------------- | ----------------------------------------- |
-| `docs/agents.md` and `docs/agents/*.md`             | `/docs/agents.md` and `/docs/agents/*.md` |
-| `packages/{core,layout,materials,screws}/README.md` | `/docs/packages/<package>.md`             |
-| `src/content/docs/docs/**/*.{md,mdx}`               | `/docs/<topic>.md`                        |
+| Repository source                                            | Published Markdown                        |
+| ------------------------------------------------------------ | ----------------------------------------- |
+| `docs/agents.md` and `docs/agents/*.md`                      | `/docs/agents.md` and `/docs/agents/*.md` |
+| `packages/{core,layout,materials,screws}/README.md`          | `/docs/packages/<package>.md`             |
+| `packages/{core,layout,materials,screws}/docs/**/*.{md,mdx}` | `/docs/packages/<package>/<topic>.md`     |
+| `src/content/docs/docs/**/*.{md,mdx}`                        | `/docs/<topic>.md`                        |
 
-The publisher's `featuredPackages` list selects Core, Layout, Materials and Screws.
+The [shared document catalog](scripts/document-sources.mjs)'s `featuredPackages` list selects Core, Layout, Materials and Screws.
 Additional packages are selected for their value to model authors; adding a
 workspace package does not automatically add a website page or an entry in the
 agent guide. Lower-level dependency READMEs stay in their packages, discoverable
@@ -52,7 +59,15 @@ Internal development docs under `.agents/docs/` and research under
 to them for contributors without adding them to the modeling agent's required
 workflow or website catalog.
 
-Keep links relative to real repository files in agent docs and READMEs. The
+Package HTML uses `/docs/packages/<package>/` for the README and
+`/docs/packages/<package>/<topic>/` for detail pages. The [collection loader](scripts/docs-loader.ts)
+loads their original Markdown/MDX files, and the [link transform](scripts/html-documents.mjs)
+shares URL resolution with the Markdown publisher. Add detail pages with Starlight
+`title` and `description` frontmatter; the sidebar discovers them automatically.
+MDX may use shared website example components to display the actual App sources.
+Package manifests are watched in development so version changes update the title.
+
+Keep links relative to real repository files in agent docs, READMEs and package docs. The
 publisher maps documentation links to relative Markdown URLs and source links
 to readable repository files at the checkout’s current commit. Build deployment
 artifacts after committing; push that commit so the source links are reachable. Website pages retain their HTML-relative links;

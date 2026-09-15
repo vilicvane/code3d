@@ -19,7 +19,7 @@ A group composes values. A boolean operation evaluates its operands into new
 geometry. These operations are distinct even when their viewport results look
 similar.
 
-Each value has [local coordinates](../local-coordinates/). Changing its origin
+Each value has [local coordinates](../../../../../../core/docs/local-coordinates.md). Changing its origin
 changes point coordinates; a relation supplies placement when the model is
 used in a composition. Positions use coordinate arrays, such as
 `point([10, 0, 0])`, while dimensions and displacements use separate numbers.
@@ -34,7 +34,7 @@ Inputs and outputs are separate contexts. In `part.rotate(0, 30, 0)`, the
 `part` occurrence refers to the input model, while the method call refers to
 the rotated result. Model-valued arguments are tracked through ordinary
 function calls too; this inspection does not require tool annotations.
-See [inspecting inputs and results](../../getting-started/app/#inspect-inputs-and-results).
+See [inspecting inputs and results](../getting-started/app.md#inspect-inputs-and-results).
 
 A collection of models uses the members' resolved composition positions,
 including arrays, sets, and map values. Even a one-element collection keeps
@@ -48,7 +48,7 @@ Inside a relate array, inspection stops at the selected transformation. For exam
 translated pose at `offset`, and the rotated pose at `rotate`. Later calls do
 not move an earlier preview. The highlighted references indicate which side
 you are inspecting while the other related objects remain as context. See
-[relation previews](../../guides/relations/#inspect-the-right-scope).
+[relation previews](../../../../../../core/docs/relations.mdx#inspect-the-right-scope).
 
 Selecting an intermediate expression is a way to inspect the model, not an
 instruction to rewrite the program's entry point. Exporting a value is an
@@ -71,7 +71,7 @@ increment. Neither operation solves for the expression's inputs.
 These are source edits. If a loop or function uses the same call more than
 once, changing its expression can affect every occurrence. Shared upstream
 parameters can affect other call sites too. See
-[parameter editing](../../guides/model-tools/#what-a-panel-can-edit) for examples.
+[parameter editing](../guides/model-tools.mdx#what-a-panel-can-edit) for examples.
 
 ## Geometry and topology
 

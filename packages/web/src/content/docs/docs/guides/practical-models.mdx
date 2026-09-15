@@ -10,7 +10,7 @@ import {appUrl} from '../../../../lib/site';
 Basic shapes, operations and constraints have their own directories. Text,
 expose, materials and topology paths are standalone files. Sketches, npm
 dependencies, assemblies and complete projects retain their own directories.
-Interaction belongs in each model, not in a separate set of UI demos. Start with the [desktop stand](../../getting-started/first-model/)
+Interaction belongs in each model, not in a separate set of UI demos. Start with the [desktop stand](../getting-started/first-model.mdx)
 without installing packages or connecting an agent.
 
 ## Cut a slot on a part
@@ -45,7 +45,7 @@ change the depth, then Undo. Text outlines are not editable sketch entities.
 `annotations.ts` demonstrates how defaults, limits and Arguments presets give
 an ordinary spacer function an editing interface. `primitives/custom-primitives.ts`
 shows when a Replicad-backed `definePrimitive` is useful instead. See
-[reusable models](../reusable-models/) and [custom primitives](../custom-primitives/).
+[reusable models](reusable-models.mdx) and [custom primitives](../../../../../../core/docs/custom-primitives.mdx).
 
 <p>
   <a target="_blank" rel="noopener" href={appUrl('npm/model.ts')}>
@@ -97,7 +97,7 @@ errors are shown in status and source diagnostics, not as a general viewport Fix
   </a>
 </p>
 
-This model positions three sections with contacts and pivot rotations before lofting. Inspect `start`, `via`, `end` and the completed loft. See [relations](../relations/) for their coordinate frames.
+This model positions three sections with contacts and pivot rotations before lofting. Inspect `start`, `via`, `end` and the completed loft. See [relations](../../../../../../core/docs/relations.mdx) for their coordinate frames.
 
 ## Explore a complete project
 
@@ -112,13 +112,13 @@ board placeholder, posts and screws, using the built-in modeling packages. The t
 above demonstrate actual installation instead.
 
 Switch to Render to inspect materials. Select the final group before
-[exporting STEP, STL or 3MF](../exporting/); selecting an individual component
+[exporting STEP, STL or 3MF](exporting.md); selecting an individual component
 exports that context. This is a modeling study, not an electronics or
 manufacturing-validated design.
 
 ## Let an agent continue the same model
 
-Use the mounting plate for the first [agent handoff](../agents/). Connect an
+Use the mounting plate for the first [agent handoff](agents.mdx). Connect an
 agent and copy its prompt, then ask it to widen the plate while preserving the
 slot. Follow the agent to see its current source and render. Continue with a
 parameter edit yourself and Undo it; the agent must read the current file version
