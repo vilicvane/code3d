@@ -69,6 +69,9 @@ placement is not baked into tuple coordinates. A spatial copy shares point
 identities with its original, so a derived layer can still use `profile.point(id)`.
 References target the actual immutable model value: creating a later rotated or
 repositioned model does not redirect existing sketch relations.
+The `relate` callback parameter represents the new sketch frame; every returned
+constraint must involve it. References to the original sketch's plane stay on
+the original frame.
 
 In the App, select the related value (`opening`) to edit against read-only model
 outlines projected into the sketch's local plane. Select `profile` for its original

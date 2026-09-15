@@ -166,8 +166,12 @@ test('selected points, edges and surfaces use only their own finite extent', () 
       vertex =>
         defined(modelElementReference(vertex)).transform.position[1] > 9,
     );
-  for (const geometry of [top, edge, vertex]) {
-    const placed = source.relate(() => defined(geometry).on(base.up));
+  for (const select of [
+    (self: typeof source) => self.surface(defined(top).id),
+    (self: typeof source) => self.edge(defined(edge).id),
+    (self: typeof source) => self.vertex(defined(vertex).id),
+  ]) {
+    const placed = source.relate(self => select(self).on(base.up));
     near(position(placed), [0, -5, 0]);
     const constraint = snapshot(placed).constraints[0];
     assert.equal(constraint.kind, 'on');
@@ -233,17 +237,56 @@ test('redundancy is accepted and positional conflicts never rotate the model', (
   );
 });
 
-test('relate rebinds the original receiver and supports self on either end', () => {
+test('relate requires callback self and supports it on either end', () => {
   const base = box(10, 10, 10),
     original = box(2, 2, 2);
-  near(position(original.relate(() => original.on(base.up))), [0, 6, 0]);
+  near(position(original.relate(self => self.on(base.up))), [0, 6, 0]);
   near(position(original.relate(self => base.on(self.up))), [0, -6, 0]);
-  near(position(original.relate(() => base.on(original.up))), [0, -6, 0]);
   near(position(original), [0, 0, 0]);
-  assert.throws(
-    () => original.relate(() => base.on(box(1, 1, 1).up)),
-    /must involve self/,
+  for (const build of [
+    () => original.on(base.up),
+    () => base.on(original.up),
+    () => base.on(box(1, 1, 1).up),
+  ])
+    assert.throws(() => original.relate(build), /must involve self/);
+});
+
+test('relate can place a new panel against its unchanged original value', () => {
+  const side = box(2, 250, 250).material('#333');
+  const leftSide = side;
+  const original = snapshot(leftSide);
+  const rightSide = side.relate(self => [
+    self.on(leftSide.right),
+    offset(160, 0, 0),
+  ]);
+  const right = snapshot(rightSide);
+  near(right.compositionTransform.position, [162, 0, 0]);
+  assert.equal(right.constraints[0].source.nodeId, right.nodeId);
+  assert.equal(right.constraints[0].target.nodeId, original.nodeId);
+
+  const otherSide = side.relate(self => [
+    leftSide.on(self.right),
+    offset(-160, 0, 0),
+  ]);
+  const other = snapshot(otherSide);
+  near(other.compositionTransform.position, [-162, 0, 0]);
+  assert.equal(other.constraints[0].source.nodeId, original.nodeId);
+  assert.equal(other.constraints[0].target.nodeId, other.nodeId);
+
+  const assembly = snapshot(group([leftSide, rightSide, otherSide]));
+  assembly.children.forEach((child, index) =>
+    near(
+      child.transform.position,
+      [
+        [0, 0, 0],
+        [162, 0, 0],
+        [-162, 0, 0],
+      ][index],
+    ),
   );
+  assert.deepEqual(snapshot(leftSide), original);
+  assert.deepEqual(snapshot(rightSide), right);
+  assert.deepEqual(snapshot(otherSide), other);
 });
 
 test('current derived bounds and old references have independent immutable meaning', () => {

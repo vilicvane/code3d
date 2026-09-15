@@ -200,9 +200,32 @@ origin can happen to commute without changing the sequencing rule.
 
 ## Choose which part moves
 
-`relate` determines the movable self, even in `base.on(self.up)`. References to
-the original receiver also work: `part.relate(() => part.on(base.up))`.
-Relations that involve neither self nor the original receiver are rejected.
+`relate` returns a new value and passes it to the callback as `self`. Every
+constraint must involve that value, even when written as `base.on(self.up)`.
+The parameter can have any name; it is its value that identifies the new part.
+External variables always refer to their existing model, so a part can be
+placed against the original value from which it was derived:
+
+```ts
+const side = box(2, 250, 250);
+const leftSide = side;
+const rightSide = side.relate(self => [
+  self.on(leftSide.right),
+  offset(160, 0, 0),
+]);
+const assembly = group([leftSide, rightSide]);
+```
+
+The two panel centers are 162 units apart, with a 160-unit gap. `side` and
+`leftSide` remain unchanged; no intermediate copy is needed.
+
+This identity rule also applies to selected elements and rotation references:
+`pivotPoint(self.center)` follows the new part's center, while
+`pivotPoint(side.center)` rotates around the original part's center.
+`axisLine(self.axis)` and `axisLine(side.axis)` distinguish the same two owners.
+Use `self.surface(id)`, `self.edge(id)`, or `self.vertex(id)` to constrain an
+element of the new part. A reference selected before the callback stays attached
+to its original model.
 
 ## Inspect the right scope
 
