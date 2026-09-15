@@ -3,6 +3,17 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'layout-ventilation',
+    title: 'Ventilation in a construction space',
+    description:
+      'Fill a related construction space with fins that follow its placement, without including the space in the result.',
+    category: 'Practical models',
+    file: 'layout/ventilation.ts',
+    focus: {context: 'export default group(', token: 'group'},
+    view: {direction: [0.5, 1, 1.3], up: [0, 1, 0]},
+    tags: ['layout', 'fill', 'relate', 'frame'],
+  },
+  {
     id: 'layout-fill-grid',
     title: 'Fill a grid within bounds',
     description:
@@ -425,6 +436,7 @@ export const exampleEntries = [
   },
   {file: 'layout/linear.ts'},
   {file: 'layout/grille.ts'},
+  {file: 'layout/ventilation.ts'},
   {file: 'layout/grid.ts'},
   {file: 'layout/radial.ts'},
   {file: 'layout/flex.ts'},

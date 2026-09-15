@@ -41,7 +41,7 @@ and the [agent file workflow](../../docs/agents/files.md).
 | Task                                                                            | Start here                                                                         |
 | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | Solids, planar profiles, curves, points, Boolean operations, extrusion and loft | [Modeling reference](docs/api.md)                                                  |
-| Place parts with bounds or align underlying geometry                            | [Relations](docs/relations.mdx)                                                    |
+| Place parts with bounds, align geometry or match coordinate frames              | [Relations](docs/relations.mdx)                                                    |
 | Change origins and rotate parts                                                 | [Origins and rotation](docs/origins-and-rotation.mdx)                              |
 | Hollow a solid or choose openings                                               | [Shells](docs/shells.mdx)                                                          |
 | Select vertices, edges and surfaces, or expose named elements                   | [Topology](docs/topology.md)                                                       |

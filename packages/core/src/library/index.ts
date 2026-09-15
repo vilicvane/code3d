@@ -71,6 +71,7 @@ export type {
   ExposedElements,
   ExposedValue,
   FaceAnchor,
+  FrameAnchor,
   FaceModel,
   GeometryCapabilities,
   GeometryQueryCapabilities,

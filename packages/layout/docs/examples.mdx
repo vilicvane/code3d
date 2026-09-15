@@ -30,7 +30,8 @@ explicit spacing; use zero for touching copies.
 `flex(items, config)` arranges fixed-size bounds along an axis, starting at local
 zero with enough space for the content. `flex(items, space, config)` uses the
 target model's local bounds. The target stays a separate argument and is not
-included in the returned array.
+included in the returned array. Results follow its coordinate frame, including
+position and orientation established with `relate`.
 
 `axis` is required. `gap` is nonnegative boundary-to-boundary clearance, default
 zero. `padding` is a number for both ends or `{start, end}` for asymmetric insets.
@@ -77,6 +78,15 @@ The target bounds only constrain the main axis unless cross alignment is
 requested. No model is stretched, clipped or omitted to make a known collection
 fit. An undersized target produces an error. Filling uses scale-relative
 floating-point tolerance without rounding dimensions to a fixed decimal precision.
+
+## Follow a construction space
+
+The target can be a construction model used only to locate the layout.
+In this grille, the space is constrained to the side panel; the returned fins
+follow that placement automatically. Only the base, side panels and fins appear
+in the final group.
+
+<ModelExample id="layout-ventilation" />
 
 ## Wrap Flex lines
 
@@ -162,8 +172,10 @@ itself when you need an additional orientation such as a 90-degree turn.
 All tools measure local geometry with `.bounds()` and express results in shared
 layout coordinates. A displacement uses `originOffset` with the opposite sign;
 radial rotation uses the model's `rotate`. The original models remain unchanged.
-With no external relations, all output origins coincide, so `group(items)` retains
-the complete layout without an empty reference group.
+With a target space, each output frame follows the target's solved position and
+orientation. Spread those outputs into the final assembly; the space itself is
+not included. Without a target or external input relations, all output origins
+coincide, so `group(items)` retains the complete local layout.
 
 External relations still apply when models are composed. To repeat an assembled
 set of parts, group them first. To place a complete layout relative to another

@@ -185,6 +185,9 @@ linear/radial/flex/fillFlex 显式指定 axis，grid/fillGrid 显式指定 axes�
 单行横向对齐可选；wrap 使用逐行主轴分配和行间 alignContent。Grid 先按行列归属
 测量 track minimum，再解析 auto/固定/fr 轨道，最后分别对齐轨道与格内模型。
 对应 fill 调用复用这些步骤；fillFlex 限单行，fillGrid 计算两个轴的完整网格数量。
+带目标空间的结果通过公开 `self.frame.align(space.frame)` 保留目标的完整位姿关系；
+目标只参与求解依赖，不作为输出子模型。frame 是独立于几何的坐标系引用，origin
+是 frame.origin 的便捷入口。原点引用只约束位置，frame 对齐约束全部六个相对自由度。
 全部几何保持固定尺寸，显式轨道或目标空间不能容纳时报告错误。
 
 精确 step 使用 linear，多个轴通过组合 linear 表达；radial 的 rotate 布尔值控制
