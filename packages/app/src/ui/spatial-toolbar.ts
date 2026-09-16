@@ -46,6 +46,7 @@ export class SpatialToolbar {
     hasTopology: boolean;
   }>;
   private readonly stop: () => void;
+  private activation = 0;
 
   constructor(
     container: HTMLElement,
@@ -54,17 +55,19 @@ export class SpatialToolbar {
       visible(): boolean;
       availableTools(): readonly SpatialTool[];
       cancel(): void;
-      activateSource(tool: SpatialTool): void;
+      activateSource(tool: SpatialTool): Promise<boolean>;
     },
   ) {
     this.root.className = 'spatial-toolbar';
     const group = this.toolbar.group('Transform');
-    const choose = action((tool: SpatialTool) => {
+    const choose = async (tool: SpatialTool) => {
+      const activation = ++this.activation;
       this.options.cancel();
-      this.options.activateSource(tool);
-      // Navigation changes the source context; retain the explicit tool choice.
-      this.tools.selectTool(tool);
-    });
+      const presented = await this.options.activateSource(tool);
+      // Bind the choice to the newly presented context, including async inspect.
+      if (presented && activation === this.activation)
+        this.tools.selectTool(tool);
+    };
     this.toolbar.add(group, {
       name: names.translate,
       title: 'Translate',
@@ -105,6 +108,7 @@ export class SpatialToolbar {
     this.selection = value;
   }
   dispose(): void {
+    this.activation++;
     this.stop();
     this.toolbar.close();
     this.root.remove();

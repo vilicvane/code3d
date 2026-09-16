@@ -237,7 +237,9 @@ restores the original expression.
 
 ## Editable sketch regions
 
-Select a `sketch([...])` expression or variable in the App to open its 2D editor.
+Select a `sketch([...])` expression or variable to preview its points and curves
+in 3D. Choose **Edit sketch** to open its 2D editor and **Finish sketch** to return
+to the shared 3D scene.
 Points, lines, circles and arcs use explicit layer-local entity IDs. `face()`
 requires exactly one closed region, including holes; `faces()` returns all regions
 as an ordinary readonly array. Use `map` for independent modeling operations:
@@ -328,7 +330,7 @@ the referenced immutable host value; later creating another transformed host doe
 not redirect it. Use `align()`, not finite-bound `on()`, for the sketch's unbounded
 reference plane.
 
-Select `opening` in the App to edit with read-only model outlines in the sketch's
+Select `opening` and choose **Edit sketch** to edit with read-only model outlines in the sketch's
 local plane, or `profile` for the original local view. Both write the same geometry
 array. The outlines do not become snapping targets or external geometry constraints.
 See `examples/sketches/mounting-plate.ts` for a slotted plate. Create the relation

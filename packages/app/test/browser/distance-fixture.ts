@@ -4,10 +4,14 @@ import {ModelCompilerClient} from '../../src/model/compiler-client';
 import {browserPackageFiles} from '../../src/project/browser-packages';
 import {ModelViewport} from '../../src/viewport';
 import {sourceDecorationProviders} from '../../src/model/source-decorations';
+import type {InspectionSnapshot} from '../../src/model/inspection-snapshot';
+import type {ModelModule} from '../../src/model/compiler';
 import {MeasurementDecorationObject} from '../../src/rendering/measurement-decoration';
 
 let viewport: ModelViewport;
 let client: ModelCompilerClient;
+let module: ModelModule;
+let inspection: InspectionSnapshot;
 const source = `import {box,distance,group,offset,point,line} from '@code3d/core';
   const left=box(8,30,32).material('#708090');
   const right=box(8,30,32).relate(self=>[self.on(left.right),offset(60,0,0)]).material('#708090');
@@ -36,7 +40,7 @@ export async function startDistanceFixture() {
     onTopologySelection() {},
     sourceDecorationProviders,
   });
-  const module = await client.compile(
+  module = await client.compile(
     {files: [{path: '/main.ts', source}]},
     '/main.ts',
   );
@@ -46,7 +50,9 @@ export async function startDistanceFixture() {
 }
 
 export async function selectDistance(token: string, resetView = false) {
-  viewport.selectBySourceOffset('/main.ts', source.indexOf(token) + 1);
+  const selection = {file: '/main.ts', offset: source.indexOf(token) + 1};
+  inspection = (await client.inspect(module, selection))!;
+  viewport.renderInspection(module, inspection, selection);
   if (resetView)
     viewport['controls'].restorePose(
       viewport['controls'].defaultPose(
@@ -60,9 +66,7 @@ export async function selectDistance(token: string, resetView = false) {
 }
 
 function dimension() {
-  const layers = viewport['decorationLayers'].get(
-    'source-context:measurement',
-  )!;
+  const layers = viewport['decorationLayers'].get('inspection')!;
   const measurement = layers
     .map(value => value.measurement)
     .find((value): value is MeasurementDecorationObject => !!value)!;
@@ -99,33 +103,64 @@ export function measureDistance() {
   const localEnd = new THREE.Vector3(
     ...measurement.userData.decoration.end,
   ).applyMatrix4(measurement.matrixWorld);
+  const references = inspection.target.filter(item => item.kind === 'anchor');
+  const dimensionValue = inspection.target.find(
+    item => item.kind === 'dimension',
+  )!;
+  if (dimensionValue.kind !== 'dimension')
+    throw new Error('No dimension snapshot');
+  const roots = [...inspection.target, ...inspection.ambient].flatMap(item =>
+    'model' in item ? [item.model] : [],
+  );
+  const rootByNode = new Map<string, string>();
+  const visit = (
+    node: import('@code3d/core/tooling').ModelSnapshotObject,
+    owner: string,
+  ) => {
+    rootByNode.set(node.nodeId, owner);
+    node.children.forEach(child => visit(child, owner));
+  };
+  roots.forEach(root => visit(root, root.nodeId));
   return {
     focusKind: viewport.sourceContext!.target.kind,
-    focused: viewport.sourceContext!.evaluation.focusNodeIds,
-    operands: viewport.sourceContext!.evaluation.measurement!.operands.map(
-      value => value.nodeId,
-    ),
-    highlights: (
-      viewport['decorationLayers'].get('source-context:measurement') ?? []
-    ).flatMap(instance => {
-      const decoration = instance.object.children[0].userData.decoration;
-      if (decoration.kind === 'measurement') return [];
-      const drawn: {
-        nodeId: string;
-        kind: string;
-        opacity: number;
-      }[] = [];
-      instance.object.traverse(object => {
-        if (!(object instanceof THREE.Mesh) || Array.isArray(object.material))
-          return;
-        drawn.push({
-          nodeId: decoration.nodeId,
-          kind: decoration.kind,
-          opacity: object.material.opacity,
+    focused: inspection.target.some(item => item.focused)
+      ? [
+          ...new Set(
+            inspection.target
+              .filter(item => item.focused)
+              .flatMap(item => ('model' in item ? [item.model.nodeId] : [])),
+          ),
+        ]
+      : undefined,
+    operands: references.length
+      ? references.slice(0, 2).map(item => item.model.nodeId)
+      : [
+          ...new Set([
+            dimensionValue.model.nodeId,
+            ...roots.map(root => root.nodeId),
+          ]),
+        ],
+    highlights: (viewport['decorationLayers'].get('inspection') ?? []).flatMap(
+      instance => {
+        const decoration = instance.object.children[0].userData.decoration;
+        if (decoration.kind === 'measurement') return [];
+        const drawn: {
+          nodeId: string;
+          kind: string;
+          opacity: number;
+        }[] = [];
+        instance.object.traverse(object => {
+          if (!(object instanceof THREE.Mesh) || Array.isArray(object.material))
+            return;
+          drawn.push({
+            nodeId: decoration.nodeId,
+            kind: decoration.kind,
+            opacity: object.material.opacity,
+          });
         });
-      });
-      return drawn;
-    }),
+        return drawn;
+      },
+    ),
     text: label.userData.text,
     marks: measurementMarks(
       viewport['camera'],
@@ -142,9 +177,9 @@ export function measureDistance() {
     lineLength: localStart.distanceTo(localEnd),
     start: localStart.toArray(),
     end: localEnd.toArray(),
-    expected: viewport.sourceContext!.evaluation.measurement!.value,
+    expected: dimensionValue.value,
     kinds: viewport['decorationLayers']
-      .get('source-context:measurement')!
+      .get('inspection')!
       .map(value => value.object.children[0].userData.decoration.kind),
     surfaces,
     modelFaces: [
@@ -162,37 +197,53 @@ export function measureDistance() {
         )
           return;
         faces.push({
-          nodeId: occurrence.node.nodeId,
+          nodeId:
+            rootByNode.get(
+              occurrence.renderedNodeId ?? occurrence.node.nodeId,
+            ) ?? occurrence.node.nodeId,
           opacity: object.material.opacity,
           color: (object.material.color as THREE.Color).getHexString(),
         });
       });
       return faces;
     }),
+    renderedKinds: [
+      ...viewport['occurrences'].values(),
+      ...viewport['contextOccurrences'].values(),
+    ]
+      .filter(value => value.node.mesh)
+      .map(value => value.node.kind),
     tools: viewport.sourceContext!.target.tool,
-    position: viewport['root'].children.map(value => value.position.toArray()),
-    corners: (
-      viewport['decorationLayers'].get('source-context:measurement') ?? []
-    ).flatMap(instance => {
-      const corners = instance.corners;
-      if (!corners) return [];
-      const starts = corners.geometry.getAttribute('instanceStart'),
-        ends = corners.geometry.getAttribute('instanceEnd');
-      return Array.from({length: starts.count}, (_, i) => {
-        const a = new THREE.Vector3()
-          .fromBufferAttribute(starts, i)
-          .applyMatrix4(corners.matrixWorld)
-          .project(viewport['camera']);
-        const b = new THREE.Vector3()
-          .fromBufferAttribute(ends, i)
-          .applyMatrix4(corners.matrixWorld)
-          .project(viewport['camera']);
-        return Math.hypot(
-          ((a.x - b.x) * viewport['renderer'].domElement.clientWidth) / 2,
-          ((a.y - b.y) * viewport['renderer'].domElement.clientHeight) / 2,
-        );
-      });
-    }),
+    position: [
+      ...viewport['occurrences'].values(),
+      ...viewport['contextOccurrences'].values(),
+    ]
+      .filter(value => value.node.mesh)
+      .map(value =>
+        value.object.getWorldPosition(new THREE.Vector3()).toArray(),
+      ),
+    corners: (viewport['decorationLayers'].get('inspection') ?? []).flatMap(
+      instance => {
+        const corners = instance.corners;
+        if (!corners) return [];
+        const starts = corners.geometry.getAttribute('instanceStart'),
+          ends = corners.geometry.getAttribute('instanceEnd');
+        return Array.from({length: starts.count}, (_, i) => {
+          const a = new THREE.Vector3()
+            .fromBufferAttribute(starts, i)
+            .applyMatrix4(corners.matrixWorld)
+            .project(viewport['camera']);
+          const b = new THREE.Vector3()
+            .fromBufferAttribute(ends, i)
+            .applyMatrix4(corners.matrixWorld)
+            .project(viewport['camera']);
+          return Math.hypot(
+            ((a.x - b.x) * viewport['renderer'].domElement.clientWidth) / 2,
+            ((a.y - b.y) * viewport['renderer'].domElement.clientHeight) / 2,
+          );
+        });
+      },
+    ),
     textures: viewport['renderer'].info.memory.textures,
   };
 }
@@ -274,11 +325,13 @@ export async function zoomAndExportDistance() {
   return {zoomed, exported, pngBytes: png.size};
 }
 
-export function clearDistance(token = 'group([left,right') {
-  viewport.selectBySourceOffset('/main.ts', source.indexOf(token) + 1);
+export async function clearDistance(token = 'group([left,right') {
+  const selection = {file: '/main.ts', offset: source.indexOf(token) + 1};
+  inspection = (await client.inspect(module, selection))!;
+  viewport.renderInspection(module, inspection, selection);
   viewport['rendering'].renderFrame();
   return {
-    layers: viewport['decorationLayers'].has('source-context:measurement'),
+    layers: viewport['decorationLayers'].has('inspection'),
     textures: viewport['renderer'].info.memory.textures,
     contextNodes: [...viewport['contextOccurrences'].values()].map(
       value => value.node.nodeId,

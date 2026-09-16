@@ -16,12 +16,18 @@ import {
   type Model,
 } from '@code3d/core';
 import {
-  beginModelEvaluation,
-  type DistanceSnapshot,
+  recordInspectionCalls,
   clearKernelOperationCache,
   kernelOperationCacheStats,
 } from '@code3d/core/tooling';
 import {disposeModelObjects} from './model-test.ts';
+import type {Vec3} from '@code3d/core';
+
+type DistanceRecord = {
+  result: {value: number; start: Vec3; end: Vec3};
+  direction?: Vec3;
+  references: readonly {whole?: boolean}[];
+};
 
 const retained: Model[] = [];
 function keep<T extends Model>(model: T): T {
@@ -227,9 +233,9 @@ test('uncached measurements release their native solvers and transformed inputs'
 test('measurement traces preserve exact witnesses on cache hits and stop with evaluation lifetime', () => {
   const a = keep(line([0, 0, 0], [1, 0, 0])),
     b = keep(point([4, 3, 0]));
-  const snapshots: DistanceSnapshot[] = [];
-  const finish = beginModelEvaluation(undefined, snapshot =>
-    snapshots.push(snapshot),
+  const snapshots: DistanceRecord[] = [];
+  const finish = recordInspectionCalls(data =>
+    snapshots.push(data as DistanceRecord),
   );
   try {
     near(distance(a, b), Math.sqrt(18));
@@ -241,14 +247,14 @@ test('measurement traces preserve exact witnesses on cache hits and stop with ev
   }
   assert.equal(snapshots.length, 4);
   assert.deepEqual(snapshots[0], snapshots[1]);
-  assert.deepEqual(snapshots[0].start, [1, 0, 0]);
-  assert.deepEqual(snapshots[0].end, [4, 3, 0]);
-  for (const snapshot of snapshots)
+  assert.deepEqual(snapshots[0].result.start, [1, 0, 0]);
+  assert.deepEqual(snapshots[0].result.end, [4, 3, 0]);
+  for (const {result: snapshot} of snapshots)
     near(
       Math.hypot(...snapshot.start.map((v, i) => v - snapshot.end[i])),
       snapshot.value,
     );
-  assert.deepEqual(snapshots[2].axis, [1, 0, 0]);
+  assert.deepEqual(snapshots[2].direction, [1, 0, 0]);
   distance(a, b);
   assert.equal(snapshots.length, 4);
 });
@@ -256,9 +262,9 @@ test('measurement traces preserve exact witnesses on cache hits and stop with ev
 test('measurement snapshots distinguish whole models from exposed geometry references', () => {
   const body = keep(box(8, 30, 32));
   const assembly = keep(group([body]).expose({part: body}));
-  const snapshots: DistanceSnapshot[] = [];
-  const finish = beginModelEvaluation(undefined, snapshot =>
-    snapshots.push(snapshot),
+  const snapshots: DistanceRecord[] = [];
+  const finish = recordInspectionCalls(data =>
+    snapshots.push(data as DistanceRecord),
   );
   try {
     distance(body, body.right);
@@ -268,7 +274,7 @@ test('measurement snapshots distinguish whole models from exposed geometry refer
   }
   for (const snapshot of snapshots)
     assert.deepEqual(
-      snapshot.operands.map(value => value.whole),
+      snapshot.references.map(value => value.whole === true),
       [true, false],
     );
 });
@@ -277,9 +283,9 @@ test('contained and touching geometry produce zero-length witness segments', () 
   const solid = keep(sphere(2)),
     inside = keep(point()),
     touching = keep(point([2, 0, 0]));
-  const snapshots: DistanceSnapshot[] = [];
-  const finish = beginModelEvaluation(undefined, snapshot =>
-    snapshots.push(snapshot),
+  const snapshots: DistanceRecord[] = [];
+  const finish = recordInspectionCalls(data =>
+    snapshots.push(data as DistanceRecord),
   );
   try {
     distance(solid, inside);
@@ -287,7 +293,7 @@ test('contained and touching geometry produce zero-length witness segments', () 
   } finally {
     finish();
   }
-  for (const snapshot of snapshots) {
+  for (const {result: snapshot} of snapshots) {
     near(snapshot.value, 0);
     near(
       Math.hypot(...snapshot.start.map((value, i) => value - snapshot.end[i])),
@@ -299,9 +305,9 @@ test('contained and touching geometry produce zero-length witness segments', () 
 test('axial point-to-bound dimensions start at the point inside the shared projection', () => {
   const body = keep(box(8, 30, 32));
   const corner = keep(point([-4, -15, -16]));
-  const snapshots: DistanceSnapshot[] = [];
-  const finish = beginModelEvaluation(undefined, snapshot =>
-    snapshots.push(snapshot),
+  const snapshots: DistanceRecord[] = [];
+  const finish = recordInspectionCalls(data =>
+    snapshots.push(data as DistanceRecord),
   );
   try {
     distance(corner, body.right, 'x');
@@ -318,7 +324,7 @@ test('axial point-to-bound dimensions start at the point inside the shared proje
     [-4, 15, -16],
     [-4, -15, 16],
   ];
-  for (const [index, snapshot] of snapshots.entries()) {
+  for (const [index, {result: snapshot}] of snapshots.entries()) {
     const reversed = index === 3;
     const start = reversed ? snapshot.end : snapshot.start;
     const end = reversed ? snapshot.start : snapshot.end;

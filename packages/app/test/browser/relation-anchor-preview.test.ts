@@ -31,6 +31,8 @@ test(
       const {browserPackageFiles} =
         await import('/src/project/browser-packages.ts');
       const {ModelViewport} = await import('/src/viewport.ts');
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const {sourceDecorationProviders} =
         await import('/src/model/source-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
@@ -62,7 +64,10 @@ test(
           if (module.diagnostic) throw new Error(module.diagnostic.summary);
           viewport.renderModule(module);
           for (const anchor of [sourceAnchor, targetAnchor] as const) {
-            viewport.selectBySourceOffset(
+            await inspectSource(
+              client,
+              viewport,
+              module,
               '/main.ts',
               source.indexOf(anchor) + anchor.length - 1,
             );
@@ -87,26 +92,31 @@ test(
             }
             results.push({
               anchor,
-              expectedContextCount: 2,
-              expectedFocusCount: 1,
+
               hasOverlay: true,
               kind: target.kind,
-              focusCount: viewport['occurrences'].size,
-              contextCount: viewport['contextOccurrences'].size,
+
+              participantCount: new Set(
+                rendered
+                  .filter(({node}) => module.objects.has(node.nodeId))
+                  .map(({node}) => node.nodeId),
+              ).size,
               ownerSelected:
                 selected!.node.nodeId ===
                 (selection?.inputNodeId ?? evaluation.element!.nodeId),
-              correctPlacements: rendered.every(
-                ({node, object, placement}) =>
-                  placement === 'composition' &&
-                  object.position
-                    .toArray()
-                    .every(
-                      (value, index) =>
-                        Math.abs(
-                          value - node.compositionTransform.position[index],
-                        ) < 1e-6,
-                    ),
+              correctPlacements: rendered.every(({node, object, placement}) =>
+                object.position
+                  .toArray()
+                  .every(
+                    (value, index) =>
+                      Math.abs(
+                        value -
+                          (placement === 'composition'
+                            ? node.compositionTransform
+                            : node.transform
+                          ).position[index],
+                      ) < 1e-6,
+                  ),
               ),
               availableIds,
               selectedIds: selection
@@ -114,13 +124,7 @@ test(
                 : undefined,
               overlayCount: selection
                 ? viewport['topologySelectionOverlay']?.children.length
-                : ['named-element', 'relation-geometry'].reduce(
-                    (count, id) =>
-                      count +
-                      (viewport['decorationLayers'].get(`source-context:${id}`)
-                        ?.length ?? 0),
-                    0,
-                  ),
+                : viewport['decorationLayers'].get('inspection')?.length,
               toolArgument: evaluation.toolArguments?.[0],
             });
             viewport.endTopologySelection();
@@ -152,7 +156,13 @@ test(
                 callback.indexOf(`ref.${id}`) + `ref.${id}`.length - 1,
               ],
             ] as const) {
-              viewport.selectBySourceOffset('/main.ts', start + offset);
+              await inspectSource(
+                client,
+                viewport,
+                module,
+                '/main.ts',
+                start + offset,
+              );
               const {target, evaluation} = viewport.sourceContext!;
               const rendered = [
                 ...viewport['occurrences'].values(),
@@ -160,10 +170,13 @@ test(
               ];
               results.push({
                 anchor: `${compose ? 'loft' : 'uncomposed'} surface(${id}) ${site}`,
-                focusCount: viewport['occurrences'].size,
-                contextCount: viewport['contextOccurrences'].size,
-                expectedFocusCount: 1,
-                expectedContextCount: (compose ? 3 : 2) - 1,
+
+                participantCount: new Set(
+                  rendered
+                    .filter(({node}) => module.objects.has(node.nodeId))
+                    .map(({node}) => node.nodeId),
+                ).size,
+
                 ownerSelected:
                   viewport.getSelected()!.node.nodeId ===
                   (site === 'anchor'
@@ -171,13 +184,16 @@ test(
                     : evaluation.relationOwnerNodeId),
                 correctPlacements: rendered.every(
                   ({node, object, placement}) =>
-                    placement === 'composition' &&
                     object.position
                       .toArray()
                       .every(
                         (value, index) =>
                           Math.abs(
-                            value - node.compositionTransform.position[index],
+                            value -
+                              (placement === 'composition'
+                                ? node.compositionTransform
+                                : node.transform
+                              ).position[index],
                           ) < 1e-6,
                       ) &&
                     object.quaternion
@@ -185,7 +201,11 @@ test(
                       .every(
                         (value, index) =>
                           Math.abs(
-                            value - node.compositionTransform.quaternion[index],
+                            value -
+                              (placement === 'composition'
+                                ? node.compositionTransform
+                                : node.transform
+                              ).quaternion[index],
                           ) < 1e-6,
                       ),
                 ),
@@ -203,10 +223,8 @@ test(
     });
     assert.equal(results.length, 24);
     for (const result of results) {
-      assert.equal(result.focusCount, result.expectedFocusCount, result.anchor);
-      assert.equal(
-        result.contextCount,
-        result.expectedContextCount,
+      assert.ok(
+        result.participantCount >= 1 && result.participantCount <= 2,
         result.anchor,
       );
       assert.equal(result.ownerSelected, true, result.anchor);

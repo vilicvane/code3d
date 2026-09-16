@@ -14,8 +14,16 @@ import {
 import type {
   ModelSnapshotObject,
   RenderMesh,
+  SketchSnapshot,
+  SketchPosition,
   Transform,
 } from '@code3d/core/tooling';
+import {
+  sketchCurveGeometry,
+  sketchCurvePosition,
+  sketchPointResolver,
+} from '@code3d/core/tooling';
+import {applySourceEmphasis, type SourceEmphasis} from './source-appearance';
 
 const defaultSurfaceOpacity = 0.68;
 const boundaryColor = '#080a07';
@@ -321,6 +329,95 @@ export function createRenderedModel(node: ModelSnapshotObject): THREE.Object3D {
   object.name = node.name;
   applyNodeTransform(object, node);
   node.children.forEach(child => object.add(createRenderedModel(child)));
+  return object;
+}
+
+/** Passive sketch geometry in its XZ plane; no faces, constraints or editing state. */
+export function createRenderedSketch(
+  layers: readonly SketchSnapshot[],
+  emphasis: SourceEmphasis,
+  selectedPoints: ReadonlyMap<number, SourceEmphasis> = new Map(),
+): THREE.Group {
+  const object = new THREE.Group();
+  const resolve = sketchPointResolver(layers);
+  const points = new Map(
+    layers.flatMap(layer =>
+      layer.entities.flatMap(entity =>
+        entity.kind === 'point'
+          ? [[JSON.stringify([layer.id, entity.id]), entity] as const]
+          : [],
+      ),
+    ),
+  );
+  const addressKey = (ref: {layer: string; id: number}) => {
+    const address = resolve(ref);
+    return JSON.stringify([address.layer, address.id]);
+  };
+  const point = (ref: {layer: string; id: number}) =>
+    points.get(addressKey(ref))!.position;
+  const selected = new Map(
+    [...selectedPoints].map(([id, emphasis]) => [
+      addressKey({layer: layers.at(-1)!.id, id}),
+      emphasis,
+    ]),
+  );
+  const coordinate = ([x, y]: SketchPosition) => [x, 0, -y];
+  const seen = new Set<string>();
+  for (const layer of layers)
+    for (const entity of layer.entities) {
+      const geometry = new THREE.BufferGeometry();
+      let primitive: THREE.Points | THREE.LineSegments;
+      let role = emphasis;
+      if (entity.kind === 'point') {
+        const ref = {layer: layer.id, id: entity.id};
+        const key = addressKey(ref);
+        if (seen.has(key)) {
+          geometry.dispose();
+          continue;
+        }
+        seen.add(key);
+        role = selected.get(key) ?? role;
+        geometry.setAttribute(
+          'position',
+          new THREE.Float32BufferAttribute(coordinate(point(ref)), 3),
+        );
+        primitive = new THREE.Points(
+          geometry,
+          createModelMaterial(undefined, 'vertex'),
+        );
+      } else {
+        const curve = sketchCurveGeometry(entity, point)!;
+        const count =
+          curve.kind === 'line'
+            ? 1
+            : Math.max(
+                1,
+                Math.ceil(
+                  (curve.kind === 'circle'
+                    ? 2 * Math.PI
+                    : Math.abs(curve.sweep)) /
+                    (Math.PI / 64),
+                ),
+              );
+        const positions: number[] = [];
+        for (let i = 0; i < count; i++)
+          positions.push(
+            ...coordinate(sketchCurvePosition(curve, i / count)),
+            ...coordinate(sketchCurvePosition(curve, (i + 1) / count)),
+          );
+        geometry.setAttribute(
+          'position',
+          new THREE.Float32BufferAttribute(positions, 3),
+        );
+        primitive = new THREE.LineSegments(
+          geometry,
+          createModelMaterial(undefined, 'edge'),
+        );
+      }
+      primitive.userData.sketchEntity = {layer: layer.id, id: entity.id};
+      applySourceEmphasis(primitive, role);
+      object.add(primitive);
+    }
   return object;
 }
 

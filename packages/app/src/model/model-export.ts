@@ -36,7 +36,7 @@ type ExportShape = Readonly<{
 }>;
 
 export function exportModel(
-  geometry: ModelGeometrySnapshot,
+  geometry: Pick<ModelGeometrySnapshot, 'shapes'>,
   instances: readonly ModelExportInstance[],
   options: ModelExportOptions,
   {

@@ -27,6 +27,8 @@ import {
   type Shape3D,
 } from 'replicad';
 import {
+  cross,
+  subtract,
   edgeGeometry,
   faceGeometry,
   transformGeometry,
@@ -35,6 +37,20 @@ import {
 import {cache, cachedArtifact} from './cached.js';
 import {extrudeWithTopology} from './extrude.js';
 import {font, googleFont, type Font} from './font.js';
+import {
+  anchorAnnotation,
+  boundsAnnotation,
+  captureInspectData,
+  dimension,
+  isRecordingInspection,
+  retainInspectionIdentity,
+  type Dimension,
+  type DimensionSegment,
+  type InspectContext,
+  type InspectClosureExecution,
+  type InspectResult,
+  type PreviewValue,
+} from './inspect.js';
 import {
   beginKernelOperationEvaluation,
   kernelOperationKey,
@@ -120,7 +136,14 @@ import {
   decodeKernelArtifact,
   encodeKernelArtifact,
 } from './kernel-artifact-codec.js';
-import {sketch} from './sketch.js';
+import {
+  isSketch,
+  isSketchPoint,
+  sketch,
+  sketchFrame,
+  sketchForFrame,
+  retainSketchFrame,
+} from './sketch.js';
 
 export type {Quaternion, Vec3} from './spatial.js';
 export type {EdgeId, SurfaceId, TopologyKind, VertexId} from './topology.js';
@@ -166,32 +189,47 @@ export type ElementSnapshot = Readonly<{
   bound?: Readonly<{size: readonly [number, number]; facing: 1 | -1}>;
   facing?: 1 | -1;
   direction?: 1 | -1;
-  arrow?: RigidTransform;
+  arrows?: readonly RigidTransform[];
   topology?: Readonly<{geometryNodeId: string; transform: Transform}> &
     TopologySelection;
 }>;
 
-/** A finite measurement in the common frame solved at the time of the call. */
-export type DistanceSnapshot = Readonly<{
-  value: number;
-  start: Vec3;
-  end: Vec3;
-  axis?: Vec3;
+type DistanceInspectData = Readonly<{
+  result: DistanceResult;
+  direction?: Vec3;
   axisName?: 'x' | 'y' | 'z';
-  operands: readonly Readonly<{
-    nodeId: string;
-    /** The entire model, rather than a named or topology reference. */
-    whole: boolean;
-    elements: readonly ElementSnapshot[];
-  }>[];
-  placements: readonly Readonly<{nodeId: string; transform: Transform}>[];
+  references: readonly [AnchorReference, AnchorReference];
+  poses: ReadonlyMap<RelationObject, RigidTransform>;
 }>;
 
-type DistanceObserver = (
-  snapshot: DistanceSnapshot,
-  objects: readonly RelationObject[],
-) => void;
-let observeDistance: DistanceObserver | undefined;
+type CompositionInspectData = Readonly<{
+  poses: ReadonlyMap<RelationObject, RigidTransform>;
+}>;
+
+type InspectionFrame = Readonly<{
+  owner(model: RelationObject): ModelObject | undefined;
+  display(model: RelationObject): PreviewValue | undefined;
+  positioned(
+    value: Anchor,
+    reference?: AnchorReference,
+    asAnchor?: boolean,
+  ): PreviewValue | undefined;
+}>;
+
+type RelateInspectData = Readonly<{
+  self: RelationObject;
+  original: RelationObject;
+  participants: readonly RelationObject[];
+  relations: readonly Relation[];
+}>;
+
+type RelateInspectionContext = RelateInspectData &
+  Readonly<{
+    owns(value: unknown): boolean;
+    poses(
+      relation?: RelationExpression,
+    ): ReadonlyMap<RelationObject, RigidTransform>;
+  }>;
 
 export type ConstraintAnchorSnapshot = Readonly<{
   nodeId: string;
@@ -272,14 +310,6 @@ export type ModelGeometryKind = 'solid' | 'face' | 'edge' | 'vertex';
 
 export type ModelKind = ModelGeometryKind | 'group';
 
-export type ModelOperationRegionSnapshot = Readonly<{
-  kind: 'intersection' | 'section';
-  inputNodeId: string;
-  /** The model whose local coordinates contain this region mesh. */
-  frameNodeId: string;
-  mesh: RenderMesh;
-}>;
-
 export type ModelOperationSelectionSnapshot = Readonly<{
   kind: TopologyKind;
   inputNodeId: string;
@@ -300,7 +330,6 @@ export type ModelOperationSnapshot = Readonly<{
     role: ModelOperationInputRole;
     index: number;
   }>[];
-  regions: readonly ModelOperationRegionSnapshot[];
   selections: readonly ModelOperationSelectionSnapshot[];
   sourceRef?: SourceRef;
   spatial?: ModelSpatialOperation;
@@ -398,6 +427,8 @@ export type RenderMesh = Readonly<{
 
 export type ModelSnapshotObject = Readonly<{
   nodeId: string;
+  /** Original author geometry retained in an inspection frame, for tool binding. */
+  sourceNodeId?: string;
   name: string;
   /** Effective material, including recursive overrides from enclosing groups. */
   material?: ModelMaterialSnapshot;
@@ -592,13 +623,6 @@ type StoredOperationInput = Readonly<{
   index: number;
 }>;
 
-type StoredOperationRegion = Readonly<{
-  kind: 'intersection' | 'section';
-  input: ModelObject;
-  frame: ModelObject;
-  artifact: KernelArtifact<AnyShape>;
-}>;
-
 type StoredOperationSelection = Readonly<{
   kind: TopologyKind;
   input: ModelObject;
@@ -610,7 +634,6 @@ type StoredOperation = {
   runtimeId: string;
   kind: ModelOperationKind;
   inputs: StoredOperationInput[];
-  regions: StoredOperationRegion[];
   selections: StoredOperationSelection[];
   spatial?: ModelSpatialOperation;
   dimensions?: Readonly<Record<string, ModelParameterDimension>>;
@@ -633,22 +656,19 @@ let operationTraces = new WeakMap<StoredOperation, OperationTrace>();
  * Finish in finally after snapshotting to retain this evaluation's kernel work.
  * An optional cancellation check may throw before any kernel operation starts;
  * complete results survive cancellation, and cleanup removes the check.
- * The optional distance observer receives call-time geometry snapshots; cleanup
- * also releases its evaluation scope, while distance() still returns a number.
  */
-export function beginModelEvaluation(
-  checkCancelled?: () => void,
-  distanceObserver?: DistanceObserver,
-): () => void {
+export function beginModelEvaluation(checkCancelled?: () => void): () => void {
   valueTraces = new WeakMap();
   operationTraces = new WeakMap();
-  const previous = observeDistance;
-  observeDistance = distanceObserver;
   const finish = beginKernelOperationEvaluation(checkCancelled);
   return () => {
-    observeDistance = previous;
     finish();
   };
+}
+
+/** Inspectors share the kernel but must retain the model's trace and cache scope. */
+export function beginModelInspection(checkCancelled?: () => void): () => void {
+  return beginKernelOperationEvaluation(checkCancelled, 'inspect');
 }
 
 function valueTrace(value: object): ValueTrace {
@@ -663,8 +683,8 @@ function valueTrace(value: object): ValueTrace {
 type BooleanOperation = 'cut' | 'fuse' | 'intersect';
 
 type BooleanEvaluation = Readonly<{
+  context: SolveContext;
   geometry: SolidGeometry;
-  regions: readonly StoredOperationRegion[];
 }>;
 
 type ModelObjectInit<Kind extends ModelKind = ModelKind> = Readonly<{
@@ -754,9 +774,19 @@ const modelNamedElements = Symbol('modelNamedElements');
 
 export interface Anchor<Kind extends ElementKind = ElementKind> {
   readonly [anchorKind]: Kind;
-  /** Translate this geometry's matching bound onto the directed target bound. */
+  /**
+   * Translate this geometry's matching bound onto the directed target bound.
+   * @code3d.inspect on.inspect
+   * @code3d.inspect this on.inspect
+   * @code3d.inspect target on.inspect
+   */
   on(target: Bound): Constraint;
-  /** Align the underlying geometry, retaining unconstrained position and orientation. */
+  /**
+   * Align the underlying geometry, retaining unconstrained position and orientation.
+   * @code3d.inspect align.inspect
+   * @code3d.inspect this align.inspect
+   * @code3d.inspect target align.inspect
+   */
   align(
     this: Anchor<'point' | 'line' | 'face'>,
     target: Anchor<'point' | 'line' | 'face'>,
@@ -899,11 +929,17 @@ export interface ModelCapabilities<
   bounds(relativeTo?: Model): ModelBounds;
   /** Model-origin coordinates in relativeTo's local frame, including placement. */
   position(relativeTo: Model): Vec3;
+  /**
+   * @code3d.inspect relate.inspectCall
+   * @code3d.inspect.context build relate.inspectContext
+   * @code3d.inspect.closure build relate.inspectBody
+   */
   relate(
     build: (
       self: ModelForKind<Elements, Kind>,
     ) => Relation | readonly Relation[],
   ): ModelForKind<Elements, Kind>;
+  /** @code3d.inspect sources expose.inspectSources */
   expose<const Sources extends ElementSources>(
     sources: Sources,
   ): ModelForKind<MergedElements<Elements, ExposedElements<Sources>>, Kind>;
@@ -972,6 +1008,10 @@ export interface SurfaceTopologyCapabilities extends EdgeTopologyCapabilities {
 
 export interface SolidModificationCapabilities<Elements extends NamedElements> {
   /** Subtracts all tools in one boolean operation, equivalent to cut(stock, tools). */
+  /**
+   * @code3d.inspect this cut.inspectReceiver
+   * @code3d.inspect tools cut.inspectMethodTools
+   */
   cut(tools: readonly SolidModel<{}>[]): SolidModel;
   /**
    * @code3d.param radius {kind: 'length', default: 1, label: 'Fillet radius', constraints: {exclusiveMin: 0}}
@@ -1026,6 +1066,8 @@ export type FaceModel<Elements extends NamedElements = PlanarElements> =
       flip(): Surface;
       /**
        * Extrudes along the face's local plane normal. Signed distance; no recentering.
+       * @code3d.inspect this extrude.inspectMethod
+       * @code3d.inspect distance extrude.inspectMethod
        * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
        */
       extrude(distance: number): SolidModel;
@@ -1304,6 +1346,43 @@ export function modelTopologyIds(
   );
 }
 
+/** Snapshot the actual referenced geometry, including an exposed group's parts. */
+export function previewAnchorReference(
+  value: unknown,
+  direction?: 'none' | 'forward' | 'both',
+):
+  | Readonly<{
+      model: RelationObject;
+      geometries: readonly ModelObject[];
+      elements: readonly ElementSnapshot[];
+    }>
+  | undefined {
+  if (!(value instanceof ModelAnchor) && !(value instanceof ModelObject))
+    return;
+  const reference =
+    value instanceof ModelObject
+      ? {...value.exposedElement(), name: 'geometry', model: value}
+      : value[anchorReferenceValue];
+  const parts = reference.topology ? [reference.topology] : reference.parts;
+  const snapshot = (element: StoredAnchor): readonly ElementSnapshot[] =>
+    direction && direction !== 'none'
+      ? [reference.model.previewElement(element, direction)]
+      : snapshotElements({[reference.name]: element});
+  return {
+    model: reference.model,
+    geometries: parts?.map(part => part.source) ?? [],
+    elements: parts?.length
+      ? parts.flatMap(part =>
+          snapshot({
+            ...reference,
+            topology: part,
+            members: undefined,
+          }),
+        )
+      : snapshot({...reference, members: undefined}),
+  };
+}
+
 /** Traceable placement values, including unfinished pivot and axis selections. */
 export abstract class RelationExpression {
   protected constructor(
@@ -1562,6 +1641,7 @@ export class PivotRotation extends RelationExpression {
     });
   }
   /**
+   * @code3d.inspect relate.inspectRelation
    * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
    * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
    * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
@@ -1575,6 +1655,7 @@ export class PivotRotation extends RelationExpression {
 export class PivotChain extends PivotRotation {
   /**
    * Offset the selected pivot along self's local axes, retaining its reference.
+   * @code3d.inspect relate.inspectRelation
    * @code3d.param x {kind: 'length', default: 0, label: 'Pivot ΔX'}
    * @code3d.param y {kind: 'length', default: 0, label: 'Pivot ΔY'}
    * @code3d.param z {kind: 'length', default: 0, label: 'Pivot ΔZ'}
@@ -1602,7 +1683,10 @@ export class AxisRotation extends RelationExpression {
       pivot: selection,
     });
   }
-  /** @code3d.param angle {kind: 'angle', default: 0, label: 'Rotate'} */
+  /**
+   * @code3d.inspect relate.inspectRelation
+   * @code3d.param angle {kind: 'angle', default: 0, label: 'Rotate'}
+   */
   rotate(angle: number): Transformation;
   rotate(angle = 0): Transformation {
     return this.chain.withRotation(this.selection, angle, this);
@@ -1612,6 +1696,7 @@ export class AxisRotation extends RelationExpression {
 export class AxisChain extends AxisRotation {
   /**
    * Offset the selected axis in its reference frame, retaining its direction.
+   * @code3d.inspect relate.inspectRelation
    * @code3d.param x {kind: 'length', default: 0, label: 'Axis ΔX'}
    * @code3d.param y {kind: 'length', default: 0, label: 'Axis ΔY'}
    * @code3d.param z {kind: 'length', default: 0, label: 'Axis ΔZ'}
@@ -1636,6 +1721,7 @@ function selectedAxis(
 
 /**
  * Move the joint result along the fixed axes of its composition.
+ * @code3d.inspect relate.inspectRelation
  * @code3d.param x {kind: 'length', default: 0, label: 'ΔX'}
  * @code3d.param y {kind: 'length', default: 0, label: 'ΔY'}
  * @code3d.param z {kind: 'length', default: 0, label: 'ΔZ'}
@@ -1647,6 +1733,7 @@ export function offset(x = 0, y = 0, z = 0): Transformation {
 }
 /**
  * Rotate about self's current origin and local X, Y, then Z axes.
+ * @code3d.inspect relate.inspectRelation
  * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
  * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
  * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
@@ -1661,6 +1748,7 @@ export function rotate(x = 0, y = 0, z = 0): Transformation {
 }
 /**
  * Select a pivot in self's local coordinates for the next rotation.
+ * @code3d.inspect relate.inspectRelation
  * @code3d.param x {kind: 'length', default: 0, label: 'Pivot X'}
  * @code3d.param y {kind: 'length', default: 0, label: 'Pivot Y'}
  * @code3d.param z {kind: 'length', default: 0, label: 'Pivot Z'}
@@ -1673,7 +1761,10 @@ export function pivot([x = 0, y = 0, z = 0]: Vec3 = origin): PivotChain {
     point: [x, y, z],
   });
 }
-/** @code3d.param id {kind: 'vertex', label: 'Pivot vertex'} */
+/**
+ * @code3d.inspect relate.inspectRelation
+ * @code3d.param id {kind: 'vertex', label: 'Pivot vertex'}
+ */
 export function pivotVertex(id: VertexId): PivotChain {
   assertTopologyId('vertex', id);
   return new PivotChain(new TransformationRotation(), {
@@ -1681,14 +1772,21 @@ export function pivotVertex(id: VertexId): PivotChain {
     id,
   });
 }
-/** Select a point reference as the center; rotation axes remain self local. @code3d.tool */
+/**
+ * Select a point reference as the center; rotation axes remain self local.
+ * @code3d.tool
+ * @code3d.inspect relate.inspectRelation
+ */
 export function pivotPoint(point: PointAnchor): PivotChain {
   return new PivotChain(new TransformationRotation(), {
     kind: 'pivotPoint',
     point: rotationPointReference(point),
   });
 }
-/** @code3d.param id {kind: 'edge', label: 'Rotation edge'} */
+/**
+ * @code3d.inspect relate.inspectRelation
+ * @code3d.param id {kind: 'edge', label: 'Rotation edge'}
+ */
 export function axisEdge(id: EdgeId): AxisChain {
   assertTopologyId('edge', id);
   return new AxisChain(new TransformationRotation(), {
@@ -1698,6 +1796,7 @@ export function axisEdge(id: EdgeId): AxisChain {
 }
 /**
  * Select a positioned axis in the composition for the next rotation.
+ * @code3d.inspect relate.inspectRelation
  * @code3d.tool
  */
 export function axisLine(axis: LineAnchor): AxisChain {
@@ -1726,6 +1825,10 @@ export abstract class RelationObject {
   /** @internal */
   abstract readonly name: string;
   protected placements: StoredPlacement[];
+
+  protected get initialPose(): RigidTransform {
+    return identityRigidTransform;
+  }
 
   protected get constraints(): StoredConstraint[] {
     return this.placements.filter(
@@ -1818,7 +1921,67 @@ export abstract class RelationObject {
       return constraint.storeFor(this, original);
     });
     this.placements.push(...stored);
-    return uniqueModels(stored.flatMap(constraintReferences));
+    const references = uniqueModels(stored.flatMap(constraintReferences));
+    if (isRecordingInspection())
+      captureInspectData({
+        self: this,
+        original,
+        participants: uniqueModels([
+          this,
+          ...references.filter(model => model !== original),
+        ]),
+        relations: [...relations],
+      } satisfies RelateInspectData);
+    return references;
+  }
+
+  /** @internal Continuous constraints solve together; transformations cut the ordered prefix. */
+  inspectionPoses(
+    relation?: RelationExpression,
+  ): ReadonlyMap<RelationObject, RigidTransform> {
+    if (!relation) return RelationObject.createSolveContext([this]).poses;
+    const reference = relation.traceReference();
+    const id =
+      reference.kind === 'constraint'
+        ? reference.constraintId
+        : reference.transformationId;
+    const index = this.placements.findIndex(value => value.id === id);
+    if (index < 0)
+      throw new Error(
+        'The inspected relation was not consumed by this relate call.',
+      );
+    let end = index + 1;
+    if (this.placements[index].kind !== 'transformation')
+      while (
+        end < this.placements.length &&
+        this.placements[end].kind !== 'transformation'
+      )
+        end++;
+    return RelationObject.createSolveContext(
+      [this],
+      new Map([[this, this.placements.slice(0, end)]]),
+    ).poses;
+  }
+
+  /** @internal Exact finite support and references in an already solved inspection stage. */
+  inspectionConstraint(
+    relation: RelationExpression,
+    poses: ReadonlyMap<RelationObject, RigidTransform>,
+  ) {
+    const reference = relation.traceReference();
+    if (reference.kind !== 'constraint') return undefined;
+    const constraint = this.placements.find(
+      value => value.id === reference.constraintId,
+    );
+    if (!constraint || constraint.kind === 'transformation') return undefined;
+    return {
+      source: constraint.source.model ?? this,
+      target: constraint.target.model ?? this,
+      snapshot: this.constraintSnapshot(constraint, {
+        poses,
+        frame: identityRigidTransform,
+      }),
+    };
   }
 
   [referenceBounds](
@@ -1888,41 +2051,46 @@ export abstract class RelationObject {
     return context.poses.get(this)!;
   }
 
-  protected relationElement(reference: StoredAnchor): ElementSnapshot {
+  /** @internal Snapshot a reference and its authored curve directions. */
+  previewElement(
+    reference: StoredAnchor,
+    direction: 'forward' | 'both' = 'forward',
+  ): ElementSnapshot {
     const element = reference;
     const topology = element.topology;
-    let arrow: RigidTransform | undefined;
+    let arrows: readonly RigidTransform[] | undefined;
     if (reference.kind === 'line' && topology) {
       const geometry = topology.source[modelGeometry]()!.value;
-      arrow = withTopologyShape(
-        geometry.shape,
-        geometry.topology,
-        topology.selection,
-        shape => {
-          const edge = shape as ReplicadEdge;
-          const position = (reference.direction ?? 1) === 1 ? 1 : 0;
-          const point = edge.pointAt(position),
-            tangent = edge.tangentAt(position);
-          try {
-            return topologyTransform(
-              topology,
-              frameFromYAxis(
-                point.toTuple(),
-                tangent
-                  .toTuple()
-                  .map(v => v * (reference.direction ?? 1)) as unknown as Vec3,
-              ),
-            );
-          } finally {
-            point.delete();
-            tangent.delete();
-          }
-        },
+      arrows = (direction === 'both' ? [1, -1] : [1]).map(sign =>
+        withTopologyShape(
+          geometry.shape,
+          geometry.topology,
+          topology.selection,
+          shape => {
+            const edge = shape as ReplicadEdge;
+            const facing = (reference.direction ?? 1) * sign;
+            const position = facing === 1 ? 1 : 0;
+            const point = edge.pointAt(position),
+              tangent = edge.tangentAt(position);
+            try {
+              return topologyTransform(
+                topology,
+                frameFromYAxis(
+                  point.toTuple(),
+                  tangent.toTuple().map(v => v * facing) as unknown as Vec3,
+                ),
+              );
+            } finally {
+              point.delete();
+              tangent.delete();
+            }
+          },
+        ),
       );
     }
     return {
       ...snapshotElements({[reference.name]: element})[0],
-      arrow,
+      arrows,
     };
   }
 
@@ -2397,7 +2565,7 @@ export abstract class RelationObject {
               [model],
               new Map(overrides).set(model, placements.slice(0, start)),
             ).poses.get(model)!
-          : identityRigidTransform;
+          : model.initialPose;
       return {
         initial,
         constraints: placements
@@ -2484,8 +2652,8 @@ export abstract class RelationObject {
         kind: 'align',
         source: anchorSnapshot(source, constraint.source),
         target: anchorSnapshot(target, constraint.target),
-        sourceElement: source.relationElement(constraint.source),
-        targetElement: target.relationElement(constraint.target),
+        sourceElement: source.previewElement(constraint.source),
+        targetElement: target.previewElement(constraint.target),
         sourceRefs: [...valueTrace(constraint).sourceRefs],
         parameters: [...valueTrace(constraint).parameters],
       };
@@ -2564,7 +2732,11 @@ export class SketchFrame extends RelationObject {
   private readonly source?: SketchFrame;
   private readonly operation = storedOperation('sketch');
 
-  constructor(source?: SketchFrame, init: RelationObjectInit = {}) {
+  constructor(
+    source?: SketchFrame,
+    init: RelationObjectInit = {},
+    private readonly retainedPose?: RigidTransform,
+  ) {
     super({
       placements: source?.placements,
       sourceRefs: source?.sourceRefs,
@@ -2576,6 +2748,17 @@ export class SketchFrame extends RelationObject {
       kind: 'face',
       transform: identityRigidTransform,
     }) as FaceAnchor;
+  }
+
+  protected override get initialPose(): RigidTransform {
+    return (
+      this.retainedPose ?? this.source?.initialPose ?? identityRigidTransform
+    );
+  }
+
+  /** Snapshot the plane's placement without retaining its mutable relation program. */
+  retained(pose: RigidTransform): SketchFrame {
+    return new SketchFrame(undefined, {sourceRefs: this.sourceRefs}, pose);
   }
 
   protected copyRelations(init: RelationObjectInit): SketchFrame {
@@ -2634,7 +2817,6 @@ export class SketchFrame extends RelationObject {
           role: 'reference',
           index,
         })),
-        regions: [],
         selections: [],
       },
     };
@@ -2846,6 +3028,7 @@ export class ModelObject<
     sources: Sources,
   ): RuntimeModel<MergedElements<Elements, ExposedElements<Sources>>, Kind> {
     const entries = Object.entries(sources);
+    captureInspectData(entries);
     const elements = this.localElements(entries.map(([, source]) => source));
     const exposed = Object.fromEntries(
       entries.map(([name], index) => [name, elements[index]]),
@@ -3261,6 +3444,7 @@ export class ModelObject<
   extrude(this: ModelObject<Elements, 'face'>, distance = 10): SolidModel {
     if (this.kind !== 'face')
       throw new Error('extrude requires a single face model.');
+    ModelObject.recordExtrusions([this], []);
     if (!Number.isFinite(distance) || distance === 0)
       throw new Error('Extrusion distance must be finite and non-zero.');
     const source = this.requireGeometry();
@@ -3282,7 +3466,7 @@ export class ModelObject<
           direction,
         ),
     );
-    return ModelObject.create<CanonicalElements, 'solid'>({
+    const result = ModelObject.create<CanonicalElements, 'solid'>({
       kind: 'solid',
       name: 'Extrude',
       geometry,
@@ -3303,7 +3487,9 @@ export class ModelObject<
           },
         },
       ),
-    }) as unknown as SolidModel;
+    });
+    ModelObject.recordExtrusions([this], [result]);
+    return result as unknown as SolidModel;
   }
 
   cut(
@@ -3508,6 +3694,7 @@ export class ModelObject<
     ]);
     const common = {
       nodeId: this.nodeId,
+      sourceNodeId: ModelObject.inspectionSources.get(this)?.nodeId,
       kind: this.kind,
       name: this.name,
       material,
@@ -3530,7 +3717,7 @@ export class ModelObject<
       }),
       sourceRefs: [...this.sourceRefs],
       parameters,
-      operation: this.operationSnapshot(meshCache),
+      operation: this.operationSnapshot(),
     } as const;
 
     if (this.kind === 'group') {
@@ -3564,7 +3751,6 @@ export class ModelObject<
       ...(this.geometry?.value.referenceBasis
         ? [this.geometry.value.referenceBasis.shape]
         : []),
-      ...this.operation.regions.map(region => region.artifact.value),
     ];
     for (const shape of shapes) {
       if (!disposed.has(shape)) {
@@ -3588,6 +3774,7 @@ export class ModelObject<
       ...(spine ? [spine] : []),
     ]);
     const resultPose = this.solvePose(solveContext);
+    ModelObject.recordCompositionInspection(solveContext, []);
     const sectionInputs = sections.map(section => ({
       model: section,
       geometry: section.requireGeometry(),
@@ -3622,7 +3809,7 @@ export class ModelObject<
       () => buildLoftGeometry(sectionInputs, spineInput, ruled),
     );
     const inputs = [...sections, ...(spine ? [spine] : [])];
-    return ModelObject.create<CanonicalElements, 'solid'>({
+    const result = ModelObject.create<CanonicalElements, 'solid'>({
       kind: 'solid',
       name: 'Loft',
       geometry,
@@ -3644,7 +3831,9 @@ export class ModelObject<
           ? [{model: spine, role: 'spine' as const, index: sections.length}]
           : []),
       ]),
-    }) as unknown as SolidModel;
+    });
+    ModelObject.recordCompositionInspection(solveContext, [[result, this]]);
+    return result as unknown as SolidModel;
   }
 
   /** @internal */
@@ -3652,8 +3841,9 @@ export class ModelObject<
     this: ModelObject<Elements, 'solid'>,
     operation: BooleanOperation,
     others: readonly ModelObject<{}, 'solid'>[],
+    context?: SolveContext,
   ): SolidModel {
-    const evaluation = this.evaluateBoolean(operation, others);
+    const evaluation = this.evaluateBoolean(operation, others, context);
     let transferred = false;
     try {
       const combined = ModelObject.create<CanonicalElements, 'solid'>({
@@ -3671,26 +3861,24 @@ export class ModelObject<
           this.meshTolerance,
           ...others.map(model => model.meshTolerance),
         ),
-        operation: storedOperation(
-          operation === 'fuse' ? 'union' : operation,
-          [
-            {model: this, role: 'receiver', index: 0},
-            ...others.map((model, index) => ({
-              model,
-              role:
-                operation === 'cut' ? ('tool' as const) : ('operand' as const),
-              index: index + 1,
-            })),
-          ],
-          {regions: evaluation.regions},
-        ),
+        operation: storedOperation(operation === 'fuse' ? 'union' : operation, [
+          {model: this, role: 'receiver', index: 0},
+          ...others.map((model, index) => ({
+            model,
+            role:
+              operation === 'cut' ? ('tool' as const) : ('operand' as const),
+            index: index + 1,
+          })),
+        ]),
       });
       transferred = true;
+      ModelObject.recordCompositionInspection(evaluation.context, [
+        [combined, this],
+      ]);
       return combined as unknown as SolidModel;
     } finally {
       if (!transferred) {
         disposeModelGeometryValue(evaluation.geometry.value);
-        evaluation.regions.forEach(region => region.artifact.value.delete());
       }
     }
   }
@@ -3699,12 +3887,12 @@ export class ModelObject<
     this: ModelObject<Elements, 'solid'>,
     operation: BooleanOperation,
     others: readonly ModelObject<{}, 'solid'>[],
+    solveContext = ModelObject.createSolveContext([this, ...others]),
   ): BooleanEvaluation {
-    const solveContext = ModelObject.createSolveContext([this, ...others]);
     const targetPose = this.solvePose(solveContext);
+    ModelObject.recordCompositionInspection(solveContext, []);
     let geometry = this.requireSolidGeometry();
     let temporaryGeometry: SolidGeometry | undefined;
-    const regions: StoredOperationRegion[] = [];
     let evaluated = false;
     try {
       for (const [otherIndex, other] of others.entries()) {
@@ -3720,32 +3908,6 @@ export class ModelObject<
           () => shapeWithTransform(otherGeometry.value.shape, transform),
         );
         try {
-          if (operation === 'cut' || operation === 'fuse') {
-            regions.push({
-              kind: 'intersection',
-              input: other,
-              frame: this,
-              artifact: evaluateKernelShape(
-                'boolean-intersection-region',
-                [],
-                [geometry, operand],
-                () => geometry.value.shape.intersect(operand.value),
-              ),
-            });
-          }
-          if (operation === 'fuse') {
-            regions.push({
-              kind: 'section',
-              input: other,
-              frame: this,
-              artifact: evaluateKernelShape(
-                'boolean-section-region',
-                [],
-                [geometry, operand],
-                () => unionSectionShape(geometry.value.shape, operand.value),
-              ),
-            });
-          }
           const nextGeometry = evaluateSolidGeometry(
             `boolean-${operation}`,
             [otherIndex],
@@ -3775,11 +3937,10 @@ export class ModelObject<
         }
       }
       evaluated = true;
-      return {geometry, regions};
+      return {geometry, context: solveContext};
     } finally {
       if (!evaluated) {
         temporaryGeometry?.value.shape.delete();
-        regions.forEach(region => region.artifact.value.delete());
       }
     }
   }
@@ -3895,45 +4056,14 @@ export class ModelObject<
     if (!first.length || !second.length)
       throw new Error('distance() cannot measure an empty group.');
     const record = (result: DistanceResult, direction?: Vec3): number => {
-      if (observeDistance) {
-        const operands = [left, right].map(reference => {
-          const topology = topologyParts(reference);
-          const elements =
-            topology && reference.kind !== 'point'
-              ? topology.map(
-                  part =>
-                    snapshotElements({
-                      [reference.name]: {
-                        ...reference,
-                        topology: part,
-                        members: undefined,
-                      },
-                    })[0],
-                )
-              : [
-                  snapshotElements({
-                    [reference.name]: {...reference, members: undefined},
-                  })[0],
-                ];
-          return {
-            nodeId: reference.model.nodeId,
-            whole: reference.whole === true,
-            elements,
-          };
-        });
-        observeDistance(
-          {
-            ...result,
-            axis: direction,
-            axisName: typeof axis === 'string' ? axis : undefined,
-            operands,
-            placements: [...context.poses].map(([model, pose]) => ({
-              nodeId: model.nodeId,
-              transform: toTransform(pose),
-            })),
-          },
-          [...context.poses.keys()],
-        );
+      if (isRecordingInspection()) {
+        captureInspectData({
+          result,
+          direction,
+          axisName: typeof axis === 'string' ? axis : undefined,
+          references: [left, right],
+          poses: new Map(context.poses),
+        } satisfies DistanceInspectData);
       }
       return result.value;
     };
@@ -4038,6 +4168,538 @@ export class ModelObject<
     );
   }
 
+  private static readonly inspectionSources = new WeakMap<
+    ModelObject,
+    ModelObject
+  >();
+
+  private static readonly inspectionFrames = new WeakMap<
+    ReadonlyMap<RelationObject, RigidTransform>,
+    InspectionFrame
+  >();
+
+  /** Retain identities across focus changes; the call owns the saved frame's lifetime. */
+  private static inspectionFrame(
+    poses: ReadonlyMap<RelationObject, RigidTransform>,
+  ): InspectionFrame {
+    const retained = this.inspectionFrames.get(poses);
+    if (retained) return retained;
+    // Detach placement programs; geometry and saved child assembly poses are
+    // immutable. In particular relate self may acquire more relations after
+    // the measurement, which must not enter this scene.
+    const detached = new Map<ModelObject, ModelObject>();
+    const detachElement = (element: StoredElement): StoredElement => ({
+      ...element,
+      topology: element.topology && {
+        ...element.topology,
+        source: detach(element.topology.source),
+      },
+      parts: element.parts?.map(part => ({
+        ...part,
+        source: detach(part.source),
+      })),
+      members:
+        element.members &&
+        Object.fromEntries(
+          Object.entries(element.members).map(([name, member]) => [
+            name,
+            detachElement(member),
+          ]),
+        ),
+    });
+    const detach = (model: ModelObject): ModelObject => {
+      const previous = detached.get(model);
+      if (previous) return previous;
+      const children = model.children.map(detach);
+      const value = model.copy(
+        {
+          placements: [],
+          children,
+          assembly: model.assembly && {
+            frame: model.assembly.frame,
+            poses: new Map(
+              model.children.map((child, index) => [
+                children[index],
+                model.assembly!.poses.get(child)!,
+              ]),
+            ),
+          },
+        },
+        storedOperation(model.operation.kind),
+      ) as ModelObject;
+      detached.set(model, value);
+      this.inspectionSources.set(value, model);
+      return value;
+    };
+    const owners = new Map<RelationObject, ModelObject>();
+    const owner = (model: RelationObject): ModelObject | undefined => {
+      const existing = owners.get(model);
+      if (existing) return existing;
+      const pose = poses.get(model);
+      if (!pose) return undefined;
+      const child = model instanceof ModelObject ? detach(model) : undefined;
+      const value = ModelObject.create({
+        kind: 'group',
+        name: model.name,
+        children: child ? [child] : [],
+        assembly: {
+          frame: identityRigidTransform,
+          poses: new Map(child ? [[child, pose]] : []),
+        },
+        operation: storedOperation('group'),
+        sourceRefs: model.sourceRefs,
+      });
+      retainInspectionIdentity(value, model);
+      owners.set(model, value);
+      return value;
+    };
+    const positionedValues = new Map<Anchor, PreviewValue>();
+    const positionedAnchors = new Map<Anchor, PreviewValue>();
+    const positioned = (
+      value: Anchor,
+      reference = anchorReference(value),
+      asAnchor = false,
+    ): PreviewValue | undefined => {
+      const values = asAnchor ? positionedAnchors : positionedValues;
+      const previous = values.get(value);
+      if (previous) return previous;
+      if (asAnchor && value instanceof ModelObject)
+        reference = {...reference, ...value.exposedElement(), whole: false};
+      const model = owner(reference.model);
+      if (!model) return undefined;
+      const result =
+        value instanceof ModelObject && !asAnchor
+          ? (model as unknown as Model)
+          : retainInspectionIdentity(
+              modelAnchor(
+                model,
+                reference.name,
+                transformElement(
+                  detachElement(reference),
+                  poses.get(reference.model)!,
+                ),
+              ),
+              value,
+            );
+      values.set(value, result);
+      return result;
+    };
+    const sketches = new Map<SketchFrame, PreviewValue>();
+    const display = (model: RelationObject): PreviewValue | undefined => {
+      if (!(model instanceof SketchFrame))
+        return owner(model) as unknown as Model | undefined;
+      let value = sketches.get(model);
+      const pose = poses.get(model);
+      if (!value && pose) {
+        value = retainSketchFrame(sketchForFrame(model), pose);
+        sketches.set(model, value);
+      }
+      return value;
+    };
+    const frame = {owner, positioned, display};
+    this.inspectionFrames.set(poses, frame);
+    return frame;
+  }
+
+  /** @internal Preserve each batch result's matching input placement. */
+  static recordExtrusions(
+    faces: readonly ModelObject[],
+    results: readonly ModelObject[],
+  ): void {
+    if (!isRecordingInspection()) return;
+    const context = this.createSolveContext(faces);
+    this.recordCompositionInspection(
+      context,
+      results.map((result, index) => [result, faces[index]]),
+    );
+  }
+
+  private static readonly dimensionSegments = new WeakMap<
+    ModelObject,
+    Map<string, readonly DimensionSegment[]>
+  >();
+
+  /** @internal Describe complete straight edges in the actual model geometry. */
+  static inspectDimension(
+    model: Model,
+    parameter: string,
+    value: number,
+    owner = model,
+    transform = identityRigidTransform,
+    axisLabel?: string,
+  ): Dimension {
+    const object = model as unknown as ModelObject;
+    let dimensions = this.dimensionSegments.get(object);
+    if (!dimensions)
+      this.dimensionSegments.set(object, (dimensions = new Map()));
+    let segments = dimensions.get(parameter);
+    if (!segments) {
+      const definition = object.operation.dimensions![parameter];
+      const length = Math.hypot(...definition.vector);
+      const edges = shapeSubshapes(
+        object.requireGeometry().value.shape,
+        'edge',
+      );
+      try {
+        segments = edges.flatMap(edge => {
+          if (edge.geomType !== 'LINE') return [];
+          const first = edge.pointAt(0),
+            last = edge.pointAt(1);
+          try {
+            const start = first.toTuple(),
+              end = last.toTuple();
+            const delta = subtract(end, start);
+            return Math.abs(Math.hypot(...delta) - length) <= length * 1e-5 &&
+              Math.hypot(...cross(delta, definition.vector)) <=
+                length * length * 1e-5
+              ? [{start, end}]
+              : [];
+          } finally {
+            first.delete();
+            last.delete();
+          }
+        });
+      } finally {
+        edges.forEach(edge => edge.delete());
+      }
+      if (!segments.length)
+        segments = [
+          {
+            start: definition.origin,
+            end: addVectors(definition.origin, definition.vector),
+          },
+        ];
+      dimensions.set(parameter, segments);
+    }
+    return dimension({
+      owner,
+      value,
+      axisLabel,
+      candidates: segments.map(segment => ({
+        start: composeTransforms(transform, translation(segment.start))
+          .position,
+        end: composeTransforms(transform, translation(segment.end)).position,
+      })),
+    });
+  }
+
+  /** @internal Input and distance parameters choose their respective roles. */
+  static inspectExtrude(
+    faces: readonly FaceModel<{}>[],
+    results: readonly SolidModel[],
+    distance: number,
+    parameter: string | undefined,
+    data: CompositionInspectData,
+  ): InspectResult {
+    const input = parameter !== 'distance';
+    const scene = this.inspectComposition(
+      data,
+      input ? results : faces,
+      input ? faces : results,
+    );
+    if (input) return scene;
+    const frame = this.inspectionFrame(data.poses);
+    return {
+      ...scene,
+      target: [
+        ...scene.target!,
+        ...results.map(result =>
+          this.inspectDimension(
+            result,
+            'distance',
+            distance,
+            frame.positioned(result) as Model,
+            data.poses.get(result as unknown as ModelObject)!,
+          ),
+        ),
+      ],
+    };
+  }
+
+  private static recordCompositionInspection(
+    context: SolveContext,
+    results: readonly (readonly [ModelObject, ModelObject])[],
+  ): void {
+    if (!isRecordingInspection()) return;
+    const poses = new Map(context.poses);
+    for (const [result, input] of results)
+      poses.set(result, input.solvePose(context));
+    captureInspectData({poses} satisfies CompositionInspectData);
+  }
+
+  /** @internal Return ordinary values in the original operation's common frame. */
+  static inspectComposition(
+    data: CompositionInspectData,
+    ambient: readonly Model[],
+    target: readonly Model[],
+  ): InspectResult {
+    const frame = this.inspectionFrame(data.poses);
+    return {
+      ambient: ambient.map(value => frame.positioned(value)!),
+      target: target.map(value => frame.positioned(value)!),
+    };
+  }
+
+  /** @internal Derive the focused cut volume using the original solved operands. */
+  static inspectCutTools(
+    stock: SolidModel<{}>,
+    tools: readonly SolidModel<{}>[],
+    focused: readonly SolidModel<{}>[],
+    data: CompositionInspectData,
+  ): InspectResult {
+    const scene = this.inspectComposition(data, [stock, ...tools], []);
+    if (!focused.length) return scene;
+    const operands = focused as unknown as readonly ModelObject<{}, 'solid'>[];
+    const poses = new Map(data.poses);
+    const context = {poses, frame: identityRigidTransform};
+    const tool =
+      operands.length === 1
+        ? operands[0]
+        : (operands[0][combineModels](
+            'fuse',
+            operands.slice(1),
+            context,
+          ) as unknown as ModelObject<{}, 'solid'>);
+    poses.set(tool, poses.get(operands[0])!);
+    const body = stock as unknown as ModelObject<{}, 'solid'>;
+    let region: SolidModel;
+    try {
+      region = body[combineModels]('intersect', [tool], context).material(
+        '#ffad4d',
+      );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message ===
+          'The inputs have no common solid volume. Adjust their positions or dimensions so they overlap.'
+      )
+        return scene;
+      throw error;
+    }
+    const model = region as unknown as ModelObject;
+    const frame = this.inspectionFrame(new Map([[model, poses.get(body)!]]));
+    return {...scene, target: [frame.positioned(region)!]};
+  }
+
+  /** @internal References use expose's recorded values and receiver-local frame. */
+  static inspectExposed(
+    receiver: Model,
+    result: Model,
+    entries: readonly (readonly [string, Anchor])[],
+  ): InspectResult {
+    const owner = receiver as unknown as ModelObject;
+    const exposed = result as unknown as ModelObject;
+    return {
+      ambient: [receiver],
+      target: entries.map(([name, source]) =>
+        retainInspectionIdentity(
+          modelAnchor(owner, name, exposed.elements[name]),
+          source,
+        ),
+      ),
+    };
+  }
+
+  /** @internal Inspect members in this group's already solved assembly frame. */
+  static inspectGroup(result: GroupModel): InspectResult {
+    const model = result as unknown as ModelObject;
+    const frame = this.inspectionFrame(model.assembly!.poses);
+    return {
+      target: model.children.map(child =>
+        frame.positioned(child as unknown as Model)!,
+      ),
+    };
+  }
+
+  /** @internal Ordinary preview values retain the measured frame without re-solving. */
+  static inspectDistance(
+    [a, b]: readonly [Anchor, Anchor, DistanceAxis?],
+    context: InspectContext<number, unknown, DistanceInspectData | undefined>,
+  ): InspectResult | undefined {
+    const data = context.data;
+    if (!data) return undefined;
+    const {owner, positioned} = this.inspectionFrame(data.poses);
+    const operands = [a, b].map((value, index) =>
+      positioned(value, data.references[index]),
+    );
+    const focused = context.focused.values.flatMap(value => {
+      if (!(value instanceof ModelObject) && !(value instanceof ModelAnchor))
+        return [];
+      const placed = positioned(value);
+      return placed ? [placed] : [];
+    });
+    const selectedModels = new Set(
+      context.focused.values.filter(value => value instanceof ModelObject),
+    );
+    const target = operands.flatMap((value, index) =>
+      value &&
+      (!context.focused.parameter ||
+        !([a, b][index] instanceof ModelObject) ||
+        selectedModels.has([a, b][index] as ModelObject))
+        ? [value]
+        : [],
+    );
+    target.push(...focused.filter(value => !target.includes(value)));
+    const first = owner(data.references[0].model);
+    if (!first) return undefined;
+    target.push(
+      dimension({
+        owner: first as unknown as Model,
+        start: data.result.start,
+        end: data.result.end,
+        value: data.result.value,
+        axisLabel:
+          data.axisName?.toUpperCase() ?? (data.direction ? 'axis' : undefined),
+      }),
+    );
+    const targets = new Set(target);
+    return {
+      target: [...targets].map(value =>
+        value instanceof ModelAnchor && !focused.includes(value)
+          ? anchorAnnotation(value, {direction: 'none'})
+          : value,
+      ),
+      ambient: [...data.poses.keys()].flatMap(model => {
+        const value = owner(model) as unknown as Model | undefined;
+        return value && !targets.has(value) ? [value] : [];
+      }),
+    };
+  }
+
+  /** @internal Render only actual participants in the appropriate relation stage. */
+  static inspectRelate(
+    data: RelateInspectionContext,
+    focus: unknown,
+    values: readonly PreviewValue[],
+  ): InspectResult {
+    const poses = data.poses(
+      focus instanceof RelationExpression ? focus : undefined,
+    );
+    const frame = this.inspectionFrame(poses);
+    const selected = values.flatMap<PreviewValue>(value => {
+      if (isSketch(value) || isSketchPoint(value)) {
+        if (!data.owns(value)) return [];
+        const original = isSketch(value) ? value : value.sketch;
+        const source = sketchFrame(original);
+        const placed = frame.display(
+          source === data.original ? data.self : source,
+        );
+        if (!placed || !isSketch(placed)) return [];
+        return [
+          isSketch(value)
+            ? placed
+            : retainInspectionIdentity(placed.point(value.id), value),
+        ];
+      }
+      if (!(value instanceof ModelObject) && !(value instanceof ModelAnchor))
+        return [];
+      if (!data.owns(value)) return [];
+      const reference = anchorReference(value);
+      const rebound =
+        reference.model === data.original
+          ? {...reference, model: data.self}
+          : reference;
+      const result = frame.positioned(value, rebound);
+      return result ? [result] : [];
+    });
+    const target = selected.length ? selected : [frame.display(data.self)!];
+    const targets = new Set(target);
+    return {
+      target,
+      ambient: data.participants.flatMap(model => {
+        const value = frame.display(model);
+        return value && !targets.has(value) ? [value] : [];
+      }),
+    };
+  }
+
+  /** @internal Relation markers use explicit anchor and finite-range annotations. */
+  static inspectConstraint(
+    data: RelateInspectionContext,
+    relation: RelationExpression,
+    sourceValue: Anchor,
+    targetValue: Anchor,
+  ): InspectResult | undefined {
+    if (!data.owns(relation)) return undefined;
+    const poses = data.poses(relation);
+    const constraint = data.self.inspectionConstraint(relation, poses);
+    if (!constraint) return undefined;
+    const frame = this.inspectionFrame(poses);
+    const sourceOwner = frame.owner(constraint.source);
+    const targetOwner = frame.owner(constraint.target);
+    if (!sourceOwner || !targetOwner) return undefined;
+    const {snapshot} = constraint;
+    const anchor = (
+      owner: ModelObject,
+      model: RelationObject,
+      element: ElementSnapshot,
+      identity: Anchor,
+    ) =>
+      retainInspectionIdentity(
+        modelAnchor(owner, element.name, {
+          kind: element.kind,
+          transform: composeTransforms(poses.get(model)!, element.transform),
+          bound: element.bound,
+        }),
+        identity,
+      );
+    const source =
+      snapshot.kind === 'on'
+        ? anchor(
+            sourceOwner,
+            constraint.source,
+            snapshot.sourceElement,
+            sourceValue,
+          )
+        : (frame.positioned(
+            sourceValue,
+            {...anchorReference(sourceValue), model: constraint.source},
+            true,
+          ) as Anchor);
+    const target =
+      snapshot.kind === 'on'
+        ? anchor(
+            targetOwner,
+            constraint.target,
+            snapshot.targetElement,
+            targetValue,
+          )
+        : (frame.positioned(
+            targetValue,
+            {...anchorReference(targetValue), model: constraint.target},
+            true,
+          ) as Anchor);
+    const extent =
+      snapshot.kind === 'on'
+        ? retainInspectionIdentity(
+            boundsAnnotation({
+              owner: sourceOwner as unknown as Model,
+              size: snapshot.sourceBounds.size,
+              frame: composeTransforms(
+                poses.get(constraint.source)!,
+                snapshot.sourceBounds.transform,
+              ),
+            }),
+            sourceValue,
+          )
+        : undefined;
+    const owners = new Set([sourceOwner, targetOwner]);
+    return {
+      target: [
+        ...[...new Set([constraint.source, constraint.target])].map(model =>
+          frame.display(model)!,
+        ),
+        anchorAnnotation(source, {direction: 'forward'}),
+        anchorAnnotation(target, {direction: 'forward'}),
+        ...(extent ? [extent] : []),
+      ],
+      ambient: data.participants.flatMap(model => {
+        const value = frame.display(model);
+        return value && !owners.has(frame.owner(model)!) ? [value] : [];
+      }),
+    };
+  }
+
   /** Bounds of the selected finite geometry after a rigid transform. */
   private [referenceBoundsParts](
     reference: StoredAnchor,
@@ -4121,10 +4783,6 @@ export class ModelObject<
           this.geometry.value.topology,
         ),
       );
-    for (const region of this.operation.regions)
-      result.push(
-        meshQuery(region.artifact, region.artifact.value, this.meshTolerance),
-      );
     return result;
   }
 
@@ -4169,8 +4827,11 @@ export class ModelObject<
     return super.alignmentGeometry(reference);
   }
 
-  protected override relationElement(reference: StoredAnchor): ElementSnapshot {
-    return super.relationElement(
+  override previewElement(
+    reference: StoredAnchor,
+    direction: 'forward' | 'both' = 'forward',
+  ): ElementSnapshot {
+    return super.previewElement(
       reference.whole
         ? {
             ...this.exposedElement(),
@@ -4179,6 +4840,7 @@ export class ModelObject<
             facing: reference.facing,
           }
         : reference,
+      direction,
     );
   }
 
@@ -4223,10 +4885,8 @@ export class ModelObject<
     return this.requireGeometry() as SolidGeometry;
   }
 
-  private operationSnapshot(
-    meshCache: Map<AnyShape, RenderMesh>,
-  ): ModelOperationSnapshot {
-    const {kind, inputs, regions, selections} = this.operation;
+  private operationSnapshot(): ModelOperationSnapshot {
+    const {kind, inputs, selections} = this.operation;
     const {siteId, execution, order, sourceRef} =
       operationTraces.get(this.operation) ?? {};
     return {
@@ -4240,17 +4900,6 @@ export class ModelObject<
         nodeId: model.nodeId,
         role,
         index,
-      })),
-      regions: regions.map(region => ({
-        kind: region.kind,
-        inputNodeId: region.input.nodeId,
-        frameNodeId: region.frame.nodeId,
-        mesh: renderMesh(
-          region.artifact,
-          region.artifact.value,
-          meshCache,
-          this.meshTolerance,
-        ),
       })),
       selections: selections.map(selection => ({
         kind: selection.kind,
@@ -4436,6 +5085,10 @@ export type LoftOptions = Readonly<{
   ruled?: boolean;
 }>;
 
+/**
+ * @code3d.inspect sections loft.inspectSections
+ * @code3d.inspect spine loft.inspectSpine
+ */
 export function loft(
   sections: readonly FaceModel<{}>[],
   {spine, ruled = false}: LoftOptions = {},
@@ -4458,6 +5111,9 @@ export function loft(
 }
 
 /**
+ * @code3d.inspect x box.inspectDimension
+ * @code3d.inspect y box.inspectDimension
+ * @code3d.inspect z box.inspectDimension
  * @code3d.param x {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
  * @code3d.param z {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
@@ -4880,6 +5536,7 @@ function normalizeReplicadSolid(shape: Shape3D): Shape3D {
 }
 
 /** Compose members in the first member's local frame; empty groups use the default frame. */
+/** @code3d.inspect children group.inspectChildren */
 export function group(children: readonly Model[], name = 'Group'): GroupModel {
   const runtimeChildren = children.map(child =>
     requireModelObject(child, 'Every group child must be a model.'),
@@ -4899,16 +5556,216 @@ export function group(children: readonly Model[], name = 'Group'): GroupModel {
   }) as unknown as GroupModel;
 }
 
+/** @internal */
+export namespace group {
+  export function inspectChildren(
+    _args: [readonly Model[], string?],
+    context: InspectContext<GroupModel>,
+  ): InspectResult | undefined {
+    return context.return && ModelObject.inspectGroup(context.return);
+  }
+}
+
 /**
  * Measure finite models, topology, bounds or point references in their solved placement.
  * Without axis, returns the shortest geometric distance. With axis, returns the
  * gap between projected intervals (zero when they overlap). The result is a
  * non-negative number computed now; later relations do not update it.
+ * @code3d.inspect distance.inspect
+ * @code3d.inspect a distance.inspect
+ * @code3d.inspect b distance.inspect
+ * @code3d.inspect axis distance.inspect
  */
 export function distance(a: Anchor, b: Anchor, axis?: DistanceAxis): number {
   return ModelObject.distance(a, b, axis);
 }
 
+/** @internal */
+export namespace distance {
+  export function inspect(
+    args: [Anchor, Anchor, DistanceAxis?],
+    context: InspectContext<number, unknown, DistanceInspectData | undefined>,
+  ): InspectResult | undefined {
+    return ModelObject.inspectDistance(args, context);
+  }
+}
+
+/** @internal Runtime exports for JSDoc inspectors; not a free modeling function. */
+export namespace relate {
+  export function inspectContext(
+    execution: InspectClosureExecution,
+  ): RelateInspectionContext | undefined {
+    const data = execution.call.data as RelateInspectData | undefined;
+    return data && createContext(data);
+  }
+
+  const contexts = new WeakMap<RelateInspectData, RelateInspectionContext>();
+
+  function createContext(data: RelateInspectData): RelateInspectionContext {
+    const existing = contexts.get(data);
+    if (existing) return existing;
+    const participants = new Set([...data.participants, data.original]);
+    const frames = new Map<
+      RelationExpression | undefined,
+      ReadonlyMap<RelationObject, RigidTransform>
+    >();
+    const relations = new Set(
+      data.relations.map(value => {
+        const ref = value.traceReference();
+        return ref.kind === 'constraint'
+          ? ref.constraintId
+          : ref.transformationId;
+      }),
+    );
+    const context: RelateInspectionContext = {
+      ...data,
+      poses(relation) {
+        let frame = frames.get(relation);
+        if (!frame) {
+          frame = data.self.inspectionPoses(relation);
+          frames.set(relation, frame);
+        }
+        return frame;
+      },
+      owns,
+    };
+    contexts.set(data, context);
+    return context;
+
+    function owns(value: unknown, seen = new Set<object>()): boolean {
+      if (isSketch(value) || isSketchPoint(value))
+        return participants.has(
+          sketchFrame(isSketch(value) ? value : value.sketch),
+        );
+      if (value instanceof RelationExpression) {
+        const ref = value.traceReference();
+        return relations.has(
+          ref.kind === 'constraint' ? ref.constraintId : ref.transformationId,
+        );
+      }
+      if (value instanceof ModelObject || value instanceof ModelAnchor)
+        return participants.has(anchorReference(value).model);
+      if (!value || typeof value !== 'object' || seen.has(value)) return false;
+      if (value instanceof Map || value instanceof Set) {
+        seen.add(value);
+        const members = [
+          ...(value instanceof Map
+            ? Map.prototype.values
+            : Set.prototype.values
+          ).call(value),
+        ];
+        const related =
+          members.length > 0 && members.every(member => owns(member, seen));
+        seen.delete(value);
+        return related;
+      }
+      const prototype = Object.getPrototypeOf(value);
+      if (
+        !Array.isArray(value) &&
+        prototype !== Object.prototype &&
+        prototype !== null
+      )
+        return false;
+      seen.add(value);
+      const members = Object.keys(value).map(key =>
+        Object.getOwnPropertyDescriptor(value, key)!,
+      );
+      const related =
+        members.length > 0 &&
+        members.every(member => 'value' in member && owns(member.value, seen));
+      seen.delete(value);
+      return related;
+    }
+  }
+
+  export function context(
+    context: InspectContext,
+  ): RelateInspectionContext | undefined {
+    for (let closure = context.closure; closure; closure = closure.parent)
+      if (closure.provider === inspectContext)
+        return closure.data as RelateInspectionContext;
+    return undefined;
+  }
+
+  export function inspectCall(
+    _args: readonly unknown[],
+    context: InspectContext,
+  ): InspectResult | undefined {
+    if (!(context.return instanceof ModelObject) && !isSketch(context.return))
+      return undefined;
+    const data = createContext(context.data as RelateInspectData);
+    return ModelObject.inspectRelate(data, context.return, [
+      context.return as unknown as PreviewValue,
+    ]);
+  }
+
+  /** Inspect numeric/reference arguments through their consumed relation result. */
+  export function inspectRelation(
+    _args: readonly unknown[],
+    context: InspectContext,
+  ): InspectResult | undefined {
+    const data = relate.context(context);
+    const relation = context.return;
+    if (!(relation instanceof RelationExpression) || !data?.owns(relation))
+      return undefined;
+    return ModelObject.inspectRelate(data, relation, context.focused.values);
+  }
+
+  export function inspectBody(
+    _args: readonly unknown[],
+    context: InspectContext,
+  ): InspectResult | undefined {
+    const data = relate.context(context);
+    if (!data?.owns(context.focused.value)) return undefined;
+    return ModelObject.inspectRelate(
+      data,
+      context.focused.value,
+      context.focused.values,
+    );
+  }
+}
+
+/** @internal */
+export namespace expose {
+  export function inspectSources(
+    _args: [ElementSources],
+    context: InspectContext<
+      Model,
+      Model,
+      readonly (readonly [string, Anchor])[]
+    >,
+  ): InspectResult | undefined {
+    return (
+      context.return &&
+      ModelObject.inspectExposed(context.receiver, context.return, context.data)
+    );
+  }
+}
+
+/** @internal */
+export namespace on {
+  export function inspect(
+    [target]: [Anchor],
+    context: InspectContext<Constraint, Anchor>,
+  ): InspectResult | undefined {
+    const data = relate.context(context);
+    return data && context.return
+      ? ModelObject.inspectConstraint(
+          data,
+          context.return,
+          context.receiver,
+          target,
+        )
+      : undefined;
+  }
+}
+
+/** @internal */
+export namespace align {
+  export const inspect = on.inspect;
+}
+
+/** @code3d.inspect operands union.inspectOperands */
 export function union(operands: readonly SolidModel<{}>[]): SolidModel {
   const {first, others} = booleanOperands('union', operands);
   return first[combineModels]('fuse', others);
@@ -4916,11 +5773,15 @@ export function union(operands: readonly SolidModel<{}>[]): SolidModel {
 
 /**
  * Extrudes each face independently, preserving array order and placement.
+ * @code3d.inspect face extrude.inspectFaces
+ * @code3d.inspect distance extrude.inspectFaces
  * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
  */
 export function extrude(face: FaceModel<{}>, distance: number): SolidModel;
 /**
  * Extrudes each face independently.
+ * @code3d.inspect faces extrude.inspectFaces
+ * @code3d.inspect distance extrude.inspectFaces
  * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
  */
 export function extrude(
@@ -4938,8 +5799,18 @@ export function extrude(
       'extrude requires a face model or an array of face models.',
     ),
   );
-  const solids = faces.map(value => value.extrude(distance));
-  return Array.isArray(face) ? solids : solids[0];
+  const solids: SolidModel[] = [];
+  try {
+    for (const value of faces) solids.push(value.extrude(distance));
+    return Array.isArray(face) ? solids : solids[0];
+  } finally {
+    // Inner method records belong to this same free-function invocation.
+    // Restore its complete input scope even when a batch member throws.
+    ModelObject.recordExtrusions(
+      faces,
+      solids as unknown as readonly ModelObject[],
+    );
+  }
 }
 
 /**
@@ -4966,6 +5837,10 @@ export function text(
   );
 }
 
+/**
+ * @code3d.inspect stock cut.inspectStock
+ * @code3d.inspect tools cut.inspectTools
+ */
 export function cut(
   stock: SolidModel<{}>,
   tools: readonly SolidModel<{}>[],
@@ -4984,6 +5859,7 @@ export function cut(
   return runtimeStock[combineModels]('cut', runtimeTools);
 }
 
+/** @code3d.inspect operands intersect.inspectOperands */
 export function intersect(operands: readonly SolidModel<{}>[]): SolidModel {
   const {first, others} = booleanOperands('intersect', operands);
   return first[combineModels]('intersect', others);
@@ -4991,6 +5867,10 @@ export function intersect(operands: readonly SolidModel<{}>[]): SolidModel {
 
 export function isModelObject(value: unknown): value is ModelObject {
   return value instanceof ModelObject;
+}
+
+export function isSolidModel(value: unknown): value is SolidModel<{}> {
+  return value instanceof ModelObject && value.kind === 'solid';
 }
 
 export function isConstraint(value: unknown): value is Constraint {
@@ -5494,7 +6374,6 @@ function storedOperation(
   kind: ModelOperationKind,
   inputs: readonly StoredOperationInput[] = [],
   options: Readonly<{
-    regions?: readonly StoredOperationRegion[];
     selections?: readonly StoredOperationSelection[];
     dimensions?: Readonly<Record<string, ModelParameterDimension>>;
   }> = {},
@@ -5503,7 +6382,6 @@ function storedOperation(
     runtimeId: `operation-${nextOperationId++}`,
     kind,
     inputs: [...inputs],
-    regions: [...(options.regions ?? [])],
     selections: [...(options.selections ?? [])],
     dimensions: options.dimensions,
   };
@@ -6318,36 +7196,6 @@ function topologyReferences(
   });
 }
 
-function unionSectionShape(left: Shape3D, right: Shape3D): AnyShape {
-  const section = new (getOC().BRepAlgoAPI_Section)(
-    left.wrapped,
-    right.wrapped,
-    false,
-  );
-  try {
-    section.Build();
-    const sectionShape = castOwnedShape(section.Shape());
-    const edges = shapeSubshapes(sectionShape, 'edge');
-    if (edges.length === 0) {
-      return sectionShape;
-    }
-    let wire: ReturnType<typeof assembleWire> | undefined;
-    try {
-      wire = assembleWire(edges);
-      const face = makeFace(wire);
-      sectionShape.delete();
-      return face;
-    } catch {
-      return sectionShape;
-    } finally {
-      edges.forEach(edge => edge.delete());
-      wire?.delete();
-    }
-  } finally {
-    section.delete();
-  }
-}
-
 function boundReference(target: Bound): AnchorReference {
   const reference =
     target instanceof ModelAnchor ? target[anchorReferenceValue] : undefined;
@@ -6459,6 +7307,200 @@ function requireModelKind<Kind extends ModelKind>(
     throw new Error(message);
   }
   return object as ModelObject<{}, Kind>;
+}
+
+/** @internal */
+export namespace box {
+  export function inspectDimension(
+    args: [number, number, number],
+    context: InspectContext<SolidModel>,
+  ): InspectResult | undefined {
+    if (!context.return) return undefined;
+    const parameter = context.focused.parameter!;
+    const value = args[['x', 'y', 'z'].indexOf(parameter)];
+    return {
+      target: [
+        context.return,
+        ModelObject.inspectDimension(
+          context.return,
+          parameter,
+          value,
+          context.return,
+          identityRigidTransform,
+          parameter.toUpperCase(),
+        ),
+      ],
+    };
+  }
+}
+
+/** @internal */
+export namespace extrude {
+  export function inspectFaces(
+    [face, distance]: [FaceModel<{}> | readonly FaceModel<{}>[], number],
+    context: InspectContext<
+      SolidModel | readonly SolidModel[],
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    const faces = (
+      Array.isArray(face) ? face : [face]
+    ) as readonly FaceModel<{}>[];
+    const results = (
+      Array.isArray(context.return)
+        ? context.return
+        : context.return
+          ? [context.return]
+          : []
+    ) as readonly SolidModel[];
+    return ModelObject.inspectExtrude(
+      faces,
+      results,
+      distance,
+      context.focused.parameter,
+      context.data,
+    );
+  }
+  export function inspectMethod(
+    [distance]: [number],
+    context: InspectContext<
+      SolidModel,
+      FaceModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return (
+      context.data &&
+      ModelObject.inspectExtrude(
+        [context.receiver],
+        context.return ? [context.return] : [],
+        distance,
+        context.focused.parameter,
+        context.data,
+      )
+    );
+  }
+}
+
+/** @internal */
+export namespace union {
+  export function inspectOperands(
+    [operands]: [readonly SolidModel<{}>[]],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectComposition(context.data, [], operands);
+  }
+}
+
+/** @internal */
+export namespace intersect {
+  export function inspectOperands(
+    [operands]: [readonly SolidModel<{}>[]],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectComposition(
+      context.data,
+      operands,
+      context.return ? [context.return] : [],
+    );
+  }
+}
+
+/** @internal */
+export namespace cut {
+  export function inspectStock(
+    [stock, tools]: [SolidModel<{}>, readonly SolidModel<{}>[]],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectComposition(context.data, tools, [stock]);
+  }
+  export function inspectTools(
+    [stock, tools]: [SolidModel<{}>, readonly SolidModel<{}>[]],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectCutTools(
+      stock,
+      tools,
+      context.focused.solids,
+      context.data,
+    );
+  }
+  export function inspectReceiver(
+    [tools]: [readonly SolidModel<{}>[]],
+    context: InspectContext<
+      SolidModel,
+      SolidModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return inspectStock([context.receiver, tools], context);
+  }
+  export function inspectMethodTools(
+    [tools]: [readonly SolidModel<{}>[]],
+    context: InspectContext<
+      SolidModel,
+      SolidModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return inspectTools([context.receiver, tools], context);
+  }
+}
+
+/** @internal */
+export namespace loft {
+  export function inspectSections(
+    [sections, {spine} = {}]: [readonly FaceModel<{}>[], LoftOptions?],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectComposition(
+      context.data,
+      [...(context.return ? [context.return] : []), ...(spine ? [spine] : [])],
+      sections,
+    );
+  }
+  export function inspectSpine(
+    [sections, {spine} = {}]: [readonly FaceModel<{}>[], LoftOptions?],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectComposition(
+      context.data,
+      [...sections, ...(context.return ? [context.return] : [])],
+      spine ? [spine] : [],
+    );
+  }
 }
 
 function booleanOperands(

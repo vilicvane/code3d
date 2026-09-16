@@ -26,7 +26,7 @@ const receipt = (id: number): StoredReceipt => ({
   },
 });
 
-test('history includes only successful render receipts with a capture timestamp', () => {
+test('history includes actual render receipts with a capture timestamp', () => {
   const history = new AgentRenderHistory();
   const base = receipt(1);
   for (const response of [
@@ -110,4 +110,32 @@ test('presentation reactions run outside writes and coalesce restore and revoke 
   history.record(euler, receipt(3));
   await Promise.resolve();
   assert.deepEqual(sizes, [2, 0]);
+});
+
+test('failed model renders enter the same reactive history and deduplicate retries', () => {
+  const history = new AgentRenderHistory();
+  const saved = receipt(1);
+  assert.ok(saved.response?.ok);
+  const failed: StoredReceipt = {
+    ...saved,
+    response: {
+      ok: false,
+      error: {
+        code: 'model_failed',
+        message: 'No intersection',
+        details: saved.response.data,
+      },
+      artifacts: saved.response.artifacts,
+    },
+  };
+  const sizes: number[] = [];
+  const stop = reaction(
+    () => history.items.length,
+    size => sizes.push(size),
+  );
+  history.record(euler, failed);
+  history.record(euler, failed);
+  stop();
+  assert.deepEqual(sizes, [1]);
+  assert.equal(history.items[0].image, png);
 });

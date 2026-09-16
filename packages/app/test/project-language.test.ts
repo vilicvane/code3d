@@ -91,6 +91,33 @@ function fixture(extra: Record<string, string> = {}) {
   };
 }
 
+test('allows emitted TypeScript syntax while respecting a project opting into erasable syntax', async () => {
+  const state = fixture();
+  const source = `export function part(width: number) { return width; }
+    export namespace part { export const size = 12; }
+    enum Size { Small = 12 }
+    class Dimensions { constructor(readonly width: number) {} }
+    export const result = part(new Dimensions(Size.Small).width) + part.size;`;
+  await state.load(source);
+  const program = state.loader.typeScriptProgram;
+  const file = program.getSourceFile('/model.ts')!;
+  assert.deepEqual(program.getSyntacticDiagnostics(file), []);
+  assert.deepEqual(program.getSemanticDiagnostics(file), []);
+
+  await state.load(source, [
+    {
+      path: '/tsconfig.json',
+      source: JSON.stringify({compilerOptions: {erasableSyntaxOnly: true}}),
+    },
+  ]);
+  const restricted = state.loader.typeScriptProgram;
+  assert.ok(
+    restricted
+      .getSemanticDiagnostics(restricted.getSourceFile('/model.ts'))
+      .some(diagnostic => diagnostic.code === 1294),
+  );
+});
+
 test('source edits reuse parsed dependencies and maps; new imports prepare once and removed imports leave the closure', async () => {
   const state = fixture();
   const source = 'import {value} from "one"; export const size = 1;';

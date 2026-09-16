@@ -11,103 +11,105 @@ declare const window: Window & {
 };
 
 test(
-  'Boolean regions stay in the primary input frame when the result solves to a different position',
+  'Boolean argument scenes render the original operands and generated regions in the common frame',
   {timeout: 120_000},
   async t => {
     const page = await openViewport(t);
     const results = await page.evaluate(async () => {
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const {viewport, compiler} = window.decorationTest;
       const results = [];
       for (const kind of ['cut', 'union', 'intersect'] as const) {
-        const source = `import {box, point, cut, union, intersect} from '@code3d/core';
-const base = box(20, 20, 20).relate(self => self.on(point().up)${kind === 'intersect' ? '.rotate(0, 0, 25)' : ''});
-const cutter = box(30, 10, 30).originOffset(0, ${kind === 'cut' ? '-5' : kind === 'intersect' ? '-20' : '0'}, 0);
+        const source = `import {box, point, cut, union, intersect, rotate} from '@code3d/core';
+const base = box(20, 20, 20).relate(self => [self.on(point().up), rotate(0, 0, 25)]);
+const cutter = box(30, 10, 30).originOffset(0, -5, 0);
 export default ${kind === 'cut' ? 'cut(base, [cutter])' : `${kind}([base, cutter])`};`;
         const module = await compiler.compile(
           {files: [{path: '/main.ts', source}]},
           '/main.ts',
         );
         if (module.diagnostic) throw new Error(module.diagnostic.summary);
-        viewport.renderModule(module);
-        const operation = [...module.operations.values()].find(
-          op => op.kind === kind,
-        )!;
-        const receiver = module.objects.get(operation.inputs[0].nodeId)!;
-        const output = module.objects.get(operation.outputNodeId)!;
-        for (const role of [
-          'receiver',
-          kind === 'cut' ? 'tool' : 'operand',
-        ] as const) {
-          const target = module.sourceTargets.find(
-            target =>
-              target.kind === 'operation-input' &&
-              target.evaluations.some(
-                e =>
-                  e.operationId === operation.id &&
-                  e.operationInput?.role === role,
-              ),
-          )!;
-          viewport['renderSourceTarget'](
-            target,
-            target.evaluations.findIndex(e => e.operationId === operation.id),
+        for (const token of ['base', 'cutter']) {
+          await inspectSource(
+            compiler,
+            viewport,
+            module,
+            '/main.ts',
+            source.lastIndexOf(token) + 1,
           );
-          const occurrence = [
-            ...viewport['occurrences'].values(),
-            ...viewport['contextOccurrences'].values(),
-          ].find(o => o.node.nodeId === receiver.nodeId)!;
-          occurrence.object.updateWorldMatrix(true, true);
-          const layers = viewport['decorationLayers'].get(
-            'source-context:boolean-operation-regions',
-          )!;
-          const distances = layers.map(({object}) => {
-            let mesh: import('three').Mesh | undefined;
-            object.traverse(child => {
-              if ((child as import('three').Mesh).isMesh && !mesh)
-                mesh = child as import('three').Mesh;
-            });
-            mesh!.updateWorldMatrix(true, false);
-            const point = mesh!.position
-              .clone()
-              .fromBufferAttribute(mesh!.geometry.getAttribute('position'), 0);
-            return point
-              .clone()
-              .applyMatrix4(mesh!.matrixWorld)
-              .distanceTo(point.applyMatrix4(occurrence.object.matrixWorld));
-          });
+          const scene = viewport['inspectionScene']!;
+          const bodies = [...scene.target, ...scene.ambient].filter(
+            item => item.kind === 'model',
+          );
           results.push({
             kind,
-            role,
-            distances,
-            receiverPose: receiver.compositionTransform,
-            outputPose: output.compositionTransform,
+            token,
+            target: scene.target.length,
+            ambient: scene.ambient.length,
+            focused: scene.target.filter(item => item.focused).length,
+            matrices: bodies.map(({model}) => {
+              const occurrence = viewport
+                .renderedOccurrences()
+                .find(value => value.renderedNodeId === model.nodeId)!;
+              occurrence.object.updateWorldMatrix(true, true);
+              const pose = model.transform;
+              return {
+                actual: occurrence.object.matrixWorld.toArray(),
+                expected: occurrence.object.matrix
+                  .clone()
+                  .compose(
+                    occurrence.object.position.clone().fromArray(pose.position),
+                    occurrence.object.quaternion
+                      .clone()
+                      .fromArray(pose.quaternion),
+                    occurrence.object.scale.clone().fromArray(pose.scale),
+                  )
+                  .toArray(),
+              };
+            }),
           });
         }
       }
       return results;
     });
     for (const result of results) {
-      assert.notDeepEqual(
-        result.receiverPose,
-        result.outputPose,
-        `The fixture must distinguish the two frames: ${JSON.stringify(result)}`,
-      );
-      assert.ok(result.distances.length > 0);
-      assert.ok(
-        result.distances.every(distance => distance < 1e-6),
+      assert.equal(
+        result.target,
+        result.kind === 'union' ? 2 : 1,
         JSON.stringify(result),
       );
+      assert.equal(
+        result.ambient,
+        result.kind === 'union'
+          ? 0
+          : result.kind === 'cut' && result.token === 'base'
+            ? 1
+            : 2,
+      );
+      assert.equal(
+        result.focused,
+        result.kind === 'intersect' ||
+          (result.kind === 'cut' && result.token === 'cutter')
+          ? 0
+          : 1,
+      );
+      for (const matrix of result.matrices)
+        matrix.actual.forEach((value, i) =>
+          assert.ok(Math.abs(value - matrix.expected[i]) < 1e-6),
+        );
     }
-    if (process.env.CODE3D_DECORATION_SCREENSHOT)
-      await page.screenshot({path: process.env.CODE3D_DECORATION_SCREENSHOT});
   },
 );
 
 test(
-  'loft argument results follow the first section frame and hide during input previews',
+  'loft argument previews retain the placed sections and a separately rendered result',
   {timeout: 120_000},
   async t => {
     const page = await openViewport(t);
     const results = await page.evaluate(async () => {
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const {viewport, compiler} = window.decorationTest;
       const source = `import {rotate, offset, circle, loft, point, rectangle} from '@code3d/core';
 const start = circle(12).relate(s => [s.on(point([17, 8, -13]).up), rotate(0, 0, 25)]);
@@ -118,67 +120,39 @@ export default loft([start, end]);`;
         '/main.ts',
       );
       if (module.diagnostic) throw new Error(module.diagnostic.summary);
-      viewport.renderModule(module);
-      const operation = [...module.operations.values()].find(
-        op => op.kind === 'loft',
-      )!;
       const results = [];
       for (const word of ['start', 'end']) {
-        viewport.selectBySourceOffset('/main.ts', source.lastIndexOf(word) + 1);
-        const occurrences = [
-          ...viewport['occurrences'].values(),
-          ...viewport['contextOccurrences'].values(),
-        ];
-        const receiver = occurrences.find(
-          o => o.node.nodeId === operation.inputs[0].nodeId,
-        )!;
-        receiver.object.updateWorldMatrix(true, true);
-        const layers = viewport['decorationLayers'].get(
-          'source-context:loft-result',
-        )!;
-        const distances = layers.map(({object}) => {
-          let mesh: import('three').Mesh | undefined;
-          object.traverse(child => {
-            if ((child as import('three').Mesh).isMesh && !mesh)
-              mesh = child as import('three').Mesh;
-          });
-          mesh!.updateWorldMatrix(true, false);
-          const point = mesh!.position
-            .clone()
-            .fromBufferAttribute(mesh!.geometry.getAttribute('position'), 0);
-          return point
-            .clone()
-            .applyMatrix4(mesh!.matrixWorld)
-            .distanceTo(point.applyMatrix4(receiver.object.matrixWorld));
-        });
-        viewport.setParameterPreview('test-preview', 1);
-        const hidden = !viewport['decorationLayers'].has(
-          'source-context:loft-result',
+        await inspectSource(
+          compiler,
+          viewport,
+          module,
+          '/main.ts',
+          source.lastIndexOf(word) + 1,
         );
-        viewport.clearParameterPreview('test-preview');
+        const scene = viewport['inspectionScene']!;
+        const sections = scene.target.filter(item => item.kind === 'model');
+        const result = scene.ambient.find(item => item.kind === 'model')!;
         results.push({
           word,
-          distances,
-          count: occurrences.length,
-          hidden,
-          restored: viewport['decorationLayers'].get(
-            'source-context:loft-result',
-          )?.length,
-          receiverPosition: receiver.object.position.toArray(),
+          target: sections.length,
+          ambient: scene.ambient.length,
+          focus: sections.filter(item => item.focused).length,
+          count: viewport
+            .renderedOccurrences()
+            .filter(value => value.object.parent === viewport['root']).length,
+          firstPose: sections[0].model.children[0].transform,
+          resultPose: result.model.children[0].transform,
         });
       }
       return results;
     });
     for (const result of results) {
-      assert.equal(result.count, 2);
-      assert.equal(result.distances.length, 1);
-      assert.ok(result.distances[0] < 1e-6, JSON.stringify(result));
-      assert.ok(
-        result.receiverPosition.some(value => Math.abs(value) > 1),
-        'Fixture must have a nonzero first section pose',
-      );
-      assert.equal(result.hidden, true);
-      assert.equal(result.restored, 1);
+      assert.equal(result.target, 2);
+      assert.equal(result.ambient, 1);
+      assert.equal(result.count, 3);
+      assert.equal(result.focus, 1);
+      assert.deepEqual(result.firstPose, result.resultPose);
+      assert.ok(result.firstPose.position.some(value => Math.abs(value) > 1));
     }
   },
 );
@@ -190,6 +164,8 @@ test(
     const page = await openViewport(t);
     const result = await page.evaluate(async () => {
       const {viewport, compiler} = window.decorationTest;
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const {spatialIntent} = await import('/src/tools/model-spatial-tool.ts');
       const source =
         "import {box} from '@code3d/core'; export default box(20, 10, 30).originOffset(2, 3, 4);";
@@ -199,7 +175,10 @@ test(
       );
       if (module.diagnostic) throw new Error(module.diagnostic.summary);
       viewport.renderModule(module);
-      viewport.selectBySourceOffset(
+      await inspectSource(
+        compiler,
+        viewport,
+        module,
         '/main.ts',
         source.indexOf('originOffset') + 2,
       );
@@ -340,9 +319,11 @@ test(
     const page = await openViewport(t);
     const results = await page.evaluate(async () => {
       const {viewport, compiler} = window.decorationTest;
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const results = [];
       for (const reversed of [false, true]) {
-        const source = `import {box} from '@code3d/core';
+        const source = `import {box, rotate, pivotVertex, offset} from '@code3d/core';
 const base = box(60, 2, 40);
 export default box(20, 10, 30).originVertex(3).rotate(10, 25, 15).relate(self => [${reversed ? 'base.on(self.up)' : 'self.on(base.up)'}, rotate(0, 45, 0), pivotVertex(6).rotate(0, 0, 90), offset(20, 0, 0)]);`;
         const module = await compiler.compile(
@@ -351,21 +332,23 @@ export default box(20, 10, 30).originVertex(3).rotate(10, 25, 15).relate(self =>
         );
         if (module.diagnostic) throw new Error(module.diagnostic.summary);
         viewport.renderModule(module);
-        viewport.selectBySourceOffset(
-          '/main.ts',
-          source.indexOf('pivotVertex') + 2,
-        );
-        const selection = viewport.sourceContext!.evaluation.selection!;
-        if (selection.kind === 'edges')
-          throw new Error('Expected vertex selection');
+        if (
+          !(await inspectSource(
+            compiler,
+            viewport,
+            module,
+            '/main.ts',
+            source.lastIndexOf('pivotVertex(') + 'pivotVertex('.length,
+          ))
+        )
+          throw new Error('Pivot argument has no inspection scene');
         const occurrence = viewport.getSelected()!;
         viewport.beginTopologySelection(
           occurrence.key,
-          selection.inputNodeId,
-          selection.kind,
+          occurrence.node.nodeId,
+          'vertex',
           false,
-          selection.ids,
-          selection.scope,
+          [6],
         );
         const candidates = viewport['topologySelection']!;
         occurrence.object.updateWorldMatrix(true, true);
@@ -373,7 +356,19 @@ export default box(20, 10, 30).originVertex(3).rotate(10, 25, 15).relate(self =>
         const mesh = occurrence.node.mesh!;
         const marker = viewport['decorationLayers'].get(
           'source-context:model-origin',
-        )![0].anchor!;
+        )?.[0]?.anchor;
+        if (!marker)
+          throw new Error(
+            JSON.stringify({
+              kind: viewport.sourceContext?.target.kind,
+              tool: viewport.sourceContext?.target.tool?.signature.name,
+              spatial: viewport.sourceContext?.evaluation.relationSpatial,
+              layers: [...viewport['decorationLayers'].keys()],
+              node: occurrence.node.nodeId,
+              relationOwner:
+                viewport.sourceContext?.evaluation.relationOwnerNodeId,
+            }),
+          );
         const pivot = occurrence.object.position
           .clone()
           .fromArray(mesh.topologyVertices, mesh.vertexIds.indexOf(6) * 3)

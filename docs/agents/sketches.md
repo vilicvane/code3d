@@ -48,22 +48,23 @@ For a source binding named `profile`, a cursor-only observation can be:
 }
 ```
 
-Selecting a sketch returns the same solved 2D scene as the sketch editor: the
-selected layer and its upstream layers, with grid, curves, region fills and
-constraint labels. The image is a 960×720 PNG in orthographic local XY; sketch
-`[x, y]` maps to model `[x, 0, -y]`. Omit `render.view` for a sketch;
-3D view options return `sketch_view_unsupported`. Sketch captures report
-`mode: "modeling"`; an explicit `mode: "render"` returns
-`sketch_render_mode_unsupported`. Select a `.face()`, extrusion,
-or other model expression to inspect its 3D rendering and B-rep instead. Function
-arguments and JSDoc fallback work for sketch observations too.
+Sketch rendering uses the same three-dimensional inspect scene as the App. It
+shows solved points and curves at their actual placement, including multiple
+non-coplanar sketches and models together when an inspector returns them.
+The 960×720 PNG supports every `render.view` and both Modeling and Render modes,
+with perspective projection in `observation-scene` coordinates. Grid, constraint
+labels and editing controls belong to the App's separate 2D sketch editor.
+Function arguments and JSDoc fallback work for sketch observations too.
 
-Sketch summaries have `kind: "sketch"`. `s0` is the selected layer; `s1`, `s2`,
-and so on are its ancestors, nearest first. Each summary gives its `layerId`,
-`base`, source location, available upstream variable `references`, local entity
-counts and bounds, degrees of freedom, and redundant constraint indices. Upstream
-geometry is read-only in the selected layer: edit its defining source or create
-a derived layer, rather than copying upstream entities into the local layer.
+Sketch summaries have `kind: "sketch"`. For a single sketch, `s0` is the selected
+layer; `s1`, `s2`, and so on are its ancestors, nearest first. Mixed scenes
+continue these keys across their sketch instances and also include B-rep `mN`
+models. Each summary gives its `layerId`, `base`, source location, available
+upstream variable `references`, local entity counts and bounds, degrees of
+freedom, and redundant constraint indices. Geometry stays in local 2D: map
+sketch `[x, y]` to model `[x, 0, -y]`, then apply the summary's `geometryToScene`
+transform to locate it in the screenshot. Upstream geometry is read-only in the
+selected layer: edit its defining source or create a derived layer.
 
 `topology.kind: "sketch"` distinguishes this response from B-rep topology. Items
 are ordered as local entities, local constraints, then region summaries:
@@ -95,11 +96,11 @@ Page with the existing `topology: {snapshotId, model: "s0", offset, limit}`
 options; the same snapshot lifetime and page limits apply. Choose another `sN`
 to inspect that ancestor. B-rep `kind` / `ids` filters return
 `sketch_filter_unsupported` for sketches. When rendering a snapshot page, the
-chosen sketch layer determines the image too.
+image retains the complete inspect scene; `model` selects topology data only.
 
 A failure downstream of a valid sketch does not block that sketch's observation.
-Failure to evaluate the selected sketch returns a model diagnostic and no stale
-image. Source acceptance and saving remain separate from evaluation success.
+Failure to evaluate the selected sketch returns a model diagnostic. An inspector
+can supply a diagnostic scene alongside that failure; no stale image is reused. Source acceptance and saving remain separate from evaluation success.
 
 ## Related reading
 

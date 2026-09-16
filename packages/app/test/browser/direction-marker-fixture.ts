@@ -21,7 +21,10 @@ export function inspectDirectionMarkers(root: Object3D) {
   root.traverse(object => {
     const decoration = object.userData.decoration as
       import('../../src/viewport-decoration.ts').ViewportDecoration | undefined;
-    if (decoration?.kind === 'anchor' && decoration.directed) {
+    if (
+      decoration?.kind === 'anchor' &&
+      decoration.directionDisplay === 'forward'
+    ) {
       let shafts = 0;
       const heads: HeadMeasurement[] = [];
       object.traverse(child => {

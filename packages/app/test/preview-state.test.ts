@@ -4,6 +4,7 @@ import {reaction, observable, runInAction} from 'mobx';
 import type {CompilationPhase} from '../src/model/compilation-progress.ts';
 import type {ModelModule} from '../src/model/compiler.ts';
 import {ModelPreviewState} from '../src/model/preview-state.ts';
+import type {InspectionSnapshot} from '../src/model/inspection-snapshot.ts';
 
 const emptyModule: ModelModule = {
   sketches: new Map(),
@@ -16,6 +17,78 @@ const emptyModule: ModelModule = {
   sourceTargets: [],
   designArguments: [],
 };
+
+test('inspection retains the presented scene, publishes only the newest request and recovers after failure', async () => {
+  const state = new ModelPreviewState();
+  state.activate('/model.ts');
+  state.accept(state.begin(1), emptyModule);
+  state.presented(true);
+  const scene = (): InspectionSnapshot => ({
+    target: [],
+    ambient: [],
+    objects: new Map(),
+    sketches: new Map(),
+  });
+  let shown = scene();
+  const old = shown;
+  let finishFirst!: (value: InspectionSnapshot) => void;
+  let finishSecond!: (value: InspectionSnapshot) => void;
+  const present = (value: InspectionSnapshot | undefined) => {
+    shown = value!;
+    state.presented(true);
+  };
+  const first = state.inspect(
+    () =>
+      new Promise(resolve => {
+        finishFirst = resolve;
+      }),
+    present,
+  );
+  const second = state.inspect(
+    () =>
+      new Promise(resolve => {
+        finishSecond = resolve;
+      }),
+    present,
+  );
+  assert.equal(shown, old);
+  assert.equal(state.inspecting, true);
+  assert.equal(state.sourceVersion, undefined);
+  const newer = scene();
+  finishSecond(newer);
+  assert.equal(await second, true);
+  assert.equal(shown, newer);
+  assert.equal(state.sourceVersion, 1);
+  finishFirst(scene());
+  assert.equal(await first, false);
+  assert.equal(shown, newer);
+  assert.equal(
+    await state.inspect(async () => {
+      throw new Error('Bad inspector');
+    }, present),
+    false,
+  );
+  assert.equal(shown, newer);
+  assert.equal(state.inspectionDiagnostic?.kind, 'inspect');
+  assert.equal(state.module, emptyModule);
+  assert.equal(state.diagnostic, undefined);
+  assert.equal(await state.inspect(async () => scene(), present), true);
+  assert.equal(state.inspectionDiagnostic, undefined);
+  assert.notEqual(shown, newer);
+
+  const pending = state.inspect(
+    () =>
+      new Promise(resolve => {
+        finishFirst = resolve;
+      }),
+    present,
+  );
+  state.begin(2);
+  const beforeReplacement = shown;
+  finishFirst(scene());
+  assert.equal(await pending, false);
+  assert.equal(shown, beforeReplacement);
+});
 
 test('editor diagnostics belong to evaluated entries and survive navigation until invalidated', () => {
   const state = new ModelPreviewState();
@@ -84,6 +157,8 @@ test('same-file failure retains the display while empty success replaces it', ()
   assert.equal(state.hasPreviewedTarget, true);
   state.accept(state.begin(3), emptyModule);
   assert.equal(state.module, emptyModule);
+  assert.equal(state.sourceVersion, undefined);
+  state.presented(false);
   assert.equal(state.sourceVersion, 3);
   assert.equal(state.status, 'ready');
   assert.equal(state.diagnostic, undefined);
@@ -163,6 +238,7 @@ test('an evaluated tool failure remains editable and source transactions suspend
     diagnostic: {kind: 'evaluation', summary: 'Invalid parameter'},
   });
   assert.equal(state.status, 'error');
+  state.presented(true);
   assert.equal(state.sourceVersion, 1);
   assert.throws(
     () =>

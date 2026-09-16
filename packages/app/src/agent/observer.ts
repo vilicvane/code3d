@@ -9,18 +9,20 @@ import {
 } from '@code3d/agent';
 import {
   sameTopologyId,
+  type ModelSnapshotObject,
   type TopologyId,
   type TopologyKind,
   type Transform,
 } from '@code3d/core/tooling';
 import {Matrix4, Quaternion, Vector3} from 'three';
 import {ModelCompilerClient} from '../model/compiler-client';
-import {ModelDiagnosticError} from '../model/diagnostic';
+import {ModelDiagnosticError, type ModelDiagnostic} from '../model/diagnostic';
 import type {ModelModule} from '../model/compiler';
 import {sourceDecorationProviders} from '../model/source-decorations';
 import type {ProjectFileReader} from '../project/file-reader';
 import {ModelViewport} from '../viewport';
-import {SketchEditor} from '../ui/sketch-editor';
+import type {InspectionSnapshot} from '../model/inspection-snapshot';
+import {collectExportInstances} from '../rendering/model-export-scene';
 import {sketchDiagnostic} from '../model/viewport-diagnostic';
 import {
   describeSketch,
@@ -47,6 +49,8 @@ type Snapshot = {
   id: string;
   request: AgentObservation;
   module: ModelModule;
+  scene: InspectionSnapshot;
+  diagnostic?: ModelDiagnostic;
   models: ObservedModel[];
   createdAt: string;
   summaries: Map<
@@ -76,7 +80,9 @@ export class AgentObserver {
       .catch(error => {
         if (!(error instanceof ModelDiagnosticError)) throw error;
         return failure(
-          'model_failed',
+          error.diagnostic.kind === 'inspect'
+            ? 'inspect_failed'
+            : 'model_failed',
           error.diagnostic.summary,
           error.diagnostic,
         );
@@ -128,34 +134,82 @@ export class AgentObserver {
         },
       );
       const viewport = this.getViewport();
-      viewport.renderModule(module);
-      const selected = viewport.selectBySourceOffset(
+      const scope = viewport.sourceEvaluationAt(
+        module,
         request.cursor.file,
         request.cursor.start,
-        undefined,
         module.activeDesignContextId,
       );
-      const sketchId = selected
-        ? viewport.sourceContext?.evaluation.sketchIds?.[0]
-        : undefined;
-      const sketches = sketchId ? observeSketch(sketchId, module.sketches) : [];
-      const diagnostic = sketches.length
-        ? sketchDiagnostic(module.diagnostic, sketches[0].layers)
-        : module.diagnostic;
-      if (diagnostic)
+      const selection = {
+        file: request.cursor.file,
+        offset: request.cursor.start,
+        contextId: scope?.evaluation.contextId ?? module.activeDesignContextId,
+        order: scope?.evaluation.runtime.order,
+        callId: scope?.evaluation.inspectCallId,
+      };
+      let scene: InspectionSnapshot | undefined;
+      try {
+        scene = await this.compiler.inspect(module, selection);
+      } catch (error) {
+        if (!module.diagnostic || !(error instanceof ModelDiagnosticError))
+          throw error;
+        return failure('model_failed', module.diagnostic.summary, {
+          ...module.diagnostic,
+          inspectionDiagnostic: error.diagnostic,
+        });
+      }
+      const sketches: ObservedSketch[] = [];
+      const foregroundSketches = new Set<ObservedSketch>();
+      const seen = new Set<string>();
+      for (const item of [
+        ...(scene?.target ?? []),
+        ...(scene?.ambient ?? []),
+      ]) {
+        if (item.kind !== 'sketch' || seen.has(item.sketchId)) continue;
+        seen.add(item.sketchId);
+        for (const sketch of observeSketch(item.sketchId, scene!.sketches)) {
+          const entry = {
+            ...sketch,
+            key: `s${sketches.length}`,
+            geometryToScene: item.model.compositionTransform,
+          };
+          sketches.push(entry);
+          if (scene!.target.includes(item)) foregroundSketches.add(entry);
+        }
+      }
+      const diagnostic =
+        sketches.length && scope?.evaluation.runtime.outcome !== 'failed'
+          ? sketchDiagnostic(
+              module.diagnostic,
+              sketches.flatMap(sketch => sketch.layers),
+            )
+          : module.diagnostic;
+      if (diagnostic && !scene)
         return failure('model_failed', diagnostic.summary, diagnostic);
-      if (!selected)
+      if (!scene)
         throw new AgentError(
           'observation_not_found',
           'The cursor has no observable model context. Select a sketch, model expression or operation.',
         );
-      const models = sketches.length
-        ? sketches
-        : this.observeBrep(viewport, module);
+      viewport.renderInspection(module, scene, selection);
+      const breps = this.observeBrep(viewport, module);
+      const targets = new Set(
+        viewport.exportScene()?.instances.map(instance => instance.nodeId),
+      );
+      const foreground = (model: ObservedBrep) =>
+        model.role === 'operation-input' || targets.has(model.nodeId);
+      const models = [
+        ...breps.filter(foreground),
+        ...sketches.filter(model => foregroundSketches.has(model)),
+        ...breps.filter(model => !foreground(model)),
+        ...sketches.filter(model => !foregroundSketches.has(model)),
+      ];
       snapshot = {
         id: crypto.randomUUID(),
         request,
         module,
+        scene,
+        diagnostic,
         models,
         createdAt: new Date().toISOString(),
         summaries: new Map(),
@@ -165,7 +219,10 @@ export class AgentObserver {
     const model = options.model
       ? snapshot.models.find(model => model.key === options.model)
       : snapshot.models[0];
-    if (!model)
+    if (
+      !model &&
+      (options.model || (request.input.topology && !snapshot.diagnostic))
+    )
       throw new AgentError(
         'topology_model_missing',
         'The requested model is absent from this observation snapshot.',
@@ -173,24 +230,15 @@ export class AgentObserver {
     const renderOptions =
       typeof request.input.render === 'object' ? request.input.render : {};
     const mode = renderOptions.mode ?? 'modeling';
-    if (model.kind === 'sketch' && mode === 'render')
-      throw new AgentError(
-        'sketch_render_mode_unsupported',
-        'Sketch renders use the 2D sketch editor. Omit render.mode or use modeling, or select a face/solid to use render mode.',
-      );
-    if (model.kind === 'sketch' && renderOptions.view)
-      throw new AgentError(
-        'sketch_view_unsupported',
-        'Sketch renders use an orthographic local XY view. Omit render.view, or select a face/solid to use a 3D view.',
-      );
-    const topology = request.input.topology
-      ? model.kind === 'sketch'
-        ? inspectSketch(model, options)
-        : await this.topology(snapshot, model, options)
-      : undefined;
+    const topology =
+      request.input.topology && model
+        ? model.kind === 'sketch'
+          ? inspectSketch(model, options)
+          : await this.topology(snapshot, model, options)
+        : undefined;
     const described = [];
     for (const entry of options.model
-      ? [model]
+      ? [model!]
       : snapshot.models.slice(0, 16)) {
       if (entry.kind === 'sketch') {
         described.push(describeSketch(entry));
@@ -209,19 +257,12 @@ export class AgentObserver {
       }
       described.push(this.describeModel(snapshot, entry));
     }
-    const view =
-      model.kind === 'sketch'
-        ? undefined
-        : resolveRenderView(renderOptions.view);
+    const view = resolveRenderView(renderOptions.view);
     let artifacts: Artifact[] | undefined;
     if (request.input.render) {
-      // Scene restoration and earlier requests can leave another mode active.
-      // Every capture, including retained snapshots, selects its own mode.
-      if (model.kind !== 'sketch') this.getViewport().setRenderMode(mode);
-      const blob =
-        model.kind === 'sketch'
-          ? await this.captureSketch(model, snapshot.request.revision)
-          : await this.getViewport().captureImage(960, 720, view!);
+      // Each capture, including retained snapshots, owns its render mode.
+      this.getViewport().setRenderMode(mode);
+      const blob = await this.getViewport().captureImage(960, 720, view);
       artifacts = [
         {
           name: 'render.png',
@@ -230,67 +271,59 @@ export class AgentObserver {
         },
       ];
     }
-    return {
-      ok: true,
-      data: {
-        snapshotId: snapshot.id,
-        revision: snapshot.request.revision,
-        cursor: snapshot.request.cursor,
-        contextId:
-          snapshot.module.activeDesignContextId ??
-          this.getViewport().sourceContext?.evaluation.contextId,
-        arguments: snapshot.request.arguments ?? null,
-        argumentSource:
-          snapshot.request.arguments === undefined
-            ? snapshot.module.activeDesignContextId
-              ? 'jsdoc'
-              : 'ordinary'
-            : 'explicit',
-        createdAt: snapshot.createdAt,
-        modelsTotal: snapshot.models.length,
-        models: described,
-        ...(!options.model && snapshot.models.length > 16
-          ? {nextModel: snapshot.models[16].key}
-          : {}),
-        ...(topology ? {topology: {model: model.key, ...topology}} : {}),
-        ...(request.input.render
-          ? {
-              render: {
-                capturedAt: new Date().toISOString(),
-                width: 960,
-                height: 720,
-                mimeType: 'image/png',
-                mode,
-                ...(model.kind === 'sketch'
-                  ? {
-                      model: model.key,
-                      view: 'xy',
-                      projection: 'orthographic',
-                      coordinates: 'sketch-local',
-                    }
-                  : {
-                      view,
-                      projection: 'perspective',
-                      coordinates: 'observation-scene',
-                    }),
-              },
-            }
-          : {}),
-      },
-      ...(artifacts ? {artifacts} : {}),
+    const data = {
+      snapshotId: snapshot.id,
+      revision: snapshot.request.revision,
+      cursor: snapshot.request.cursor,
+      contextId:
+        snapshot.module.activeDesignContextId ??
+        this.getViewport().sourceContext?.evaluation.contextId,
+      arguments: snapshot.request.arguments ?? null,
+      argumentSource:
+        snapshot.request.arguments === undefined
+          ? snapshot.module.activeDesignContextId
+            ? 'jsdoc'
+            : 'ordinary'
+          : 'explicit',
+      createdAt: snapshot.createdAt,
+      modelsTotal: snapshot.models.length,
+      models: described,
+      ...(!options.model && snapshot.models.length > 16
+        ? {nextModel: snapshot.models[16].key}
+        : {}),
+      ...(topology ? {topology: {model: model!.key, ...topology}} : {}),
+      ...(request.input.render
+        ? {
+            render: {
+              capturedAt: new Date().toISOString(),
+              width: 960,
+              height: 720,
+              mimeType: 'image/png',
+              mode,
+              view,
+              projection: 'perspective',
+              coordinates: 'observation-scene',
+            },
+          }
+        : {}),
     };
+    return snapshot.diagnostic
+      ? failure(
+          'model_failed',
+          snapshot.diagnostic.summary,
+          {...snapshot.diagnostic, ...data},
+          artifacts,
+        )
+      : {ok: true, data, ...(artifacts ? {artifacts} : {})};
   }
 
   private observeBrep(
     viewport: ModelViewport,
     module: ModelModule,
   ): ObservedBrep[] {
-    const scene = viewport.exportScene();
-    if (!scene?.instances.length)
-      throw new AgentError(
-        'observation_not_found',
-        'The selected context did not produce renderable geometry.',
-      );
+    const instances = collectExportInstances(
+      viewport.renderedOccurrences().filter(({node}) => node.mesh),
+    );
     const models: ObservedBrep[] = [];
     const selection = viewport.sourceContext?.evaluation.selection;
     const occurrence = viewport.getSelected();
@@ -342,7 +375,7 @@ export class AgentObserver {
         });
       }
     }
-    for (const instance of scene.instances)
+    for (const instance of instances)
       models.push({
         kind: 'brep',
         key: 'm' + models.length,
@@ -401,7 +434,9 @@ export class AgentObserver {
   }
 
   private describeModel(snapshot: Snapshot, model: ObservedBrep) {
-    const node = snapshot.module.objects.get(model.nodeId)!;
+    const node: ModelSnapshotObject =
+      snapshot.scene.objects.get(model.nodeId) ??
+      snapshot.module.objects.get(model.nodeId)!;
     return {
       key: model.key,
       nodeId: model.nodeId,
@@ -414,7 +449,8 @@ export class AgentObserver {
       bindings: snapshot.module.catalog
         .filter(
           entry =>
-            entry.category === 'binding' && entry.nodeIds.includes(node.nodeId),
+            entry.category === 'binding' &&
+            entry.nodeIds.includes(node.sourceNodeId ?? node.nodeId),
         )
         .map(entry => ({
           name: entry.label,
@@ -437,38 +473,6 @@ export class AgentObserver {
           }
         : {}),
     };
-  }
-
-  private async captureSketch(
-    model: ObservedSketch,
-    revision: number,
-  ): Promise<Blob> {
-    const host = this.createRenderHost();
-    const editor = new SketchEditor(
-      host,
-      () => false,
-      async () => {
-        throw new Error('An observation cannot edit the sketch.');
-      },
-      () => {},
-    );
-    try {
-      editor.show({
-        key: model.layer.id,
-        id: model.layer.id,
-        revision,
-        layers: model.layers,
-        data: model.layer.data,
-        editable: new Map(),
-        constraintValues: new Map(),
-        referenceable: new Set(Object.keys(model.layer.references)),
-        readOnlyReason: 'Agent observation',
-      });
-      return await editor.captureImage(960, 720);
-    } finally {
-      editor.dispose();
-      host.remove();
-    }
   }
 
   private createRenderHost(): HTMLDivElement {

@@ -146,8 +146,9 @@ CompilerClient 的当前语言快照是响应式状态，编译请求与语言�
 [Project language](../../../packages/app/src/project/project-language.ts)按导入闭包读取
 真实声明、源码映射及源文件，不生成另一套作者 API 声明。语言准备不初始化内核。
 编辑器的默认基础库是 ECMAScript，不能把宿主项目的 Node/DOM 类型自动注入作者
-环境；项目明确导入的依赖按真实声明解析。模型采用 TypeScript 可擦除语法、
-ESNext/Bundler 模块解析与 `browser` 导出条件，与 App 的浏览器打包入口一致。
+环境；项目明确导入的依赖按真实声明解析。模型支持 esbuild 转译的 TypeScript
+语法，包括 namespace、enum 和构造函数参数属性，不默认限制为可擦除语法。
+采用 ESNext/Bundler 模块解析与 `browser` 导出条件，与 App 的浏览器打包入口一致。
 模型语言服务默认跳过依赖声明内部检查；项目 tsconfig 仍可覆盖普通类型检查选项，
 但不能把模块解析或导出条件改为 Node。相对导入支持省略源码扩展名；直接交给
 Node 执行源码时，仍须满足 Node 自身的导入规则。
@@ -187,6 +188,11 @@ Worker 批量检查已经触达的路径，整批成功后再应用失效；取�
 不把全部第三方依赖当作者模型代码改写。TypeScript、CommonJS interop 和循环模块
 由构建层处理。静态字符串 dynamic import 保持按需执行；计算出的 specifier 明确
 诊断。资源使用静态 `new URL(literal, import.meta.url)`。
+
+JSDoc 工具与 inspect 元数据共用声明、重载和别名定位；回调符号在声明所在作用域
+解析，不借用调用处的同名变量。本地 inspector 保留原词法环境，发布包则使用普通
+模块导出或函数的 namespace 属性。`@internal` 可以隐藏 helper 的声明，运行时寻址
+仍保留完整符号路径，不能要求被 `stripInternal` 删除的成员具有类型声明。
 
 编译诊断保留原文件与 UTF-16 源码范围，不能把打包器的字节位置直接当编辑器 offset。
 语言与构建回归见 [project-language](../../../packages/app/test/project-language.test.ts)、
@@ -267,6 +273,99 @@ trace、provenance 和源码位置属于本次求值；缓存几何或依赖模�
 不能反复扫描整个 trace 集合。像素、顶点等纯数据循环同样会产生 trace；观察输入只
 遍历可枚举的数据属性，不读取 getter 或枚举 Math 等对象的非枚举成员。求值上下文
 仅由 Worker 内部使用，不随模型快照传回界面。
+
+[InspectionSession](../../../packages/app/src/model/inspection.ts)另行持有当前求值的
+原始值、真实 receiver/参数/返回值及已声明 callback 的逐次执行，供执行器按源码
+位置调用 inspector。下一次求值或执行器销毁时释放该会话；模型快照和导出仍各自
+持有自己的数据。closure 上下文工厂按实际 callback 执行惰性缓存，独立于哪个
+inspector 接管画面；子层可读取父层上下文。由内向外选择首个返回结果的 inspector，
+参数先尝试参数 inspector，再退到函数级 inspector，最后使用该调用的普通返回值。
+已声明 closure 的函数体保持独立范围，放行后不重新进入同一拥有者的参数/函数级回调。
+`undefined` 放行，空对象表示明确的空画面。实际已调用的函数即使抛错也可 inspect；
+返回值为 undefined，参数和抛错前 data 保留。实参失败或可选链短路未调用函数时跳过。
+执行 inspector 不重新记录模型 trace，
+错误使用独立的 inspect 诊断。真实模型验证见
+[source-inspection](../../../packages/app/test/source-inspection.test.ts)。
+
+box / extrude 的参数尺寸由 Core inspector 返回 `dimension` 候选直线段，
+渲染器按进入时相机位置选取最近候选，保存到该检查图层的实例选择缓存；转动相机
+或重复检查不重选，离开该参数后释放选择。固定端点与候选共用数值、虚线和刻线绘制。
+旧参数直边装饰和 Boolean 交集/截线预计算已删除；切入体积只在对应 inspector 中按需计算。
+
+App、补全预览、截图导出与 agent observe 共用 `compiler.inspect` →
+`renderInspection`，不再按操作名另建源码预览场景。补全取消恢复完整检查场景及相机。
+保留位姿的检查对象沿原对象身份复用相机记忆，并在显示坐标系和存储坐标系之间转换。
+工具可以编辑 ambient 参与者，但不因此提升其检查层级。空间关系函数与链式选择器
+使用共用的函数级 inspector，通过已消费的关系返回值取得对应阶段；未消费的链不接管。
+
+表达式匹配优先选择最精确的源码范围，执行顺序仅区分同一位置的重复执行。
+实参记录保留完整容器以及参数周围空白的范围；成员表达式仍使用更窄的范围。
+
+Core 的 `captureInspectData(data)` 将库定义的数据附到实际执行的当前 inspect 调用，
+回调通过 `context.data` 读取；未记录时为 `undefined`，同一调用最后一次记录生效。
+closure 工厂可通过 `execution.call.data` 读取所属调用的记录。宿主按调用持有引用，
+不克隆、解析或按返回值匹配数据；需要调用时快照的库自行保存不可变数据。
+无记录会话时该函数不做任何事，inspector 执行期间也不覆盖建模记录。
+执行器以 `finally` 恢复记录入口；新模型求值和销毁释放上一会话的数据。
+
+检查结果在执行器内转换为普通可序列化快照，模型、锚点、草图、`dimension` 与
+`boundsAnnotation`、`anchorAnnotation` 标注共用这一边界。生成的草图使用独立的身份注册范围，不因反复移动检查位置而累计
+保留临时草图。草图点线按 `[x, y] → [x, 0, -y]` 放入自身平面，再应用参考架的
+实际位姿；开放曲线、上游层与跨层点别名直接绘制，不经过 B-Rep 面构造。关系检查
+保留选中阶段的草图参考架及原值身份，Sketch 与 Model 可混合分配 target/ambient。
+草图快照同时保留源码草图身份，二维编辑工具通过显式 Edit sketch / Finish sketch
+进入和退出；其编辑状态、可用性及画布视图由 SketchEditorController 的 MobX 状态
+统一驱动，避免选择被动预览时自动进入二维。
+`beginModelInspection` 保留原模型 trace 与缓存工作集，检查生成的
+几何在结束后进入有预算的历史缓存；不能借一次检查替换整次建模的保留范围。
+ProjectExecutor 另持有最新成功检查场景的原生几何快照，供该场景的拓扑查询和导出
+使用；完整快照成功后替换，失败时保留旧快照，新建模或执行器销毁时释放。
+AgentObserver 使用同一 inspect/三维绘制入口，截图不再创建二维 SketchEditor。
+混合场景的草图层继续返回局部二维拓扑，并附参考架的 geometryToScene；分页只选择
+拓扑数据，截图始终呈现完整检查场景。建模失败但检查成功时保留 model_failed，
+错误详情携带检查快照，失败响应可带 artifacts；ProjectSession、协议解析、回执、CLI
+与 AgentRenderHistory 共用这一路径。CLI 保存图片但仍以 1 退出，历史状态由既有
+MobX action 发布；检查失败不复用旧图片，建模诊断保持主错误。
+选中无可预览值的位置返回 undefined 时，App 保留当前画面，执行器也保留其原生
+几何；只有实际替换场景（包括明确的空画面）才释放上一检查快照。
+
+执行 Worker 串行运行检查、建模和其他内核操作；异步模块加载或快照计算不能让
+两个内核上下文交叠。client 的 inspect 请求独立于编译/导出请求，带执行版本及
+取消信号。新检查取消旧检查，新编译使旧检查失效；迟到结果和旧执行版本不能
+发布。错误通过独立的 inspect 响应返回，不把已成功的模型改成编译失败。
+
+`ModelPreviewState` 持有当前检查请求与已呈现模型，作为独立的历史状态。检查期间
+保持原画面，最新结果就绪后在同一 action 内提交视口和已呈现版本；新请求、源码
+失效与页面生命周期使旧请求失效。编辑工具只消费当前已呈现的有效源码版本。
+计算失败保留旧画面，诊断不覆盖建模结果。真实 Worker 与 App 验证见
+[浏览器检查测试](../../../packages/app/test/browser/source-inspection.test.ts)。
+工具栏激活源码时等待该次检查成功呈现，再把工具选择绑定到新的上下文；被后续
+选择取消的请求不得恢复旧工具。保留位姿的模型快照通过 `sourceNodeId` 关联原对象，
+视口保留它的几何和位姿，并合并原对象的编辑元数据与当前关系阶段。关系阶段是
+部分数据，不能代替完整对象，否则原点、参数及操作来源会丢失。
+
+Core 的 distance inspector 使用原调用保存的端点与共同位姿。各参与者被保留为
+独立的普通模型预览值，target/ambient 直接决定层级；不从 ambient 组合中自动
+提升子实例。库内保留坐标架的副本关联原值身份，使 focused 仍能识别同一元素；
+新生成的辅助几何不自动继承 focused。relate 上下文来自本次实际采用的关系序列，
+不扫描 closure 中出现的对象；检查已采用的关系时按连续约束段与变换顺序求解。
+阶段结果在该次调用的上下文中缓存，重复检查不重新执行用户 callback。
+集合只有全部成员属于该次关系时才由 relate 接管；混合集合整体放行到默认预览。
+数组、嵌套集合及命名集合共用这一判断，不执行 getter。
+源码目标记录 `inspectCallId`，普通值目标关联到实际所属调用；它不依赖返回数值，
+在循环实例与参数/逗号之间导航时保留所选调用。方法使用完整调用范围，包括 receiver。
+App 不再保留 DistanceObserver/DistanceSnapshot 或测距专用源码目标与装饰 provider。
+`anchorAnnotation` 显式选择 none/forward/both，原始 Anchor 保留普通预览；同一引用的
+重叠几何保留最强层级，方向标记分别保留朝向。focused 只匹配对应值，不从模型隐式
+传给其所有元素。
+group 参数检查使用返回组合已保存的成员位姿；expose 保存本次读取的命名引用，
+检查时不重复执行 getter。Boolean 与 loft 保存实际共同求解位姿，通过同一普通模型
+值路径呈现输入和结果。cut 工具检查按 focused.solids 计算被切入体积；生成区域放在
+stock 的原调用坐标架中，不继承工具的 focused。函数 identifier 仍默认查看原返回值。
+
+`on` 的范围标注使用求解器给出的精确有限范围与接触参考架，转到保留位姿的 owner
+局部空间；渲染器按值种类绘制屏幕角线，不检查建模函数名称。范围框沿用实例级
+去重规则，覆盖同实例的普通选择框，并抑制接触面重复的角线。
 
 生成的执行函数按内容去重，但浏览器原生 ESM 记录会保留到 Worker 结束；回收 Blob
 URL 不等于卸载模块。不能承诺无限多不同源码版本下 JavaScript 内存零增长。

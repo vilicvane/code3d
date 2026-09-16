@@ -5,6 +5,8 @@ import type {ModelPlacement} from '../rendering/model-renderer';
 
 export type ViewportScene = Readonly<{
   key: string;
+  /** Map the rendered frame into this scene identity's stored camera frame. */
+  frame: Matrix4;
   defaults: readonly Readonly<{key: string; transform: Matrix4}>[];
 }>;
 
@@ -74,8 +76,46 @@ export class ViewportScenes {
     placement: ModelPlacement,
   ): ViewportScene | undefined {
     if (nodes.length === 0) return undefined;
-    const key = this.key(nodes, placement);
-    return {key, defaults: this.defaults.get(key) ?? []};
+    // Frame-only containers preserve one authored value. They should not
+    // create a fresh camera identity merely because an inspector retained it.
+    const roots = nodes.map(node => {
+      let transform = matrix(
+        placement === 'composition'
+          ? node.compositionTransform
+          : node.transform,
+      );
+      while (
+        !this.identities.has(node.nodeId) &&
+        !node.sourceNodeId &&
+        node.children.length === 1
+      ) {
+        node = node.children[0];
+        transform.multiply(matrix(node.transform));
+      }
+      return {node, transform};
+    });
+    const canonicalPlacement = roots.length > 1 ? 'composition' : placement;
+    const key = this.key(
+      roots.map(root => root.node),
+      canonicalPlacement,
+    );
+    const first = roots.sort((a, b) =>
+      (a.node.sourceNodeId ?? a.node.nodeId).localeCompare(
+        b.node.sourceNodeId ?? b.node.nodeId,
+      ),
+    )[0];
+    const original = this.module.objects.get(
+      first.node.sourceNodeId ?? first.node.nodeId,
+    );
+    const canonical =
+      original &&
+      (canonicalPlacement === 'composition'
+        ? original.compositionTransform
+        : original.transform);
+    const frame = canonical
+      ? matrix(canonical).multiply(first.transform.clone().invert())
+      : new Matrix4();
+    return {key, frame, defaults: this.defaults.get(key) ?? []};
   }
 
   private key(
@@ -87,7 +127,10 @@ export class ViewportScenes {
       placement,
       [
         ...new Set(
-          nodes.map(node => this.identities.get(node.nodeId) ?? node.nodeId),
+          nodes.map(node => {
+            const id = node.sourceNodeId ?? node.nodeId;
+            return this.identities.get(id) ?? id;
+          }),
         ),
       ].sort(),
     ]);

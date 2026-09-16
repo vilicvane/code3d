@@ -1,4 +1,7 @@
 import type {CompilationProgress} from './compilation-progress';
+import type {PreviewValue} from '@code3d/core';
+import {InspectionSession, type InspectSelection} from './inspection';
+import {isPreviewAnnotation, snapshotInspection} from './inspection-snapshot';
 import type * as CoreTooling from '@code3d/core/tooling';
 import {
   isTopologyId,
@@ -9,7 +12,6 @@ import {
   type EdgeId,
   type ElementKind,
   type ElementSnapshot,
-  type DistanceSnapshot,
   type ModelObject,
   type ModelOperationInputRole,
   type ModelOperationSnapshot,
@@ -160,8 +162,6 @@ type TraceFrame = Readonly<{
 }>;
 
 type SourceExecutionTrace = {
-  measurement?: DistanceSnapshot;
-  measurementCount?: number;
   callRef: SourceRef;
   siteId: string;
   execution: number;
@@ -232,7 +232,33 @@ export function createModelExecutor(
   let latestTracedObject: ModelObject | undefined;
   let evaluationOrder = 0;
   let sourceReachOrder = 0;
+  let inspection: InspectionSession | undefined;
   const traceRuntime = Object.freeze({
+    apply: (callee: Function, receiver: unknown, args: unknown[]) =>
+      Reflect.apply(callee, receiver, args),
+    inspectDefinition: <T>(
+      id: string,
+      getters: readonly ((() => unknown) | undefined)[],
+      value: T,
+    ) => inspection!.definition(id, getters, value),
+    inspectMethod: (
+      id: string,
+      getters: readonly ((() => unknown) | undefined)[],
+    ) => inspection!.method(id, getters),
+    inspectArgument: <T>(id: string, index: number, value: T) => {
+      traceRuntime.argument(id, index, value);
+      return inspection!.argument(id, index, value, sourceReachOrder);
+    },
+    inspectSpread: <T>(id: string, index: number, values: Iterable<T>) => {
+      traceRuntime.argument(id, index, values);
+      return inspection!.spread(id, index, values);
+    },
+    inspectCall: (
+      id: string,
+      callee: Function,
+      receiver: unknown,
+      args: unknown[],
+    ) => inspection!.invoke(id, callee, receiver, args),
     trace<T>(
       file: string,
       start: number,
@@ -243,6 +269,7 @@ export function createModelExecutor(
       label: string,
       run: () => T,
     ): T {
+      if (inspection?.isInspecting) return run();
       const execution = nextTraceExecution(id);
       const location = sourceRef(file, start, end);
       const callLocation = sourceRef(file, callStart, callEnd);
@@ -271,12 +298,14 @@ export function createModelExecutor(
       );
       parameterFrames.push(parameters);
       traceFrames.push({trace: executionTrace});
+      const inspectExecution = inspection?.enter(id, context.id, execution);
       let result: T;
       try {
         result = run();
       } catch (error) {
         executionTrace.outcome = 'failed';
         executionTrace.order = nextSourceReachOrder();
+        inspection?.fail(inspectExecution, executionTrace.order);
         const failure = locateModelError(
           error,
           sketches.constraintErrorSource(error, location) ?? callLocation,
@@ -284,13 +313,13 @@ export function createModelExecutor(
         executionTrace.failure = failure.diagnostic;
         throw failure;
       } finally {
+        inspection?.leave(inspectExecution);
         traceFrames.pop();
         parameterFrames.pop();
       }
-      if (executionTrace.measurement?.value !== result)
-        executionTrace.measurement = undefined;
       executionTrace.outcome = 'completed';
       executionTrace.order = nextSourceReachOrder();
+      inspection?.complete(inspectExecution, result, executionTrace.order);
       const runtime = sourceExecutionRuntime(executionTrace);
       sketches.call(
         result,
@@ -382,6 +411,7 @@ export function createModelExecutor(
       scope: ObjectCatalogEntry['scope'],
       run: () => T,
     ): T {
+      if (inspection?.isInspecting) return run();
       const location = sourceRef(file, start, end);
       const context =
         currentEvaluationContext() ??
@@ -424,6 +454,7 @@ export function createModelExecutor(
       id: string,
       value: unknown,
     ): void {
+      if (inspection?.isInspecting) return;
       const location = sourceRef(file, start, end);
       const context =
         currentEvaluationContext() ??
@@ -455,6 +486,7 @@ export function createModelExecutor(
       label: string,
       run: () => T,
     ): T {
+      if (inspection?.isInspecting) return run();
       const context: EvaluationContext = {
         id,
         kind: 'design',
@@ -493,10 +525,18 @@ export function createModelExecutor(
       id: string,
       value: T,
     ): T {
+      if (inspection?.isInspecting) return value;
       const executionTrace = traceFrames.at(-1)?.trace;
       if (executionTrace?.siteId !== siteId) {
         return value;
       }
+      inspection?.value(
+        id,
+        sourceRef(file, start, end),
+        value,
+        executionTrace.contextId,
+        sourceReachOrder + 1,
+      );
       if (isSketch(value)) {
         recordSourceValue(
           id,
@@ -554,6 +594,7 @@ export function createModelExecutor(
     },
 
     argument<T>(siteId: string, index: number, value: T): T {
+      if (inspection?.isInspecting) return value;
       const executionTrace = traceFrames.at(-1)?.trace;
       if (executionTrace?.siteId === siteId) {
         executionTrace.arguments.set(index, value);
@@ -569,6 +610,7 @@ export function createModelExecutor(
       id: string,
       value: T,
     ): T {
+      if (inspection?.isInspecting) return value;
       const executionTrace = traceFrames.at(-1)?.trace;
       if (executionTrace?.siteId === siteId) {
         executionTrace.receiver = value;
@@ -590,6 +632,7 @@ export function createModelExecutor(
       id: string,
       value: T,
     ): T {
+      if (inspection?.isInspecting) return value;
       if (!isModelObject(value) && !modelElementReference(value)) return value;
       const location = sourceRef(file, start, end);
       const context =
@@ -615,6 +658,7 @@ export function createModelExecutor(
       id: string,
       value: T,
     ): T {
+      if (inspection?.isInspecting) return value;
       const reference = modelElementReference(value);
       if (!reference) return value;
       const location = sourceRef(file, start, end);
@@ -628,6 +672,7 @@ export function createModelExecutor(
           location,
         );
       const key = `${id}:${location.file}:${location.start}:${location.end}`;
+      inspection?.value(id, location, value, context.id, sourceReachOrder + 1);
       const trace = sourceElementTraces.get(key) ?? {
         id,
         sourceRef: location,
@@ -737,6 +782,7 @@ export function createModelExecutor(
       recordSourceConstraint(id, sourceRef, value, contextId, runtime);
       return;
     }
+    inspection?.value(id, sourceRef, value, contextId, runtime.order);
     const topologyReferences: TopologyValueReference[] = [];
     const anchorReferences: AnchorValueReference[] = [];
     const objects = modelObjectsIn(
@@ -796,6 +842,7 @@ export function createModelExecutor(
     contextId: string,
     runtime: RuntimeReach,
   ): void {
+    inspection?.value(id, location, constraint, contextId, runtime.order);
     const reference = relationTraceReference(constraint);
     if (reference.kind === 'transformation') {
       if (!reference.self) return;
@@ -1002,6 +1049,13 @@ export function createModelExecutor(
     prepareSnapshots?: (objects: readonly RelationObject[]) => Promise<void>,
   ): Promise<ModelModule> {
     const {rootPath, files, designArguments, activeDesignContext} = artifact;
+    inspection?.dispose();
+    inspection = new InspectionSession(
+      artifact.inspectCallSites,
+      importModule,
+      inspectValues,
+      runtime.isSolidModel,
+    );
     tracedObjects.clear();
     sourceValueTraces.clear();
     sourceConstraintTraces.clear();
@@ -1023,25 +1077,16 @@ export function createModelExecutor(
     sourceReachOrder = 0;
     sketches.begin(artifact.sketches);
     let finishEvaluation: (() => void) | undefined;
+    const finishRecording = runtime.recordInspectionCalls(data =>
+      inspection?.capture(data),
+    );
     try {
       let modules = new Map<string, Record<string, unknown>>();
       let diagnostic: ModelDiagnostic | undefined;
       try {
         onProgress?.('evaluating-model');
         checkCancelled();
-        finishEvaluation = beginModelEvaluation(
-          checkCancelled,
-          (snapshot, objects) => {
-            const trace = traceFrames.at(-1)?.trace;
-            if (!trace) return;
-            // A package helper may make several uninstrumented measurements.
-            // Only a single forwarded scalar has an unambiguous visual result.
-            trace.measurementCount = (trace.measurementCount ?? 0) + 1;
-            trace.measurement =
-              trace.measurementCount === 1 ? snapshot : undefined;
-            objects.forEach(object => tracedObjects.add(object));
-          },
-        );
+        finishEvaluation = beginModelEvaluation(checkCancelled);
         const result = await evaluator.evaluate(artifact.source, {
           __code3d: traceRuntime,
           __code3dAssetUrl: assetUrl,
@@ -1194,6 +1239,7 @@ export function createModelExecutor(
             ...(activeDesignContext ? [activeDesignContext] : []),
           ],
           files,
+          artifact.inspectCallSites,
         ),
         designArguments: designArguments.map(
           ({
@@ -1209,9 +1255,9 @@ export function createModelExecutor(
       // values). Drop this evaluation's references; Replicad's native wrappers
       // release shapes when their actual owners become unreachable.
       finishEvaluation?.();
+      finishRecording();
       tracedObjects.clear();
       sourceValueTraces.clear();
-      sketches.clear();
       sourceConstraintTraces.clear();
       sourceTransformationTraces.clear();
       sourceElementTraces.clear();
@@ -1301,6 +1347,7 @@ export function createModelExecutor(
       'functionId' | 'functionRef'
     >[],
     files: ReadonlyMap<string, string>,
+    inspectSites: CompiledModelSource['inspectCallSites'],
   ): SourceTarget[] {
     // Completion order is unique within this evaluation. Pixel/vertex loops can
     // produce many traces; resolving each reach must not rescan the whole run.
@@ -1359,7 +1406,9 @@ export function createModelExecutor(
           contextId,
           runtime,
         }) => {
-          const nodeIds = objects.map(modelObjectNodeId);
+          const nodeIds = [...objects, ...sketchValues.map(sketchFrame)].map(
+            modelObjectNodeId,
+          );
           const operationId = [...operations.values()].find(
             operation =>
               operation.siteId === trace.id &&
@@ -2100,7 +2149,7 @@ export function createModelExecutor(
 
     function withConstraintContext(target: SourceTarget): SourceTarget {
       if (
-        target.kind === 'measurement' ||
+        target.kind === 'inspect' ||
         target.kind === 'constraint' ||
         target.kind === 'transformation'
       )
@@ -2284,50 +2333,53 @@ export function createModelExecutor(
       return {...target, evaluations, contextTargetIds: [...contextTargetIds]};
     }
 
-    const measurementTargets: SourceTarget[] = [...executionsBySite].flatMap(
+    const inspectionTargets: SourceTarget[] = [...executionsBySite].flatMap(
       ([siteId, executions]) => {
-        const measured = executions.filter(
+        const site = inspectSites.get(siteId);
+        if (
+          !site ||
+          (!site.signature.annotations.length && !site.signature.diagnostic)
+        )
+          return [];
+        const invoked = executions.filter(
           execution =>
-            execution.measurement && execution.outcome === 'completed',
+            execution.outcome === 'completed' ||
+            inspection?.hasInvocation(
+              traceExecutionKey(siteId, execution.execution),
+            ),
         );
-        return measured.length
+        return invoked.length
           ? [
               {
-                id: `source:measurement:${siteId}`,
-                kind: 'measurement' as const,
-                sourceRef: measured[0].callRef,
-                functionId: designFunctionAt(
-                  measured[0].callRef,
-                  designArguments,
-                ),
+                id: `source:inspect:${siteId}`,
+                kind: 'inspect' as const,
+                sourceRef: site.callRef,
+                functionId: designFunctionAt(site.callRef, designArguments),
                 contextTargetIds: [],
-                evaluations: measured.map(execution => ({
-                  measurement: execution.measurement!,
+                evaluations: invoked.map(execution => ({
+                  inspectCallId: traceExecutionKey(siteId, execution.execution),
                   runtime: sourceExecutionRuntime(execution),
                   contextId: execution.contextId,
-                  nodeIds: execution.measurement!.placements.map(
-                    value => value.nodeId,
-                  ),
+                  nodeIds: [],
                 })),
               },
             ]
           : [];
       },
     );
-    function withMeasurementContext(target: SourceTarget): SourceTarget {
-      if (target.kind === 'measurement') return target;
-      const containing = measurementTargets
+    function withInspectionContext(target: SourceTarget): SourceTarget {
+      if (target.kind === 'inspect') return target;
+      const containing = inspectionTargets
         .filter(
-          measurement =>
-            measurement.sourceRef.file === target.sourceRef.file &&
-            measurement.sourceRef.start <= target.sourceRef.start &&
-            target.sourceRef.end <= measurement.sourceRef.end,
+          inspection =>
+            inspection.sourceRef.file === target.sourceRef.file &&
+            inspection.sourceRef.start <= target.sourceRef.start &&
+            target.sourceRef.end <= inspection.sourceRef.end,
         )
         .sort((a, b) => sourceSpan(a.sourceRef) - sourceSpan(b.sourceRef));
       if (!containing.length) return target;
       return {
         ...target,
-        contextTargetIds: [],
         evaluations: target.evaluations.map(evaluation => {
           // An argument belongs to the first enclosing call to finish in this
           // execution context, including repeated calls to the same source site.
@@ -2335,26 +2387,19 @@ export function createModelExecutor(
             .filter(
               candidate =>
                 candidate.contextId === evaluation.contextId &&
-                candidate.runtime.order >= evaluation.runtime.order,
+                candidate.runtime.order >=
+                  (evaluation.toolExecutionOrder ?? evaluation.runtime.order),
             )
             .sort((a, b) => a.runtime.order - b.runtime.order)[0];
           if (!owner) return evaluation;
-          const focusNodeIds =
-            evaluation.valueNodeIds ??
-            evaluation.focusNodeIds ??
-            evaluation.nodeIds;
           return {
             ...evaluation,
-            measurement: owner.measurement,
-            valueNodeIds: focusNodeIds,
-            focusNodeIds,
-            nodeIds: [...new Set([...owner.nodeIds, ...focusNodeIds])],
+            inspectCallId: owner.inspectCallId,
           };
         }),
       };
     }
     const targets: SourceTarget[] = [
-      ...measurementTargets,
       ...elementTargets,
       ...constraintTargets,
       ...transformationTargets,
@@ -2406,7 +2451,19 @@ export function createModelExecutor(
     ]
       .map(withConstraintContext)
       .map(withOperationContext)
-      .map(withMeasurementContext);
+      .map(withInspectionContext);
+    // Existing model/relation/tool targets retain their richer source metadata.
+    // Scalar annotated calls need a generic target for navigation and execution choice.
+    for (const target of inspectionTargets)
+      if (
+        !targets.some(
+          existing =>
+            existing.sourceRef.file === target.sourceRef.file &&
+            existing.sourceRef.start === target.sourceRef.start &&
+            existing.sourceRef.end === target.sourceRef.end,
+        )
+      )
+        targets.push(target);
     // Array gaps own their insertion prefix, not the final stage of a nearby call.
     for (const site of relationArraySites) {
       const self = valueTargets.find(
@@ -2460,15 +2517,17 @@ export function createModelExecutor(
             relationSpatial: undefined,
             ...relationPreviewContext(
               gap,
-              trace.evaluations.find(
-                value =>
-                  value.contextId === evaluation.contextId &&
-                  value.objects.some(
-                    object =>
-                      modelObjectNodeId(object) ===
-                      (evaluation.relationOwnerNodeId ?? evaluation.nodeIds[0]),
-                  ),
-              )!.objects[0],
+              trace.evaluations
+                .filter(value => value.contextId === evaluation.contextId)
+                .flatMap(value => [
+                  ...value.objects,
+                  ...value.sketches.map(sketchFrame),
+                ])
+                .find(
+                  object =>
+                    modelObjectNodeId(object) ===
+                    (evaluation.relationOwnerNodeId ?? evaluation.nodeIds[0]),
+                )!,
               self =>
                 relationSelectionPreview(
                   self,
@@ -2902,5 +2961,83 @@ export function createModelExecutor(
     );
   }
 
-  return {execute};
+  function inspectValues(
+    value: unknown,
+    seen = new Set<object>(),
+  ): PreviewValue[] {
+    if (!value || typeof value !== 'object' || seen.has(value)) return [];
+    seen.add(value);
+    if (
+      isModelObject(value) ||
+      isSketch(value) ||
+      isPreviewAnnotation(value) ||
+      modelElementReference(value)
+    )
+      return [value as PreviewValue];
+    const sketch = Object.getOwnPropertyDescriptor(value, 'sketch');
+    const point = Object.getOwnPropertyDescriptor(value, 'id');
+    if (
+      sketch &&
+      'value' in sketch &&
+      isSketch(sketch.value) &&
+      point &&
+      'value' in point &&
+      typeof point.value === 'number'
+    )
+      return [value as PreviewValue];
+    if (value instanceof Map)
+      return [...Map.prototype.values.call(value)].flatMap(item =>
+        inspectValues(item, seen),
+      );
+    if (value instanceof Set)
+      return [...Set.prototype.values.call(value)].flatMap(item =>
+        inspectValues(item, seen),
+      );
+    if (
+      Array.isArray(value) ||
+      Object.getPrototypeOf(value) === Object.prototype ||
+      Object.getPrototypeOf(value) === null
+    ) {
+      return Object.keys(value).flatMap(key => {
+        const property = Object.getOwnPropertyDescriptor(value, key)!;
+        return 'value' in property ? inspectValues(property.value, seen) : [];
+      });
+    }
+    return [];
+  }
+
+  return {
+    execute,
+    async inspect(
+      selection: InspectSelection,
+      prepareSnapshots: (objects: readonly RelationObject[]) => Promise<void>,
+      checkCancelled: () => void,
+      retainGeometry?: (objects: readonly RelationObject[]) => void,
+    ) {
+      checkCancelled();
+      const finish = runtime.beginModelInspection(checkCancelled);
+      try {
+        const result = await inspection?.inspect(selection);
+        checkCancelled();
+        return (
+          result &&
+          (await snapshotInspection(
+            result,
+            runtime,
+            sketches.fork(),
+            prepareSnapshots,
+            checkCancelled,
+            retainGeometry,
+          ))
+        );
+      } finally {
+        finish();
+      }
+    },
+    dispose: () => {
+      inspection?.dispose();
+      inspection = undefined;
+      sketches.clear();
+    },
+  };
 }

@@ -118,7 +118,10 @@ define the App's behavior. They are maintained separately from this transport SD
 Request IDs are scoped to an agent grant. Identical normalized requests with the
 same ID join an in-progress execution or return the saved result. Different
 content with the same ID returns `request_conflict`. Errors from the handler are
-also retained, since work may have started before failure. Transport failures
+also retained, since work may have started before failure. Both success and
+failure responses can carry validated `artifacts`; a failed modeling observation
+may contain a diagnostic inspect image and available topology in its error
+details. Receipt replay preserves the failure status and the same artifacts. Transport failures
 never imply rollback, and the client does not automatically resubmit changes.
 
 `result` returns the saved response, `result_pending`, `result_interrupted`, or `result_unknown` in the

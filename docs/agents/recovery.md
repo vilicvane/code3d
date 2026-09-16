@@ -9,6 +9,12 @@ image-viewing tool. `--output-dir <directory>` chooses the parent artifact folde
 Exit codes are 0 for success, 1 for an App error, 2 for local input/startup errors,
 and 3 for transport errors or output failure after an invocation.
 
+A `model_failed` response may still include a diagnostic render and available
+topology from inspect. The CLI saves those artifacts and exits with code 1;
+open the image and read `error.details.observation`. Check `accepted` and `saved`
+separately before changing source again. Receipt lookup preserves the original
+failure and its image without rerunning the model.
+
 | Failure                                          | What to do                                                                                                                                               |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `service_unavailable`                            | Run the supplied `recovery.command` with the current session's managed process tool, then retry with the original ID. No conversation restart is needed. |

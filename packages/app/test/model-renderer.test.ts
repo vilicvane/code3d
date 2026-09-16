@@ -368,3 +368,72 @@ test('texture restoration owns its pixels and releases each rendered texture onc
     [0, 1, 1],
   );
 });
+
+test('passive sketches retain open lines, circular curves and upstream aliases in the XZ plane', async () => {
+  const {sketch} = await import('@code3d/core');
+  const {snapshotSketch} = await import('@code3d/core/tooling');
+  const {createRenderedSketch} = await server.ssrLoadModule<
+    typeof import('../src/rendering/model-renderer.ts')
+  >('/src/rendering/model-renderer.ts');
+  const base = sketch([
+    ['point', 1, [2, 3]],
+    ['point', 2, [12, 3]],
+    ['point', 3, [-8, 3]],
+    ['arc', 4, [1, 10, 2, 3, 'ccw']],
+    ['circle', 5, [1, 4]],
+  ]);
+  const child = base.derive([
+    ['point', 1, base.point(2)],
+    ['point', 2, [15, 9]],
+    ['line', 3, [1, 2]],
+  ]);
+  const layers = [base, child].map(value =>
+    snapshotSketch(value, s => (s === base ? 'base' : 'child')),
+  );
+  const object = createRenderedSketch(
+    layers,
+    'context',
+    new Map([[1, 'primary']]),
+  );
+  const primitives = object.children as Array<
+    THREE.Points | THREE.LineSegments
+  >;
+  assert.equal(
+    primitives.filter(value => value instanceof THREE.Points).length,
+    4,
+  );
+  assert.equal(
+    primitives.filter(value => value instanceof THREE.LineSegments).length,
+    3,
+  );
+  const line = primitives.find(
+    value =>
+      value.userData.sketchEntity.layer === 'child' &&
+      value.userData.sketchEntity.id === 3,
+  )!;
+  assert.deepEqual(
+    Array.from(line.geometry.getAttribute('position').array),
+    [12, 0, -3, 15, 0, -9],
+  );
+  const selected = primitives.find(
+    value =>
+      value.userData.sketchEntity.layer === 'base' &&
+      value.userData.sketchEntity.id === 2,
+  )!;
+  const other = primitives.find(
+    value =>
+      value.userData.sketchEntity.layer === 'base' &&
+      value.userData.sketchEntity.id === 3,
+  )!;
+  assert.ok(
+    !Array.isArray(selected.material) && !Array.isArray(other.material),
+  );
+  assert.ok(selected.material.opacity > other.material.opacity);
+  for (const primitive of primitives) {
+    const positions = primitive.geometry.getAttribute('position');
+    for (let i = 0; i < positions.count; i++)
+      assert.equal(positions.getY(i), 0);
+    primitive.geometry.dispose();
+    if (!Array.isArray(primitive.material)) primitive.material.dispose();
+  }
+});

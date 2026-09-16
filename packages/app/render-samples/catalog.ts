@@ -330,7 +330,7 @@ export const sourceContextSets: Readonly<
       image: 'relate-offset',
       label: 'Offset',
       description:
-        'At offset, the part moves along the composition axes. Focus returns to self, while the later rotation remains outside this preview.',
+        'At offset, the part is the target in this transformation stage, with the other participants in the background. The later rotation is outside this preview.',
       focus: {
         context: 'offset(6, 0, 0)',
         token: 'offset',

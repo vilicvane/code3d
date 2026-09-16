@@ -68,6 +68,7 @@ export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 export {
   authoringApi,
   beginModelEvaluation,
+  beginModelInspection,
   relationPreview,
   currentRelationSelf,
   relationSelectionPreview,
@@ -80,7 +81,9 @@ export {
   isConstraint,
   isRelationExpression,
   isModelObject,
+  isSolidModel,
   modelElementReference,
+  previewAnchorReference,
   modelObjectRuntimeInfo,
   modelTopologyIds,
   modelTopologyReference,
@@ -101,7 +104,6 @@ export type {
   RelationTraceReference,
   ElementKind,
   ElementSnapshot,
-  DistanceSnapshot,
   ModelElementReference,
   ModelGeometryKind,
   ModelGeometrySnapshot,
@@ -111,7 +113,6 @@ export type {
   ModelOperationInputRole,
   ModelOperationInstrumentation,
   ModelOperationKind,
-  ModelOperationRegionSnapshot,
   ModelOperationSelectionSnapshot,
   ModelOperationSnapshot,
   ModelParameterDimension,
@@ -169,3 +170,4 @@ export {captureModelMaterial, modelMaterialColor} from '../library/material.js';
 export type {ModelMaterialSnapshot} from '../library/material.js';
 export {parseModelColor} from '../library/model-color.js';
 export type {ModelColor} from '../library/model-color.js';
+export {recordInspectionCalls, inspectionIdentity} from '../library/inspect.js';

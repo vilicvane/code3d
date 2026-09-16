@@ -646,10 +646,22 @@ test('JSON files share the editor revision and agent save path', async () => {
 });
 
 test('model observation failures preserve the successful file acceptance result', async () => {
+  const image = {name: 'render.png', mimeType: 'image/png', base64: 'aW1hZ2U'};
+  const scene = {
+    summary: 'Invalid geometry.',
+    snapshotId: 'failed-scene',
+    topology: {total: 12},
+    render: {capturedAt: '2026-09-16T00:00:00Z'},
+  };
   const f = fixture({
     observe: async () => ({
       ok: false,
-      error: {code: 'model_failed', message: 'Invalid geometry.'},
+      error: {
+        code: 'model_failed',
+        message: 'Invalid geometry.',
+        details: scene,
+      },
+      artifacts: [image],
     }),
   });
   const original = await f.read('/model.ts');
@@ -667,6 +679,11 @@ test('model observation failures preserve the successful file acceptance result'
   assert.ok(!result.ok && result.error.code === 'model_failed');
   assert.equal((result.error.details as {saved: boolean}).saved, true);
   assert.equal(f.disk.get('/model.ts'), 'const model = 0;');
+  assert.deepEqual(result.artifacts, [image]);
+  assert.deepEqual(
+    (result.error.details as {observation: unknown}).observation,
+    scene,
+  );
 });
 
 test('explorer moves wait for queued saves and do not enqueue duplicate editor writes', async () => {

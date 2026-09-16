@@ -31,8 +31,8 @@ test(
       const {browserPackageFiles} =
         await import('/src/project/browser-packages.ts');
       const {ModelViewport} = await import('/src/viewport.ts');
-      const {elementSourceDecoration} =
-        await import('/src/model/element-decorations.ts');
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
       const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
@@ -40,7 +40,6 @@ test(
         onNavigateSource() {},
         onPositionTool() {},
         onTopologySelection() {},
-        sourceDecorationProviders: [elementSourceDecoration],
       });
       const source = `import {offset, box, group, point} from '@code3d/core';
 const part = box(10, 20, 30);
@@ -62,7 +61,10 @@ export default assembly;`;
           ['assembly.mount.edges()', 4],
           ['assembly.mount.edge(1).vertices()', 2],
         ] as const) {
-          viewport.selectBySourceOffset(
+          await inspectSource(
+            client,
+            viewport,
+            module,
             '/main.ts',
             source.indexOf(expression) + expression.length - 1,
           );
@@ -118,20 +120,23 @@ export default assembly;`;
           });
           viewport.endTopologySelection();
         }
-        viewport.selectBySourceOffset(
+        await inspectSource(
+          client,
+          viewport,
+          module,
           '/main.ts',
           source.indexOf('const outline') + 'const out'.length,
         );
-        const outlineEvaluation = viewport.sourceContext!.evaluation;
-        const owner = [...viewport['occurrences'].values()].find(
-          occurrence =>
-            occurrence.node.nodeId ===
-            outlineEvaluation.topologyReferences![0].nodeId,
+        const highlights = (
+          viewport['decorationLayers'].get('inspection') ?? []
+        ).filter(
+          instance =>
+            instance.object.children[0].userData.decoration?.kind === 'edges',
         );
-        const highlights = owner!.object.children.filter(
-          child => child.renderOrder === 24,
-        );
-        viewport.selectBySourceOffset(
+        await inspectSource(
+          client,
+          viewport,
+          module,
           '/main.ts',
           source.indexOf('assembly.mount.center') +
             'assembly.mount.center'.length -
@@ -139,13 +144,12 @@ export default assembly;`;
         );
         const center = viewport.sourceContext!.evaluation.element;
         const markers =
-          viewport['decorationLayers'].get('source-context:named-element')
-            ?.length ?? 0;
+          viewport['decorationLayers'].get('inspection')?.length ?? 0;
         return {
           checks,
           highlightCount: highlights.length,
           highlightPositions: highlights.map(highlight =>
-            highlight.position.toArray(),
+            highlight.object.position.toArray(),
           ),
           center: center!.transform.position,
           markers,

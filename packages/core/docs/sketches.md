@@ -70,8 +70,8 @@ identities with its original, so a derived layer can still use `profile.point(id
 References target the actual immutable model value: creating a later rotated or
 repositioned model does not redirect existing sketch relations.
 
-In the App, select the related value (`opening`) to edit against read-only model
-outlines projected into the sketch's local plane. Select `profile` for its original
+In the App, select the related value (`opening`) and choose **Edit sketch** to edit against read-only model
+outlines projected into the sketch's local plane. Select `profile` and choose **Edit sketch** for its original
 local view. Both edit the same source array, with ordinary undo; separate placements
 of that geometry are not separate authoring definitions. Context outlines are
 visual references only, not snapping targets or imported geometry constraints.

@@ -9,7 +9,9 @@ npx --yes @code3d/cli@latest project.c3d.json --request-id inspect-001 < /tmp/in
 ```
 
 `"render": true` requests a 960×720 PNG in Modeling mode with the default isometric
-view. `mode` and `view` are independently optional:
+view. The image uses the App's inspect scene, including its target, ambient
+geometry and passive annotations. Models and sketches can appear together.
+`mode` and `view` are independently optional:
 
 ```json
 {
@@ -54,7 +56,22 @@ properties; edges include length, endpoints, adjacency, and analytic properties;
 vertices include coordinates and adjacent edges. Curved-face normals identify
 the sample location and whether it lies inside the trimmed surface is unverified.
 Unavailable geometry is labeled explicitly. Coordinates use the observation
-scene, with `geometryToScene` and `storedOrigin` identifying frames.
+scene, with `geometryToScene` and `storedOrigin` identifying frames. Sketch
+topology remains local 2D; its summary provides `geometryToScene` for locating
+those values in the same screenshot. Inspector-generated geometry is queryable
+within the observation snapshot too.
+
+When modeling fails but the selected inspector produces a scene, the response
+keeps `ok: false` and `error.code: "model_failed"`. Its
+`error.details.observation` contains the modeling diagnostic together with the
+available `snapshotId`, model summaries, topology and render metadata. Requested
+PNG artifacts are returned normally. Use this scene to diagnose the failed call;
+it does not mean the modeling operation succeeded. Paging that snapshot keeps
+the same failure status and original diagnostic.
+
+If inspection also fails, no earlier image is substituted. The modeling error
+stays primary and `inspectionDiagnostic` describes the additional inspection
+error. An inspector failure after successful modeling uses `inspect_failed`.
 
 For additional entries, submit a separate apply payload:
 
@@ -75,7 +92,7 @@ For additional entries, submit a separate apply payload:
 
 Use the returned `snapshotId`, model key, `nextOffset`, and optionally `ids`.
 `limit` is 1–200. Defaults return up to 16 model summaries and 48 entries,
-prioritizing operation inputs. Snapshot queries cannot also change source or the
+prioritizing operation inputs, then target geometry before ambient geometry. Snapshot queries cannot also change source or the
 cursor. Snapshots expire after another observation, source/project changes,
 worker restart, reload, or five minutes; `snapshot_expired` requires a fresh observation.
 
@@ -85,4 +102,4 @@ not roll back changes. A stuck compilation can be replaced by applying new sourc
 
 ## Related reading
 
-See [cursor and arguments](cursor.md) to choose the evaluation target, [sketches](sketches.md) for 2D results, and [recovery](recovery.md) for superseded or failed observations.
+See [cursor and arguments](cursor.md) to choose the evaluation target, [sketches](sketches.md) for sketch topology, and [recovery](recovery.md) for superseded or failed observations.

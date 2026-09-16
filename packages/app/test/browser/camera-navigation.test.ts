@@ -5,6 +5,7 @@ import {chromium, type Page} from 'playwright-core';
 declare const window: Window & {
   navigationApp: {
     viewport: import('../../src/viewport.ts').ModelViewport;
+    compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
     codeEditor: import('../../src/editor.ts').CodeEditor;
   };
 };
@@ -927,7 +928,7 @@ async function openNavigationPage(t: TestContext) {
       response,
       body:
         (await response.text()) +
-        '\nwindow.navigationApp = {viewport, codeEditor};\n',
+        '\nwindow.navigationApp = {viewport, codeEditor, compiler};\n',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL, {waitUntil: 'domcontentloaded'});
@@ -1156,9 +1157,14 @@ export const outer = group([inner, box(6, 12, 4)], 'Grid assembly');
 
   for (const token of ['members =', 'inner =', 'outer =', 'tilted =']) {
     const result = await page.evaluate(
-      ({source, token}) => {
-        const {viewport: v, codeEditor} = window.navigationApp;
-        v.selectBySourceOffset(
+      async ({source, token}) => {
+        const {inspectSource} =
+          await import('/test/browser/inspection-fixture.ts');
+        const {viewport: v, codeEditor, compiler} = window.navigationApp;
+        await inspectSource(
+          compiler,
+          v,
+          v.presentedModule!,
           codeEditor.currentFile()!,
           source.indexOf(token) + 1,
         );
@@ -1247,9 +1253,13 @@ export const outer = group([inner, box(6, 12, 4)], 'Grid assembly');
     }
   }
   // Check the tilted member while still showing the whole collection.
-  await page.evaluate(source => {
-    const {viewport, codeEditor} = window.navigationApp;
-    viewport.selectBySourceOffset(
+  await page.evaluate(async source => {
+    const {inspectSource} = await import('/test/browser/inspection-fixture.ts');
+    const {viewport, codeEditor, compiler} = window.navigationApp;
+    await inspectSource(
+      compiler,
+      viewport,
+      viewport.presentedModule!,
       codeEditor.currentFile()!,
       source.indexOf('members =') + 1,
     );

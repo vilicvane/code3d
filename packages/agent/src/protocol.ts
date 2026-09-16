@@ -124,21 +124,25 @@ export type Artifact = Readonly<{
   mimeType: string;
   base64: string;
 }>;
-export type AgentResponse =
-  | Readonly<{ok: true; data: unknown; artifacts?: readonly Artifact[]}>
+export type AgentResponse = (
+  | Readonly<{ok: true; data: unknown}>
   | Readonly<{
       ok: false;
       error: Readonly<{code: string; message: string; details?: unknown}>;
-    }>;
+    }>
+) &
+  Readonly<{artifacts?: readonly Artifact[]}>;
 
 export function failure(
   code: string,
   message: string,
   details?: unknown,
+  artifacts?: readonly Artifact[],
 ): AgentResponse {
   return {
     ok: false,
     error: {code, message, ...(details === undefined ? {} : {details})},
+    ...(artifacts ? {artifacts} : {}),
   };
 }
 
@@ -270,25 +274,6 @@ export function parseResponse(value: unknown): AgentResponse {
     ['ok', 'data', 'artifacts', 'error'],
     'Response',
   );
-  if (response.ok === false) {
-    object(value, ['ok', 'error'], 'Error response');
-    const error = object(
-      response.error,
-      ['code', 'message', 'details'],
-      'Response error',
-    );
-    return failure(
-      string(error.code, 'Error code'),
-      string(error.message, 'Error message'),
-      error.details,
-    );
-  }
-  if (response.ok !== true || !Object.hasOwn(response, 'data'))
-    throw new AgentError(
-      'invalid_response',
-      'Response must contain a success value and data or an error.',
-    );
-  object(value, ['ok', 'data', 'artifacts'], 'Success response');
   let artifacts: Artifact[] | undefined;
   if (response.artifacts !== undefined) {
     if (!Array.isArray(response.artifacts))
@@ -307,5 +292,25 @@ export function parseResponse(value: unknown): AgentResponse {
       };
     });
   }
+  if (response.ok === false) {
+    object(value, ['ok', 'error', 'artifacts'], 'Error response');
+    const error = object(
+      response.error,
+      ['code', 'message', 'details'],
+      'Response error',
+    );
+    return failure(
+      string(error.code, 'Error code'),
+      string(error.message, 'Error message'),
+      error.details,
+      artifacts,
+    );
+  }
+  if (response.ok !== true || !Object.hasOwn(response, 'data'))
+    throw new AgentError(
+      'invalid_response',
+      'Response must contain a success value and data or an error.',
+    );
+  object(value, ['ok', 'data', 'artifacts'], 'Success response');
   return {ok: true, data: response.data, ...(artifacts ? {artifacts} : {})};
 }

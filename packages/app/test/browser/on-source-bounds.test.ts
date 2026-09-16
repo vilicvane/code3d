@@ -4,7 +4,7 @@ import {test} from 'node:test';
 import {chromium} from 'playwright-core';
 
 test(
-  'on renders the full source box once and restores ordinary selection bounds',
+  'on renders one exact source bounds annotation and both contact planes',
   {timeout: 120_000},
   async t => {
     assert.ok(process.env.CODE3D_TEST_URL);
@@ -33,8 +33,8 @@ test(
       const {browserPackageFiles} =
         await import('/src/project/browser-packages.ts');
       const {ModelViewport} = await import('/src/viewport.ts');
-      const {elementSourceDecoration, relationSourceDecoration} =
-        await import('/src/model/element-decorations.ts');
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
       const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
@@ -42,10 +42,7 @@ test(
         onNavigateSource() {},
         onPositionTool() {},
         onTopologySelection() {},
-        sourceDecorationProviders: [
-          elementSourceDecoration,
-          relationSourceDecoration,
-        ],
+        sourceDecorationProviders: [],
       });
       const cases = [
         {
@@ -72,7 +69,7 @@ test(
       const results = [];
       try {
         for (const spec of cases) {
-          const source = `import {box, group} from '@code3d/core'; const base = box(20, 10, 30).rotate(0, 0, 15); const part = ${spec.geometry}.relate(self => ${spec.relation}.rotate(0, 0, 25)); export default group([base, part]);`;
+          const source = `import {box, group, rotate} from '@code3d/core'; const base = box(20, 10, 30).rotate(0, 0, 15); const part = ${spec.geometry}.relate(self => [${spec.relation}, rotate(0, 0, 25)]); export default group([base, part]);`;
           const module = await client.compile(
             {files: [{path: '/main.ts', source}]},
             '/main.ts',
@@ -80,7 +77,13 @@ test(
           if (module.diagnostic)
             throw new Error(JSON.stringify(module.diagnostic));
           viewport.renderModule(module);
-          viewport.selectBySourceOffset('/main.ts', source.indexOf('.on(') + 2);
+          await inspectSource(
+            client,
+            viewport,
+            module,
+            '/main.ts',
+            source.indexOf('.on(') + 2,
+          );
           const evaluation = viewport.sourceContext!.evaluation;
           const constraint = evaluation.relationPreview!.constraints.find(
             c => c.id === evaluation.constraintId,
@@ -114,16 +117,16 @@ test(
               viewport.getSelected()!.node.nodeId,
             );
           viewport['rendering'].renderFrame();
-          const groupBoxBefore = viewport['selectionHighlight']?.visible;
-          viewport.clearDecorations('source-context:relation-geometry');
           results.push({
             spec,
             drawn: [...drawn],
-            sourceId: constraint.source.nodeId,
-            targetId: constraint.target.nodeId,
-            groupBoxBefore,
-            groupBoxAfter: viewport['selectionHighlight']?.visible,
-            selectedId: viewport.getSelected()!.node.nodeId,
+            sourceId: viewport['inspectionScene']!.target.find(
+              item => item.kind === 'bounds',
+            )!.model.nodeId,
+            targetId: viewport['inspectionScene']!.target.filter(
+              item => item.kind === 'anchor',
+            )[1].model.nodeId,
+            selectedId: constraint.source.nodeId,
           });
         }
         return results;
@@ -154,14 +157,7 @@ test(
           .filter(part => part.kind !== 'selection')
           .every(part => part.color === 'd8ff3e'),
       );
-      assert.equal(
-        source.find(part => part.kind === 'surface')!.opacity,
-        0.18 * (sourceId === result.selectedId ? 1 : 0.7),
-      );
-      if (spec.geometry.startsWith('group') && sourceId === result.selectedId) {
-        assert.equal(result.groupBoxBefore, false);
-        assert.equal(result.groupBoxAfter, true);
-      }
+      assert.equal(source.find(part => part.kind === 'surface')!.opacity, 0.18);
     }
   },
 );

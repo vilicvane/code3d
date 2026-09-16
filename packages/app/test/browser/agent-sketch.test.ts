@@ -7,6 +7,10 @@ import {chromium} from 'playwright-core';
 import {runCli, startServe} from '../../../cli/test/process.ts';
 import {reserveLocalPort} from './local-port.ts';
 
+declare const window: Window & {
+  agentFailureHistory: import('../../src/agent/render-history.ts').AgentRenderHistory;
+};
+
 test(
   'CLI edits and observes solved sketches, ancestors, arguments and derived solids',
   {timeout: 180_000},
@@ -29,6 +33,15 @@ test(
     page.setDefaultTimeout(15_000);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
+    await page.route('**/src/main.ts*', async route => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        body:
+          (await response.text()) +
+          '\nwindow.agentFailureHistory = agentRenders;',
+      });
+    });
     await page.goto(process.env.CODE3D_TEST_URL);
     await page.locator('#agents-button').click();
     const port = await reserveLocalPort(t);
@@ -104,8 +117,8 @@ export default design();
     });
     assert.deepEqual(alias.position, [0, 0]);
     assert.ok(observation.type.type.includes('Sketch'));
-    assert.equal(observation.render.projection, 'orthographic');
-    assert.equal(observation.render.coordinates, 'sketch-local');
+    assert.equal(observation.render.projection, 'perspective');
+    assert.equal(observation.render.coordinates, 'observation-scene');
     assert.equal(observation.render.mode, 'modeling');
     const png = await readFile(first.artifacts[0].path);
     assert.equal(png.subarray(1, 4).toString(), 'PNG');
@@ -129,16 +142,20 @@ export default design();
       (await apply({topology: {snapshotId, kind: 'edge'}}, 1)).error.code,
       'sketch_filter_unsupported',
     );
-    assert.equal(
-      (await apply({topology: {snapshotId}, render: {view: 'top'}}, 1)).error
-        .code,
-      'sketch_view_unsupported',
-    );
-    assert.equal(
-      (await apply({topology: {snapshotId}, render: {mode: 'render'}}, 1)).error
-        .code,
-      'sketch_render_mode_unsupported',
-    );
+    const top = await apply({topology: {snapshotId}, render: {view: 'top'}});
+    assert.deepEqual(top.data.observation.render.view, {
+      direction: [0, 1, 0],
+      up: [0, 0, -1],
+    });
+    assert.notDeepEqual(await readFile(top.artifacts[0].path), png);
+    const rendered = await apply({
+      topology: {snapshotId},
+      render: {mode: 'render'},
+    });
+    assert.equal(rendered.data.observation.render.mode, 'render');
+    assert.deepEqual(rendered.data.observation.topology, observation.topology);
+    assert.equal(observation.models[0].coordinates.space, 'sketch-local');
+    assert.deepEqual(observation.models[0].geometryToScene.position, [0, 0, 0]);
     const modeling = await apply({
       topology: {snapshotId},
       render: {mode: 'modeling'},
@@ -279,6 +296,93 @@ export default design();
     assert.equal(empty.data.observation.topology.bounds, null);
     assert.equal(empty.data.observation.topology.counts.region, 0);
     assert.ok(empty.artifacts[0].path);
+    const failureFile = '/failed-inspection.ts';
+    const failureSource = `import {box, intersect} from '@code3d/core';
+const a = box(4, 4, 4), b = box(6, 6, 6).originOffset(-20, 0, 0);
+export default intersect([a, b]);`;
+    const diagnosed = await apply(
+      {
+        files: [{path: failureFile, version: null, content: failureSource}],
+        cursor: {file: failureFile, regex: 'intersect\\((\\[a, b\\])\\)'},
+        render: {view: 'front'},
+        topology: true,
+        type: true,
+      },
+      1,
+    );
+    assert.equal(diagnosed.error.code, 'model_failed');
+    assert.equal(diagnosed.error.details.saved, true);
+    const diagnosis = diagnosed.error.details.observation;
+    assert.equal(diagnosis.kind, 'evaluation');
+    assert.match(diagnosis.summary, /no common solid volume/);
+    assert.equal(diagnosis.modelsTotal, 2);
+    assert.equal(diagnosis.topology.counts.surface, 6);
+    assert.ok(diagnosis.type);
+    const failedPng = await readFile(diagnosed.artifacts[0].path);
+    assert.equal(failedPng.readUInt32BE(16), 960);
+    await writeFile('/tmp/code3d-180-failed-inspection.png', failedPng);
+    await page.waitForFunction(
+      requestId =>
+        window.agentFailureHistory.items.some(frame =>
+          frame.id.includes(requestId),
+        ),
+      diagnosed.requestId,
+    );
+    const replay = await cli(
+      {operation: 'result', requestId: diagnosed.requestId},
+      1,
+    );
+    assert.deepEqual(replay.error, diagnosed.error);
+    assert.deepEqual(await readFile(replay.artifacts[0].path), failedPng);
+    const pageOfFailure = await apply(
+      {topology: {snapshotId: diagnosis.snapshotId, model: 'm1', limit: 1}},
+      1,
+    );
+    assert.equal(pageOfFailure.error.code, 'model_failed');
+    assert.equal(
+      pageOfFailure.error.details.observation.topology.items.length,
+      1,
+    );
+    assert.equal(
+      pageOfFailure.error.details.observation.snapshotId,
+      diagnosis.snapshotId,
+    );
+    assert.equal(pageOfFailure.artifacts, undefined);
+    const framesBefore = await page.evaluate(
+      () => window.agentFailureHistory.items.length,
+    );
+    const badInspector = await apply(
+      {
+        files: [
+          {
+            path: '/bad-inspector.ts',
+            version: null,
+            content: `
+/** @code3d.inspect broken.inspect */
+function broken() { throw new Error('Model failure stays visible'); }
+namespace broken { export function inspect() { throw new Error('Inspector failure'); } }
+export default broken();`,
+          },
+        ],
+        cursor: {
+          file: '/bad-inspector.ts',
+          regex: 'export default (broken)\\(\\)',
+        },
+        render: true,
+      },
+      1,
+    );
+    assert.equal(badInspector.error.code, 'model_failed');
+    assert.equal(badInspector.error.message, 'Model failure stays visible');
+    assert.equal(
+      badInspector.error.details.observation.inspectionDiagnostic.summary,
+      'Inspector failure',
+    );
+    assert.equal(badInspector.artifacts, undefined);
+    assert.equal(
+      await page.evaluate(() => window.agentFailureHistory.items.length),
+      framesBefore,
+    );
     assert.deepEqual(errors, []);
   },
 );

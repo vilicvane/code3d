@@ -1,10 +1,12 @@
 import {MeasurementDecorationObject} from './rendering/measurement-decoration';
-import {measuredModelIds} from './model/measurement-decorations';
+import type {
+  InspectionItem,
+  InspectionSnapshot,
+} from './model/inspection-snapshot';
+import type {CompiledSketch} from './model/sketch-trace';
+import {previewElementDecorations} from './model/element-decorations';
 import {committedSpatialObject} from './tools/spatial-edit';
-import {
-  isCompositionInputRole,
-  sameOperationCall,
-} from './model/operation-context';
+import {isCompositionInputRole} from './model/operation-context';
 import * as THREE from 'three';
 import {
   action,
@@ -46,6 +48,7 @@ import {
   applyTransform,
   createEdgeGeometry,
   createRenderedModelNode,
+  createRenderedSketch,
   createSurfaceGeometry,
   disposeObject,
   modelingHelper,
@@ -71,10 +74,7 @@ import {
   contextualToolScope,
 } from './tools/contextual-tool-context';
 import type {ToolParameterSchema} from './model/tool-schema';
-import {
-  dimensionEdges,
-  representativeDimensionEdge,
-} from './rendering/parameter-dimension';
+import {representativeDimensionEdge} from './rendering/parameter-dimension';
 import {
   continuedSpatialBindings,
   spatialBindings,
@@ -89,7 +89,6 @@ import {
   applySourceEmphasis,
   type SourceEmphasis,
 } from './rendering/source-appearance';
-import {evaluatedConstraints} from './model/constraint-context';
 import {writeBoxEdges} from './rendering/box-edges';
 import {AnchorDecorationObject} from './rendering/anchor-decoration';
 import {
@@ -103,6 +102,9 @@ import {
 
 export type Occurrence = Readonly<{
   key: string;
+  /** Passive annotations keep the retained snapshot identity; tools use node's source identity. */
+  renderedNodeId?: string;
+  sketchId?: string;
   node: ModelSnapshotObject;
   object: THREE.Object3D;
   depth: number;
@@ -125,6 +127,9 @@ type RenderedViewTarget =
 
 type TransientPreviewRestore = Readonly<{
   module: ModelModule;
+  inspection?: InspectionSnapshot;
+  inspectionSource?: SourceViewSelection;
+  target: SelectedViewTarget;
   selectedKey: string;
   pose: CameraPose;
   mode: ModelRenderMode;
@@ -172,7 +177,7 @@ export type ModelViewportOptions = Readonly<{
   onViewChange?: () => void;
   onSelect: (occurrence: Occurrence) => void;
   onDrillDown: (node: ModelSnapshotObject) => void;
-  onNavigateSource: (sourceRef: SourceRef) => void;
+  onNavigateSource: (sourceRef: SourceRef, contextId?: string) => void;
   onPositionTool: (event: TransformGizmoEvent) => void;
   canEditPosition?: (binding: TransformGizmoBinding) => boolean;
   onTopologySelection: (event: TopologySelectionEvent) => void;
@@ -377,6 +382,12 @@ export class ModelViewport {
   private selectionEmphasized = true;
   private selectedKey = 'root';
   private module: ModelModule | null = null;
+  private inspectionScene?: InspectionSnapshot;
+  private inspectionSource?: SourceViewSelection;
+  private readonly measurementChoices = new Map<
+    string,
+    ReadonlyMap<string, number>
+  >();
   private selectedViewTarget: SelectedViewTarget = {kind: 'model'};
   private renderedViewTarget: RenderedViewTarget = {kind: 'model'};
   private transientPreviewRestore?: TransientPreviewRestore;
@@ -411,6 +422,7 @@ export class ModelViewport {
     makeObservable<
       this,
       | 'module'
+      | 'inspectionScene'
       | 'sourceParameter'
       | 'parameterPreviews'
       | 'spatialPreviews'
@@ -423,11 +435,13 @@ export class ModelViewport {
       | 'awaitingToolUpdate'
       | 'topologySelection'
       | 'clearTopologySelection'
-      | 'renderSourceTarget'
       | 'renderModelView'
       | 'retainRenderedGeometry'
     >(this, {
       module: observableRef,
+      inspectionScene: observableRef,
+      inspectedSketchId: computed,
+      renderInspection: action,
       sourceParameter: observableRef,
       parameterPreviews: observableShallow,
       spatialPreviews: observableShallow,
@@ -442,8 +456,6 @@ export class ModelViewport {
       selectedKey: observableRef,
       sourceContext: computed,
       availablePositionTools: computed,
-      selectBySourceOffset: action,
-      selectEvaluationContext: action,
       selectSourceTarget: action,
       selectKey: action,
       restoreTransientPreview: action,
@@ -453,7 +465,6 @@ export class ModelViewport {
       awaitingToolUpdate: observableRef,
       topologySelection: observableRef,
       clearTopologySelection: action,
-      renderSourceTarget: action,
       renderModelView: action,
       retainRenderedGeometry: action,
       beginTopologySelection: action,
@@ -600,6 +611,15 @@ export class ModelViewport {
     return this.rendering.mode;
   }
 
+  get presentedModule(): ModelModule | null {
+    return this.module;
+  }
+
+  clearSourceInspection(): void {
+    this.retainRenderedGeometry('unfocused');
+    this.onViewChange?.();
+  }
+
   /** The last live frame, unaffected by temporary image-export grid settings. */
   get gridStep(): number | undefined {
     return this.renderMode === 'modeling' ? this.liveGridStep : undefined;
@@ -627,32 +647,21 @@ export class ModelViewport {
   renderModule(
     module: ModelModule | null,
     selectedKey = 'root',
-    source?: SourceViewSelection,
     retainOnError = false,
   ): boolean {
     this.restoreTransientPreview();
+    this.inspectionScene = undefined;
+    this.inspectionSource = undefined;
     this.saveViewportState();
     this.awaitingToolUpdate = false;
     this.pendingSpatialTool = undefined;
     const retainGeometry =
       retainOnError && !!this.module && !!module?.diagnostic;
-    const previousSource = this.sourceContext?.target.sourceRef;
     this.module = module;
     this.sourceParameter = undefined;
     this.scenes = module ? new ViewportScenes(module) : undefined;
     this.selectedViewTarget = {kind: 'model'};
     this.renderedViewTarget = {kind: 'model'};
-    if (
-      source &&
-      this.selectBySourceOffset(
-        source.file,
-        source.offset,
-        selectedKey,
-        source.contextId,
-        previousSource?.end === source.offset ? previousSource : undefined,
-      )
-    )
-      return true;
     if (module?.fallback) {
       this.renderModelView(selectedKey);
     } else if (retainGeometry) {
@@ -665,8 +674,326 @@ export class ModelViewport {
     return false;
   }
 
+  /** Commit one complete inspector scene; no modeling operation names are involved. */
+  renderInspection(
+    module: ModelModule,
+    scene: InspectionSnapshot,
+    source?: SourceViewSelection,
+    selectedKey?: string,
+  ): void {
+    const scope =
+      source &&
+      this.sourceEvaluationAt(
+        module,
+        source.file,
+        source.offset,
+        source.contextId,
+      );
+    this.saveViewportState();
+    this.module = module;
+    this.inspectionScene = scene;
+    this.inspectionSource = source;
+    this.scenes = new ViewportScenes(module);
+    const parameter =
+      scope &&
+      source &&
+      sourceParameterAt(scope.target, source.file, source.offset);
+    this.sourceParameter =
+      scope && parameter
+        ? {
+            targetId: scope.target.id,
+            parameter,
+          }
+        : undefined;
+    this.selectedViewTarget = scope
+      ? {
+          kind: 'source',
+          targetId: scope.target.id,
+          evaluationIndex: scope.evaluationIndex,
+        }
+      : {kind: 'model'};
+    this.renderedViewTarget = scope
+      ? this.selectedViewTarget
+      : {kind: 'unfocused'};
+    this.transientPreviewRestore = undefined;
+    this.awaitingToolUpdate = false;
+    this.pendingSpatialTool = undefined;
+    const measurementChoices = this.measurementChoices.get('inspection');
+    this.resetRenderedView();
+    if (measurementChoices)
+      this.measurementChoices.set('inspection', measurementChoices);
+    const placement = scene.collection ? 'composition' : 'standalone';
+    const focused = scene.target.some(item => item.focused);
+    const bodies = new Map<
+      string,
+      {model: ModelSnapshotObject; emphasis: SourceEmphasis; visible: boolean}
+    >();
+    const addBody = (
+      model: ModelSnapshotObject,
+      emphasis: SourceEmphasis,
+      visible = true,
+    ) => {
+      const previous = bodies.get(model.nodeId);
+      if (!previous || !previous.visible)
+        bodies.set(model.nodeId, {model, emphasis, visible});
+      else if (emphasis !== 'context')
+        bodies.set(model.nodeId, {model, emphasis, visible: true});
+    };
+    for (const item of scene.ambient)
+      if (item.kind === 'model') addBody(item.model, 'context');
+    for (const item of scene.target)
+      if (item.kind === 'model')
+        addBody(item.model, item.focused || !focused ? 'primary' : 'secondary');
+    const authoredNodeId = (model: ModelSnapshotObject): string => {
+      while (
+        !module.objects.has(model.nodeId) &&
+        !model.sourceNodeId &&
+        model.children.length === 1
+      )
+        model = model.children[0];
+      return model.sourceNodeId ?? model.nodeId;
+    };
+    const toolFocus = new Set(
+      scope?.evaluation.focusNodeIds ?? scope?.evaluation.nodeIds ?? [],
+    );
+    const selectable = new Set(
+      scene.target.flatMap(item =>
+        item.kind === 'model' || item.kind === 'anchor'
+          ? [item.model.nodeId]
+          : [],
+      ),
+    );
+    // A tool may edit an ambient participant without changing its inspect tier.
+    for (const item of scene.ambient)
+      if (
+        (item.kind === 'model' || item.kind === 'anchor') &&
+        toolFocus.has(authoredNodeId(item.model))
+      )
+        selectable.add(item.model.nodeId);
+    const decorations: ViewportDecoration[] = [];
+    const referenceMarkers = new Map<string, ViewportDecoration>();
+    const values = [
+      ...scene.ambient.map(item => ({item, ambient: true})),
+      ...scene.target.map(item => ({item, ambient: false})),
+    ];
+    const sketchBodies = new Map<
+      string,
+      {
+        item: Extract<InspectionItem, {kind: 'sketch'}>;
+        emphasis: SourceEmphasis;
+        points: Map<number, SourceEmphasis>;
+      }
+    >();
+    const lookup = {...module, objects: scene.objects};
+    for (const [index, {item, ambient}] of values.entries()) {
+      const opacity = ambient ? 0.28 : item.focused || !focused ? 1 : 0.7;
+      if (item.kind === 'sketch') {
+        const emphasis = ambient
+          ? 'context'
+          : item.focused || !focused
+            ? 'primary'
+            : 'secondary';
+        let body = sketchBodies.get(item.sketchId);
+        if (!body) {
+          body = {item, emphasis: 'context', points: new Map()};
+          sketchBodies.set(item.sketchId, body);
+        }
+        const strongest = (a: SourceEmphasis, b: SourceEmphasis) =>
+          a === 'primary' || b === 'primary'
+            ? 'primary'
+            : a === 'secondary' || b === 'secondary'
+              ? 'secondary'
+              : 'context';
+        if (item.pointId === undefined)
+          body.emphasis = strongest(body.emphasis, emphasis);
+        else
+          body.points.set(
+            item.pointId,
+            strongest(body.points.get(item.pointId) ?? 'context', emphasis),
+          );
+      } else if (item.kind === 'anchor') {
+        if (!bodies.has(item.model.nodeId)) addBody(item.model, 'context');
+        for (const element of item.elements) {
+          const markers = previewElementDecorations(
+            lookup,
+            item.model,
+            element,
+            item.direction,
+          );
+          for (const marker of markers) {
+            // Aliases of the same placed reference share geometry. Direction
+            // markers keep their own orientation; the strongest tier wins.
+            const {id: _id, appearance: _appearance, ...arrow} = marker;
+            const key = JSON.stringify(
+              marker.kind === 'anchor'
+                ? arrow
+                : [
+                    item.model.nodeId,
+                    marker.kind,
+                    element.kind,
+                    element.transform,
+                    element.bound,
+                    element.topology,
+                  ],
+            );
+            const appearance = {
+              ...marker.appearance,
+              opacity: (marker.appearance.opacity ?? 1) * opacity,
+              edgeOpacity:
+                marker.appearance.edgeOpacity === undefined
+                  ? undefined
+                  : marker.appearance.edgeOpacity * opacity,
+            };
+            const previous = referenceMarkers.get(key);
+            if (
+              !previous ||
+              appearance.opacity > (previous.appearance.opacity ?? 1)
+            )
+              referenceMarkers.set(key, {
+                ...marker,
+                id:
+                  previous?.id ?? `inspect:reference:${referenceMarkers.size}`,
+                appearance,
+              });
+          }
+        }
+      } else if (item.kind === 'bounds') {
+        if (!bodies.has(item.model.nodeId))
+          addBody(item.model, 'context', false);
+        decorations.push({
+          kind: 'bounds',
+          id: `inspect:${index}`,
+          nodeId: item.model.nodeId,
+          size: item.size,
+          transform: {...item.frame, scale: [1, 1, 1]},
+          appearance: {
+            ...boundAppearance,
+            opacity: boundAppearance.opacity * opacity,
+          },
+        });
+      } else if (item.kind === 'dimension') {
+        if (!bodies.has(item.model.nodeId))
+          addBody(item.model, 'context', false);
+        decorations.push({
+          kind: 'measurement',
+          id: `inspect:${index}`,
+          nodeId: item.model.nodeId,
+          ...('candidates' in item
+            ? {candidates: item.candidates}
+            : {start: item.start, end: item.end}),
+          value: item.value,
+          axisLabel: item.axisLabel,
+          appearance: {
+            color: '#c4c4c4',
+            opacity: 0.92 * opacity,
+            depthTest: false,
+          },
+        });
+      }
+    }
+    this.selectionEmphasized = focused;
+    for (const [index, {model, emphasis, visible}] of [
+      ...bodies.values(),
+    ].entries()) {
+      const node = visible ? model : {...model, mesh: undefined, children: []};
+      const object = !selectable.has(model.nodeId)
+        ? this.buildContextObject(
+            node,
+            `context/${index}`,
+            scope?.target.id ?? '',
+            placement,
+            'context',
+          )
+        : this.buildObject(node, `source/${index}`, 1, 'source', placement);
+      if (selectable.has(model.nodeId)) applySourceEmphasis(object, emphasis);
+      this.root.add(object);
+    }
+    const sketchNodes: ModelSnapshotObject[] = [];
+    for (const [index, body] of [...sketchBodies.values()].entries()) {
+      const layers: CompiledSketch[] = [];
+      for (
+        let sketch = scene.sketches.get(body.item.sketchId);
+        sketch;
+        sketch = sketch.base ? scene.sketches.get(sketch.base) : undefined
+      )
+        layers.unshift(sketch);
+      const original = module.sketches.get(body.item.sourceSketchId);
+      const node = {
+        ...body.item.model,
+        sourceNodeId: original?.frameNodeId,
+        transform: body.item.model.compositionTransform,
+      };
+      const key = `sketch/${index}`;
+      const object = createRenderedSketch(layers, body.emphasis, body.points);
+      object.name = 'Sketch';
+      applyNodeTransform(object, node);
+      const occurrence: Occurrence = {
+        key,
+        node: this.interactionNode(node),
+        renderedNodeId: node.nodeId,
+        sketchId: body.item.sourceSketchId,
+        object,
+        depth: 1,
+        view: 'source',
+        placement: 'standalone',
+      };
+      if (body.emphasis !== 'context' || body.points.size) {
+        object.userData.selectionKey = key;
+        this.occurrences.set(key, occurrence);
+      } else this.contextOccurrences.set(key, occurrence);
+      sketchNodes.push(node);
+      this.root.add(object);
+    }
+    this.applyPreviewTransforms();
+    const toolNodeId =
+      scope?.evaluation.relationOwnerNodeId ??
+      (scope?.evaluation.operationId &&
+        module.operations.get(scope.evaluation.operationId)?.outputNodeId);
+    const toolOccurrence =
+      toolNodeId &&
+      [...this.occurrences.values()].find(
+        value => value.node.nodeId === toolNodeId,
+      );
+    const focusedIds = new Set(
+      scene.target.flatMap(item =>
+        item.focused && item.kind !== 'sketch'
+          ? [authoredNodeId(item.model)]
+          : [],
+      ),
+    );
+    const focusedOccurrence = [...this.occurrences.values()].find(value =>
+      focusedIds.has(value.node.nodeId),
+    );
+    const parameterOccurrence = [...this.occurrences.values()].find(value =>
+      toolFocus.has(value.node.nodeId),
+    );
+    const retained = selectedKey && this.occurrences.get(selectedKey);
+    const nextKey =
+      focusedOccurrence?.key ??
+      parameterOccurrence?.key ??
+      (retained && (!toolNodeId || retained.node.nodeId === toolNodeId)
+        ? retained.key
+        : toolOccurrence
+          ? toolOccurrence.key
+          : this.occurrences.keys().next().value);
+    if (nextKey) this.selectKey(nextKey, false);
+    this.activateViewportScene(
+      [...bodies.values()]
+        .filter(value => value.visible)
+        .map(value => value.model)
+        .concat(sketchNodes),
+      placement,
+    );
+    this.setDecorations('inspection', [
+      ...decorations,
+      ...referenceMarkers.values(),
+    ]);
+    this.onViewChange?.();
+  }
+
   hasRenderableGeometry(): boolean {
-    return this.renderedOccurrences().some(({node}) => {
+    return this.renderedOccurrences().some(({node, sketchId, object}) => {
+      if (sketchId) return object.children.length > 0;
       const mesh = node.mesh;
       return (
         mesh !== undefined &&
@@ -677,71 +1004,15 @@ export class ModelViewport {
     });
   }
 
-  selectBySourceOffset(
-    file: string,
-    offset: number,
-    preferredOccurrenceKey?: string,
-    preferredContextId?: string,
-    preferredSource?: SourceRef,
-  ): boolean {
-    const scope = this.sourceEvaluationAt(
-      this.module,
-      file,
-      offset,
-      preferredContextId,
-      preferredSource,
+  /** A single authored sketch can be offered to the independent 2D editing tool. */
+  get inspectedSketchId(): string | undefined {
+    const sketches =
+      this.inspectionScene?.target.filter(item => item.kind === 'sketch') ?? [];
+    const focused = sketches.filter(item => item.focused);
+    const ids = new Set(
+      (focused.length ? focused : sketches).map(item => item.sourceSketchId),
     );
-    const match = scope?.target;
-    const parameter = match && sourceParameterAt(match, file, offset);
-    this.sourceParameter = parameter
-      ? {targetId: match!.id, parameter}
-      : undefined;
-    if (!scope || !sourceContextRenderable(this.module!, scope)) {
-      this.retainRenderedGeometry(
-        this.renderedViewTarget.kind === 'retained' ? 'retained' : 'unfocused',
-      );
-      return false;
-    }
-
-    const {target, evaluationIndex} = scope;
-    this.selectedViewTarget = {
-      kind: 'source',
-      targetId: target.id,
-      evaluationIndex,
-    };
-    this.transientPreviewRestore = undefined;
-    if (
-      this.renderedViewTarget.kind !== 'source' ||
-      this.renderedViewTarget.targetId !== target.id ||
-      this.renderedViewTarget.evaluationIndex !== evaluationIndex
-    ) {
-      this.renderSourceTarget(target, evaluationIndex, preferredOccurrenceKey);
-    } else {
-      if (
-        preferredOccurrenceKey &&
-        this.occurrences.has(preferredOccurrenceKey)
-      ) {
-        this.selectKey(preferredOccurrenceKey, false);
-      }
-    }
-    return true;
-  }
-
-  selectEvaluationContext(contextId: string): boolean {
-    const scope = this.sourceContext;
-    if (!scope) return false;
-    const evaluationIndex = scope.target.evaluations.findIndex(
-      evaluation => evaluation.contextId === contextId,
-    );
-    if (evaluationIndex < 0) return false;
-    this.selectedViewTarget = {
-      kind: 'source',
-      targetId: scope.target.id,
-      evaluationIndex,
-    };
-    this.transientPreviewRestore = undefined;
-    this.renderSourceTarget(scope.target, evaluationIndex);
-    return true;
+    return ids.size === 1 ? ids.values().next().value : undefined;
   }
 
   /** The current semantic focus, shared by panels, handles and reference picking. */
@@ -786,10 +1057,10 @@ export class ModelViewport {
     const target = this.sourceTargetAt(file, offset, module, preferredSource);
     if (!target) return;
     const current = module === this.module ? this.sourceContext : undefined;
-    const matchingMeasurementIndex = current?.evaluation.measurement
+    const matchingInspectionIndex = current?.evaluation.inspectCallId
       ? target.evaluations.findIndex(
           evaluation =>
-            evaluation.measurement === current.evaluation.measurement &&
+            evaluation.inspectCallId === current.evaluation.inspectCallId &&
             (!preferredContextId ||
               evaluation.contextId === preferredContextId),
         )
@@ -821,16 +1092,25 @@ export class ModelViewport {
       this.selectedViewTarget.targetId === target.id
         ? this.selectedViewTarget.evaluationIndex
         : -1;
+    const requestedEvaluationIndex =
+      retainedEvaluationIndex >= 0 &&
+      (this.renderedViewTarget.kind !== 'source' ||
+        this.renderedViewTarget.targetId !== target.id ||
+        this.renderedViewTarget.evaluationIndex !== retainedEvaluationIndex)
+        ? retainedEvaluationIndex
+        : -1;
     const preferredEvaluationIndex =
-      matchingMeasurementIndex >= 0
-        ? matchingMeasurementIndex
-        : matchingOwnerIndex >= 0
-          ? matchingOwnerIndex
-          : matchingContextIndex >= 0
-            ? matchingContextIndex
-            : retainedEvaluationIndex >= 0
-              ? retainedEvaluationIndex
-              : 0;
+      requestedEvaluationIndex >= 0
+        ? requestedEvaluationIndex
+        : matchingInspectionIndex >= 0
+          ? matchingInspectionIndex
+          : matchingOwnerIndex >= 0
+            ? matchingOwnerIndex
+            : matchingContextIndex >= 0
+              ? matchingContextIndex
+              : retainedEvaluationIndex >= 0
+                ? retainedEvaluationIndex
+                : 0;
     const evaluationIndex = target.evaluations[preferredEvaluationIndex]
       ? preferredEvaluationIndex
       : 0;
@@ -860,71 +1140,42 @@ export class ModelViewport {
         candidate.name ===
         (referenceName ? `${referenceName}.${memberName}` : memberName),
     );
-    const previewEvaluation: SourceTargetEvaluation = {
-      ...evaluation,
-      // This immediate member preview precedes recompiling its relation.
-      // Keep its actual receiver and never draw the previous contact snapshot.
-      constraintId: undefined,
-      relationOwnerNodeId: undefined,
-      relationContext: undefined,
-      constraintFocus: undefined,
-      relationPreview: undefined,
-      relationPreviewDiagnostic: undefined,
-      relationSpatial: undefined,
-      topologyReferences: element?.topology
-        ? [{nodeId: receiver.nodeId, name: element.name, ...element.topology}]
-        : undefined,
-      anchorReferences: undefined,
-      element: element
-        ? {
-            ...element,
-            nodeId: receiver.nodeId,
-          }
-        : undefined,
-    };
-    const previewTarget: SourceTarget = {
-      ...target,
-      id: `completion:${target.id}`,
-      kind: element ? 'element' : target.kind,
-      evaluations: [previewEvaluation],
-    };
-    this.captureTransientPreviewRestore();
-    this.renderSourceScene(
-      previewTarget,
-      previewEvaluation,
-      {kind: 'completion'},
-      undefined,
-      [receiver.nodeId],
+    this.previewCompletedProject(
+      this.module,
+      {
+        target: [
+          element
+            ? {
+                kind: 'anchor',
+                model: receiver,
+                elements: [element],
+                focused: true,
+              }
+            : {kind: 'model', model: receiver, focused: true},
+        ],
+        ambient: [],
+        objects: this.module.objects,
+        sketches: this.module.sketches,
+      },
+      {
+        file: target.sourceRef.file,
+        offset: target.sourceRef.start,
+        contextId: evaluation.contextId,
+      },
     );
     return true;
   }
 
   previewCompletedProject(
     module: ModelModule,
-    file: string,
-    offset: number,
-    preferredContextId?: string,
-  ): boolean {
+    scene: InspectionSnapshot,
+    source: SourceViewSelection,
+  ): void {
     this.captureTransientPreviewRestore();
-    if (!this.transientPreviewRestore) return false;
-    this.module = module;
-    const target = this.sourceTargetAt(file, offset);
-    if (target) {
-      const matchingContext = preferredContextId
-        ? target.evaluations.findIndex(
-            evaluation => evaluation.contextId === preferredContextId,
-          )
-        : -1;
-      const evaluation =
-        target.evaluations[matchingContext] ?? target.evaluations[0];
-      if (evaluation) {
-        this.renderSourceScene(target, evaluation, {kind: 'completion'});
-        return true;
-      }
-    }
-    if (!module.fallback) return false;
-    this.renderModelView('root', {kind: 'completion'});
-    return true;
+    const restore = this.transientPreviewRestore;
+    this.renderInspection(module, scene, source);
+    this.transientPreviewRestore = restore;
+    this.renderedViewTarget = {kind: 'completion'};
   }
 
   restoreTransientPreview(): void {
@@ -937,24 +1188,18 @@ export class ModelViewport {
     this.scenes = new ViewportScenes(restore.module);
     this.controls.restorePose(restore.pose);
     this.setRenderMode(restore.mode);
-    const target = this.selectedViewTarget;
-    if (target.kind === 'model') {
-      this.renderModelView(restore.selectedKey);
-    } else {
-      const sourceTarget = this.module.sourceTargets.find(
-        candidate => candidate.id === target.targetId,
+    this.selectedViewTarget = restore.target;
+    if (restore.inspection) {
+      this.renderInspection(
+        restore.module,
+        restore.inspection,
+        restore.inspectionSource,
+        restore.selectedKey,
       );
-      if (sourceTarget) {
-        this.renderSourceTarget(
-          sourceTarget,
-          target.evaluationIndex,
-          restore.selectedKey,
-        );
-      } else {
-        this.selectedViewTarget = {kind: 'model'};
-        this.renderModelView('root');
-      }
+      return;
     }
+    this.selectedViewTarget = {kind: 'model'};
+    this.renderModelView(restore.selectedKey);
   }
 
   getSelected(): Occurrence | undefined {
@@ -1163,17 +1408,43 @@ export class ModelViewport {
     decorations: readonly ViewportDecoration[],
     scope?: Readonly<{occurrenceKeys: readonly string[]}>,
   ): void {
+    const previousChoices = this.measurementChoices.get(owner);
+    const choices = new Map<string, number>();
+    this.measurementChoices.set(owner, choices);
     this.clearDecorations(owner);
     if (decorations.length === 0) {
       return;
     }
     const occurrenceKeys = scope ? new Set(scope.occurrenceKeys) : undefined;
     this.root.updateMatrixWorld(true);
+    const resolveMeasurement = (
+      value: Extract<ViewportDecoration, {kind: 'measurement'}>,
+      occurrence: Occurrence,
+    ) => {
+      if (!('candidates' in value)) return value;
+      const key = JSON.stringify([
+        occurrence.key,
+        value.nodeId,
+        value.candidates,
+      ]);
+      const previous = previousChoices?.get(key);
+      const segment =
+        previous === undefined
+          ? representativeDimensionEdge(
+              value.candidates,
+              this.camera,
+              occurrence.object.matrixWorld,
+            )!
+          : value.candidates[previous];
+      choices.set(key, value.candidates.indexOf(segment));
+      return segment;
+    };
     const instances = decorations.flatMap<DecorationInstance>(decoration => {
       return this.renderedOccurrences()
         .filter(
           occurrence =>
-            occurrence.node.nodeId === decoration.nodeId &&
+            (occurrence.node.nodeId === decoration.nodeId ||
+              occurrence.renderedNodeId === decoration.nodeId) &&
             (!occurrenceKeys || occurrenceKeys.has(occurrence.key)),
         )
         .map(occurrence => {
@@ -1199,15 +1470,12 @@ export class ModelViewport {
                       )
                     : projected.kind === 'topology'
                       ? createTopologyDecorationObject(projected)
-                      : projected.kind === 'dimension'
-                        ? createDimensionDecorationObject(
-                            projected,
-                            this.camera,
-                            occurrence.object.matrixWorld,
-                          )
-                        : projected.kind === 'measurement'
-                          ? new MeasurementDecorationObject(projected)
-                          : new AnchorDecorationObject(projected);
+                      : projected.kind === 'measurement'
+                        ? new MeasurementDecorationObject({
+                            ...projected,
+                            ...resolveMeasurement(projected, occurrence),
+                          })
+                        : new AnchorDecorationObject(projected);
           const object = new THREE.Group();
           object.matrixAutoUpdate = false;
           object.add(decorationObject);
@@ -1326,7 +1594,10 @@ export class ModelViewport {
   private saveViewportState(): void {
     if (!this.activeScene || this.transientPreviewRestore) return;
     this.viewStates.set(this.activeScene.key, {
-      pose: this.controls.savedPose(),
+      pose: transformCameraPose(
+        this.controls.savedPose(),
+        this.activeScene.frame,
+      ),
       mode: this.rendering.mode,
       savedAt: ++this.stateRevision,
     });
@@ -1346,9 +1617,15 @@ export class ModelViewport {
       return;
     }
     const scene = this.scenes!.scene(nodes, placement);
-    if (scene?.key === this.activeScene?.key) {
-      if (!this.isViewVisible())
-        this.controls.restorePose(this.controls.savedPose());
+    if (scene && this.activeScene && scene.key === this.activeScene.key) {
+      const transform = scene.frame
+        .clone()
+        .invert()
+        .multiply(this.activeScene.frame);
+      this.controls.restorePose(
+        transformCameraPose(this.controls.savedPose(), transform),
+      );
+      this.activeScene = scene;
       return;
     }
     const previousScene = this.activeScene;
@@ -1372,7 +1649,9 @@ export class ModelViewport {
     }
     this.setRenderMode(state?.mode ?? 'modeling');
     const framing = !state ? this.cameraFraming(this.root) : undefined;
-    const pose = state?.pose ?? (framing && this.controls.defaultPose(framing));
+    const pose = state
+      ? transformCameraPose(state.pose, scene.frame.clone().invert())
+      : framing && this.controls.defaultPose(framing);
     if (pose) {
       const previousFrame = scene.defaults.find(
         candidate => candidate.key === previousScene?.key,
@@ -1381,7 +1660,11 @@ export class ModelViewport {
         this.controls.restorePose(
           transformCameraPose(
             this.controls.capturePose(),
-            previousFrame.transform,
+            scene.frame
+              .clone()
+              .invert()
+              .multiply(previousFrame.transform)
+              .multiply(previousScene!.frame),
           ),
         );
       }
@@ -1409,6 +1692,22 @@ export class ModelViewport {
     );
   }
 
+  /** Use retained geometry/pose with the original source's editing metadata. */
+  private interactionNode(node: ModelSnapshotObject): ModelSnapshotObject {
+    const source =
+      node.sourceNodeId && this.module?.objects.get(node.sourceNodeId);
+    if (!source) return node;
+    const stage = this.sourceContext?.evaluation.relationPreview;
+    const {kind: _kind, mesh: _mesh, children: _children, ...metadata} = source;
+    return {
+      ...node,
+      ...metadata,
+      ...(stage?.nodeId === source.nodeId ? stage : undefined),
+      transform: node.transform,
+      compositionTransform: node.compositionTransform,
+    };
+  }
+
   private buildObject(
     node: ModelSnapshotObject,
     key: string,
@@ -1424,7 +1723,8 @@ export class ModelViewport {
 
     const occurrence = {
       key,
-      node,
+      node: this.interactionNode(node),
+      renderedNodeId: node.nodeId,
       object,
       depth,
       view,
@@ -1449,207 +1749,11 @@ export class ModelViewport {
     return object;
   }
 
-  private renderSourceTarget(
-    target: SourceTarget,
-    evaluationIndex: number,
-    selectedKey?: string,
-  ): void {
-    const evaluation = target.evaluations[evaluationIndex];
-    if (!evaluation) {
-      return;
-    }
-    this.renderSourceScene(
-      target,
-      evaluation,
-      {kind: 'source', targetId: target.id, evaluationIndex},
-      selectedKey,
-    );
-  }
-
-  private renderSourceScene(
-    target: SourceTarget,
-    evaluation: SourceTargetEvaluation,
-    renderedViewTarget: RenderedViewTarget,
-    selectedKey?: string,
-    focusNodeIds = evaluation.focusNodeIds,
-  ): void {
-    const placements = new Map(
-      evaluation.measurement?.placements.map(value => [
-        value.nodeId,
-        value.transform,
-      ]),
-    );
-    const measuredModels = measuredModelIds(
-      this.module!,
-      evaluation.measurement,
-    );
-    const relatedNodes = this.resolveNodes(evaluation.nodeIds)
-      .filter(
-        node =>
-          !evaluation.relationPreviewDiagnostic ||
-          node.nodeId !== evaluation.relationOwnerNodeId,
-      )
-      .map(node =>
-        placements.has(node.nodeId)
-          ? {...node, compositionTransform: placements.get(node.nodeId)!}
-          : node,
-      )
-      .map(node =>
-        node.nodeId === evaluation.relationPreview?.nodeId
-          ? {...node, ...evaluation.relationPreview}
-          : node,
-      );
-    const placement = sourceTargetPlacement(evaluation);
-    const focusNodes = focusNodeIds
-      ? relatedNodes.filter(node => focusNodeIds.includes(node.nodeId))
-      : relatedNodes;
-    const relationContextNodes = focusNodeIds
-      ? relatedNodes
-          .filter(node => !focusNodeIds.includes(node.nodeId))
-          .map(node => ({node, targetId: target.id}))
-      : [];
-    const contextNodes = uniqueContextNodes([
-      ...relationContextNodes,
-      ...this.resolveContextNodes(
-        target.contextTargetIds,
-        evaluation.operationInput?.operationId,
-        [...evaluation.nodeIds, ...(evaluation.operationInput?.nodeIds ?? [])],
-      ),
-    ])
-      .filter(
-        ({node}) =>
-          !evaluation.relationPreviewDiagnostic ||
-          node.nodeId !== evaluation.relationOwnerNodeId,
-      )
-      .map(context => {
-        const preview = target.evaluations.find(
-          candidate =>
-            candidate.relationPreview?.nodeId === context.node.nodeId,
-        )?.relationPreview;
-        return preview
-          ? {...context, node: {...context.node, ...preview}}
-          : context;
-      });
-    const layeredScene = focusNodes.length + contextNodes.length > 1;
-    this.selectionEmphasized =
-      (!evaluation.measurement || !!focusNodeIds?.length) &&
-      (focusNodeIds !== undefined || target.kind !== 'constraint');
-    this.renderedViewTarget = renderedViewTarget;
-    this.resetRenderedView();
-    const constraints = evaluatedConstraints(this.module!.objects, evaluation);
-    const relationContext =
-      evaluation.relationContext !== undefined || constraints.length > 0;
-    const secondaryNodeIds = new Set(
-      evaluation.relationContext?.referenceNodeIds ??
-        constraints.flatMap(constraint => [
-          constraint.source.nodeId,
-          constraint.target.nodeId,
-        ]),
-    );
-    contextNodes.forEach(({node, targetId}, index) => {
-      this.root.add(
-        this.buildContextObject(
-          node,
-          `context/${index}`,
-          targetId,
-          placement,
-          !evaluation.measurement && secondaryNodeIds.has(node.nodeId)
-            ? 'secondary'
-            : 'context',
-        ),
-      );
-    });
-    focusNodes.forEach((node, index) => {
-      const operationRole = sourceOperationRole(
-        this.module!,
-        evaluation,
-        node.nodeId,
-      );
-      const object = this.buildObject(
-        node,
-        `source/${index}`,
-        1,
-        'source',
-        placement,
-        operationRole,
-      );
-      // The current relation provider already owns both element highlights.
-      const references =
-        relationContext || evaluation.measurement
-          ? []
-          : (evaluation.topologyReferences?.filter(
-              reference => reference.nodeId === node.nodeId,
-            ) ?? []);
-      if (evaluation.measurement) {
-        const elementFocus =
-          evaluation.element ||
-          evaluation.selection ||
-          evaluation.topologyReferences?.length ||
-          evaluation.anchorReferences?.length;
-        applySourceEmphasis(
-          object,
-          !elementFocus &&
-            (focusNodeIds?.includes(node.nodeId) ||
-              (!focusNodeIds?.length && measuredModels.has(node.nodeId)))
-            ? 'primary'
-            : 'context',
-        );
-      } else if (relationContext) {
-        applySourceEmphasis(object, 'primary');
-      } else if (
-        references.length > 0 ||
-        (target.kind === 'topology-selection' && !evaluation.operationId)
-      ) {
-        applySourceEmphasis(object, 'context');
-      } else if (operationRole === 'tool') {
-        makeToolObjectTranslucent(object);
-      } else if (layeredScene) {
-        applySourceEmphasis(object, 'primary');
-      }
-      for (const reference of references) {
-        const mesh = this.module!.objects.get(reference.geometryNodeId)?.mesh;
-        if (!mesh) continue;
-        const kind = reference.kind === 'solid' ? 'surface' : reference.kind;
-        const ids = new TopologyIdSet(
-          reference.kind === 'solid'
-            ? topologyIds(mesh, 'surface')
-            : [reference.id],
-        );
-        const highlight = createTopologyHighlight(
-          mesh,
-          kind,
-          ids,
-          '#d8ff3e',
-          24,
-          symbolLineWidth,
-        );
-        if (highlight) {
-          highlight.raycast = () => undefined;
-          applyTransform(highlight, reference.transform);
-          object.add(modelingHelper(highlight));
-        }
-      }
-      this.root.add(object);
-    });
-    this.applyPreviewTransforms();
-    const nextKey =
-      selectedKey && this.occurrences.has(selectedKey)
-        ? selectedKey
-        : this.occurrences.keys().next().value;
-    if (nextKey) {
-      this.selectKey(nextKey, false);
-    }
-    this.activateViewportScene(
-      [...focusNodes, ...contextNodes.map(({node}) => node)],
-      placement,
-    );
-    this.onViewChange?.();
-  }
-
   private renderModelView(
     selectedKey: string,
     renderedViewTarget: RenderedViewTarget = {kind: 'model'},
   ): void {
+    this.inspectionScene = undefined;
     if (!this.module?.fallback) {
       return;
     }
@@ -1745,7 +1849,8 @@ export class ModelViewport {
     applySourceEmphasis(object, emphasis);
     this.contextOccurrences.set(key, {
       key,
-      node,
+      node: this.interactionNode(node),
+      renderedNodeId: node.nodeId,
       object,
       depth: 1,
       view: 'source',
@@ -1765,59 +1870,14 @@ export class ModelViewport {
     return object;
   }
 
-  private resolveNodes(nodeIds: readonly string[]): ModelSnapshotObject[] {
-    if (!this.module) {
-      return [];
-    }
-    const seen = new Set<string>();
-    return nodeIds.flatMap(nodeId => {
-      const node = this.module?.objects.get(nodeId);
-      if (!node || seen.has(node.nodeId)) {
-        return [];
-      }
-      seen.add(node.nodeId);
-      return [node];
-    });
-  }
-
-  private resolveContextNodes(
-    targetIds: readonly string[],
-    operationId: string | undefined,
-    focusNodeIds: readonly string[],
-  ): Array<Readonly<{node: ModelSnapshotObject; targetId: string}>> {
-    const focus = new Set(focusNodeIds);
-    const seen = new Set<string>();
-    return targetIds.flatMap(targetId => {
-      const target = this.module?.sourceTargets.find(
-        candidate => candidate.id === targetId,
-      );
-      if (!target) {
-        return [];
-      }
-      const evaluation = target.evaluations.find(candidate =>
-        sameOperationCall(
-          this.module?.operations.get(candidate.operationId ?? ''),
-          this.module?.operations.get(operationId ?? ''),
-        ),
-      );
-      if (!evaluation) {
-        return [];
-      }
-      return this.resolveNodes(evaluation.nodeIds).flatMap(node => {
-        if (focus.has(node.nodeId) || seen.has(node.nodeId)) {
-          return [];
-        }
-        seen.add(node.nodeId);
-        return [{node, targetId}];
-      });
-    });
-  }
-
   private captureTransientPreviewRestore(): void {
     if (!this.module) return;
     this.saveViewportState();
     this.transientPreviewRestore ??= {
       module: this.module,
+      inspection: this.inspectionScene,
+      inspectionSource: this.inspectionSource,
+      target: this.selectedViewTarget,
       selectedKey: this.selectedKey,
       pose: this.controls.capturePose(),
       mode: this.rendering.mode,
@@ -1850,6 +1910,7 @@ export class ModelViewport {
     this.transformGizmo.detach();
     this.clearImpactHighlights();
     this.clearAllDecorations();
+    this.measurementChoices.clear();
     this.parameterPreviews.clear();
     this.committedParameterPreviews.clear();
     this.hiddenSourceDecorations.clear();
@@ -1892,6 +1953,7 @@ export class ModelViewport {
     const occurrence = this.getSelected();
     if (
       !occurrence ||
+      occurrence.sketchId ||
       occurrence.node.mesh ||
       !this.selectionEmphasized ||
       this.topologySelection
@@ -2061,7 +2123,8 @@ export class ModelViewport {
     this.transformGizmo.updateAnchor();
   }
 
-  private renderedOccurrences(): Occurrence[] {
+  /** Visible target and ambient instances in the currently presented scene. */
+  renderedOccurrences(): Occurrence[] {
     return [...this.occurrences.values(), ...this.contextOccurrences.values()];
   }
 
@@ -2397,27 +2460,20 @@ export class ModelViewport {
       return;
     }
     const evaluationIndex = target.evaluations.findIndex(evaluation =>
-      this.resolveNodes(evaluation.nodeIds).some(node =>
-        containsNode(node, nodeId),
-      ),
+      evaluation.nodeIds.some(id => {
+        const node = this.module?.objects.get(id);
+        return node && containsNode(node, nodeId);
+      }),
     );
     if (evaluationIndex < 0) {
       return;
     }
     this.selectedViewTarget = {kind: 'source', targetId, evaluationIndex};
     this.transientPreviewRestore = undefined;
-    this.renderSourceTarget(target, evaluationIndex);
-    const occurrence = [...this.occurrences.values()].find(
-      candidate => candidate.node.nodeId === nodeId,
+    this.onNavigateSource(
+      target.sourceRef,
+      target.evaluations[evaluationIndex].contextId,
     );
-    if (occurrence) {
-      this.selectKey(occurrence.key, false);
-    }
-    this.onNavigateSource(target.sourceRef);
-    const selected = this.getSelected();
-    if (selected) {
-      this.onSelect(selected);
-    }
   }
 
   private resize(): void {
@@ -2645,38 +2701,11 @@ function sourceTargetPriority(target: SourceTarget): number {
   return 3;
 }
 
-export function sourceTargetPlacement(
-  evaluation: SourceTargetEvaluation,
-): ModelPlacement {
-  return evaluation.measurement !== undefined ||
-    evaluation.isCollection ||
-    evaluation.constraintId !== undefined ||
-    evaluation.transformationId !== undefined ||
-    evaluation.relationContext !== undefined ||
-    isCompositionInputRole(evaluation.operationInput?.role)
-    ? 'composition'
-    : 'standalone';
-}
-
 function isRelativePositionContext(target: SourceTarget | undefined): boolean {
   if (target?.kind === 'constraint' || target?.kind === 'transformation')
     return true;
   const role = target?.operation?.role;
   return target?.kind === 'operation-input' && isCompositionInputRole(role);
-}
-
-function sourceOperationRole(
-  module: ModelModule,
-  evaluation: SourceTargetEvaluation,
-  nodeId: string,
-): ModelOperationInputRole | undefined {
-  if (module.toolNodeIds.has(nodeId)) return 'tool';
-  const input = evaluation.operationInput;
-  if (!input) return undefined;
-  const sourceNodeIds = evaluation.relationOwnerNodeId
-    ? [evaluation.relationOwnerNodeId]
-    : evaluation.nodeIds;
-  return sourceNodeIds.includes(nodeId) ? input.role : undefined;
 }
 
 function axisIndex(argument: string): 0 | 1 | 2 | undefined {
@@ -2848,51 +2877,6 @@ function createTopologyDecorationObject(
   );
   if (highlight) container.add(highlight);
   applyTransform(container, decoration.transform);
-  return container;
-}
-
-function createDimensionDecorationObject(
-  decoration: Extract<ViewportDecoration, {kind: 'dimension'}>,
-  camera: THREE.Camera,
-  matrixWorld: THREE.Matrix4,
-): THREE.Object3D {
-  const edge = representativeDimensionEdge(
-    dimensionEdges(decoration.mesh, decoration.dimension),
-    camera,
-    matrixWorld,
-  );
-  const start = edge?.start ?? decoration.dimension.origin;
-  const end =
-    edge?.end ??
-    new THREE.Vector3(...start)
-      .add(new THREE.Vector3(...decoration.dimension.vector))
-      .toArray();
-  const positions = new Float32Array([...start, ...end]);
-  const container = new THREE.Group();
-  container.name = decoration.id;
-  container.userData.decoration = decoration;
-  container.userData.edgeId = edge?.id;
-  container.add(
-    createScreenSpaceEdgeLines(
-      positions,
-      decoration.appearance.color,
-      symbolLineWidth,
-      decoration.appearance.opacity,
-      decoration.appearance.depthTest,
-      28,
-    ),
-  );
-  if (!edge)
-    container.add(
-      createScreenSpacePoints(
-        positions,
-        decoration.appearance.color,
-        topologyPointSize,
-        1,
-        false,
-        28,
-      ),
-    );
   return container;
 }
 
@@ -3218,10 +3202,6 @@ function surfaceIdFromIntersection(
   )?.surfaceId;
 }
 
-function makeToolObjectTranslucent(object: THREE.Object3D): void {
-  makeObjectSurfacesTranslucent(object, toolSurfaceOpacity);
-}
-
 function makeObjectSurfacesTranslucent(
   object: THREE.Object3D,
   opacity: number,
@@ -3293,34 +3273,4 @@ function transformCameraPose(
       .setFromRotationMatrix(transform)
       .multiply(pose.orientation),
   };
-}
-
-function uniqueContextNodes(
-  entries: readonly Readonly<{
-    node: ModelSnapshotObject;
-    targetId: string;
-  }>[],
-): Array<Readonly<{node: ModelSnapshotObject; targetId: string}>> {
-  const seen = new Set<string>();
-  return entries.filter(({node}) => {
-    if (seen.has(node.nodeId)) return false;
-    seen.add(node.nodeId);
-    return true;
-  });
-}
-
-/** A failed result retains its source metadata even when this focus has no usable view. */
-function sourceContextRenderable(
-  module: ModelModule,
-  {target, evaluation}: NonNullable<ModelViewport['sourceContext']>,
-): boolean {
-  return (
-    (evaluation.runtime.outcome === 'completed' ||
-      (!!target.rotationSelection &&
-        !!evaluation.relationPreview &&
-        !evaluation.relationPreviewDiagnostic) ||
-      !!target.tool?.arguments.some(argument => argument.target)) &&
-    (evaluation.nodeIds.some(id => module.objects.has(id)) ||
-      !!evaluation.sketchIds?.some(id => module.sketches.has(id)))
-  );
 }

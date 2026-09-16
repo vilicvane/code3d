@@ -52,6 +52,7 @@ async function focus(source: string, token: string, displacement = 0) {
     target,
     parameter,
     evaluation,
+    scene: await compiler.executor.inspect({file: '/model.ts', offset}),
     guides: decorations.parameterSourceDecoration.decorations({
       module,
       target,
@@ -61,37 +62,36 @@ async function focus(source: string, token: string, displacement = 0) {
   };
 }
 
-test('argument occurrences resolve literal, shared-variable and compound dimensions independently', async () => {
+test('argument occurrences inspect literal, shared-variable and compound dimensions independently', async () => {
   const source = `import {box as makeBox} from '@code3d/core';
 const size = 12;
 const result = makeBox(size, size + 4, 30);`;
-  for (const [token, name, vector] of [
-    ['size,', 'x', [12, 0, 0]],
-    ['size + 4', 'y', [0, 16, 0]],
-    ['30)', 'z', [0, 0, 30]],
+  for (const [token, name, length] of [
+    ['size,', 'x', 12],
+    ['size + 4', 'y', 16],
+    ['30)', 'z', 30],
   ] as const) {
-    const {guides, parameter} = await focus(source, token, token.length - 1);
+    const {scene, parameter} = await focus(source, token, token.length - 1);
     assert.equal(parameter?.name, name);
-    assert.equal(guides.length, 1);
-    const guide = guides[0];
-    assert.equal(guide.kind, 'dimension');
-    if (guide.kind !== 'dimension') throw new Error('Expected dimension');
-    assert.deepEqual(guide.dimension.vector, vector);
-    const edges = dimensions.dimensionEdges(guide.mesh, guide.dimension);
-    assert.equal(edges.length, 4);
-    for (const edge of edges) {
+    const guide = scene?.target.find(item => item.kind === 'dimension');
+    assert.ok(guide && 'candidates' in guide);
+    assert.equal(guide.value, length);
+    assert.equal(guide.candidates.length, 4);
+    for (const edge of guide.candidates)
       assert.ok(
         Math.abs(
           new THREE.Vector3(...edge.end).distanceTo(
             new THREE.Vector3(...edge.start),
-          ) - Math.hypot(...vector),
+          ) - length,
         ) < 1e-5,
       );
-    }
   }
   const name = await focus(source, 'makeBox(size');
   assert.equal(name.parameter, undefined);
-  assert.deepEqual(name.guides, []);
+  assert.equal(
+    name.scene?.target.some(item => item.kind === 'dimension'),
+    false,
+  );
 });
 
 test('fillet selection uses consumed input edges and does not confuse its radius', async () => {
@@ -134,32 +134,19 @@ test('extrusion dimensions follow the profile normal and signed distance in both
     const source = `import {rectangle, extrude} from '@code3d/core';
 const profile = rectangle(20, 30).rotate(0, 0, 90).originOffset(4, 5, 6);
 const result = ${call};`;
-    const {guides} = await focus(source, '-12', 2);
-    const guide = guides[0];
-    assert.equal(guide.kind, 'dimension');
-    if (guide.kind !== 'dimension') throw new Error('Expected dimension');
-    assert.ok(
-      new THREE.Vector3(...guide.dimension.vector).distanceTo(
-        new THREE.Vector3(12, 0, 0),
-      ) < 1e-8,
-    );
-    assert.deepEqual(guide.dimension.origin, [-4, -5, -6]);
-    assert.equal(
-      dimensions.dimensionEdges(guide.mesh, guide.dimension).length,
-      4,
-    );
+    const {scene} = await focus(source, '-12', 2);
+    const guide = scene?.target.find(item => item.kind === 'dimension');
+    assert.ok(guide && 'candidates' in guide);
+    assert.equal(guide.value, -12);
+    assert.equal(guide.candidates.length, 4);
+    for (const edge of guide.candidates) {
+      const vector = new THREE.Vector3(...edge.end).sub(
+        new THREE.Vector3(...edge.start),
+      );
+      assert.ok(Math.abs(Math.abs(vector.x) - 12) < 1e-8);
+      assert.ok(Math.hypot(vector.y, vector.z) < 1e-8);
+    }
   }
-});
-
-test('a curved edge of matching endpoint distance cannot represent a straight dimension', () => {
-  const mesh = {
-    edges: new Float32Array([0, 0, 0, 5, 3, 0, 5, 3, 0, 10, 0, 0]),
-    edgeGroups: [{start: 0, count: 4, edgeId: 1}],
-  };
-  assert.deepEqual(
-    dimensions.dimensionEdges(mesh, {origin: [0, 0, 0], vector: [10, 0, 0]}),
-    [],
-  );
 });
 
 test('representative edge selection uses the visible occurrence placement', () => {

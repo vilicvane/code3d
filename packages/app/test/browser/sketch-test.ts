@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import {after, before, type TestContext} from 'node:test';
 import {chromium, type Browser, type Locator, type Page} from 'playwright-core';
 
+declare global {
+  interface Window {
+    sketchTestEditor: import('monaco-editor').editor.IStandaloneCodeEditor;
+  }
+}
+
 let browser: Browser;
 before(async () => {
   assert.ok(
@@ -25,6 +31,15 @@ export async function openPage(t: TestContext): Promise<Page> {
   page.on('pageerror', e => errors.push(e.message));
   t.after(() => assert.deepEqual(errors, []));
   // A cold Vite module graph needs the same initialization budget as compilation.
+  await page.route('**/src/main.ts*', async route => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body:
+        (await response.text()) +
+        '\nwindow.sketchTestEditor = codeEditor.editor;',
+    });
+  });
   await page.goto(process.env.CODE3D_TEST_URL!, {timeout: 30_000});
   await page.getByText('Ready', {exact: true}).waitFor({timeout: 30_000});
   return page;
@@ -50,6 +65,7 @@ export async function open(
     await page.keyboard.press('ArrowLeft');
     await page.keyboard.press('ArrowLeft');
   }
+  await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
   await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
   return page;
 }

@@ -32,8 +32,8 @@ test(
       const {browserPackageFiles} =
         await import('/src/project/browser-packages.ts');
       const {ModelViewport} = await import('/src/viewport.ts');
-      const {elementSourceDecoration, relationSourceDecoration} =
-        await import('/src/model/element-decorations.ts');
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const {originSourceDecoration} =
         await import('/src/model/origin-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
@@ -43,11 +43,7 @@ test(
         onNavigateSource() {},
         onPositionTool() {},
         onTopologySelection() {},
-        sourceDecorationProviders: [
-          elementSourceDecoration,
-          relationSourceDecoration,
-          originSourceDecoration,
-        ],
+        sourceDecorationProviders: [originSourceDecoration],
       });
       const compile = async (source: string) => {
         const module = await client.compile(
@@ -59,8 +55,14 @@ test(
         viewport.renderModule(module);
         return module;
       };
-      const inspect = (source: string, text: string) => {
-        viewport.selectBySourceOffset('/main.ts', source.indexOf(text) + 2);
+      const inspect = async (source: string, text: string) => {
+        await inspectSource(
+          client,
+          viewport,
+          viewport.presentedModule!,
+          '/main.ts',
+          source.indexOf(text) + 2,
+        );
         const scope = viewport.sourceContext!;
         const selected = viewport.getSelected();
         selected?.object.updateWorldMatrix(true, false);
@@ -73,9 +75,14 @@ test(
             pose: selected.node.compositionTransform,
           },
           matrix: selected?.object.matrixWorld.toArray(),
-          context: [...viewport['contextOccurrences'].values()].map(
-            o => o.node.nodeId,
-          ),
+          context: viewport
+            .renderedOccurrences()
+            .filter(
+              o =>
+                o.object.parent === viewport['root'] &&
+                o.node.nodeId !== selected?.node.nodeId,
+            )
+            .map(o => o.node.nodeId),
           bindings: viewport['transformGizmo']['axes'].flatMap(axis =>
             axis.binding && axis.controls.getHelper().visible
               ? [{mode: axis.binding.mode, value: axis.binding.value}]
@@ -104,17 +111,19 @@ test(
           'axisLine(base.axis)',
           'rotate(30)',
           'offset(7',
-        ].map(text => inspect(source, text));
-        const target = inspect(source, 'base.up');
-        const ownerInContext = [
-          ...viewport['contextOccurrences'].values(),
-        ].find(o => o.node.nodeId === target.preview!.nodeId);
+        ];
+        const stageViews = [];
+        for (const text of stages) stageViews.push(await inspect(source, text));
+        const target = await inspect(source, 'base.up');
+        const ownerInContext = viewport
+          .renderedOccurrences()
+          .find(o => o.node.nodeId === target.preview!.nodeId);
         const contextStagePose = ownerInContext?.node.compositionTransform;
         const plainSource = `import {box} from '@code3d/core'; export default box(8,6,4).rotate(0,0,45).rotate(0,0,90);`;
         await compile(plainSource);
-        const plain = ['rotate(0,0,45)', 'rotate(0,0,90)'].map(text =>
-          inspect(plainSource, text),
-        );
+        const plain = [];
+        for (const text of ['rotate(0,0,45)', 'rotate(0,0,90)'])
+          plain.push(await inspect(plainSource, text));
         const aliasSource = `import {box,group,offset,rotate} from '@code3d/core';
         const base = box(20,10,30);
         const part = box(8,6,4).relate(self => {
@@ -130,7 +139,10 @@ test(
           'moved =',
           'rotate(0,0,90)',
           'rotate(0,45,0)',
-        ].map(text => inspect(aliasSource, text));
+        ];
+        const aliasViews = [];
+        for (const text of aliases)
+          aliasViews.push(await inspect(aliasSource, text));
         const invalidSource = `import {offset, box,group} from '@code3d/core';
         const base=box(20,10,20);
         const higher=box(20,10,20).relate(s=>s.on(base.up));
@@ -146,11 +158,11 @@ test(
         }
         const retainedValidModel = viewport['module'] === retained;
         return {
-          stages,
+          stages: stageViews,
           finalPose,
           contextStagePose,
           plain,
-          aliases,
+          aliases: aliasViews,
           invalid,
           retainedValidModel,
         };

@@ -1074,7 +1074,7 @@ test('pivot coordinates have an independent drag and preserve the local frame', 
 
 for (const [geometry, id] of [
   ['box(8, 6, 4)', 3],
-  ['box(8, 6, 4).shell(1)', [1, 3]],
+  ['box(8, 6, 4).shell(1)', 3],
 ] as const) {
   test(`pivotVertex selects self topology ${JSON.stringify(id)} when self is the target of on`, async () => {
     const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const base = box(20, 10, 30); const part = ${geometry}.relate(self => [base.on(self.up), pivotVertex(${JSON.stringify(id)}).rotate(0, 0, 45)]);`;
@@ -1181,63 +1181,50 @@ test('a reversed rotation axis previews the authored signed angle', async () => 
   near(preview.quaternion, defined(next).compositionTransform.quaternion);
 });
 
-test('a bound selection renders each computed plane once across named and relation previews', async () => {
-  const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).rotate(0, 0, 30).relate(self => self.on(base.up));`;
+test('a bound selection renders the computed contact planes and support once through inspect', async () => {
+  const source = `import {box} from '@code3d/core'; const base=box(20,10,30); const part=box(8,6,4).rotate(0,0,30).relate(self=>self.on(base.up));`;
   const module = await compiler.compile(
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
   );
   assert.equal(module.diagnostic, undefined);
-  const target = module.sourceTargets.find(
-    target =>
-      target.kind === 'element' &&
-      source.slice(target.sourceRef.start, target.sourceRef.end) === 'up',
+  const scene = defined(
+    await compiler.executor.inspect({
+      file: '/model.ts',
+      offset: source.indexOf('on(base') + 1,
+    }),
   );
-  assert.ok(defined(defined(target).evaluations[0].element).bound);
-  const {elementSourceDecoration, relationSourceDecoration} =
-    await server.ssrLoadModule<
-      typeof import('../src/model/element-decorations.ts')
-    >('/src/model/element-decorations.ts');
-  assert.ok(target);
-  const scope = {module, target, evaluation: defined(target).evaluations[0]};
-  const named = elementSourceDecoration.decorations(scope);
-  assert.equal(named.length, 0);
-  const contacts = relationSourceDecoration.decorations(scope);
-  const targetMesh = contacts.find(
-    decoration =>
-      decoration.kind === 'surface' && decoration.id.includes(':target:'),
+  const {previewElementDecorations} = await server.ssrLoadModule<
+    typeof import('../src/model/element-decorations.ts')
+  >('/src/model/element-decorations.ts');
+  const contacts = scene.target.flatMap(item =>
+    item.kind === 'anchor'
+      ? item.elements.flatMap(element =>
+          previewElementDecorations(
+            {...module, objects: scene.objects},
+            item.model,
+            element,
+            item.direction,
+          ),
+        )
+      : [],
   );
-  assert.ok(targetMesh?.kind === 'surface');
-  assert.equal(targetMesh.mesh.vertices.length, 12);
-  assert.deepEqual(targetMesh.mesh.surfaceGroups, []);
-  const combined = [...named, ...contacts];
-  assert.equal(new Set(combined.map(item => item.id)).size, combined.length);
-  assert.equal(
-    combined.filter(decoration => decoration.kind === 'surface').length,
-    2,
+  const planes = contacts.filter(item => item.kind === 'surface');
+  assert.equal(planes.length, 2);
+  assert.ok(
+    planes.every(
+      item =>
+        item.mesh.vertices.length === 12 &&
+        item.mesh.surfaceGroups.length === 0,
+    ),
   );
-  const relationTarget = module.sourceTargets.find(
-    target =>
-      target.kind === 'constraint' && target.evaluations[0].constraintId,
-  );
-  const relation = relationSourceDecoration.decorations({
-    module,
-    target: defined(relationTarget),
-    evaluation: defined(relationTarget).evaluations[0],
-  });
-  assert.equal(relation.filter(item => item.kind === 'surface').length, 2);
-  const bounds = relation.filter(item => item.kind === 'bounds');
+  const bounds = scene.target.filter(item => item.kind === 'bounds');
   assert.equal(bounds.length, 1);
   near(bounds[0].size, [
     8 * Math.cos(Math.PI / 6) + 6 * Math.sin(Math.PI / 6),
     8 * Math.sin(Math.PI / 6) + 6 * Math.cos(Math.PI / 6),
     4,
   ]);
-  const sourcePlane = relation.find(
-    item => item.kind === 'surface' && item.nodeId === bounds[0].nodeId,
-  );
-  assert.ok(sourcePlane);
-  assert.equal(sourcePlane.appearance.color, bounds[0].appearance.color);
 });
 
 for (const [call, kind] of [

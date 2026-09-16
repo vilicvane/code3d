@@ -28,14 +28,14 @@ export class AgentRenderHistory {
 
   record(agent: RenderAgent, receipt: StoredReceipt): void {
     const response = receipt.response;
-    if (!response?.ok) return;
-    const data = response.data as
+    if (!response) return;
+    const data = (response.ok ? response.data : response.error.details) as
       | {
           observation?: {render?: {capturedAt?: string}};
         }
       | undefined;
     const capturedAt = data?.observation?.render?.capturedAt;
-    // Older receipts have no capture timestamp: snapshot creation time is not render time.
+    // Capture time belongs to the image, independently of model success.
     if (
       typeof capturedAt !== 'string' ||
       !Number.isFinite(Date.parse(capturedAt))

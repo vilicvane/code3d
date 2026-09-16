@@ -1,5 +1,9 @@
 import ts from '@typescript/typescript6';
-import {code3dAnnotations, type Code3dAnnotation} from './annotations';
+import {
+  code3dAnnotations,
+  declarationAnnotations,
+  type Code3dAnnotation,
+} from './annotations';
 import {
   isToolSelectionKind,
   validToolParameterValue,
@@ -157,19 +161,7 @@ export function parameterAnnotations(
 
 /** A tool may expose reference picking without numeric/ID parameters. */
 export function toolAnnotations(node: ts.Node): readonly Code3dAnnotation[] {
-  const sourceFile = node.getSourceFile();
-  // JSDoc on a const belongs to its variable statement, including emitted .d.ts.
-  const owner =
-    ts.isVariableDeclaration(node) &&
-    ts.isVariableDeclarationList(node.parent) &&
-    ts.isVariableStatement(node.parent.parent)
-      ? node.parent.parent
-      : node;
-  return code3dAnnotations(
-    sourceFile,
-    owner.getFullStart(),
-    owner.getStart(sourceFile),
-  ).filter(
+  return declarationAnnotations(node).filter(
     annotation => annotation.name === 'param' || annotation.name === 'tool',
   );
 }

@@ -8,6 +8,10 @@ another. An active TypeScript or JavaScript file is the execution root. Open a
 source file to preview the models it produces; other text files open without
 running a model.
 
+Model files support TypeScript namespaces, enums, and constructor parameter
+properties. You can attach helpers to a function with a namespace of the same
+name. A project's `tsconfig.json` can opt into stricter syntax checking.
+
 You can keep editing while a model is building. The App cancels the older
 revision and builds the latest one, reusing completed geometry calculations.
 The operation currently running may need to finish first. If the old build
@@ -135,8 +139,10 @@ the editor empty, while preserving the project's files.
 When you load a file without a preview, the viewport shows **Select to preview**.
 Place the cursor in a model or sketch expression to open it. The hint stays
 dismissed after your first preview until you load another file. Moving outside
-an expression keeps the last 3D preview. An empty sketch still opens its drawing
-tools. Selecting an editable call that fails also opens the viewport and its
+an expression keeps the last 3D preview. Sketch points and curves appear in 3D at
+their actual placement, alongside any models or other sketches in the inspection.
+Select a single authored sketch and click **Edit sketch** to open its 2D drawing
+tools, including for an empty sketch. Click **Finish sketch** to return to 3D. Selecting an editable call that fails also opens the viewport and its
 parameter panel, so you can correct the arguments without first producing a
 valid model. Dimension-based primitives such as `box()` provide
 [runtime defaults](../../../../../../core/docs/api.md#runtime-defaults-while-editing) for a
@@ -201,25 +207,26 @@ function centered(model: typeof blank) {
 const result = centered(rounded);
 ```
 
-In `blank.fillet(1)`, place the cursor on `blank` to inspect the input before
-rounding, then on `fillet(1)` to inspect the operation's result. In
-`centered(rounded)`, the `rounded` argument is also an inspectable input,
-even though `centered` is an ordinary function without tool annotations.
+In `blank.fillet(1)`, select `blank` to preview the input before rounding,
+then select `fillet` to preview its result. Unannotated parameters first use a
+function-level inspector when one exists, then preview the call's ordinary
+return value. For example, selecting `rounded` inside `centered(rounded)` shows
+the recentered result.
 
-The App follows evaluated model values, not a list of function names. Imported
-aliases, namespace calls, and models in arrays or options objects can retain
-their input contexts too. A failed call can still expose inputs that were
-evaluated before it failed.
+Public JSDoc inspectors can provide additional context for a parameter or call.
+They return the complete scene as `target` and `ambient` values. Targets matching
+the selected values receive focus; newly generated geometry does not inherit it.
+The App keeps the previous scene until inspection finishes, and retains it if
+inspection itself fails. See [source inspection](../../../../../../core/docs/runtime.md#source-inspection)
+for authoring inspectors, including local helpers and published packages.
 
-Inside `relate(part => ...)`, the parameter declaration and uses of `part`
-show the related model alongside the other participants. Named elements and
-topology references share that context. Selecting the bare parameter shows its
-completed placement segment so its tools can edit the nearest following offset or rotation.
-Each independent transformation shows its own stage, before later steps in the array. The other
-constraints in the same continuous segment remain active and are solved together in each preview. Independent transformations separate successive segments. The current pair's markers
-distinguish the selected side from its counterpart and the dimmed surrounding
-objects. See
-[inspecting relation scope](../../../../../../core/docs/relations.mdx#inspect-the-right-scope).
+Inside `relate(part => ...)`, related values show only the actual participants.
+`on` and `align` inspect their references and support geometry at the constraint
+stage. Independent transformations inspect their own stage before later steps;
+continuous constraints still solve together. Unrelated values keep ordinary
+preview, and mixed collections retain all their members. Inner call inspectors
+and results take precedence over the enclosing closure.
+See [inspecting relation scope](../../../../../../core/docs/relations.mdx#inspect-the-right-scope).
 
 Inspection does not automatically add a parameter panel or a drag handle.
 Panels use [parameter annotations](../guides/model-tools.mdx), while spatial
@@ -227,9 +234,9 @@ handles require an operation with supported positioning or rotation semantics.
 
 ## Use a contextual tool
 
-Place the cursor inside a `box(x, y, z)` argument to highlight one edge along
-that dimension. An extrusion distance highlights an edge along the extrusion,
-or a finite distance guide when there is no matching edge. Edge arguments to
+Place the cursor inside a `box(x, y, z)` argument to show a dimension with its
+value and end ticks along one actual edge. An extrusion distance uses the same
+annotation, with a finite distance guide when no matching edge exists. Edge arguments to
 `fillet` identify the original edges being rounded, and `originVertex`
 identifies the chosen vertex in the model's adjusted coordinates.
 
@@ -395,8 +402,8 @@ or relation. Highlighting or moving a member keeps this frame fixed; the member'
 modeling handles still use their own reference frame. Perspective shows the XZ
 grid; axis-aligned orthographic views show the corresponding XY, XZ, or YZ plane.
 
-Each sketch remembers its own pan and zoom while the project is open. Switching
-between visible sketches smoothly restores their views; scrolling, panning or
+Each sketch remembers its 2D editing pan and zoom while the project is open. Switching
+between sketches in the editing tool restores their views; scrolling, panning or
 interacting with geometry takes over immediately. Entering a sketch from a 3D or
 empty view shows it immediately, as does returning to 3D. Reduced-motion settings
 disable the transitions.
@@ -422,17 +429,17 @@ Selecting a section inside a `loft` call shows all sections in their composition
 positions, with the current section emphasized. A successful loft also shows its
 completed shape as translucent context. If the loft fails, the sections remain
 visible and editable so you can adjust its inputs.
-Selecting an input inside `intersect()` shows the input collection and highlights
-the volume shared by all inputs in cyan. If the inputs do not overlap or only
-touch, a diagnostic explains that there is no common solid volume; the input
-models stay available for adjustment.
-This also works for inline inputs such as `intersect([sphere(8), box(12, 12, 12)])`:
-editing a primitive's dimensions keeps the surrounding intersection visible.
-For `extrude([a, b], distance)`, selecting an input face highlights its extrusion
-in cyan while keeping the other results as translucent context. Selecting the
-input array highlights all results. The shared distance field updates every
-extrusion, and selecting the distance in code displays a length marker on each
-result. If extrusion fails, the input faces remain visible and editable.
+Selecting an input inside `intersect()` shows ambient inputs and the shared
+volume as the target. If the inputs do not overlap or only touch, a diagnostic
+explains that there is no common solid volume; inspecting the input still shows
+the operands for adjustment. An inner call such as `sphere(8)` in
+`intersect([sphere(8), box(12, 12, 12)])` previews its own result or inspector.
+
+For `extrude([a, b], distance)`, inspecting the input shows target faces and
+ambient results. Selecting one face focuses it; selecting the array focuses all
+faces. The shared distance field updates every extrusion, and inspecting that
+argument shows target results with a dimension on each and ambient input faces.
+After an extrusion fails, select its input argument to inspect the faces.
 If the current target itself fails or the file cannot be evaluated, its previous
 preview remains visible and its stale tools pause until a new result is available.
 

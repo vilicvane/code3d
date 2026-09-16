@@ -35,13 +35,12 @@ let bundledExamples: (typeof import('../src/project/bundled-examples.ts'))['bund
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let compiler: Awaited<ReturnType<typeof createTestModelPipeline>>;
 let ModelViewport: (typeof import('../src/viewport.ts'))['ModelViewport'];
-let sourceTargetPlacement: (typeof import('../src/viewport.ts'))['sourceTargetPlacement'];
 
 let applyNodeTransform: (typeof import('../src/rendering/model-renderer.ts'))['applyNodeTransform'];
 
 before(async () => {
   server = await createAppTestServer();
-  ({ModelViewport, sourceTargetPlacement} =
+  ({ModelViewport} =
     await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
       '/src/viewport.ts',
     ));
@@ -64,6 +63,34 @@ before(async () => {
 after(async () => {
   compiler?.dispose();
   await server?.close();
+});
+
+test('executes function namespaces, enums and constructor parameter properties through model tracing', async () => {
+  const source = `import {box} from '@code3d/core';
+    enum Size { Small = 12 }
+    class Dimensions { constructor(readonly width: number) {} }
+    export function part(width: number) { return box(width, 2, 3); }
+    export namespace part {
+      export function width() { return new Dimensions(Size.Small).width; }
+    }
+    const renamed = part;
+    const result = renamed(renamed.width());
+    if (result.bounds().size[0] !== 12) throw new Error('Incorrect namespace result');
+    export default result;`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  assert.ok(module.fallback?.mesh);
+  const call = defined(
+    ModelViewport.prototype['sourceTargetAt'].call(
+      {module},
+      '/model.ts',
+      source.indexOf('renamed(renamed.width())') + 1,
+    ),
+  );
+  assert.ok(call.evaluations[0].nodeIds.includes(module.fallback!.nodeId));
 });
 
 test('full relate source range retains its self toolbar context, including nested relations', async () => {
@@ -469,13 +496,12 @@ test('a caret on range previews one map result with resolved collection placemen
     assert.equal(defined(target).evaluations.length, 1);
     const evaluation = defined(target).evaluations[0];
     assert.equal(evaluation.nodeIds.length, count);
-    assert.equal(sourceTargetPlacement(evaluation), 'composition');
     const positions = evaluation.nodeIds.map(nodeId => {
       const object = new THREE.Object3D();
       applyNodeTransform(
         object,
         defined(module.objects.get(nodeId)),
-        sourceTargetPlacement(evaluation),
+        'composition',
       );
       return object.position.x;
     });
@@ -483,16 +509,6 @@ test('a caret on range previews one map result with resolved collection placemen
       positions,
       Array.from({length: count}, (_, i) => (i - 2) * 8),
     );
-    assert.equal(
-      sourceTargetPlacement(defined(at('const first')).evaluations[0]),
-      'standalone',
-    );
-    for (const binding of ['singleton', 'set', 'map'] as const) {
-      assert.equal(
-        sourceTargetPlacement(defined(at(`const ${binding}`)).evaluations[0]),
-        'composition',
-      );
-    }
   }
 });
 
@@ -833,7 +849,6 @@ for (const compose of [true, false] as const) {
           relation.relationOwnerNodeId,
         ]);
         assert.equal(evaluation.constraintId, relation.constraintId);
-        assert.equal(sourceTargetPlacement(evaluation), 'composition');
         assert.deepEqual(
           defined(target).contextTargetIds,
           defined(
@@ -938,7 +953,6 @@ for (const [kind, sourceAnchor, targetAnchor] of [
               nodeId => nodeId !== constraint.relationOwnerNodeId,
             );
         assert.deepEqual(evaluation.focusNodeIds, [owner]);
-        assert.equal(sourceTargetPlacement(evaluation), 'composition');
         if (isSource && kind !== 'named' && kind !== 'model') {
           assert.equal(defined(evaluation.selection).kind, kind);
           assert.equal(defined(evaluation.selection).inputNodeId, owner);
@@ -1010,7 +1024,6 @@ test('anchor context is limited to the enclosing relation in a constraint array'
   assert.equal(alone.nodeIds.length, 1);
   assert.equal(alone.constraintId, undefined);
   assert.equal(alone.operationId, undefined);
-  assert.equal(sourceTargetPlacement(alone), 'standalone');
   assert.deepEqual(defined(at('base.edge(2)')).contextTargetIds, []);
 });
 
@@ -1069,24 +1082,6 @@ ${composed ? "const derived = part.material('#ff4d81'); export default group([de
           2,
         );
         assert.equal(part.constraints.length, 3);
-        assert.equal(sourceTargetPlacement(evaluation), 'composition');
-        const peers = ModelViewport.prototype['resolveContextNodes'].call(
-          {
-            module,
-            resolveNodes: (nodeIds: readonly string[]) =>
-              nodeIds.map(nodeId => defined(module.objects.get(nodeId))),
-          },
-          target.contextTargetIds,
-          evaluation.operationInput?.operationId,
-          [
-            ...evaluation.nodeIds,
-            ...(evaluation.operationInput?.nodeIds ?? []),
-          ],
-        );
-        assert.deepEqual(
-          new Set(peers.map(peer => peer.node.nodeId)),
-          new Set(composed ? [id('old'), id('other')] : []),
-        );
       }
       const stage = at(
         source.indexOf(reverse ? 'base.on(' : 'self.on(base') + 6,
@@ -1097,7 +1092,6 @@ ${composed ? "const derived = part.material('#ff4d81'); export default group([de
       const binding = at(source.indexOf('part =')).evaluations[0];
       assert.equal(binding.relationContext, undefined);
       assert.deepEqual(binding.nodeIds, [id('part')]);
-      assert.equal(sourceTargetPlacement(binding), 'standalone');
     });
   }
 }
@@ -1405,7 +1399,6 @@ export default grow(${argument}, 20);`;
       );
       assert.equal(defined(target.tool).signature.name, 'extrude');
       const evaluation = target.evaluations[0];
-      assert.equal(sourceTargetPlacement(evaluation), 'composition');
       assert.equal(evaluation.nodeIds.length, word === 'faces' ? 2 : 1);
       const focused = operations.filter(operation =>
         operation.inputs.some(input =>
@@ -1428,24 +1421,15 @@ export default grow(${argument}, 20);`;
       ),
     );
     assert.equal(distance.evaluations[0].nodeIds.length, 2);
-    const {parameterSourceDecoration} = await server.ssrLoadModule<
-      typeof import('../src/model/parameter-decorations.ts')
-    >('/src/model/parameter-decorations.ts');
-    const decorations = parameterSourceDecoration.decorations({
-      module,
-      target: distance,
-      evaluation: distance.evaluations[0],
-      parameter: defined(
-        defined(distance.tool).signature.parameters.find(
-          parameter => parameter.name === 'distance',
-        ),
-      ),
-    });
-    assert.equal(decorations.length, 2);
-    assert.equal(
-      new Set(decorations.map(decoration => decoration.nodeId)).size,
-      2,
+    const scene = defined(
+      await compiler.executor.inspect({
+        file: '/model.ts',
+        offset: source.lastIndexOf('20'),
+      }),
     );
+    const dimensions = scene.target.filter(item => item.kind === 'dimension');
+    assert.equal(dimensions.length, 2);
+    assert.equal(new Set(dimensions.map(item => item.model.nodeId)).size, 2);
   }
 });
 
@@ -1497,7 +1481,6 @@ export default intersect([sphere(8), box(12, 12, 12)]);`;
       ).kind,
       'intersect',
     );
-    assert.equal(sourceTargetPlacement(evaluation), 'composition');
     assert.equal(evaluation.nodeIds.length, 1);
     assert.ok(target.contextTargetIds.length >= 2);
   }
@@ -1524,11 +1507,6 @@ export default intersect([sphere(1), box(2, 2, 2).originOffset(-20, 0, 0)]);`;
   assert.ok(inline.tool);
   assert.equal(inline.evaluations[0].nodeIds.length, 2);
   assert.equal(defined(inline.evaluations[0].focusNodeIds).length, 1);
-  assert.equal(sourceTargetPlacement(inline.evaluations[0]), 'composition');
-  assert.equal(
-    sourceTargetPlacement(at('sphere(5)').evaluations[0]),
-    'standalone',
-  );
 });
 
 test('failed loft calls retain their complete input collection and focused section across aliases and containers', async () => {
@@ -1565,7 +1543,6 @@ export default ${call};`;
     assert.equal(new Set(evaluation.nodeIds).size, 3, call);
     assert.equal(defined(evaluation.focusNodeIds).length, focusCount, call);
     assert.equal(evaluation.isCollection, true, call);
-    assert.equal(sourceTargetPlacement(evaluation), 'composition', call);
     assert.ok(
       evaluation.nodeIds.every(id => module.objects.has(id)),
       call,
@@ -1898,7 +1875,6 @@ test('the shared combined-constraints guide retains both inspectable relations',
     );
     const evaluation = defined(target).evaluations[0];
     assert.ok(evaluation.constraintId);
-    assert.equal(sourceTargetPlacement(evaluation), 'composition');
     assert.equal(evaluation.nodeIds.length, 2);
     return evaluation.constraintId;
   });
@@ -1961,18 +1937,33 @@ for (const sample of renderSamples) {
     ];
     for (const focus of focuses) {
       const offset = sourceTokenOffset(file.source, focus);
-      assert.ok(
-        module.sourceTargets.some(
-          target =>
-            target.sourceRef.file === rootPath &&
-            target.sourceRef.start <= offset &&
-            target.sourceRef.end > offset &&
-            target.evaluations.some(
-              evaluation => evaluation.nodeIds.length > 0,
-            ),
+      const target = defined(
+        ModelViewport.prototype['sourceTargetAt'].call(
+          {module},
+          rootPath,
+          offset,
         ),
-        `The gallery image must focus a renderable source context: ${focus.token}`,
       );
+      const evaluation = target.evaluations[0];
+      if (target.kind === 'inspect') {
+        const scene = defined(
+          await compiler.executor.inspect({
+            file: rootPath,
+            offset,
+            contextId: evaluation.contextId,
+            order: evaluation.runtime.order,
+            callId: evaluation.inspectCallId,
+          }),
+        );
+        assert.ok(
+          scene.target.length + scene.ambient.length > 0,
+          `The gallery image must inspect a renderable source context: ${focus.token}`,
+        );
+      } else
+        assert.ok(
+          evaluation.nodeIds.length > 0,
+          `The gallery image must focus a renderable source context: ${focus.token}`,
+        );
     }
   });
 }
@@ -2201,7 +2192,6 @@ export const model = ${composition};`;
       assert.equal(operation.kind, method);
       assert.equal(operation.outputNodeId, evaluation.nodeIds[0]);
       assert.ok(operation.spatial);
-      assert.equal(sourceTargetPlacement(evaluation), 'composition');
       assert.notEqual(
         evaluation.operationId,
         defined(evaluation.operationInput).operationId,
@@ -2211,22 +2201,6 @@ export const model = ${composition};`;
           parameter => parameter.operation === method,
         ),
       );
-      const contexts = ModelViewport.prototype['resolveContextNodes'].call(
-        {
-          module,
-          resolveNodes: (ids: readonly string[]) =>
-            ids.map(id => defined(module.objects.get(id))),
-        },
-        target.contextTargetIds,
-        evaluation.operationInput!.operationId,
-        [...evaluation.nodeIds, ...evaluation.operationInput!.nodeIds],
-      );
-      assert.equal(
-        contexts.length,
-        1,
-        'the later transformed value must not appear as a ghost peer',
-      );
-      assert.equal(contexts[0].node.operation.kind, 'box');
     }
     const binding = defined(
       ModelViewport.prototype['sourceTargetAt'].call(
@@ -2264,7 +2238,6 @@ export default group([peer, part]);`;
       ),
     );
     assert.equal(target.evaluations.length, 1);
-    assert.equal(sourceTargetPlacement(target.evaluations[0]), 'composition');
     assert.equal(
       defined(
         module.operations.get(

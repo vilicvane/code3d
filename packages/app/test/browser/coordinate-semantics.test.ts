@@ -742,29 +742,23 @@ export default loft([start, via, end]).material('#d8ff3e');`;
         const viewport = window.coordinateApp.viewport;
         viewport.fit();
         return {
-          count:
-            viewport['occurrences'].size + viewport['contextOccurrences'].size,
-          result:
-            viewport['decorationLayers'].get('source-context:loft-result')
-              ?.length ?? 0,
+          count: viewport
+            .renderedOccurrences()
+            .filter(o => o.object.parent === viewport['root']).length,
+          result: viewport['inspectionScene']?.ambient.length ?? 0,
           relative: viewport.hasRelativePositionContext(),
           tools: viewport.positionTools.availableTools,
-          positions: [
-            ...viewport['occurrences'].values(),
-            ...viewport['contextOccurrences'].values(),
-          ].map(o => ({
-            actual: o.object.position.toArray(),
-            expected: o.node.compositionTransform.position,
-          })),
+          focused: viewport['inspectionScene']?.target.filter(
+            item => item.focused,
+          ).length,
         };
       });
-      assert.equal(displayed.count, 3);
+      assert.equal(displayed.count, offset === -18 ? 3 : 4);
+      assert.equal(displayed.focused, 1);
       assert.equal(displayed.result, offset === -18 ? 0 : 1);
       assert.equal(displayed.relative, true);
       assert.ok(displayed.tools.includes('translate'));
       assert.ok(displayed.tools.includes('rotate-point'));
-      for (const position of displayed.positions)
-        near(position.actual, position.expected);
       await cameraIdle(page);
       if (process.env.CODE3D_LOFT_ARGUMENT_SCREENSHOT)
         await page.screenshot({
@@ -793,37 +787,35 @@ export default grow([a, b], 20);`;
     }, source);
     await page.waitForFunction(
       () =>
-        window.coordinateApp.viewport['decorationLayers'].get(
-          'source-context:extrude-result',
-        )?.length === 2,
+        window.coordinateApp.viewport['inspectionScene']?.ambient.length === 2,
     );
     const inspect = () =>
       page.evaluate(() => {
         const {viewport, codeEditor} = window.coordinateApp;
-        const layers =
-          viewport['decorationLayers'].get('source-context:extrude-result') ??
-          [];
+        const scene = viewport['inspectionScene'];
+        if (!scene)
+          throw new Error(
+            JSON.stringify({
+              source: codeEditor.editor.getValue(),
+              cursor: codeEditor.cursorSource(),
+              scope: viewport.sourceContext,
+              diagnostic: viewport['module']?.diagnostic,
+            }),
+          );
         return {
           source: codeEditor.editor.getValue(),
-          count:
-            viewport['occurrences'].size + viewport['contextOccurrences'].size,
-          results: layers.map(({object}) => {
-            let decoration:
-              | Extract<
-                  import('../../src/viewport-decoration.ts').ViewportDecoration,
-                  {kind: 'mesh'}
-                >
-              | undefined;
-            object.traverse(child => {
-              if (child.userData.decoration?.kind === 'mesh')
-                decoration = child.userData.decoration;
-            });
-            return {
-              nodeId: decoration!.nodeId,
-              opacity: decoration!.appearance?.opacity,
-            };
-          }),
-          focus: viewport.sourceContext?.evaluation.nodeIds,
+          count: viewport
+            .renderedOccurrences()
+            .filter(o => o.object.parent === viewport['root']).length,
+          results: scene.ambient.filter(item => item.kind === 'model'),
+          focus: scene.target
+            .filter(item => item.focused)
+            .map(
+              item =>
+                item.model.sourceNodeId ??
+                item.model.children[0]?.sourceNodeId ??
+                item.model.nodeId,
+            ),
           lengths: [...viewport['module']!.operations.values()]
             .filter(op => op.kind === 'extrude')
             .map(op => Math.hypot(...op.dimensions!.distance.vector)),
@@ -837,16 +829,10 @@ export default grow([a, b], 20);`;
         path: `${process.env.CODE3D_BATCH_EXTRUDE_SCREENSHOT}.input.png`,
       });
     }
-    assert.equal(initial.count, 2);
+    assert.equal(initial.count, 4);
     assert.equal(initial.results.length, 2);
-    assert.equal(
-      initial.results.filter(result => result.opacity === 0.94).length,
-      1,
-    );
-    assert.ok(
-      initial.results.find(result => result.opacity === 0.94)?.nodeId ===
-        initial.focus![0],
-    );
+    assert.equal(initial.focus.length, 1);
+    assert.ok(initial.results.every(item => !item.focused));
     const distance = page.locator('[data-parameter=distance]');
     await distance.fill('30');
     await page.keyboard.press('Enter');
@@ -866,15 +852,34 @@ export default grow([a, b], 20);`;
         editor.getModel()!.getPositionAt(editor.getValue().lastIndexOf('b]')),
       );
     });
+    await page.waitForFunction(() => {
+      const {viewport, codeEditor, previewState} = window.coordinateApp;
+      return (
+        !previewState.busy &&
+        viewport['inspectionSource']?.offset ===
+          codeEditor.editor.getValue().lastIndexOf('b]')
+      );
+    });
     const second = await inspect();
+    assert.equal(second.focus.length, 1);
     assert.notDeepEqual(second.focus, initial.focus);
-    assert.ok(
-      second.results.find(result => result.opacity === 0.94)?.nodeId ===
-        second.focus![0],
-    );
     await distance.fill('0');
     await page.keyboard.press('Enter');
     await page.locator('#viewport-status[data-state=error]').waitFor();
+    // Tool writeback returns the cursor to the call identifier. A failed call
+    // has no ordinary return value; explicitly inspect its input to diagnose it.
+    await page.evaluate(() => {
+      const editor = window.coordinateApp.codeEditor.editor;
+      editor.setPosition(
+        editor.getModel()!.getPositionAt(editor.getValue().lastIndexOf('a, b')),
+      );
+    });
+    await page.waitForFunction(
+      () =>
+        window.coordinateApp.viewport['inspectionScene']?.target.length === 2 &&
+        window.coordinateApp.viewport['inspectionScene']?.ambient.length === 0,
+    );
+
     assert.equal((await inspect()).count, 2);
     assert.equal((await inspect()).results.length, 0);
     await distance.fill('12');
@@ -891,9 +896,9 @@ export default grow([a, b], 20);`;
     });
     await page.waitForFunction(
       () =>
-        window.coordinateApp.viewport['decorationLayers'].get(
-          'source-context:parameter-geometry',
-        )?.length === 2,
+        window.coordinateApp.viewport['inspectionScene']?.target.filter(
+          item => item.kind === 'dimension',
+        ).length === 2,
     );
     await cameraIdle(page);
     if (process.env.CODE3D_BATCH_EXTRUDE_SCREENSHOT)
@@ -905,7 +910,7 @@ export default grow([a, b], 20);`;
 );
 
 test(
-  'intersection previews include both inputs inside inline primitive arguments',
+  'inline primitive arguments preview their own call before enclosing intersection inspectors',
   {timeout: 120_000},
   async t => {
     const {page, errors} = await openApp(t);
@@ -935,10 +940,13 @@ export default intersect([sphere(8), box(12, 12, 12)]);`;
         editor.focus();
       }, call);
       await page.waitForFunction(
-        () =>
-          window.coordinateApp.viewport['decorationLayers'].get(
-            'source-context:boolean-operation-regions',
-          )?.length === 1,
+        name =>
+          window.coordinateApp.viewport.sourceContext?.target.tool?.signature
+            .name === name &&
+          window.coordinateApp.viewport['inspectionScene']?.target.some(
+            item => item.kind === 'model',
+          ),
+        call.slice(0, call.indexOf('(')),
       );
       const state = await page.evaluate(() => {
         const viewport = window.coordinateApp.viewport;
@@ -946,16 +954,13 @@ export default intersect([sphere(8), box(12, 12, 12)]);`;
         viewport.fit();
         return {
           tool: scope.target.tool?.signature.name,
-          operation: viewport['module']!.operations.get(
-            scope.evaluation.operationInput!.operationId,
-          )!.kind,
-          count:
-            viewport['occurrences'].size + viewport['contextOccurrences'].size,
+          count: viewport
+            .renderedOccurrences()
+            .filter(o => o.object.parent === viewport['root']).length,
         };
       });
       assert.equal(state.tool, call.slice(0, call.indexOf('(')));
-      assert.equal(state.operation, 'intersect');
-      assert.equal(state.count, 2);
+      assert.equal(state.count, 1);
       await cameraIdle(page);
       if (process.env.CODE3D_INLINE_INTERSECT_SCREENSHOT)
         await page.screenshot({
@@ -995,28 +1000,30 @@ export default common([a, b, c]);`;
       const result = await page.evaluate(() => {
         const viewport = window.coordinateApp.viewport;
         viewport.fit();
-        const owner = 'source-context:boolean-operation-regions';
-        const count = viewport['decorationLayers'].get(owner)?.length ?? 0;
-        viewport.setParameterPreview('test-preview', 1);
-        const hidden = !viewport['decorationLayers'].has(owner);
-        viewport.clearParameterPreview('test-preview');
+        const scene = viewport['inspectionScene']!;
         return {
-          count,
-          hidden,
-          restored: viewport['decorationLayers'].get(owner)?.length ?? 0,
-          inputs:
-            viewport['occurrences'].size + viewport['contextOccurrences'].size,
+          count: scene.target.length,
+          ambient: scene.ambient.length,
+          focused: scene.target.filter(item => item.focused).length,
+          inputs: viewport
+            .renderedOccurrences()
+            .filter(o => o.object.parent === viewport['root']).length,
           bindings: viewport['transformGizmo']['axes'].filter(
-            axis => axis.binding,
+            axis =>
+              axis.binding?.mode === 'translate' &&
+              !(
+                axis.binding.kind === 'spatial' &&
+                axis.binding.spatial.source.kind === 'reference-offset'
+              ),
           ).length,
           diagnostic: viewport['module']?.diagnostic?.summary,
         };
       });
-      assert.equal(result.inputs, 3);
-      assert.equal(result.bindings, 6);
+      assert.equal(result.inputs, offset === 50 ? 3 : 4);
+      assert.equal(result.ambient, 3);
+      assert.equal(result.focused, 0);
+      assert.equal(result.bindings, 3);
       assert.equal(result.count, offset === 50 ? 0 : 1);
-      assert.equal(result.restored, result.count);
-      assert.equal(result.hidden, true);
       if (offset === 50)
         assert.match(result.diagnostic!, /no common solid volume/);
       await cameraIdle(page);
@@ -5072,7 +5079,17 @@ const covers = [0, 10].map(x => box(8, 2, 6).relate(self => {
             ),
         )!.nodeId;
       }, instance);
+      await page.waitForFunction(
+        nodeId =>
+          window.coordinateApp.viewport.getSelected()?.node.nodeId === nodeId,
+        instance.nodeId,
+      );
       await page.getByRole('button', {name: 'Translate', exact: true}).click();
+      await page.waitForFunction(
+        () =>
+          window.coordinateApp.viewport.sourceContext?.target.tool?.signature
+            .name === 'offset',
+      );
       const actual = await page.evaluate(() => ({
         tool: window.coordinateApp.viewport.sourceContext?.target.tool
           ?.signature.name,

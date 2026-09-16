@@ -1,4 +1,5 @@
 import {BrowserPackageManager} from './project/browser-package-manager';
+import {developmentWorkspaces} from './project/browser-packages';
 import {bundledExamples} from './project/bundled-examples';
 import {openBrowserProjectFileSystem} from './project/filesystem';
 import {ModelCompilerClient} from './model/compiler-client';
@@ -62,46 +63,68 @@ async function renderModel(): Promise<void> {
   const files = await openBrowserProjectFileSystem();
   await files.initialize();
   await files.syncDirectory(bundledExamples);
-  const packages = new BrowserPackageManager(files);
+  const packages = new BrowserPackageManager(
+    files,
+    undefined,
+    undefined,
+    undefined,
+    developmentWorkspaces,
+  );
   await packages.prepare(project.rootPath);
   const compiler = new ModelCompilerClient(packages.dependencies);
-  const module = await compiler
-    .compile(project, project.rootPath)
-    .finally(() => compiler.dispose());
-  if (module.diagnostic) {
-    throw new ModelDiagnosticError(module.diagnostic);
-  }
-  const viewport = new ModelViewport(root, {
-    animateViewChanges: false,
-    onSelect: () => undefined,
-    onDrillDown: () => undefined,
-    onNavigateSource: () => undefined,
-    onPositionTool: () => undefined,
-    onTopologySelection: () => undefined,
-    showCoordinateReference: false,
-    sourceDecorationProviders,
-  });
-  viewport.renderModule(module);
-  const source = project.files.find(
-    file => file.path === project.rootPath,
-  )!.source;
-  const sourceOffset = requestedSourceOffset(name, source, project.focus);
-  if (!viewport.selectBySourceOffset(project.rootPath, sourceOffset)) {
-    throw new Error('The requested source position has no renderable context.');
-  }
-  document.documentElement.dataset.renderFocus = 'source';
+  try {
+    const module = await compiler.compile(project, project.rootPath);
+    if (module.diagnostic) {
+      throw new ModelDiagnosticError(module.diagnostic);
+    }
+    const viewport = new ModelViewport(root, {
+      animateViewChanges: false,
+      onSelect: () => undefined,
+      onDrillDown: () => undefined,
+      onNavigateSource: () => undefined,
+      onPositionTool: () => undefined,
+      onTopologySelection: () => undefined,
+      showCoordinateReference: false,
+      sourceDecorationProviders,
+    });
+    const source = project.files.find(
+      file => file.path === project.rootPath,
+    )!.source;
+    const sourceOffset = requestedSourceOffset(name, source, project.focus);
+    const scope = viewport.sourceEvaluationAt(
+      module,
+      project.rootPath,
+      sourceOffset,
+    );
+    const selection = {
+      file: project.rootPath,
+      offset: sourceOffset,
+      contextId: scope?.evaluation.contextId,
+      order: scope?.evaluation.runtime.order,
+      callId: scope?.evaluation.inspectCallId,
+    };
+    const scene = await compiler.inspect(module, selection);
+    if (!scene)
+      throw new Error(
+        'The requested source position has no renderable context.',
+      );
+    viewport.renderInspection(module, scene, selection);
+    document.documentElement.dataset.renderFocus = 'source';
 
-  await new Promise<void>(resolve =>
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-  );
-  const {width, height} = root.getBoundingClientRect();
-  const image = await viewport.captureImage(
-    Math.round(width),
-    Math.round(height),
-    project.view,
-  );
-  window.code3dRenderedImage = await blobDataUrl(image);
-  document.documentElement.dataset.renderState = 'ready';
+    await new Promise<void>(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    const {width, height} = root.getBoundingClientRect();
+    const image = await viewport.captureImage(
+      Math.round(width),
+      Math.round(height),
+      project.view,
+    );
+    window.code3dRenderedImage = await blobDataUrl(image);
+    document.documentElement.dataset.renderState = 'ready';
+  } finally {
+    compiler.dispose();
+  }
 }
 
 function blobDataUrl(blob: Blob): Promise<string> {
