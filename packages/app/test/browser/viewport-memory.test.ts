@@ -600,10 +600,10 @@ test(
       const {viewport, client} = window.viewportMemory;
       const file = '/inspect-completion.ts';
       const source = `import {box} from '@code3d/core';
-const stock = box(20,20,20);
+const stock = box(20,20,20).material('#ff0000');
 /** @code3d.inspect show.inspect */
 function show() { return stock; }
-namespace show { export function inspect() { return {ambient: [stock], target: [box(4,5,6)]}; } }
+namespace show { export function inspect() { return {ambient: [stock], target: [box(4,5,6).material('#0000ff')]}; } }
 export default show();`;
       const module = await client.compile(
         {files: [{path: file, source}]},
@@ -613,6 +613,24 @@ export default show();`;
       const scene = await client.inspect(module, selection);
       if (!scene) throw new Error('Missing custom inspection');
       viewport.renderInspection(module, scene, selection);
+      const appearance = () => {
+        const opacity: number[] = [];
+        viewport['root'].traverse(object => {
+          if (!('isMesh' in object)) return;
+          const mesh = object as import('three').Mesh;
+          for (const material of Array.isArray(mesh.material)
+            ? mesh.material
+            : [mesh.material])
+            opacity.push(material.opacity);
+        });
+        return {
+          kind: viewport['inspectionScene']?.kind,
+          opacity: opacity.sort(),
+          selectable: viewport['occurrences'].size,
+          context: viewport['contextOccurrences'].size,
+        };
+      };
+      const originalAppearance = appearance();
       const original = viewport['controls'].capturePose();
       const scope = viewport.sourceEvaluationAt(
         module,
@@ -631,6 +649,7 @@ export default show();`;
       const completed = await client.inspect(module, stockSelection);
       if (!completed) throw new Error('Missing completion inspection');
       viewport.previewCompletedProject(module, completed, stockSelection);
+      const completedAppearance = appearance();
       viewport.restoreTransientPreview();
       const restoredPose = viewport['controls'].capturePose();
       return {
@@ -638,8 +657,9 @@ export default show();`;
         immediate,
         restoredImmediate,
         restoredCompleted: viewport['inspectionScene'] === scene,
-        targetCount: viewport['occurrences'].size,
-        ambientCount: viewport['contextOccurrences'].size,
+        originalAppearance,
+        completedAppearance,
+        restoredAppearance: appearance(),
         pose: {
           ...restoredPose,
           orientation: restoredPose.orientation.toArray(),
@@ -651,8 +671,15 @@ export default show();`;
     assert.equal(result.immediate, 'anchor');
     assert.equal(result.restoredImmediate, true);
     assert.equal(result.restoredCompleted, true);
-    assert.equal(result.targetCount, 1);
-    assert.equal(result.ambientCount, 1);
+    assert.equal(result.originalAppearance.kind, 'inspect');
+    assert.deepEqual(result.originalAppearance.opacity, [0.18, 0.82]);
+    assert.equal(
+      result.originalAppearance.selectable + result.originalAppearance.context,
+      2,
+    );
+    assert.equal(result.completedAppearance.kind, 'preview');
+    assert.deepEqual(result.completedAppearance.opacity, [1]);
+    assert.deepEqual(result.restoredAppearance, result.originalAppearance);
     assert.deepEqual(
       {...result.pose, orientation: []},
       {...result.original, orientation: []},

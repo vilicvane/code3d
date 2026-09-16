@@ -85,6 +85,101 @@ test('renders curves in their model color with a visible neutral fallback', () =
   assert.equal(colored.children[0].material.color.getHexString(), 'ff4d81');
 });
 
+test('default model materials visibly distinguish focus, target and ambient without changing authored alpha', () => {
+  for (const kind of ['solid', 'face', 'edge', 'vertex'] as const) {
+    const surface = kind === 'solid' || kind === 'face';
+    for (const [emphasis, expected] of [
+      ['primary', surface ? 0.68 : 1],
+      ['secondary', surface ? 0.4 : 0.5],
+      ['context', surface ? 0.18 : 0.28],
+    ] as const) {
+      for (const color of [undefined, '#12345633']) {
+        const rendered = createRenderedModelNode(snapshot(kind, color));
+        try {
+          applySourceEmphasis(rendered, emphasis);
+          const material = (
+            rendered.children[0] as THREE.Mesh<
+              THREE.BufferGeometry,
+              THREE.MeshStandardMaterial
+            >
+          ).material;
+          assert.equal(
+            material.opacity,
+            color ? Math.min(0.2, expected) : expected,
+            `${kind} ${emphasis}`,
+          );
+          if (color && emphasis !== 'context')
+            assert.equal(material.color.getHexString(), '123456');
+        } finally {
+          disposeObject(rendered);
+        }
+      }
+    }
+  }
+});
+
+test('depth-independent point and line materials join the foreground pass even at full opacity', () => {
+  for (const kind of ['vertex', 'edge'] as const) {
+    const authored =
+      kind === 'vertex'
+        ? new THREE.PointsMaterial({depthTest: false})
+        : new THREE.LineBasicMaterial({depthTest: false});
+    const rendered = createRenderedModelNode({
+      ...snapshot(kind),
+      material: authored.toJSON(),
+    });
+    try {
+      applySourceEmphasis(rendered, 'primary');
+      const primitive = rendered.children[0] as THREE.Points<
+        THREE.BufferGeometry,
+        THREE.PointsMaterial
+      >;
+      assert.equal(primitive.material.opacity, 1);
+      assert.equal(primitive.material.transparent, true);
+      assert.equal(primitive.material.depthWrite, false);
+      assert.ok(primitive.renderOrder > 1);
+      assert.equal(authored.transparent, false);
+    } finally {
+      disposeObject(rendered);
+      authored.dispose();
+    }
+  }
+});
+
+test('model outlines follow their surface depth policy and finish each modeling layer', () => {
+  for (const depthTest of [true, false]) {
+    const authored = new THREE.MeshBasicMaterial({depthTest});
+    for (const emphasis of [
+      undefined,
+      'primary',
+      'secondary',
+      'context',
+    ] as const) {
+      const rendered = createRenderedModelNode({
+        ...snapshot('solid'),
+        material: authored.toJSON(),
+      });
+      try {
+        if (emphasis) applySourceEmphasis(rendered, emphasis);
+        const [surface, boundary] = rendered.children as [
+          THREE.Mesh<THREE.BufferGeometry, THREE.Material>,
+          THREE.LineSegments<THREE.BufferGeometry, THREE.Material>,
+        ];
+        assert.equal(boundary.material.depthTest, surface.material.depthTest);
+        assert.equal(boundary.material.depthWrite, false);
+        assert.ok(boundary.renderOrder > surface.renderOrder);
+        if (!depthTest && emphasis !== 'context') {
+          assert.ok(surface.renderOrder > 1);
+          assert.equal(surface.material.transparent, true);
+        }
+      } finally {
+        disposeObject(rendered);
+      }
+    }
+    authored.dispose();
+  }
+});
+
 for (const kind of ['solid', 'face', 'edge', 'vertex'] as const) {
   test(`${kind} color keeps RGB and alpha for hex and functional colors`, () => {
     for (const [color, rgb, opacity] of [

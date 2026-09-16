@@ -40,6 +40,8 @@ export type InspectionItem = Readonly<{focused: boolean}> &
   );
 
 export type InspectionSnapshot = Readonly<{
+  /** Ordinary values retain authored materials; inspectors apply scene emphasis. */
+  kind: 'preview' | 'inspect';
   /** Only ordinary containers use the members' shared composition frame. */
   collection?: boolean;
   target: readonly InspectionItem[];
@@ -150,6 +152,7 @@ export async function snapshotInspection(
   );
   const get = (object: RelationObject) => snapshots.get(object)!;
   const result = {
+    kind: values.kind,
     collection: values.collection,
     target: targetItems.map(item => item(get)),
     ambient: ambientItems.map(item => item(get)),

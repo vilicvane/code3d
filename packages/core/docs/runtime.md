@@ -54,6 +54,11 @@ model files should stay on the authoring API.
 ## Source inspection
 
 Ordinary expression values preview directly, including models, anchors and collections.
+Model values retain their authored material opacity: an opaque color stays opaque,
+explicit alpha stays unchanged, and unstyled surfaces keep the default translucency.
+This also applies to ordinary call results and parameter fallbacks. Inspection
+scenes apply the target/focused/ambient opacity limits; an anchor's owner remains
+context behind the reference in both kinds of preview.
 Use `@code3d.inspect parameter callback` when a parameter needs additional context;
 use `@code3d.inspect callback` for an exceptional call-result view. A parameter
 first tries its parameter inspector, then the call inspector, then the ordinary
@@ -64,6 +69,15 @@ in `context.receiver`. Its `target` and `ambient` arrays own the complete scene.
 Returning `undefined` declines the scope; returning `{}` intentionally displays
 an empty scene. Target values matching `context.focused.values` receive focus;
 generated geometry does not inherit focus from its inputs.
+
+Selecting an array member focuses that value while keeping the other inspection
+targets visible at a weaker level; selecting the whole array focuses its members.
+For cut tools and intersect operands, selected inputs are targets and other inputs
+are ambient. The generated cut volume (orange) or intersection (cyan) is a separate
+target, including when inspecting a single input. A failed intersection still
+shows the selected inputs and ambient operands without inventing a result.
+These region inspectors use ordinary unlit materials with depth testing disabled,
+so their colors remain visible through the translucent inputs.
 
 Core uses this mechanism for distance measurements, relate calls and their
 closures, on/align references, relative transformation stages, group children,
@@ -87,6 +101,12 @@ Relative transformation functions and pivot/axis chains share a call inspector:
 numeric and reference arguments inspect the consumed relation stage. Unconsumed
 chains do not invent a stage. The tool can edit an ambient participant without
 promoting its display tier.
+
+Topology accessors (`vertex`, `edge`, `surface` and their plural forms) keep
+ordinary anchor preview when they return references. Their inspector returns
+the owner as `ambient` when the call fails or the reference collection is empty.
+The owner therefore has the same background appearance before and after a
+selection; missing or invalid IDs still produce their normal modeling errors.
 
 ### Call data
 

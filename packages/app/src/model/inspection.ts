@@ -29,6 +29,7 @@ type CallbackGetters = readonly ((() => unknown) | undefined)[];
 
 export type InspectedValues = InspectResult &
   Readonly<{
+    kind: 'preview' | 'inspect';
     focused: readonly PreviewValue[];
     /** Ordinary containers share their members' solved frame. */
     collection?: boolean;
@@ -298,8 +299,20 @@ export class InspectionSession {
     if (!focus) return;
     const selected = (result: InspectResult): InspectedValues => ({
       ...result,
+      kind: 'inspect',
       focused: this.previewValues(focus.value),
     });
+    const preview = (value: unknown): InspectedValues | undefined => {
+      const values = this.previewValues(value);
+      return values.length
+        ? {
+            kind: 'preview',
+            target: values,
+            focused: this.previewValues(focus.value),
+            collection: value !== values[0],
+          }
+        : undefined;
+    };
     this.inspecting = true;
     try {
       let closure = focus.closure;
@@ -373,12 +386,8 @@ export class InspectionSession {
           // Non-renderable results (e.g. relation descriptions) still reach their
           // enclosing closure inspector.
           if (inArguments) {
-            const values = this.previewValues(call.return);
-            if (values.length)
-              return {
-                ...selected({target: values}),
-                collection: call.return !== values[0],
-              };
+            const result = preview(call.return);
+            if (result) return result;
           }
         }
       }
@@ -387,10 +396,7 @@ export class InspectionSession {
         if (result !== undefined) return selected(result);
         closure = closure.parent;
       }
-      const values = this.previewValues(focus.value);
-      return values.length
-        ? {...selected({target: values}), collection: focus.value !== values[0]}
-        : undefined;
+      return preview(focus.value);
     } finally {
       this.inspecting = false;
     }

@@ -23,7 +23,11 @@ import {
   sketchCurvePosition,
   sketchPointResolver,
 } from '@code3d/core/tooling';
-import {applySourceEmphasis, type SourceEmphasis} from './source-appearance';
+import {
+  applySourceEmphasis,
+  modelRenderOrder,
+  type SourceEmphasis,
+} from './source-appearance';
 
 const defaultSurfaceOpacity = 0.68;
 const boundaryColor = '#080a07';
@@ -66,6 +70,13 @@ function withRenderMaterial<T extends ModelPrimitive>(
     preview.polygonOffset = true;
     preview.polygonOffsetFactor = 1;
     preview.polygonOffsetUnits = 1;
+  }
+  const layer = preview.depthTest ? 'ordinary' : 'foreground';
+  object.renderOrder =
+    modelRenderOrder[layer][object instanceof THREE.Mesh ? 'surface' : 'line'];
+  if (layer === 'foreground') {
+    preview.transparent = true;
+    preview.depthWrite = false;
   }
   object.material = preview;
   renderMaterials.set(object, {object, material});
@@ -472,9 +483,12 @@ export function createRenderedModelNode(
       color: boundaryColor,
       transparent: true,
       opacity: boundaryOpacity * alpha,
-      depthWrite: alpha === 1,
+      depthTest: material.depthTest,
+      depthWrite: false,
     });
     const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+    edges.renderOrder =
+      modelRenderOrder[material.depthTest ? 'ordinary' : 'foreground'].line;
     edges.userData.edgeGroups = node.mesh.edgeGroups;
     container.add(modelingHelper(edges));
   }

@@ -153,6 +153,34 @@ async function expectExpression(page: Page, expression: string) {
   await page.getByText('Ready', {exact: true}).waitFor();
 }
 
+async function selectedModelAppearance(page: Page) {
+  return page.evaluate(() => {
+    const occurrence = window.topologyTestApp.viewport.getSelected()!;
+    const appearance: unknown[] = [];
+    occurrence.object.traverse(object => {
+      if (!('material' in object)) return;
+      const primitive = object as import('three').Mesh;
+      const materials = Array.isArray(primitive.material)
+        ? primitive.material
+        : [primitive.material];
+      for (const material of materials) {
+        appearance.push({
+          type: primitive.type,
+          color:
+            'color' in material
+              ? (material.color as import('three').Color).getHexString()
+              : undefined,
+          opacity: material.opacity,
+          transparent: material.transparent,
+          depthWrite: material.depthWrite,
+          order: primitive.renderOrder,
+        });
+      }
+    });
+    return appearance;
+  });
+}
+
 for (const kind of ['surface', 'edge', 'vertex'] as const) {
   test(
     `${kind} picks write one path and survive recompilation and Undo/Redo`,
@@ -272,6 +300,7 @@ for (const method of [
           ? 'body.relate(self => [self.on(point([0,0,0]).up), pivotVertex().rotate(0,0,20)])'
           : `body.${method}()`;
       const {page, errors} = await openApp(t, expression, `${method}()`);
+      const emptyAppearance = await selectedModelAppearance(page);
       assert.equal(
         await page.locator('.contextual-tool-panel').isVisible(),
         true,
@@ -288,8 +317,36 @@ for (const method of [
         window.topologyTestApp.codeEditor.editor.getValue(),
       );
       assert.ok(before.includes(`${method}()`));
+      // Re-enter the incomplete call without recompiling: tool focus must also
+      // survive the no-result path that keeps an already presented module.
+      await page.evaluate(() => {
+        const {editor} = window.topologyTestApp.codeEditor;
+        editor.setPosition(
+          editor.getModel()!.getPositionAt(editor.getValue().indexOf('loft([')),
+        );
+      });
+      await page.waitForFunction(
+        () => !window.topologyTestApp.viewport['topologySelection'],
+      );
+      await page.evaluate(method => {
+        const {editor} = window.topologyTestApp.codeEditor;
+        editor.setPosition(
+          editor
+            .getModel()!
+            .getPositionAt(
+              editor.getValue().lastIndexOf(`${method}()`) + method.length + 1,
+            ),
+        );
+      }, method);
+      await page.waitForFunction(
+        () =>
+          window.topologyTestApp.viewport['topologySelection']?.selectedIds
+            .size === 0,
+      );
+      assert.deepEqual(await selectedModelAppearance(page), emptyAppearance);
       await clickId(page, [2, 1]);
       await expectExpression(page, `${method}([2, 1])`);
+      assert.deepEqual(await selectedModelAppearance(page), emptyAppearance);
       await page.evaluate(() =>
         window.topologyTestApp.codeEditor.editor.focus(),
       );
@@ -306,6 +363,7 @@ for (const method of [
           window.topologyTestApp.viewport['topologySelection']?.selectedIds
             .size === 0,
       );
+      assert.deepEqual(await selectedModelAppearance(page), emptyAppearance);
       await page.keyboard.press('Escape');
       assert.ok(
         (

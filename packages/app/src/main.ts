@@ -1204,15 +1204,7 @@ async function inspectSourceSelection(
     () => compiler.inspect(module, selection),
     scene => {
       if (previewState.module !== module) return;
-      if (scene)
-        viewport.renderInspection(module, scene, selection, selectedKey);
-      else if (viewport.presentedModule !== module)
-        viewport.renderModule(
-          module,
-          selectedKey,
-          viewport.presentedModule !== null,
-        );
-      else viewport.clearSourceInspection();
+      viewport.renderInspection(module, scene, selection, selectedKey);
       previewState.presented(hasViewportTarget(), viewport.presentedModule);
       updatePresentedSourceSelection();
     },

@@ -7,7 +7,13 @@ export {
   captureInspectData,
 } from './inspect.js';
 /** @internal */
-export {relate, on, align, expose} from './runtime.js';
+export {
+  relate,
+  on,
+  align,
+  expose,
+  inspectTopologyReference,
+} from './runtime.js';
 export type {
   Dimension,
   DimensionSegment,

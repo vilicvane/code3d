@@ -615,11 +615,6 @@ export class ModelViewport {
     return this.module;
   }
 
-  clearSourceInspection(): void {
-    this.retainRenderedGeometry('unfocused');
-    this.onViewChange?.();
-  }
-
   /** The last live frame, unaffected by temporary image-export grid settings. */
   get gridStep(): number | undefined {
     return this.renderMode === 'modeling' ? this.liveGridStep : undefined;
@@ -674,10 +669,10 @@ export class ModelViewport {
     return false;
   }
 
-  /** Commit one complete inspector scene; no modeling operation names are involved. */
+  /** Publish source focus even when inspection has no replacement scene. */
   renderInspection(
     module: ModelModule,
-    scene: InspectionSnapshot,
+    scene: InspectionSnapshot | undefined,
     source?: SourceViewSelection,
     selectedKey?: string,
   ): void {
@@ -689,11 +684,35 @@ export class ModelViewport {
         source.offset,
         source.contextId,
       );
+    if (!scene) {
+      if (this.module !== module)
+        this.renderModule(module, selectedKey, this.module !== null);
+      else this.retainRenderedGeometry('unfocused');
+      // An incomplete call can offer tools even without a previewable result.
+      this.applyInspectionSource(scope, source);
+      if (scope?.target.tool) {
+        const nodeId =
+          scope.evaluation.relationOwnerNodeId ??
+          scope.evaluation.selection?.inputNodeId;
+        const node = nodeId && module.objects.get(nodeId);
+        if (node) this.renderModelView('root', this.renderedViewTarget, node);
+      }
+      this.onViewChange?.();
+      return;
+    }
     this.saveViewportState();
     this.module = module;
     this.inspectionScene = scene;
-    this.inspectionSource = source;
     this.scenes = new ViewportScenes(module);
+    this.applyInspectionSource(scope, source);
+    this.renderInspectionScene(module, scene, scope, selectedKey);
+  }
+
+  private applyInspectionSource(
+    scope: ModelViewport['sourceContext'],
+    source: SourceViewSelection | undefined,
+  ): void {
+    this.inspectionSource = source;
     const parameter =
       scope &&
       source &&
@@ -718,6 +737,14 @@ export class ModelViewport {
     this.transientPreviewRestore = undefined;
     this.awaitingToolUpdate = false;
     this.pendingSpatialTool = undefined;
+  }
+
+  private renderInspectionScene(
+    module: ModelModule,
+    scene: InspectionSnapshot,
+    scope: ModelViewport['sourceContext'],
+    selectedKey: string | undefined,
+  ): void {
     const measurementChoices = this.measurementChoices.get('inspection');
     this.resetRenderedView();
     if (measurementChoices)
@@ -905,7 +932,11 @@ export class ModelViewport {
             'context',
           )
         : this.buildObject(node, `source/${index}`, 1, 'source', placement);
-      if (selectable.has(model.nodeId)) applySourceEmphasis(object, emphasis);
+      if (
+        selectable.has(model.nodeId) &&
+        (scene.kind === 'inspect' || emphasis === 'context')
+      )
+        applySourceEmphasis(object, emphasis);
       this.root.add(object);
     }
     const sketchNodes: ModelSnapshotObject[] = [];
@@ -1143,6 +1174,7 @@ export class ModelViewport {
     this.previewCompletedProject(
       this.module,
       {
+        kind: 'preview',
         target: [
           element
             ? {
@@ -1752,28 +1784,31 @@ export class ModelViewport {
   private renderModelView(
     selectedKey: string,
     renderedViewTarget: RenderedViewTarget = {kind: 'model'},
+    model = this.module?.fallback,
   ): void {
     this.inspectionScene = undefined;
-    if (!this.module?.fallback) {
+    if (!model) {
       return;
     }
     this.selectionEmphasized = true;
     this.renderedViewTarget = renderedViewTarget;
     this.resetRenderedView();
     const rootObject = this.buildObject(
-      this.module.fallback,
+      model,
       'root',
-      this.module.fallback.kind === 'group' ? 0 : 1,
+      model.kind === 'group' ? 0 : 1,
       'model',
       'standalone',
     );
+    if (renderedViewTarget.kind === 'source')
+      applySourceEmphasis(rootObject, 'primary');
     this.root.add(rootObject);
     this.applyPreviewTransforms();
     this.selectKey(
       this.occurrences.has(selectedKey) ? selectedKey : 'root',
       false,
     );
-    this.activateViewportScene([this.module.fallback], 'standalone');
+    this.activateViewportScene([model], 'standalone');
     this.onViewChange?.();
   }
 

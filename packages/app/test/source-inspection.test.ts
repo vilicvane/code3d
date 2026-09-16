@@ -76,6 +76,15 @@ test('parameter inspection falls through to call inspection and then the ordinar
   assert.deepEqual(defined(await inspect('part(1, 2)', 5)).target, []);
   assert.equal(width(defined(await inspect('plain(13)', 6)).target[0]), 13);
   assert.equal(width(defined(await inspect('part(3, 7)')).target[0]), 11);
+  for (const [token, delta, kind] of [
+    ['part(3, 7)', 5, 'inspect'],
+    ['part(4, 8)', 5, 'inspect'],
+    ['part(1, 2)', 5, 'inspect'],
+    ['part(6, 9)', 8, 'preview'],
+    ['plain(13)', 6, 'preview'],
+    ['plain(13)', 0, 'preview'],
+  ] as const)
+    assert.equal(defined(await inspect(token, delta)).kind, kind, token);
 });
 
 test('failed calls retain evaluated arguments and the last captured data without reexecuting', async () => {
@@ -161,8 +170,9 @@ test('failed intersection and zero extrusion retain complete original input scop
     /no common solid volume/,
   );
   const scene = defined(await common('[a, b]', 1));
-  assert.equal(scene.ambient.length, 2);
-  assert.deepEqual(scene.target, []);
+  assert.equal(scene.ambient.length, 1);
+  assert.equal(scene.target.length, 1);
+  assert.equal(scene.target[0].focused, true);
   for (const call of ['a.extrude(0)', 'extrude([a, b], 0)']) {
     const inspect = await compile(
       `import {rectangle, extrude} from '@code3d/core';
@@ -699,6 +709,39 @@ test('group parameter inspection keeps each member in the actual assembly frame'
   assert.equal(result.target[0].kind, 'model');
 });
 
+test('missing and invalid topology references inspect their owner while valid references keep default preview', async () => {
+  for (const method of ['vertex', 'edge', 'surface']) {
+    for (const argument of ['', '0']) {
+      const call = `body.${method}(${argument})`;
+      const inspect = await compile(
+        `import {box} from '@code3d/core'; const body = box(4,6,8); ${call};`,
+        /IDs must be/,
+      );
+      const scene = defined(await inspect(call, call.length - 1));
+      assert.equal(scene.target.length, 0);
+      assert.equal(scene.ambient.length, 1);
+      assert.equal(width(scene.ambient[0]), 4);
+    }
+    const call = `body.${method}(1)`;
+    const inspect = await compile(
+      `import {box} from '@code3d/core'; const body = box(4,6,8); ${call};`,
+    );
+    const scene = defined(await inspect(call, call.length - 1));
+    assert.equal(scene.target[0].kind, 'anchor');
+    assert.equal(scene.ambient.length, 0);
+  }
+  for (const call of ['body.edge(1).vertex()', 'body.vertices([])']) {
+    const inspect = await compile(
+      `import {box} from '@code3d/core'; const body = box(4,6,8); ${call};`,
+      call.endsWith('vertex()') ? /IDs must be/ : undefined,
+    );
+    const scene = defined(await inspect(call, call.length - 1));
+    assert.equal(scene.target.length, 0);
+    assert.equal(scene.ambient.length, 1);
+    assert.equal(width(scene.ambient[0]), 4);
+  }
+});
+
 test('expose inspects recorded references in the receiving assembly without repeating getters', async () => {
   const inspect =
     await compile(`import {box, group, offset} from '@code3d/core';
@@ -752,16 +795,20 @@ test('boolean inspectors preserve original placement and generate only the focus
   assert.equal(stock.target.length, 1);
   assert.equal(centerX(stock.target[0]), 30);
   assert.deepEqual(stock.ambient.map(centerX), [25, 35]);
-  for (const [token, delta, size, center] of [
-    ['[a,b]', 0, 14, 30],
-    ['[a,b]', 1, 4, 25],
-    ['stock.cut([a,b])', 'stock.cut(['.length, 4, 25],
+  for (const [token, delta, size, center, selected] of [
+    ['[a,b]', 0, 14, 30, 2],
+    ['[a,b]', 1, 4, 25, 1],
+    ['[a,b]', 3, 4, 35, 1],
+    ['stock.cut([a,b])', 'stock.cut(['.length, 4, 25, 1],
   ] as const) {
     const scene = defined(await inspect(token, delta));
-    assert.equal(scene.target.length, 1);
-    assert.equal(scene.target[0].focused, false);
-    assert.equal(scene.ambient.length, 3);
-    const region = scene.target[0];
+    assert.equal(scene.target.length, selected + 1);
+    assert.deepEqual(
+      scene.target.map(item => item.focused),
+      [...Array(selected).fill(true), false],
+    );
+    assert.equal(scene.ambient.length, 3 - selected);
+    const region = scene.target.at(-1)!;
     assert.equal(region.kind, 'model');
     if (region.kind === 'model')
       assert.equal(
@@ -771,8 +818,9 @@ test('boolean inspectors preserve original placement and generate only the focus
     assert.equal(centerX(region), center);
   }
   const noVolume = defined(await inspect('[far]'));
-  assert.equal(noVolume.target.length, 0);
-  assert.equal(noVolume.ambient.length, 2);
+  assert.equal(noVolume.target.length, 1);
+  assert.equal(noVolume.target[0].focused, true);
+  assert.equal(noVolume.ambient.length, 1);
   const union = defined(
     await inspect('union([stock,a])', 'union([stock,'.length),
   );
@@ -781,15 +829,37 @@ test('boolean inspectors preserve original placement and generate only the focus
     union.target.map(value => value.focused),
     [false, true],
   );
-  const common = defined(
-    await inspect('intersect([stock,a])', 'intersect('.length),
-  );
-  assert.equal(common.target.length, 1);
-  assert.equal(common.ambient.length, 2);
-  assert.equal(common.target[0].focused, false);
+  for (const delta of [
+    'intersect('.length,
+    'intersect(['.length,
+    'intersect([stock,'.length,
+  ]) {
+    const common = defined(await inspect('intersect([stock,a])', delta));
+    const selected = delta === 'intersect('.length ? 2 : 1;
+    assert.equal(common.target.length, selected + 1);
+    assert.equal(common.ambient.length, 2 - selected);
+    assert.deepEqual(
+      common.target.map(item => item.focused),
+      [...Array(selected).fill(true), false],
+    );
+    const region = common.target.at(-1)!;
+    assert.equal(region.kind, 'model');
+    if (region.kind === 'model') {
+      const material = region.model.material;
+      assert.ok(material && typeof material !== 'string');
+      assert.equal(material.color, 0x66c9ff);
+      assert.equal(material.depthTest, false);
+      assert.equal(material.toneMapped, false);
+    }
+    assert.equal(centerX(region), 25);
+  }
   const result = defined(await inspect('cut(stock, [a,b])'));
   assert.equal(result.target.length, 1);
   assert.equal(result.ambient.length, 0);
+  const original = defined(await inspect('intersect([stock,a])')).target[0];
+  assert.equal(original.kind, 'model');
+  if (original.kind === 'model')
+    assert.equal(original.model.material, undefined);
 });
 
 test('loft inspectors distinguish section and destructured spine parameters in the same solved frame', async () => {

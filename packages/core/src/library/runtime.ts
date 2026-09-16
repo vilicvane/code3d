@@ -100,7 +100,7 @@ import {
   type Vec3,
 } from './spatial.js';
 import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
-import type {Material} from 'three';
+import {MeshBasicMaterial, type Material} from 'three';
 import {formatTopologyId, type TopologyId} from './topology-id.js';
 import {
   inspectShapeTopology,
@@ -986,23 +986,41 @@ export interface GeometryCapabilities<
 }
 
 export interface VertexTopologyCapabilities {
-  /** @code3d.param id {kind: 'vertex', label: 'Vertex'} */
+  /**
+   * @code3d.param id {kind: 'vertex', label: 'Vertex'}
+   * @code3d.inspect inspectTopologyReference
+   */
   vertex(id: VertexId): Vertex;
-  /** @code3d.param ids {kind: 'vertex', label: 'Vertices', actions: [{label: 'Use all', action: 'remove-argument'}]} */
+  /**
+   * @code3d.param ids {kind: 'vertex', label: 'Vertices', actions: [{label: 'Use all', action: 'remove-argument'}]}
+   * @code3d.inspect inspectTopologyReference
+   */
   vertices(ids?: readonly VertexId[]): readonly Vertex[];
 }
 
 export interface EdgeTopologyCapabilities extends VertexTopologyCapabilities {
-  /** @code3d.param id {kind: 'edge', label: 'Edge'} */
+  /**
+   * @code3d.param id {kind: 'edge', label: 'Edge'}
+   * @code3d.inspect inspectTopologyReference
+   */
   edge(id: EdgeId): Edge;
-  /** @code3d.param ids {kind: 'edge', label: 'Edges', actions: [{label: 'Use all', action: 'remove-argument'}]} */
+  /**
+   * @code3d.param ids {kind: 'edge', label: 'Edges', actions: [{label: 'Use all', action: 'remove-argument'}]}
+   * @code3d.inspect inspectTopologyReference
+   */
   edges(ids?: readonly EdgeId[]): readonly Edge[];
 }
 
 export interface SurfaceTopologyCapabilities extends EdgeTopologyCapabilities {
-  /** @code3d.param id {kind: 'surface', label: 'Surface'} */
+  /**
+   * @code3d.param id {kind: 'surface', label: 'Surface'}
+   * @code3d.inspect inspectTopologyReference
+   */
   surface(id: SurfaceId): Surface;
-  /** @code3d.param ids {kind: 'surface', label: 'Surfaces', actions: [{label: 'Use all', action: 'remove-argument'}]} */
+  /**
+   * @code3d.param ids {kind: 'surface', label: 'Surfaces', actions: [{label: 'Use all', action: 'remove-argument'}]}
+   * @code3d.inspect inspectTopologyReference
+   */
   surfaces(ids?: readonly SurfaceId[]): readonly Surface[];
 }
 
@@ -4447,7 +4465,12 @@ export class ModelObject<
     focused: readonly SolidModel<{}>[],
     data: CompositionInspectData,
   ): InspectResult {
-    const scene = this.inspectComposition(data, [stock, ...tools], []);
+    const selected = new Set(focused);
+    const scene = this.inspectComposition(
+      data,
+      [stock, ...tools.filter(tool => !selected.has(tool))],
+      tools.filter(tool => selected.has(tool)),
+    );
     if (!focused.length) return scene;
     const operands = focused as unknown as readonly ModelObject<{}, 'solid'>[];
     const poses = new Map(data.poses);
@@ -4465,7 +4488,7 @@ export class ModelObject<
     let region: SolidModel;
     try {
       region = body[combineModels]('intersect', [tool], context).material(
-        '#ffad4d',
+        inspectionRegionMaterial('#ffad4d'),
       );
     } catch (error) {
       if (
@@ -4478,7 +4501,7 @@ export class ModelObject<
     }
     const model = region as unknown as ModelObject;
     const frame = this.inspectionFrame(new Map([[model, poses.get(body)!]]));
-    return {...scene, target: [frame.positioned(region)!]};
+    return {...scene, target: [...scene.target!, frame.positioned(region)!]};
   }
 
   /** @internal References use expose's recorded values and receiver-local frame. */
@@ -5723,6 +5746,25 @@ export namespace relate {
       context.focused.values,
     );
   }
+}
+
+/** @internal */
+export function inspectTopologyReference(
+  _args: readonly unknown[],
+  context: InspectContext<
+    Anchor | readonly Anchor[] | undefined,
+    Model | Anchor
+  >,
+): InspectResult | undefined {
+  if (
+    context.return !== undefined &&
+    (!Array.isArray(context.return) || context.return.length > 0)
+  )
+    return undefined;
+  const owner = isModelObject(context.receiver)
+    ? context.receiver
+    : modelTopologyReference(context.receiver)?.model;
+  return owner ? {ambient: [owner as unknown as Model]} : undefined;
 }
 
 /** @internal */
@@ -7410,12 +7452,31 @@ export namespace intersect {
     >,
   ): InspectResult | undefined {
     if (!context.data) return undefined;
-    return ModelObject.inspectComposition(
+    const focused = new Set(context.focused.solids);
+    const scene = ModelObject.inspectComposition(
       context.data,
-      operands,
-      context.return ? [context.return] : [],
+      operands.filter(operand => !focused.has(operand)),
+      operands.filter(operand => focused.has(operand)),
     );
+    if (!context.return) return scene;
+    const result = ModelObject.inspectComposition(
+      context.data,
+      [],
+      [context.return],
+    ).target![0] as Model;
+    return {
+      ...scene,
+      target: [
+        ...scene.target!,
+        result.material(inspectionRegionMaterial('#66c9ff')),
+      ],
+    };
   }
+}
+
+/** Generated inspect regions remain legible through their translucent inputs. */
+function inspectionRegionMaterial(color: string): Material {
+  return new MeshBasicMaterial({color, depthTest: false, toneMapped: false});
 }
 
 /** @internal */

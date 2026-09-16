@@ -24,6 +24,7 @@ test('inspection retains the presented scene, publishes only the newest request 
   state.accept(state.begin(1), emptyModule);
   state.presented(true);
   const scene = (): InspectionSnapshot => ({
+    kind: 'inspect',
     target: [],
     ambient: [],
     objects: new Map(),

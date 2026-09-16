@@ -99,8 +99,9 @@ test(
         const scene = viewport['inspectionScene'];
         return (
           !previewState.inspecting &&
-          scene?.ambient.length === 2 &&
-          scene.target.length === (displaced ? 0 : 1) &&
+          scene?.ambient.length === 1 &&
+          scene.target.length === (displaced ? 1 : 2) &&
+          scene.target[0].focused &&
           !!previewState.diagnostic === displaced
         );
       }, displaced);
