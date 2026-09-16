@@ -92,8 +92,13 @@ test('origin offsets compose and cancel while preserving topology and old model 
   near(vertices(offset), shifted(vertices(base), [5, 7, 3]));
   near(vertices(positioned), shifted(vertices(base), [1, 2, 3]));
   near(vertices(offset.originOffset(-5, -7, -3)), vertices(base));
-  for (const model of [base, positioned, offset])
+  for (const model of [base, positioned, offset]) {
     near(snapshot(model).origin, [0, 0, 0]);
+    near(
+      defined(modelElementReference(model.origin)).transform.position,
+      [0, 0, 0],
+    );
+  }
   const before = defined(snapshot(base).mesh),
     after = defined(snapshot(offset).mesh);
   assert.deepEqual(after.vertexIds, before.vertexIds);
@@ -125,7 +130,6 @@ test('origin offsets compose and cancel while preserving topology and old model 
     assert.throws(() => base[method](NaN, 0, 0), /finite/);
     assert.throws(() => base[method](0, Infinity, 0), /finite/);
   }
-  assert.equal('origin' in base, false);
 });
 
 test('coordinate point construction equals a zero point with the opposite origin offset', () => {

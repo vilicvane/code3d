@@ -10,6 +10,10 @@ import * as browserAuthoring from '../bld/library/index.js';
 import * as browserReplicadInterop from '../bld/library/replicad.js';
 
 const authoringValues = [
+  'dimension',
+  'boundsAnnotation',
+  'anchorAnnotation',
+  'captureInspectData',
   'arc',
   'axisEdge',
   'axisLine',
@@ -47,9 +51,38 @@ const authoringValues = [
   'union',
 ].sort();
 
-test('exports exactly the authoring value whitelist', () => {
-  assert.deepEqual(Object.keys(authoring).sort(), authoringValues);
+const inspectorEntries = [
+  'relate',
+  'on',
+  'align',
+  'expose',
+  'inspectTopologyReference',
+];
+
+test('exports authored values and runtime inspector entry points without leaking internal declarations', async () => {
+  assert.deepEqual(
+    Object.keys(authoring).sort(),
+    [...authoringValues, ...inspectorEntries].sort(),
+  );
   assert.deepEqual(Object.keys(authoringApi).sort(), authoringValues);
+  for (const [name, value] of Object.entries(authoringApi))
+    assert.ok(
+      value === authoring[name as keyof typeof authoring],
+      `${name} shares tooling identity`,
+    );
+  const declaration = await readFile(
+    new URL('../bld/library/index.d.ts', import.meta.url),
+    'utf8',
+  );
+  for (const name of inspectorEntries)
+    assert.doesNotMatch(declaration, new RegExp('\\b' + name + '\\b'), name);
+  for (const name of [
+    'dimension',
+    'boundsAnnotation',
+    'anchorAnnotation',
+    'captureInspectData',
+  ])
+    assert.match(declaration, new RegExp('\\b' + name + '\\b'), name);
 });
 
 test('keeps Replicad behind its explicit author interop entry', () => {

@@ -7,14 +7,14 @@
   "resolutions": {
     "primary": {
       "@code3d/core": {
-        "installUrl": "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.9/"
+        "installUrl": "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.10/"
       },
       "@ctrl/tinycolor": {
         "installUrl": "https://registry.npmjs.org/%40ctrl%2Ftinycolor/4.2.0/"
       }
     },
     "secondary": {
-      "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.9/": {
+      "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.10/": {
         "@code3d/opencascade": {
           "installUrl": "https://registry.npmjs.org/%40code3d%2Fopencascade/0.0.1-alpha.0/"
         },
@@ -95,11 +95,11 @@
     }
   },
   "packages": {
-    "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.9/": {
+    "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.10/": {
       "name": "@code3d/core",
-      "version": "0.0.1-alpha.9",
-      "tarball": "https://registry.npmjs.org/@code3d/core/-/core-0.0.1-alpha.9.tgz",
-      "integrity": "sha512-6xjVE2hLD1Qgnrs7Yey0wvO0jgX0LQWL11FAuk+HGSGtUuGDvbH+9u1UjZUjZP1INS+nedW4eUbdjfNvVMdGVQ=="
+      "version": "0.0.1-alpha.10",
+      "tarball": "https://registry.npmjs.org/@code3d/core/-/core-0.0.1-alpha.10.tgz",
+      "integrity": "sha512-/7Skd73z/a1UqG3O53XHNY1ApyXPkuOwgosrbn5tQxzrhgcwYqCXHgrnn1GFbU0swLnyoMuZ6xTlTBxgGO5D/A=="
     },
     "https://registry.npmjs.org/%40code3d%2Fopencascade/0.0.1-alpha.0/": {
       "name": "@code3d/opencascade",

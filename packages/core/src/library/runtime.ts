@@ -6428,6 +6428,10 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  dimension,
+  boundsAnnotation,
+  anchorAnnotation,
+  captureInspectData,
   offset,
   rotate,
   pivot,
