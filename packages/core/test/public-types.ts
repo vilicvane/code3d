@@ -1,9 +1,15 @@
 import {
   box,
+  anchorAnnotation,
+  boundsAnnotation,
+  captureInspectData,
+  dimension,
   distance,
   group,
   line,
   type Anchor,
+  type Inspector,
+  type PreviewValue,
   type DistanceAxis,
   extrude,
   sketch,
@@ -175,3 +181,38 @@ distance(solid, geometry, solid.up);
 distance(solid, geometry, 'horizontal');
 // @ts-expect-error Geometry operands must carry model/reference ownership.
 distance([0, 0, 0], solid);
+
+captureInspectData({model: solid, length: 10});
+const inspectLength: Inspector<
+  [SolidModel],
+  number,
+  undefined,
+  {model: SolidModel; length: number} | undefined
+> = (_args, context) =>
+  context.data
+    ? {
+        target: [
+          context.data.model,
+          anchorAnnotation(context.data.model.axis, {direction: 'forward'}),
+          dimension({
+            owner: context.data.model,
+            start: [0, 0, 0],
+            end: [context.data.length, 0, 0],
+            value: context.data.length,
+          }),
+          boundsAnnotation({
+            owner: context.data.model,
+            size: [context.data.length, 2, 3],
+            frame: {position: [0, 0, 0], quaternion: [0, 0, 0, 1]},
+          }),
+        ],
+      }
+    : undefined;
+void inspectLength;
+
+const candidateDimension: PreviewValue = dimension({
+  owner: box(12, 14, 16),
+  value: 12,
+  candidates: [{start: [-6, -7, -8], end: [6, -7, -8]}],
+});
+void candidateDimension;

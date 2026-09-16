@@ -47,6 +47,7 @@ and the [agent file workflow](../../docs/agents/files.md).
 | Select vertices, edges and surfaces, or expose named elements                   | [Topology](docs/topology.md)                                                       |
 | Build reusable model functions                                                  | [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx)         |
 | Give functions editing tools and example arguments                              | [Model tools](../web/src/content/docs/docs/guides/model-tools.mdx)                 |
+| Customize parameter and call inspection                                         | [Source inspection](docs/runtime.md#source-inspection)                             |
 | Extend the runtime with Replicad geometry                                       | [Custom primitives](docs/custom-primitives.mdx)                                    |
 | Known boundaries                                                                | [Current limitations](../web/src/content/docs/docs/getting-started/limitations.md) |
 

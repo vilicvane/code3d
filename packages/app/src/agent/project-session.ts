@@ -450,10 +450,15 @@ export class AgentProjectSession {
           'Project changed during observation. Request a new observation.',
         );
       if (!observed.ok)
-        return failure(observed.error.code, observed.error.message, {
-          ...(accepted.response.data as object),
-          observation: observed.error.details,
-        });
+        return failure(
+          observed.error.code,
+          observed.error.message,
+          {
+            ...(accepted.response.data as object),
+            observation: observed.error.details,
+          },
+          observed.artifacts,
+        );
       return {
         ok: true,
         data: {

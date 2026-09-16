@@ -71,7 +71,11 @@ your view stays where it is until the next activity.
 When an agent requests a render, its returned image appears below the controls
 at the top right of the Modeling or sketch view. The preview shows the agent's
 name, color, and capture time. It is the same image sent to the agent, including
-its requested camera angle and render mode.
+its requested camera angle and render mode. Sketches use the same 3D inspect
+scene as models, so an image can show both at their actual placements. The
+separate 2D sketch editor remains available for editing. A failed modeling call
+can also return an inspect image to help diagnose its inputs. That image appears
+in the same history while the operation continues to report its modeling error.
 
 Click the preview to fill the visualization area and browse the timeline below
 it. You can filter by agent, step between images, or use Left/Right, Home, and End

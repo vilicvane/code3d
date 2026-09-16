@@ -64,17 +64,15 @@ local zero, and the shape retains its rotation.
 
 ## Compose with other parts
 
-While the cursor is inside an origin operation, `rotate()`, or `scaled()`, the
-App also shows peers from the downstream `group`, `union`, `cut`, `intersect`,
-or `loft` that consumes the value. The current step stays highlighted and
-editable; peers appear dimmed and can be clicked to inspect their input source.
-Function aliases, object methods, and array arguments use the same behavior.
+Origin operations, `rotate()` and `scaled()` preview their own returned value.
+Their ordinary preview does not add downstream consumers. Select the inputs of
+`group`, `union`, `cut`, `intersect` or `loft` to inspect the context declared by
+that operation's public inspector. A standalone model uses its local frame;
+an ordinary collection retains its members' shared composition positions.
 
-Later transformations do not replace the geometry at the cursor. The later
-version of the same part is omitted from the context, and Boolean overlap
-regions are hidden if they belong to that later version. A standalone binding
-still shows its own local value. When a value has several consumers, the App
-initially shows the most recently evaluated consumer's context.
+Inspectors can retain the pose at the selected operation, so later transformations
+do not replace its geometry or stage. See [source inspection](runtime.md#source-inspection)
+for the common rules and custom JSDoc callbacks.
 
 A relation such as `companion.relate(part => part.on(rotated.up))` can place
 a companion against a rotated part before grouping them. Inspecting the companion by itself uses its local

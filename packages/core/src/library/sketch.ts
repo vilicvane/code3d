@@ -7,12 +7,15 @@ import {solveSketchDrag} from './sketch-drag-rules.js';
 import {sketchRegions} from './sketch-regions.js';
 import {
   SketchFrame,
+  relate,
   disposeModelObjects,
   isModelObject,
   type Relation,
   type FaceAnchor,
   type FaceModel,
 } from './runtime.js';
+import {retainInspectionIdentity} from './inspect.js';
+import type {RigidTransform} from './spatial.js';
 import {
   sketchIncidences,
   sketchIncidencePoints,
@@ -92,6 +95,9 @@ export interface Sketch {
   /**
    * Relates a new frame without changing this sketch's two-dimensional data.
    * Each constraint must involve callback self; external references keep their identity.
+   * @code3d.inspect relate.inspectCall
+   * @code3d.inspect.context build relate.inspectContext
+   * @code3d.inspect.closure build relate.inspectBody
    */
   relate(build: (self: Sketch) => Relation | readonly Relation[]): Sketch;
   /** References a point defined in this layer. */
@@ -119,6 +125,7 @@ type Definition = Readonly<{
 
 const definitions = new WeakMap<Sketch, Definition>();
 const references = new WeakSet<SketchPoint>();
+const framedSketches = new WeakMap<SketchFrame, Sketch>();
 
 class SketchValue implements Sketch {
   readonly frame: SketchFrame;
@@ -135,12 +142,14 @@ class SketchValue implements Sketch {
   ) {
     if ('source' in input) {
       this.frame = input.frame;
+      framedSketches.set(this.frame, this);
       this.source = input.source;
       definitions.set(this, definitions.get(input.source)!);
       return;
     }
     const {entries, options, base} = input;
     this.frame = new SketchFrame(base && (base as SketchValue).frame);
+    framedSketches.set(this.frame, this);
     const ids = new Set<number>();
     const points = new Map<number, SketchPosition>();
     const copied = (entries ?? []).map<SketchEntry>(entry => {
@@ -444,6 +453,25 @@ export function sketch(
 
 export function isSketch(value: unknown): value is Sketch {
   return value instanceof SketchValue;
+}
+
+export function isSketchPoint(value: unknown): value is SketchPoint {
+  return (
+    !!value && typeof value === 'object' && references.has(value as SketchPoint)
+  );
+}
+
+/** Internal correspondence between a spatial participant and its sketch data. */
+export function sketchForFrame(frame: SketchFrame): Sketch {
+  return framedSketches.get(frame)!;
+}
+
+/** A normal immutable sketch value in a captured inspection stage. */
+export function retainSketchFrame(value: Sketch, pose: RigidTransform): Sketch {
+  return retainInspectionIdentity(
+    new SketchValue({source: value, frame: sketchFrame(value).retained(pose)}),
+    value,
+  );
 }
 
 export function sketchDefinition(value: Sketch): Definition {

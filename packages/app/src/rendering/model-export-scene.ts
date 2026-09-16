@@ -8,7 +8,7 @@ import type {SourceRef} from '@code3d/core/tooling';
 export function collectExportInstances(
   occurrences: Iterable<Occurrence>,
 ): ModelExportInstance[] {
-  return [...occurrences].flatMap(({node, object}) => {
+  return [...occurrences].flatMap(({node, renderedNodeId, object}) => {
     if (node.kind === 'group' || node.kind === 'reference') return [];
     object.updateWorldMatrix(true, false);
     const position = new Vector3();
@@ -17,7 +17,7 @@ export function collectExportInstances(
     object.matrixWorld.decompose(position, quaternion, scale);
     return [
       {
-        nodeId: node.nodeId,
+        nodeId: renderedNodeId ?? node.nodeId,
         name: node.name,
         kind: node.kind,
         material: node.material,

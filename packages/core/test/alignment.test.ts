@@ -144,7 +144,7 @@ test('ellipse edges use the complete locus and its major axis without endpoint p
   near(position(placed), [0, 0, 0]);
   const result = snapshot(placed);
   assert.equal(result.constraints[0].kind, 'align');
-  assert.ok(result.constraints[0].sourceElement.arrow);
+  assert.ok(result.constraints[0].sourceElement.arrows?.length);
 });
 
 test('point, circle, line and surface constraints use true cylinder and sphere geometry', () => {

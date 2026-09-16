@@ -193,6 +193,27 @@ test('a changed prefix preserves later operations from the previous evaluation',
   assert.equal(released.length, 0);
 });
 
+test('inspection uses bounded history without replacing the model working set', () => {
+  evaluate(() => {
+    for (let index = 0; index < 600; index++) primitive(index);
+  });
+  for (let selection = 0; selection < 20; selection++) {
+    const finish = cache.beginKernelOperationEvaluation(undefined, 'inspect');
+    try {
+      assert.equal(primitive(selection).value.instance, 'use');
+      for (let index = 0; index < 50; index++)
+        primitive(600 + selection * 50 + index);
+    } finally {
+      finish();
+    }
+  }
+  assert.ok(cache.kernelOperationCacheStats().entries < 650);
+  evaluate(() => {
+    for (let index = 0; index < 600; index++)
+      assert.equal(primitive(index).value.instance, 'use');
+  });
+});
+
 test('shrinking evaluations release old working sets and bound unused history', () => {
   let owned: ReturnType<typeof primitive> | undefined;
   evaluate(() => {

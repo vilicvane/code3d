@@ -252,9 +252,11 @@ to its original model.
 
 The related part on its own still displays in its local frame. Select the
 `group` to see the part positioned against the base, or place the cursor in
-the relation to inspect both participants. Selecting a named anchor or an
-`edge`, `surface`, or `vertex` call keeps the other participant and downstream
-composition peers visible while highlighting the selected anchor.
+the relation to inspect both participants. Related expressions inside the callback keep the actual participants visible.
+`on` and `align` inspectors show the relevant anchors and finite support bounds.
+Unrelated values keep their ordinary preview, and mixed collections preview all
+of their members. An inner call's own inspector or ordinary result takes
+precedence over the enclosing callback.
 
 The callback parameter in `relate(part => ...)` is the new related model
 value. Place the cursor on its declaration or a use of `part` inside the
@@ -280,27 +282,26 @@ preview error while keeping the valid final model available.
 
 ## Read the relation highlights
 
-The viewport distinguishes three levels: the reference you are inspecting,
-the other reference in the same constraint, and the remaining related objects.
-The current pair uses the same yellow-green marker color. The selected side
-keeps each marker's normal opacity; the other side uses 70% of that opacity.
-Other related geometry stays dimmed in gray.
+The viewport distinguishes focused targets, other targets, and ambient geometry.
+An inspector declares the complete scene. Targets that are the actual selected
+values receive focus; generated results do not inherit focus from their inputs.
+With focus present, other target markers use 70% of their normal opacity. Without
+focus, all target markers keep their normal opacity. Ambient geometry stays gray.
 
-On the `relate` method name or the call area outside its callback, the completed
-part is selected. All references used by this `relate` call share the second
-highlight level, including references from multiple returned constraints. Other
-inputs of the downstream composition stay at the third, dimmed level. Earlier
-inherited constraints still affect the solved position, but their references do
-not become second-level highlights unless the current call also uses them.
-Entering an individual constraint returns to its existing step-by-step preview.
+On the `relate` method name, the completed part is the target and this call's
+actual participants are ambient. Unrelated downstream parts are omitted. Inside
+its callback, related values use the same participants and the selected relation
+stage. Unrelated values use ordinary object preview; a mixed collection falls
+through as a whole so no unrelated member disappears.
 
-On `self.on(...)` or `self.align(...)`, and in independent `offset`,
-`pivot`, `pivotVertex`, `pivotPoint`, `axisEdge`, `axisLine`, and `rotate` calls, self is selected. Inside
-the parentheses of `on(...)` or `align(...)`, the target reference is selected.
-In the reverse spelling `base.on(self.up)`, the target
-argument focuses self. Selecting an explicit reference
-such as the receiver `base` focuses that reference. Switching sides changes
-emphasis without changing marker size or color.
+`on` and `align` have their own inspectors for the call, receiver and target.
+Selecting a reference emphasizes that reference. Selecting the method name shows
+the participating references without inventing a focused side. In
+`base.on(self.up)`, selecting `self.up` therefore focuses self's bound. Independent
+`offset`, `pivot`, `pivotVertex`, `pivotPoint`, `axisEdge`, `axisLine` and `rotate`
+expressions use the relate stage; their editing handles remain separate from
+passive inspection. See [source inspection](runtime.md#source-inspection) for
+custom JSDoc inspectors and closure contexts.
 
 Model surfaces remain translucent so you can see overlapping references.
 Their opacity is capped for the current role instead of multiplied by the

@@ -104,7 +104,9 @@ export class AnchorDecorationObject extends THREE.Group {
             'instanceStart',
           ) as THREE.InterleavedBufferAttribute
         ).data;
-        if (decoration.directed) {
+        if (decoration.directionDisplay === 'none') {
+          this.axisShaft = {buffer};
+        } else if (decoration.directionDisplay === 'forward') {
           const direction = decoration.direction ?? 1;
           this.axisShaft =
             direction === 1
@@ -124,7 +126,12 @@ export class AnchorDecorationObject extends THREE.Group {
       face.add(
         anchorRing(anchorPixels.ringRadius, appearance),
         anchorOriginPoint(appearance),
-        arrow(decoration.facing ?? 1),
+        ...(decoration.directionDisplay === 'none'
+          ? []
+          : [arrow(decoration.facing ?? 1)]),
+        ...(decoration.directionDisplay === 'both'
+          ? [arrow((decoration.facing ?? 1) === 1 ? -1 : 1)]
+          : []),
       );
       marker(face);
     } else {

@@ -6,7 +6,6 @@ import {
   type EdgeId,
   type ElementKind,
   type ElementSnapshot,
-  type DistanceSnapshot,
   type ModelOperationInputRole,
   type ModelOperationKind,
   type ModelOperationSnapshot,
@@ -26,6 +25,13 @@ import {
 import {normalizeProjectPath, type ModelProject} from '../project/project';
 import {ProjectBuilder, type ProjectBundle} from '../project/project-builder';
 import {code3dAnnotations} from './annotations';
+import {
+  resolveProjectInspection,
+  type InspectSignature,
+  type InspectCallSite,
+  type ProjectInspectionIndex,
+} from './inspect-schema';
+import {InspectTransform} from './inspect-transform';
 import {argumentExpression, unwrapArgument} from './argument-path';
 import {
   designArgumentAnnotationSites,
@@ -78,7 +84,8 @@ export type TopologySelectionScope = Readonly<{
 }>;
 
 export type SourceTargetEvaluation = Readonly<{
-  measurement?: DistanceSnapshot;
+  /** Actual annotated invocation shared by its call and argument source targets. */
+  inspectCallId?: string;
   sketchIds?: readonly string[];
   /** A container's members share relation placement, unlike a single value. */
   isCollection?: boolean;
@@ -148,7 +155,7 @@ export type SourceTarget = Readonly<{
   id: string;
   kind:
     | 'value'
-    | 'measurement'
+    | 'inspect'
     | 'constraint'
     | 'transformation'
     | 'element'
@@ -344,10 +351,12 @@ export type CompiledModelSource = Readonly<{
   toolCallSites: ReadonlyMap<string, ToolCallSite>;
   relationCallSites: ReadonlyMap<string, RelationCallSite>;
   relationArraySites: readonly RelationArraySite[];
+  inspectCallSites: ReadonlyMap<string, InspectCallSite>;
   sketches: SketchSourceSites;
 }>;
 
 export function createModelCompiler() {
+  const inspectCallSites = new Map<string, InspectCallSite>();
   const edgeSelectionSites = new Map<string, EdgeSelectionSite>();
   const toolCallSites = new Map<string, ToolCallSite>();
   const relationCallSites = new Map<string, RelationCallSite>();
@@ -366,6 +375,7 @@ export function createModelCompiler() {
     toolCallSites.clear();
     relationCallSites.clear();
     relationArraySites.length = 0;
+    inspectCallSites.clear();
     checkCancelled();
     const files = new Map(
       project.files.map(file => [normalizeProjectPath(file.path), file.source]),
@@ -374,6 +384,32 @@ export function createModelCompiler() {
       parseDesignArgumentContexts(path, source),
     );
     const tooling = resolveProjectTooling(project, program);
+    const inspectionIndex = resolveProjectInspection(project, program);
+    const inspectionCalls = new Map<string, Map<string, InspectSignature>>();
+    for (const [path, calls] of inspectionIndex.calls) {
+      const resolvedCalls = new Map<string, InspectSignature>();
+      for (const [key, signature] of calls) {
+        const annotations: InspectSignature['annotations'][number][] = [];
+        for (const annotation of signature.annotations) {
+          const binding = annotation.binding;
+          if (binding.kind !== 'module') {
+            annotations.push(annotation);
+            continue;
+          }
+          const resolved = await builder.resolve(binding.module, path);
+          annotations.push({
+            ...annotation,
+            binding: {
+              ...binding,
+              module: resolved === false ? binding.module : resolved,
+            },
+          });
+        }
+        resolvedCalls.set(key, {...signature, annotations});
+      }
+      inspectionCalls.set(path, resolvedCalls);
+    }
+    const inspection = {...inspectionIndex, calls: inspectionCalls};
     const activeDesignContext = selectDesignContext(
       project,
       designArguments,
@@ -418,6 +454,7 @@ export function createModelCompiler() {
           source,
           tooling.toolCalls.get(path),
           tooling.parameterDefinitions.get(path),
+          inspection,
           cached,
           activeDesignContext?.functionRef.file === path
             ? activeDesignContext
@@ -448,6 +485,7 @@ export function createModelCompiler() {
       toolCallSites: new Map(toolCallSites),
       relationCallSites: new Map(relationCallSites),
       relationArraySites: [...relationArraySites],
+      inspectCallSites: new Map(inspectCallSites),
       sketches: sketchSourceSites(tooling.program, files),
     };
   }
@@ -695,6 +733,7 @@ export function createModelCompiler() {
     source: string,
     toolCalls: ToolCallSchemaMap | undefined,
     parameterDefinitions: ParameterDefinitionMap | undefined,
+    inspection: ProjectInspectionIndex,
     cached: CachedDefinitions,
     designContext?: ActiveDesignContext,
   ): string {
@@ -712,6 +751,7 @@ export function createModelCompiler() {
         source.length,
         toolCalls,
         parameterDefinitions ?? new Map(),
+        inspection,
         cached,
       ),
     ]);
@@ -730,12 +770,19 @@ export function createModelCompiler() {
     authorSourceLength: number,
     toolCalls: ToolCallSchemaMap | undefined,
     parameterDefinitions: ParameterDefinitionMap,
+    inspection: ProjectInspectionIndex,
     cached: CachedDefinitions,
   ): ts.TransformerFactory<ts.SourceFile> {
     return context => {
       const {factory} = context;
 
       return sourceFile => {
+        const inspections = new InspectTransform(
+          sourceFile,
+          inspection,
+          factory,
+          inspectCallSites,
+        );
         const insertions = createTransformationInsertions(sourceFile);
         const rotationSelection = (
           node: ts.CallExpression,
@@ -815,12 +862,46 @@ export function createModelCompiler() {
           ) {
             return node;
           }
-          const visited = identifyCachedCall(
+          const visited = inspections.node(
             node,
-            ts.visitEachChild(node, visit, context),
-            cached,
-            factory,
+            identifyCachedCall(
+              node,
+              ts.visitEachChild(node, visit, context),
+              cached,
+              factory,
+            ),
           );
+          const returned = (before: ts.Expression, after: ts.Expression) =>
+            instrumentContainedValues(
+              before,
+              after,
+              factory,
+              (original, value) =>
+                ts.isCallExpression(original) ||
+                !isTraceableExpression(original, sourceFile)
+                  ? value
+                  : bindExpression(
+                      value,
+                      original.getStart(sourceFile),
+                      original.end,
+                      sourceFile.fileName,
+                      stableSourceId('value', original, sourceFile),
+                      original.getText(sourceFile),
+                      'expression',
+                      'local',
+                      factory,
+                    ),
+            );
+          if (
+            ts.isReturnStatement(node) &&
+            ts.isReturnStatement(visited) &&
+            node.expression &&
+            visited.expression
+          )
+            return factory.updateReturnStatement(
+              visited,
+              returned(node.expression, visited.expression),
+            );
           // A standalone value expression is a concrete use site, including a
           // sketch reference. Calls already record their returned value. Keep
           // directive prologues and control-flow-sensitive expressions intact.
@@ -860,11 +941,15 @@ export function createModelCompiler() {
               sourceFile,
               factory,
             );
-            if (parameters.length > 0) {
+            if (parameters.length > 0 || !ts.isBlock(visited.body)) {
               const body = visited.body;
               const statements = ts.isBlock(body)
                 ? [...body.statements]
-                : [factory.createReturnStatement(body)];
+                : [
+                    factory.createReturnStatement(
+                      returned(node.body as ts.Expression, body),
+                    ),
+                  ];
               // Directive prologues must remain at the beginning of the function.
               let insertion = 0;
               while (insertion < statements.length) {
@@ -1016,11 +1101,9 @@ export function createModelCompiler() {
               sourceFile,
               factory,
             );
-            const call = instrumentCallArguments(
-              callWithInputs,
-              siteId,
-              factory,
-            );
+            const call =
+              inspections.call(node, callWithInputs, siteId) ??
+              instrumentCallArguments(callWithInputs, siteId, factory);
 
             return traceExpression(
               call,
@@ -1579,11 +1662,25 @@ export function createModelCompiler() {
     sourceFile: ts.SourceFile,
     factory: ts.NodeFactory,
   ): ts.Expression {
+    return instrumentContainedValues(
+      original,
+      visited,
+      factory,
+      (before, after) =>
+        callInputExpression(after, before, siteId, sourceFile, factory),
+    );
+  }
+
+  function instrumentContainedValues(
+    original: ts.Expression,
+    visited: ts.Expression,
+    factory: ts.NodeFactory,
+    wrap: (original: ts.Expression, visited: ts.Expression) => ts.Expression,
+  ): ts.Expression {
     const instrument = (
       before: ts.Expression,
       after: ts.Expression,
-    ): ts.Expression =>
-      instrumentInputValue(before, after, siteId, sourceFile, factory);
+    ): ts.Expression => instrumentContainedValues(before, after, factory, wrap);
     if (ts.isOmittedExpression(visited)) return visited;
     if (ts.isSpreadElement(original) && ts.isSpreadElement(visited)) {
       return factory.updateSpreadElement(
@@ -1641,7 +1738,7 @@ export function createModelCompiler() {
         }),
       );
     }
-    return callInputExpression(visited, original, siteId, sourceFile, factory);
+    return wrap(original, visited);
   }
 
   function callInputExpression(

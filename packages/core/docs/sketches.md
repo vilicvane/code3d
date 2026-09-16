@@ -73,8 +73,8 @@ The `relate` callback parameter represents the new sketch frame; every returned
 constraint must involve it. References to the original sketch's plane stay on
 the original frame.
 
-In the App, select the related value (`opening`) to edit against read-only model
-outlines projected into the sketch's local plane. Select `profile` for its original
+In the App, select the related value (`opening`) and choose **Edit sketch** to edit against read-only model
+outlines projected into the sketch's local plane. Select `profile` and choose **Edit sketch** for its original
 local view. Both edit the same source array, with ordinary undo; separate placements
 of that geometry are not separate authoring definitions. Context outlines are
 visual references only, not snapping targets or imported geometry constraints.

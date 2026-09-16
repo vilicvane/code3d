@@ -150,132 +150,118 @@ test('relate distinguishes the new self from its original receiver alias in sour
     defined(shift.evaluation.relationPreview).compositionTransform.position,
     [162, 0, 0],
   );
+  const scene = await inspect(source, 'relate(self');
+  assert.equal(scene.target.length, 1);
+  assert.equal(scene.ambient.length, 1);
+  const self = scene.target[0],
+    original = scene.ambient[0];
+  assert.equal(self.kind, 'model');
+  assert.equal(original.kind, 'model');
+  if (self.kind !== 'model' || original.kind !== 'model') return;
+  assert.deepEqual(self.model.children[0].transform.position, [162, 0, 0]);
+  assert.deepEqual(original.model.children[0].transform.position, [0, 0, 0]);
+  const constraintScene = await inspect(source, 'leftSide.right');
+  assert.deepEqual(
+    constraintScene.target.flatMap(item =>
+      item.kind === 'model' ? [item.model.children[0].transform.position] : [],
+    ),
+    [
+      [2, 0, 0],
+      [0, 0, 0],
+    ],
+  );
 });
 
-test('on applies one opacity factor to complete source and target groups without named duplicates', async () => {
-  const source = `import {offset, box,group} from '@code3d/core'; const base=group([box(20,10,30)]); const part=group([box(8,6,4)]).relate(self=>[self.on( base.up ), offset(2,0,0)]); export default group([base,part]);`;
+async function inspect(source: string, token: string) {
+  return defined(
+    await compiler.executor.inspect({
+      file: '/main.ts',
+      offset: source.indexOf(token) + (token === 'base.up' ? 6 : 1),
+    }),
+  );
+}
+
+test('relation inspection declares directed references, exact bounds and explicit focus without duplicate named providers', async () => {
+  const source = `import {box,group,offset} from '@code3d/core'; const base=group([box(20,10,30)]); const part=group([box(8,6,4)]).relate(self=>[self.on(base.up), offset(2,0,0)]); export default group([base,part]);`;
   const module = await compile(source);
   for (const token of ['on(', 'base.up']) {
-    const scope = at(module, source, token);
-    assert.deepEqual(
-      decorations.elementSourceDecoration.decorations(scope),
-      [],
+    const scene = await inspect(source, token);
+    const anchors = scene.target.filter(item => item.kind === 'anchor');
+    assert.equal(anchors.length, 2);
+    assert.ok(anchors.every(item => item.direction === 'forward'));
+    assert.equal(
+      anchors.filter(item => item.focused).length,
+      token === 'on(' ? 0 : 1,
     );
-    const items = decorations.relationSourceDecoration.decorations(scope);
-    assert.equal(new Set(items.map(item => item.id)).size, items.length);
-    const primary = token === 'base.up' ? 'target' : 'source';
-    for (const side of ['source', 'target'] as const) {
-      const factor = side === primary ? 1 : 0.7;
-      const group = items.filter(item =>
-        item.id.startsWith(`${scope.constraint.id}:${side}:`),
-      );
-      assert.equal(
-        group.filter(item => item.kind === 'bounds').length,
-        side === 'source' ? 1 : 0,
-      );
-      assert.equal(group.filter(item => item.kind === 'surface').length, 1);
-      for (const item of group) {
-        assert.equal(item.appearance.color, '#d8ff3e');
-        assert.equal(
-          item.appearance.opacity,
-          (item.kind === 'surface' ? 0.18 : 0.85) * factor,
-        );
-      }
-    }
+    const bounds = scene.target.filter(item => item.kind === 'bounds');
+    assert.equal(bounds.length, 1);
+    const planes = anchors
+      .flatMap(item =>
+        item.elements.flatMap(element =>
+          decorations.previewElementDecorations(
+            {...module, objects: scene.objects},
+            item.model,
+            element,
+            item.direction,
+          ),
+        ),
+      )
+      .filter(item => item.kind === 'surface');
+    assert.equal(planes.length, 2);
+    assert.ok(planes.every(item => item.appearance.color === '#d8ff3e'));
   }
 });
 
-for (const [geometry, receiver, argument, baseOpacity] of [
-  ['box(8,6,4)', 'self.axis', 'base.axis.reverse()', 0.98],
-  ['line([0,0,0],[10,5,0])', 'self', 'base.reverse()', 0.98],
-  ['box(8,6,4)', 'self.surface(1)', 'base.surface(2).flip()', 0.66],
-  ['point()', 'self', 'base', 0.92],
+for (const [geometry, receiver, argument] of [
+  ['box(8,6,4)', 'self.axis', 'base.axis.reverse()'],
+  ['line([0,0,0],[10,5,0])', 'self', 'base.reverse()'],
+  ['box(8,6,4)', 'self.surface(1)', 'base.surface(2).flip()'],
+  ['point()', 'self', 'base'],
 ] as const) {
-  test(`align fades all ${receiver} geometry and directions together`, async () => {
+  test(`align uses the public anchor annotations for ${receiver}`, async () => {
     const source = `import {box,line,point,group} from '@code3d/core'; const base=${geometry}; const part=${geometry}.relate(self=>${receiver}.align( /* target */ ${argument} )); export default group([base,part]);`;
-    const module = await compile(source);
-    for (const [token, primary] of [
-      ['align(', 'source'],
-      ['/* target */', 'target'],
-    ] as const) {
-      const scope = at(module, source, token);
-      const items = decorations.relationSourceDecoration.decorations(scope);
-      for (const side of ['source', 'target'] as const) {
-        const factor = side === primary ? 1 : 0.7;
-        const group = items.filter(item => item.id.includes(`:${side}:`));
-        assert.ok(group.length > 0);
-        assert.ok(group.some(item => item.kind === 'anchor'));
-        for (const item of group) {
-          assert.equal(item.appearance.opacity, baseOpacity * factor);
-          if (item.appearance.edgeColor)
-            assert.equal(item.appearance.edgeOpacity, factor);
-        }
-      }
+    await compile(source);
+    for (const token of ['align(', '/* target */']) {
+      const scene = await inspect(source, token);
+      const anchors = scene.target.filter(item => item.kind === 'anchor');
+      assert.equal(anchors.length, 2);
+      assert.ok(anchors.every(item => item.direction === 'forward'));
+      assert.equal(
+        anchors.filter(item => item.focused).length,
+        token === 'align(' ? 0 : 1,
+      );
+      assert.equal(
+        scene.target.filter(item => item.kind === 'bounds').length,
+        0,
+      );
     }
   });
 }
 
-test('two relation elements on the same node keep distinct focus and decoration identities', async () => {
-  const source = `import {point} from '@code3d/core'; export default point().relate(self=>self.align( /* target */ self ));`;
+test('member completion uses its actual reference receiver when the tool context focuses self', async () => {
+  const source = `import {axisLine, box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>[self.on(base.up), axisLine(axis.axis).rotate(20)]);`;
   const module = await compile(source);
-  for (const [token, primary] of [
-    ['align(', 'source'],
-    ['/* target */', 'target'],
-  ] as const) {
-    const scope = at(module, source, token);
-    assert.equal(
-      scope.constraint.source.nodeId,
-      scope.constraint.target.nodeId,
-    );
-    assert.equal(
-      context.focusedConstraintSide(scope.evaluation, scope.constraint),
-      primary,
-    );
-    const items = decorations.relationSourceDecoration.decorations(scope);
-    assert.equal(items.length, 2);
-    assert.equal(new Set(items.map(item => item.id)).size, 2);
-    assert.equal(
-      defined(items.find(item => item.id.includes(`:${primary}:`))).appearance
-        .opacity,
-      0.92,
-    );
-    assert.equal(
-      defined(items.find(item => !item.id.includes(`:${primary}:`))).appearance
-        .opacity,
-      0.92 * 0.7,
-    );
-  }
-});
-
-test('member previews retain their reference receiver when a chain focuses self', async () => {
-  const source = `import {axisLine, rotate, box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>[self.on(base.up), axisLine(axis.axis).rotate(20)]);`;
-  const module = await compile(source);
-  const targetAtReference = defined(
+  const original = defined(
     module.sourceTargets.find(
       target =>
         target.kind === 'element' &&
         target.receiverRef?.start === source.indexOf('axis.axis'),
     ),
   );
-  const scope = {
-    target: targetAtReference,
-    evaluation: targetAtReference.evaluations[0],
-  };
-  const receiver = defined(scope.evaluation.valueNodeIds?.[0]);
-  assert.notEqual(receiver, scope.evaluation.focusNodeIds?.[0]);
+  const evaluation = original.evaluations[0];
+  const receiver = defined(evaluation.valueNodeIds?.[0]);
+  assert.notEqual(receiver, evaluation.focusNodeIds?.[0]);
   let preview:
-    import('../src/model/compiler.ts').SourceTargetEvaluation | undefined;
+    import('../src/model/inspection-snapshot').InspectionSnapshot | undefined;
   const host = {
     module,
-    captureTransientPreviewRestore() {},
-    renderSourceScene(_target: unknown, evaluation: typeof preview) {
-      preview = evaluation;
+    previewCompletedProject(_module: unknown, scene: typeof preview) {
+      preview = scene;
     },
   };
-  // Complete the receiver value `axis` to a directional bound.
   const target = {
-    ...scope.target,
-    evaluations: [{...scope.evaluation, element: undefined}],
+    ...original,
+    evaluations: [{...evaluation, element: undefined}],
   };
   assert.ok(
     ModelViewport.prototype.previewCompletion.call(
@@ -285,75 +271,32 @@ test('member previews retain their reference receiver when a chain focuses self'
       'up',
     ),
   );
-  assert.equal(defined(defined(preview).element).nodeId, receiver);
-  assert.ok(defined(defined(preview).element).bound);
-  assert.equal(defined(preview).constraintId, undefined);
-  assert.ok(
-    decorations.elementSourceDecoration.decorations({
-      module,
-      target,
-      evaluation: defined(preview),
-    }).length > 0,
-  );
-  assert.deepEqual(
-    decorations.relationSourceDecoration.decorations({
-      module,
-      target,
-      evaluation: defined(preview),
-    }),
-    [],
-  );
+  const item = defined(preview).target[0];
+  assert.equal(item.kind, 'anchor');
+  if (item.kind !== 'anchor') return;
+  assert.equal(item.model.nodeId, receiver);
+  assert.ok(item.elements[0].bound);
+  assert.deepEqual(defined(preview).ambient, []);
 });
 
-test('joint placement highlights only the focused relation, while self and transforms keep no unrelated markers', async () => {
-  const source = `import {box,group,offset,pivot} from '@code3d/core'; const base=box(20,10,30); const part=box(8,6,4).relate(self=>[self.axis.align(base.axis),self.on(base.up), offset(1,0,0),offset(3,0,0),pivot([1,0,0]).rotate(0,0,20)]); export default group([base,part]);`;
-  const module = await compile(source);
+test('joint placement draws only the selected relation and keeps unrelated values out of its scene', async () => {
+  const source = `import {box,group,offset,pivot} from '@code3d/core'; const extra=box(50,50,50); const base=box(20,10,30); const part=box(8,6,4).relate(self=>[self.axis.align(base.axis),self.on(base.up),offset(3,0,0),pivot([1,0,0]).rotate(0,0,20)]); export default group([base,part,extra]);`;
+  await compile(source);
   for (const token of ['align(', 'on(', 'base.axis', 'base.up']) {
-    const scope = at(module, source, token);
-    const items = decorations.relationSourceDecoration.decorations(scope);
-    assert.ok(items.length > 0, token);
+    const scene = await inspect(source, token);
+    assert.equal(
+      scene.target.filter(item => item.kind === 'anchor').length,
+      2,
+      token,
+    );
+    assert.equal(scene.ambient.length, 0, token);
+  }
+  for (const token of ['offset(3', 'pivot([', 'rotate(']) {
+    const scene = await inspect(source, token);
     assert.ok(
-      items.every(item => item.id.startsWith(`${scope.constraint.id}:`)),
+      scene.target.every(item => item.kind === 'model'),
       token,
     );
+    assert.equal(scene.ambient.length, 1, token);
   }
-  for (const token of [
-    'self.on',
-    'offset(1',
-    'offset(3',
-    'pivot([',
-    'rotate(',
-  ]) {
-    const target = defined(
-      ModelViewport.prototype['sourceTargetAt'].call(
-        {module},
-        '/main.ts',
-        source.indexOf(token) + 1,
-      ),
-    );
-    const evaluation = target.evaluations[0];
-    assert.deepEqual(
-      decorations.relationSourceDecoration.decorations({
-        module,
-        target,
-        evaluation,
-      }),
-      [],
-      token,
-    );
-    assert.ok(evaluation.relationPreview, token);
-  }
-});
-
-test('an explicit external model receiver keeps its relation markers while bare self does not', async () => {
-  const source = `import {box,group} from '@code3d/core'; const base=box(20,10,20); const part=box(2,2,2).relate(self=>base.on(self.up)); export default group([base,part]);`;
-  const module = await compile(source);
-  const scope = at(module, source, 'base.on(');
-  assert.equal(scope.evaluation.constraintFocus, 'source');
-  const drawn = decorations.relationSourceDecoration.decorations(scope);
-  assert.ok(drawn.length > 0);
-  assert.deepEqual(
-    new Set(drawn.map(value => value.nodeId)),
-    new Set([scope.constraint.source.nodeId, scope.constraint.target.nodeId]),
-  );
 });

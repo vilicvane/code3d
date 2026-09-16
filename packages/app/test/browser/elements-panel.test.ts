@@ -82,19 +82,23 @@ body;`,
         const viewport = window.elementsTestApp.viewport;
         const instances =
           viewport['decorationLayers'].get('elements-panel') ?? [];
-        return instances.map(instance => ({
-          occurrenceKey: instance.occurrenceKey,
-          selectedKey: viewport.getSelected()!.key,
-          type: instance.object.children[0].type,
-          color:
-            (instance.object.children[0] as import('three').Mesh)
-              .material instanceof Array
-              ? undefined
-              : (
-                  (instance.object.children[0] as import('three').Mesh)
-                    .material as import('three').MeshBasicMaterial
-                ).color.getHexString(),
-        }));
+        return instances.map(instance => {
+          let drawing: import('three').Mesh | undefined;
+          instance.object.traverse(object => {
+            if (!drawing && 'material' in object)
+              drawing = object as import('three').Mesh;
+          });
+          if (!drawing)
+            throw new Error('Element hover contains no rendered geometry');
+          const material =
+            drawing.material as import('three').MeshBasicMaterial;
+          return {
+            occurrenceKey: instance.occurrenceKey,
+            selectedKey: viewport.getSelected()!.key,
+            type: drawing.type,
+            color: material.color.getHexString(),
+          };
+        });
       });
     for (const [name, type] of [
       ['S1, surface', 'Mesh'],
@@ -161,23 +165,44 @@ body.center;`,
         .textContent(),
       'center',
     );
+    const passiveReferences = await page.evaluate(
+      () =>
+        window.elementsTestApp.viewport['decorationLayers'].get('inspection')
+          ?.length,
+    );
+    assert.equal(passiveReferences, 1);
     await page.getByRole('listitem', {name: 'up, face', exact: true}).hover();
     assert.equal(
+      await page.evaluate(
+        () =>
+          window.elementsTestApp.viewport['decorationLayers'].get('inspection')
+            ?.length,
+      ),
+      passiveReferences,
+    );
+    assert.ok(
       await page.evaluate(() =>
         window.elementsTestApp.viewport['decorationLayers'].has(
-          'source-context:named-element',
+          'elements-panel',
         ),
       ),
-      false,
     );
     await topology.click();
     assert.equal(
+      await page.evaluate(
+        () =>
+          window.elementsTestApp.viewport['decorationLayers'].get('inspection')
+            ?.length,
+      ),
+      passiveReferences,
+    );
+    assert.equal(
       await page.evaluate(() =>
         window.elementsTestApp.viewport['decorationLayers'].has(
-          'source-context:named-element',
+          'elements-panel',
         ),
       ),
-      true,
+      false,
     );
     await setSource(
       page,

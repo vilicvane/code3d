@@ -1389,17 +1389,16 @@ export class CodeEditor {
     };
   }
 
-  /** Activate the expression end or insertion gap through normal source navigation. */
-  activateSourceTool(ref: SourceRef | undefined): boolean {
+  /** Move to a tool's expression end; the caller awaits its source presentation. */
+  activateSourceTool(ref: SourceRef | undefined): SourceNavigation | undefined {
     const current = ref && this.resolveSourceRef(ref);
-    if (!current || current.file !== this.activePath) return false;
+    if (!current || current.file !== this.activePath) return;
     const model = this.editor.getModel()!;
     const position = model.getPositionAt(current.end);
     this.sourceDecoration.clear();
     this.withSuppressedCursorEvents(() => this.editor.setPosition(position));
-    this.emitCursorPosition(position, ref);
     this.revealSourceRange(sourceRange(model, current));
-    return true;
+    return {...this.cursorAt(position)!, sourceRef: ref};
   }
 
   /** Observe source context without turning state refreshes into navigation. */

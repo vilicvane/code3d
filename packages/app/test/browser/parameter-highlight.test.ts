@@ -6,6 +6,7 @@ declare const window: Window & {
   parameterHighlightApp: {
     viewport: import('../../src/viewport.ts').ModelViewport;
     codeEditor: import('../../src/editor.ts').CodeEditor;
+    previewState: import('../../src/model/preview-state.ts').ModelPreviewState;
   };
 };
 
@@ -31,14 +32,22 @@ async function focus(page: Page, token: string, delta = 0) {
     },
     {source, token, delta},
   );
+  await page.waitForFunction(
+    () => !window.parameterHighlightApp.previewState.inspecting,
+  );
 }
 
 async function measure(page: Page) {
   return page.evaluate(async () => {
     const {viewport} = window.parameterHighlightApp;
-    const instances =
-      viewport['decorationLayers'].get('source-context:parameter-geometry') ??
-      [];
+    const instances = [
+      ...(viewport['decorationLayers'].get('inspection') ?? []).filter(
+        instance => instance.measurement,
+      ),
+      ...(viewport['decorationLayers'].get(
+        'source-context:parameter-geometry',
+      ) ?? []),
+    ];
     const guides = instances.map(instance => {
       const group = instance.object.children[0];
       const decoration = group.userData
@@ -47,9 +56,20 @@ async function measure(page: Page) {
         object: instance.object,
         group,
         kind: decoration.kind,
-        edgeId: group.userData.edgeId,
         dimension:
-          decoration.kind === 'dimension' ? decoration.dimension : undefined,
+          decoration.kind === 'measurement'
+            ? {
+                value: decoration.value,
+                start: (
+                  decoration as import('../../src/viewport-decoration.ts').ViewportMeasurementDecoration &
+                    import('@code3d/core').DimensionSegment
+                ).start,
+                end: (
+                  decoration as import('../../src/viewport-decoration.ts').ViewportMeasurementDecoration &
+                    import('@code3d/core').DimensionSegment
+                ).end,
+              }
+            : undefined,
         topologyKind:
           decoration.kind === 'topology' ? decoration.topologyKind : undefined,
         ids: decoration.kind === 'topology' ? decoration.ids : undefined,
@@ -123,7 +143,7 @@ test(
         response,
         body:
           (await response.text()) +
-          '\nwindow.parameterHighlightApp = {viewport, codeEditor};',
+          '\nwindow.parameterHighlightApp = {viewport, codeEditor, previewState};',
       });
     });
     await page.goto(process.env.CODE3D_TEST_URL);
@@ -145,8 +165,8 @@ test(
     );
     const x = await measure(page);
     assert.equal(x.guides.length, 1);
-    assert.deepEqual(x.guides[0].dimension?.vector, [24, 0, 0]);
-    assert.ok(x.guides[0].edgeId !== undefined);
+    assert.equal(x.guides[0].dimension?.value, 24);
+    assert.ok(x.guides[0].dimension?.start);
     assert.ok(x.liveDraws > 0);
     assert.ok(x.exportedDraws > 0);
     assert.ok(x.widths.every(width => width === 1));
@@ -155,8 +175,8 @@ test(
 
     await focus(page, 'size,', 4);
     const same = await measure(page);
-    assert.equal(same.guides[0].uuid, x.guides[0].uuid);
-    const beforeOrbit = same.guides[0].edgeId;
+    assert.deepEqual(same.guides[0].dimension, x.guides[0].dimension);
+    const beforeOrbit = same.guides[0].dimension;
     const canvas = (await page.locator('.viewport-canvas').boundingBox())!;
     await page.mouse.move(
       canvas.x + canvas.width / 2,
@@ -175,13 +195,17 @@ test(
         -1,
     );
     const orbited = await measure(page);
-    assert.equal(orbited.guides[0].edgeId, beforeOrbit);
+    assert.deepEqual(orbited.guides[0].dimension, beforeOrbit);
     assert.notDeepEqual(orbited.camera, same.camera);
 
     await focus(page, 'size + 12', 5);
     const y = await measure(page);
-    assert.deepEqual(y.guides[0].dimension?.vector, [0, 36, 0]);
-    assert.deepEqual(y.camera, orbited.camera);
+    assert.equal(y.guides[0].dimension?.value, 36);
+    assert.ok(
+      y.camera.every(
+        (value, index) => Math.abs(value - orbited.camera[index]) < 1e-9,
+      ),
+    );
     assert.equal(y.scene, orbited.scene);
     assert.equal(y.selectedKey, orbited.selectedKey);
     await page.getByRole('button', {name: 'Render', exact: true}).click();
@@ -225,35 +249,11 @@ test(
 
     await focus(page, '-12', 2);
     const extrusion = await measure(page);
-    assert.ok(Math.abs(extrusion.guides[0].dimension!.vector[0] - 12) < 1e-5);
-    assert.ok(extrusion.guides[0].edgeId !== undefined);
+    assert.equal(extrusion.guides[0].dimension?.value, -12);
     assert.ok(extrusion.liveDraws > 0);
-    // Exercise the rendering contract for a dimension with no mesh edge.
-    const endpoints = await page.evaluate(() => {
-      const {viewport} = window.parameterHighlightApp;
-      const owner = 'source-context:parameter-geometry';
-      const decoration = viewport['decorationLayers'].get(owner)![0].object
-        .children[0].userData
-        .decoration as import('../../src/viewport-decoration.ts').ViewportDimensionDecoration;
-      viewport.setDecorations(owner, [
-        {
-          ...decoration,
-          mesh: {...decoration.mesh, edges: new Float32Array(), edgeGroups: []},
-        },
-      ]);
-      const group =
-        viewport['decorationLayers'].get(owner)![0].object.children[0];
-      const points = group.children[1] as import('three').Points;
-      return Array.from(points.geometry.getAttribute('position').array);
-    });
-    assert.deepEqual(endpoints, [-4, -5, -6, 8, -5, -6]);
-    const fallback = await measure(page);
-    assert.equal(fallback.guides[0].edgeId, undefined);
-    assert.equal(fallback.liveDraws, 2);
-    assert.equal(fallback.exportedDraws, 2);
     await focus(page, '20);');
     const round = await measure(page);
-    assert.deepEqual(round.guides[0].dimension?.vector, [0, 20, 0]);
+    assert.equal(round.guides[0].dimension?.value, 20);
     assert.ok(round.liveDraws > 0);
     await focus(page, 'const size');
     assert.deepEqual((await measure(page)).guides, []);

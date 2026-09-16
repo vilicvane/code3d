@@ -218,8 +218,18 @@ test('reads real JSDoc only and keeps multiline offsets in the original source',
   assert.deepEqual(diagnostics(sourceFile(source)), []);
 });
 
-test('recognizes tool, param and arguments, leaving former variable tags as ordinary comments', () => {
-  assert.deepEqual([...annotationNames], ['arguments', 'param', 'tool']);
+test('recognizes public annotations, leaving former variable tags as ordinary comments', () => {
+  assert.deepEqual(
+    [...annotationNames],
+    [
+      'arguments',
+      'param',
+      'tool',
+      'inspect',
+      'inspect.closure',
+      'inspect.context',
+    ],
+  );
   const source = [
     '/**',
     ' * @code3d.label Custom width',
@@ -245,6 +255,39 @@ test('recognizes tool, param and arguments, leaving former variable tags as ordi
   assert.deepEqual(diagnostics(sourceFile(source)), []);
   const result = select(source.replace('Custom width', 'Custom wi|dth'));
   assert.deepEqual(result.selection, result.outer);
+});
+
+test('keeps inspect closure tags distinct from call and parameter inspectors', () => {
+  const source = [
+    '/**',
+    ' * @code3d.inspect relate.inspect',
+    ' * @code3d.inspect this relate.inspectSelf',
+    ' * @code3d.inspect.closure build relate.inspectBody',
+    ' * @code3d.inspect.context build relate.inspectContext',
+    ' * @code3d.inspect.unsupported ignored',
+    ' */',
+    'function relate(build: (self: unknown) => unknown) {}',
+  ].join('\r\n');
+  const result = annotations(source);
+  assert.deepEqual(
+    result.map(({name, value}) => ({name, value})),
+    [
+      {name: 'inspect', value: 'relate.inspect'},
+      {name: 'inspect', value: 'this relate.inspectSelf'},
+      {name: 'inspect.closure', value: 'build relate.inspectBody'},
+      {name: 'inspect.context', value: 'build relate.inspectContext'},
+    ],
+  );
+  for (const annotation of result) {
+    assert.equal(
+      source.slice(annotation.start, annotation.end),
+      `@code3d.${annotation.name}`,
+    );
+    assert.equal(
+      source.slice(annotation.valueStart, annotation.valueEnd),
+      annotation.value,
+    );
+  }
 });
 
 test('validates unused functions, methods and overloads independently', () => {

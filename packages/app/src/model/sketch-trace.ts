@@ -55,6 +55,13 @@ export class SketchTraceRegistry {
     return this.values.size;
   }
 
+  /** Preserve source identities while keeping generated inspection layers local. */
+  fork(): SketchTraceRegistry {
+    const registry = new SketchTraceRegistry(this.runtime);
+    for (const [value, trace] of this.values) registry.values.set(value, trace);
+    return registry;
+  }
+
   frames() {
     return [...this.values.keys()].map(value =>
       this.runtime.sketchFrame(value),

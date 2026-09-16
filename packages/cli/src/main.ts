@@ -200,7 +200,7 @@ async function outputResult(
   response: AgentResponse,
   options: Options,
 ): Promise<void> {
-  if (!response.ok || !response.artifacts?.length) {
+  if (!response.artifacts?.length) {
     emit({requestId: activeRequestId, ...response});
   } else {
     const parent =
@@ -227,28 +227,24 @@ async function outputResult(
     }
     emit({
       requestId: activeRequestId,
-      ok: true,
-      data: response.data,
+      ...response,
       artifacts,
     });
   }
 }
 
 function withoutArtifactData(response: AgentResponse): unknown {
-  return response.ok
-    ? {
-        ok: true,
-        data: response.data,
-        ...(response.artifacts
-          ? {
-              artifacts: response.artifacts.map(({name, mimeType}) => ({
-                name,
-                mimeType,
-              })),
-            }
-          : {}),
-      }
-    : response;
+  return {
+    ...response,
+    ...(response.artifacts
+      ? {
+          artifacts: response.artifacts.map(({name, mimeType}) => ({
+            name,
+            mimeType,
+          })),
+        }
+      : {}),
+  };
 }
 
 function emit(value: unknown): void {

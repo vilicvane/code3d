@@ -60,6 +60,11 @@ ports. Port conflicts are explicit. Revoke/Revoke all stops App retries and remo
 authorizations; the local process remains owned by its agent host.
 
 Operations emit JSON; artifacts are local files with paths in the result.
+Artifacts are saved for successful and failed responses alike. A `model_failed`
+response can include an inspect image and topology under
+`error.details.observation`; the CLI still exits with code 1. An artifact write
+failure reports the remote result without inline binary data, so its original
+status remains available.
 Transport errors distinguish a missing service from a disconnected App and an
 unknown execution outcome, and include executable recovery instructions. Retain
 a mutation ID before sending; query it after uncertain outcomes. A `not_sent`

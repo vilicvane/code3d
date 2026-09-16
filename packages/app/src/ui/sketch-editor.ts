@@ -24,7 +24,7 @@ import {
   sketchRegions,
   type SketchCurve,
 } from '@code3d/core/tooling';
-import {Maximize, Magnet, MousePointer2, Scissors, Shapes} from 'lucide';
+import {Check, Maximize, Magnet, MousePointer2, Scissors, Shapes} from 'lucide';
 import type {SketchChange} from '../tools/sketch-source';
 import type {
   SketchDragPreview,
@@ -258,6 +258,7 @@ export class SketchEditor {
       mergeTarget?: SketchPointAddress,
     ) => Promise<SketchDragPreview>,
     private readonly reportMove: (error?: string) => void,
+    private readonly finish?: () => void,
   ) {
     makeObservable<this, 'view' | 'gesture' | 'pointerDown' | 'pointerUp'>(
       this,
@@ -618,6 +619,13 @@ export class SketchEditor {
   }
 
   private createToolbar(): void {
+    if (this.finish)
+      this.toolbar.add(this.toolbar.group('Editing'), {
+        name: 'Finish sketch',
+        title: 'Finish editing and return to the 3D preview',
+        icon: Check,
+        run: this.finish,
+      });
     const select = (create: () => 'Select' | 'Trim' | SketchDrawing) => () => {
       this.cancel();
       this.tool = create();

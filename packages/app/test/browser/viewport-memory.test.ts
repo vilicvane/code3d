@@ -164,8 +164,8 @@ async function switchFile(page: Page, file: string): Promise<void> {
   }, file);
 }
 
-const assembly = `import {offset, box, group} from '@code3d/core';
-const a = box(10, 8, 6).originOffset(-30, 0, 0);
+const assembly = `import {offset, box, group, point} from '@code3d/core';
+const a = box(10, 8, 6).originOffset(-30, 0, 0).relate(self => self.on(point([15,20,30]).up));
 const b = box(8, 6, 4).relate(self => [self.on(a.up), offset(0, 5, 0)]);
 const members = [a, b];
 export const assembled = group(members);
@@ -191,9 +191,15 @@ test(
     await select(page, 'members =');
     await pose(page, 240, [1, 2, 3], 'render');
     const members = await state(page);
-    // Focusing either input of the same group keeps the displayed collection.
+    // The same collection can use the result's coordinate frame without moving its image.
+    const beforeGroupInputs = await projectedVertex(page);
     await select(page, 'group(members)', 'group('.length);
-    nearState(await state(page), members);
+    const groupInputs = await state(page);
+    near(groupInputs.distance, members.distance);
+    assert.equal(groupInputs.mode, members.mode);
+    (await projectedVertex(page)).forEach((value, i) =>
+      near(value, beforeGroupInputs[i]),
+    );
     await load(page, '\n\n' + assembly.replace('10, 8, 6', '12, 8, 6'), 'a =');
     nearState(await state(page), a);
     await select(page, 'members =');
@@ -340,9 +346,17 @@ export const large = box(200, 200, 200);`;
     await load(page, source, 'small =');
     const small = await state(page);
     const transition = await page.evaluate(async () => {
-      const {viewport, source, file} = window.viewportMemory;
+      const {viewport, source, file, client, module} = window.viewportMemory;
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const controls = viewport['controls'];
-      viewport.selectBySourceOffset(file, source.indexOf('large =') + 1);
+      await inspectSource(
+        client,
+        viewport,
+        module,
+        file,
+        source.indexOf('large =') + 1,
+      );
       const start = controls.capturePose().distance;
       const end = controls.savedPose().distance;
       const samples: number[] = [];
@@ -368,14 +382,28 @@ export const large = box(200, 200, 200);`;
       assert.ok(transition.samples[i] >= transition.samples[i - 1]);
 
     const redirected = await page.evaluate(async () => {
-      const {viewport, source, file} = window.viewportMemory;
+      const {viewport, source, file, client, module} = window.viewportMemory;
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const controls = viewport['controls'];
-      viewport.selectBySourceOffset(file, source.indexOf('small =') + 1);
+      await inspectSource(
+        client,
+        viewport,
+        module,
+        file,
+        source.indexOf('small =') + 1,
+      );
       await new Promise<void>(resolve =>
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       );
       const before = controls.capturePose();
-      viewport.selectBySourceOffset(file, source.indexOf('large =') + 1);
+      await inspectSource(
+        client,
+        viewport,
+        module,
+        file,
+        source.indexOf('large =') + 1,
+      );
       const after = controls.capturePose();
       return {before: before.distance, after: after.distance};
     });
@@ -444,10 +472,15 @@ async function load(
       data.source = source;
       data.file = file;
       data.module = module;
-      data.viewport.renderModule(module, undefined, {
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
+      await inspectSource(
+        data.client,
+        data.viewport,
+        module,
         file,
-        offset: source.indexOf(selection) + 1,
-      });
+        source.indexOf(selection) + 1,
+      );
       return module.diagnostic;
     },
     {source, selection, file},
@@ -458,9 +491,14 @@ async function load(
 async function select(page: Page, selection: string, shift = 1): Promise<void> {
   assert.equal(
     await page.evaluate(
-      ({selection, shift}) => {
-        const {source, file, viewport} = window.viewportMemory;
-        return viewport.selectBySourceOffset(
+      async ({selection, shift}) => {
+        const {inspectSource} =
+          await import('/test/browser/inspection-fixture.ts');
+        const {source, file, viewport, client, module} = window.viewportMemory;
+        return inspectSource(
+          client,
+          viewport,
+          module,
           file,
           source.indexOf(selection) + shift,
         );
@@ -552,3 +590,102 @@ function nearState(
   assert.equal(actual.projection, expected.projection);
   near(actual.viewHeight, expected.viewHeight);
 }
+
+test(
+  'completion previews restore the complete custom inspect scene and camera',
+  {timeout: 120_000},
+  async t => {
+    const page = await open(t);
+    const result = await page.evaluate(async () => {
+      const {viewport, client} = window.viewportMemory;
+      const file = '/inspect-completion.ts';
+      const source = `import {box} from '@code3d/core';
+const stock = box(20,20,20).material('#ff0000');
+/** @code3d.inspect show.inspect */
+function show() { return stock; }
+namespace show { export function inspect() { return {ambient: [stock], target: [box(4,5,6).material('#0000ff')]}; } }
+export default show();`;
+      const module = await client.compile(
+        {files: [{path: file, source}]},
+        file,
+      );
+      const selection = {file, offset: source.lastIndexOf('show();')};
+      const scene = await client.inspect(module, selection);
+      if (!scene) throw new Error('Missing custom inspection');
+      viewport.renderInspection(module, scene, selection);
+      const appearance = () => {
+        const opacity: number[] = [];
+        viewport['root'].traverse(object => {
+          if (!('isMesh' in object)) return;
+          const mesh = object as import('three').Mesh;
+          for (const material of Array.isArray(mesh.material)
+            ? mesh.material
+            : [mesh.material])
+            opacity.push(material.opacity);
+        });
+        return {
+          kind: viewport['inspectionScene']?.kind,
+          opacity: opacity.sort(),
+          selectable: viewport['occurrences'].size,
+          context: viewport['contextOccurrences'].size,
+        };
+      };
+      const originalAppearance = appearance();
+      const original = viewport['controls'].capturePose();
+      const scope = viewport.sourceEvaluationAt(
+        module,
+        file,
+        source.indexOf('stock =') + 1,
+      )!;
+      const previewed = viewport.previewCompletion(
+        scope.target,
+        scope.evaluationIndex,
+        'up',
+      );
+      const immediate = viewport['inspectionScene']?.target[0].kind;
+      viewport.restoreTransientPreview();
+      const restoredImmediate = viewport['inspectionScene'] === scene;
+      const stockSelection = {file, offset: source.indexOf('stock =') + 1};
+      const completed = await client.inspect(module, stockSelection);
+      if (!completed) throw new Error('Missing completion inspection');
+      viewport.previewCompletedProject(module, completed, stockSelection);
+      const completedAppearance = appearance();
+      viewport.restoreTransientPreview();
+      const restoredPose = viewport['controls'].capturePose();
+      return {
+        previewed,
+        immediate,
+        restoredImmediate,
+        restoredCompleted: viewport['inspectionScene'] === scene,
+        originalAppearance,
+        completedAppearance,
+        restoredAppearance: appearance(),
+        pose: {
+          ...restoredPose,
+          orientation: restoredPose.orientation.toArray(),
+        },
+        original: {...original, orientation: original.orientation.toArray()},
+      };
+    });
+    assert.equal(result.previewed, true);
+    assert.equal(result.immediate, 'anchor');
+    assert.equal(result.restoredImmediate, true);
+    assert.equal(result.restoredCompleted, true);
+    assert.equal(result.originalAppearance.kind, 'inspect');
+    assert.deepEqual(result.originalAppearance.opacity, [0.18, 0.82]);
+    assert.equal(
+      result.originalAppearance.selectable + result.originalAppearance.context,
+      2,
+    );
+    assert.equal(result.completedAppearance.kind, 'preview');
+    assert.deepEqual(result.completedAppearance.opacity, [1]);
+    assert.deepEqual(result.restoredAppearance, result.originalAppearance);
+    assert.deepEqual(
+      {...result.pose, orientation: []},
+      {...result.original, orientation: []},
+    );
+    result.pose.orientation.forEach((value, index) =>
+      near(value, result.original.orientation[index]),
+    );
+  },
+);

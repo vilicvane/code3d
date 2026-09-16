@@ -3,9 +3,16 @@ import {
   compilationPhaseDescriptions,
   type CompilationPhase,
 } from './compilation-progress.ts';
-import {action, computed, makeObservable, observableRef} from 'mobx';
+import {
+  action,
+  computed,
+  makeObservable,
+  observableRef,
+  runInAction,
+} from 'mobx';
 import type {ModelModule} from './compiler';
-import type {ModelDiagnostic} from './diagnostic';
+import {diagnosticFromError, type ModelDiagnostic} from './diagnostic.ts';
+import type {InspectionSnapshot} from './inspection-snapshot';
 
 export type ModelPreviewRequest = Readonly<{
   revision: number;
@@ -17,6 +24,9 @@ export type ModelPreviewRequest = Readonly<{
 export class ModelPreviewState {
   private generation = 0;
   private snapshot?: {module: ModelModule; sourceVersion: number};
+  private displayedModule: ModelModule | null = null;
+  private inspectionRequest?: object;
+  inspectionDiagnostic: ModelDiagnostic | undefined;
   private resultCurrent = false;
   private awaitingFile = false;
   private retaining = false;
@@ -42,6 +52,8 @@ export class ModelPreviewState {
     makeObservable<
       this,
       | 'snapshot'
+      | 'displayedModule'
+      | 'inspectionRequest'
       | 'resultCurrent'
       | 'awaitingFile'
       | 'retaining'
@@ -50,6 +62,12 @@ export class ModelPreviewState {
       | 'diagnosticsByEntry'
     >(this, {
       snapshot: observableRef,
+      displayedModule: observableRef,
+      inspectionRequest: observableRef,
+      inspectionDiagnostic: observableRef,
+      inspecting: computed,
+      cancelInspection: action,
+      invalidate: action,
       resultCurrent: observableRef,
       awaitingFile: observableRef,
       retaining: observableRef,
@@ -95,6 +113,13 @@ export class ModelPreviewState {
   }
 
   get presentation() {
+    if (this.inspecting)
+      return {
+        state: 'busy' as const,
+        label: 'Inspecting',
+        description: undefined,
+        delay: 200,
+      };
     const compilation = this.activity.compilation;
     const phase = compilation ? this.compilationPhase() : undefined;
     return {
@@ -124,7 +149,10 @@ export class ModelPreviewState {
   }
 
   get statusDiagnostic(): ModelDiagnostic | undefined {
-    return this.activity.state === 'error' ? this.diagnostic : undefined;
+    return (
+      this.inspectionDiagnostic ??
+      (this.activity.state === 'error' ? this.diagnostic : undefined)
+    );
   }
 
   get editorDiagnostics(): readonly ModelDiagnostic[] {
@@ -148,7 +176,7 @@ export class ModelPreviewState {
   }
 
   get busy(): boolean {
-    return this.activity.state === 'busy';
+    return this.inspecting || this.activity.state === 'busy';
   }
 
   get empty(): boolean {
@@ -172,9 +200,49 @@ export class ModelPreviewState {
   }
 
   get sourceVersion(): number | undefined {
-    return this.resultCurrent && !this.changingSource
+    return this.resultCurrent &&
+      !this.changingSource &&
+      !this.inspecting &&
+      this.displayedModule === this.module
       ? this.snapshot?.sourceVersion
       : undefined;
+  }
+
+  get inspecting(): boolean {
+    return this.inspectionRequest !== undefined;
+  }
+
+  cancelInspection(): void {
+    this.inspectionRequest = undefined;
+    this.inspectionDiagnostic = undefined;
+  }
+
+  /** Keep the displayed scene until the newest inspection can be committed. */
+  async inspect(
+    execute: () => Promise<InspectionSnapshot | undefined>,
+    present: (scene: InspectionSnapshot | undefined) => void,
+  ): Promise<boolean> {
+    const request = {};
+    runInAction(() => {
+      this.inspectionRequest = request;
+      this.inspectionDiagnostic = undefined;
+    });
+    try {
+      const scene = await execute();
+      return runInAction(() => {
+        if (this.inspectionRequest !== request) return false;
+        this.inspectionRequest = undefined;
+        present(scene);
+        return true;
+      });
+    } catch (error) {
+      runInAction(() => {
+        if (this.inspectionRequest !== request) return;
+        this.inspectionRequest = undefined;
+        this.inspectionDiagnostic = diagnosticFromError(error, 'inspect');
+      });
+      return false;
+    }
   }
 
   activate(file: string | undefined, reload = false): boolean {
@@ -196,6 +264,7 @@ export class ModelPreviewState {
 
   invalidate(): void {
     this.generation++;
+    this.cancelInspection();
   }
 
   begin(sourceVersion: number): ModelPreviewRequest {
@@ -231,7 +300,8 @@ export class ModelPreviewState {
   }
 
   /** Release the previous view after its replacement has been rendered. */
-  presented(present: boolean): void {
+  presented(present: boolean, module: ModelModule | null = this.module): void {
+    this.displayedModule = module;
     this.retaining = false;
     this.observeTarget(present);
   }

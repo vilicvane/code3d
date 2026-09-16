@@ -96,6 +96,9 @@ for (const [name, failure] of [
         false,
       );
       await cursor(page, 2, 8);
+      await page
+        .getByRole('button', {name: 'Edit sketch', exact: true})
+        .click();
       await page.getByText('Ready', {exact: true}).waitFor();
       assert.equal(
         await page.locator('#viewport-diagnostic-stack').isVisible(),
@@ -317,7 +320,24 @@ test('toolbar navigation skips read-only drawing tools but leaves view controls 
     {line: 3, column: 8},
   );
   const toolbar = page.getByRole('toolbar', {name: 'Sketch tools'});
-  assert.equal(await toolbar.locator('button:disabled').count(), 6);
+  for (const name of [
+    'Line',
+    'Rectangle',
+    'Rectangle tools',
+    'Circle',
+    'Arc',
+    'Trim',
+  ])
+    assert.equal(
+      await toolbar.getByRole('button', {name, exact: true}).isDisabled(),
+      true,
+    );
+  assert.equal(
+    await toolbar
+      .getByRole('button', {name: 'Finish sketch', exact: true})
+      .isEnabled(),
+    true,
+  );
   await toolbar.getByRole('button', {name: 'Select', exact: true}).focus();
   await page.keyboard.press('ArrowRight');
   assert.equal(
@@ -480,10 +500,14 @@ test('syntax errors retain an explicitly stale sketch without a model error, and
     `import {sketch, box} from '@code3d/core';\n${sketch}\nconst solid = box(10, 10, 10);`,
     {line: 2, column: 8},
   );
-  await cursor(page, 2, 1);
-  await page.keyboard.press('End');
-  // Stay inside the selected sketch array, not after the call's closing `)`.
-  for (let i = 0; i < 5; i++) await page.keyboard.press('ArrowLeft');
+  await page.evaluate(() => {
+    const editor = window.sketchTestEditor;
+    editor.setPosition({
+      lineNumber: 2,
+      column: editor.getModel()!.getLineMaxColumn(2) - 5,
+    });
+    editor.focus();
+  });
   await page.keyboard.insertText('?');
   await page.getByText('Last valid sketch', {exact: true}).waitFor();
   assert.equal(await point(page, 1).count(), 1);
@@ -500,6 +524,7 @@ test('syntax errors retain an explicitly stale sketch without a model error, and
   await page.keyboard.press('Control+z');
   await page.getByText('Ready', {exact: true}).waitFor();
   await cursor(page, 2, 8);
+  await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
   await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
   assert.equal(
     await page.getByRole('button', {name: 'Trim', exact: true}).isEnabled(),

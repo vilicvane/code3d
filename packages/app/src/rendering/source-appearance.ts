@@ -2,6 +2,13 @@ import * as THREE from 'three';
 
 export type SourceEmphasis = 'primary' | 'secondary' | 'context';
 
+/** Each modeling layer finishes its surfaces before drawing its outlines. */
+export const modelRenderOrder = {
+  context: {surface: -2, line: -1},
+  ordinary: {surface: 0, line: 1},
+  foreground: {surface: 2, line: 3},
+} as const;
+
 export const sourceContextAppearance = {
   color: '#788078',
   opacity: 0.18,
@@ -11,7 +18,7 @@ export const sourceContextAppearance = {
 
 const opacityLimits = {
   primary: {surface: 0.82, line: 1},
-  secondary: {surface: 0.7, line: 0.7},
+  secondary: {surface: 0.4, line: 0.5},
   context: {
     surface: sourceContextAppearance.opacity,
     line: sourceContextAppearance.edgeOpacity,
@@ -34,6 +41,13 @@ export function applySourceEmphasis(
       : [child.material];
     for (const material of materials) {
       const surface = child instanceof THREE.Mesh;
+      const layer =
+        emphasis === 'context'
+          ? 'context'
+          : material.depthTest
+            ? 'ordinary'
+            : 'foreground';
+      child.renderOrder = modelRenderOrder[layer][surface ? 'surface' : 'line'];
       if (emphasis === 'context') {
         if ('color' in material && material.color instanceof THREE.Color)
           material.color.set(
@@ -41,7 +55,11 @@ export function applySourceEmphasis(
               ? sourceContextAppearance.color
               : sourceContextAppearance.edgeColor,
           );
-        child.renderOrder = surface ? -2 : -1;
+      } else if (layer === 'foreground') {
+        // Depth-independent inspector materials must composite after ordinary
+        // translucent bodies too; Three otherwise sorts them by object origin.
+        material.transparent = true;
+        material.depthWrite = false;
       }
       // Ensure the model is see-through without compounding its own opacity.
       const limit = opacityLimits[emphasis];

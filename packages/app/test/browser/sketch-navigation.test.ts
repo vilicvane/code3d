@@ -63,6 +63,7 @@ async function open(
       editor.getModel()!.getPositionAt(source.indexOf('small = sketch') + 10),
     );
   }, source);
+  await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
   await page.locator('.sketch-editor:not([hidden])').waitFor();
   // Other CDP clients can override context media emulation on shared Chrome.
   await page.emulateMedia({reducedMotion});
@@ -76,9 +77,10 @@ async function open(
 }
 
 async function choose(page: Page, name: string) {
-  return page.evaluate(name => {
+  const before = await page.evaluate(async name => {
     const {codeEditor, sketchEditor, viewport} = window.sketchNavigationApp;
     const before = sketchEditor.navigation.pose;
+    const previous = viewport['inspectionScene'];
     const editor = codeEditor.editor;
     editor.setPosition(
       editor
@@ -87,13 +89,23 @@ async function choose(page: Page, name: string) {
           editor.getValue().indexOf(`${name} = `) + name.length + 5,
         ),
     );
+    while (viewport['inspectionScene'] === previous)
+      await new Promise<void>(resolve =>
+        requestAnimationFrame(() => resolve()),
+      );
+    return before;
+  }, name);
+  const edit = page.getByRole('button', {name: 'Edit sketch', exact: true});
+  if (await edit.isVisible()) await edit.click();
+  return page.evaluate(before => {
+    const {sketchEditor, viewport} = window.sketchNavigationApp;
     return {
       before,
       after: sketchEditor.navigation.pose,
       sketchAnimation: sketchEditor.navigation['frame'] !== undefined,
       modelAnimation: viewport['controls']['transition'] !== undefined,
     };
-  }, name);
+  }, before);
 }
 
 async function settled(page: Page) {
@@ -132,7 +144,7 @@ test('sketch switches animate remembered views, preserve edits and yield to whee
   const small = await pose(page);
   const start = await choose(page, 'large');
   assert.equal(start.sketchAnimation, true);
-  assert.deepEqual(start.after, start.before);
+  assert.deepEqual(start.before, small);
   await page.waitForFunction(scale => {
     const nav = window.sketchNavigationApp.sketchEditor.navigation;
     return nav.pose.scale !== scale && nav['frame'] !== undefined;
@@ -164,7 +176,7 @@ test('sketch switches animate remembered views, preserve edits and yield to whee
   await choose(page, 'small');
   await page.waitForTimeout(80);
   const redirected = await choose(page, 'large');
-  assert.deepEqual(redirected.after, redirected.before);
+  assert.equal(redirected.sketchAnimation, true);
   await page.mouse.wheel(0, 200);
   await settled(page);
   const takenOver = await pose(page);

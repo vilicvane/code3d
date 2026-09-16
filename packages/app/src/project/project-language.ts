@@ -21,7 +21,6 @@ export const projectCompilerOptions: ts.CompilerOptions = {
   customConditions: ['browser'],
   allowImportingTsExtensions: true,
   rewriteRelativeImportExtensions: true,
-  erasableSyntaxOnly: true,
   verbatimModuleSyntax: true,
   strict: true,
   skipLibCheck: true,

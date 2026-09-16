@@ -14,6 +14,7 @@ const storage = new ArtifactStoreConnection();
 const executor = new ProjectExecutor(undefined, undefined, storage);
 const artifactChannel = new ArtifactChannel();
 let compileId: number | undefined;
+let operations = Promise.resolve();
 
 async function execute(
   request: Extract<ExecutorRequest, {kind: 'execute'}>,
@@ -50,6 +51,39 @@ async function execute(
 scope.onmessage = ({data}: MessageEvent<ExecutorRequest>) => {
   if (data.kind === 'artifact-store') {
     storage.connect(data.endpoint);
+    return;
+  }
+  // Native kernel state, cancellation scopes and retained model values share
+  // one execution lane, even while an inspector awaits a module or snapshots.
+  operations = operations.then(() => handle(data));
+};
+
+async function handle(
+  data: Exclude<ExecutorRequest, {kind: 'artifact-store'}>,
+): Promise<void> {
+  if (data.kind === 'inspect') {
+    const checkCancelled = () =>
+      checkCompilationCancellation(data.cancellation);
+    storage.readCancellation = data.cancellation;
+    try {
+      checkCancelled();
+      if (compileId !== data.compileId)
+        throw new Error(
+          'The inspected model execution is no longer available.',
+        );
+      const scene = await executor.inspect(data.selection, checkCancelled);
+      checkCancelled();
+      send({kind: 'inspect', id: data.id, ok: true, scene});
+    } catch (error) {
+      send({
+        kind: 'inspect',
+        id: data.id,
+        ok: false,
+        diagnostic: diagnosticFromError(error, 'inspect'),
+      });
+    } finally {
+      storage.readCancellation = undefined;
+    }
   } else if (data.kind === 'sketch') {
     try {
       send({
@@ -88,6 +122,6 @@ scope.onmessage = ({data}: MessageEvent<ExecutorRequest>) => {
       });
     }
   } else if (data.kind === 'execute') {
-    void execute(data);
+    await execute(data);
   }
-};
+}

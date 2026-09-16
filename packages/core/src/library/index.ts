@@ -1,5 +1,33 @@
 export {cache} from './cached.js';
 export type {CacheOptions} from './cached.js';
+export {
+  dimension,
+  boundsAnnotation,
+  anchorAnnotation,
+  captureInspectData,
+} from './inspect.js';
+/** @internal */
+export {
+  relate,
+  on,
+  align,
+  expose,
+  inspectTopologyReference,
+} from './runtime.js';
+export type {
+  Dimension,
+  DimensionSegment,
+  BoundsAnnotation,
+  AnchorAnnotation,
+  PreviewValue,
+  InspectResult,
+  InspectCall,
+  InspectClosureExecution,
+  InspectContextFactory,
+  InspectClosure,
+  InspectContext,
+  Inspector,
+} from './inspect.js';
 export {font, googleFont} from './font.js';
 export type {Font} from './font.js';
 export type {GoogleFontOptions} from './google-font.js';

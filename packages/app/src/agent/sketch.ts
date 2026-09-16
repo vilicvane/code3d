@@ -7,6 +7,7 @@ import {
   type SketchPosition,
   type SketchPointAddress,
   type SketchSnapshot,
+  type Transform,
 } from '@code3d/core/tooling';
 import type {CompiledSketch} from '../model/sketch-trace';
 
@@ -16,6 +17,7 @@ export type ObservedSketch = {
   role: 'result' | 'upstream';
   layer: CompiledSketch;
   layers: readonly CompiledSketch[];
+  geometryToScene?: Transform;
 };
 
 /** Match the editor: the selected layer and its ancestors, never sibling layers. */
@@ -64,6 +66,7 @@ export function describeSketch(model: ObservedSketch) {
     sourceRef: layer.definitionRef,
     references: layer.references,
     coordinates,
+    ...(model.geometryToScene ? {geometryToScene: model.geometryToScene} : {}),
     counts: {
       point: layer.entities.filter(e => e.kind === 'point').length,
       line: layer.entities.filter(e => e.kind === 'line').length,

@@ -104,13 +104,23 @@ export default shape;`;
           file: cursor.file,
           offset: cursor.start,
         });
-        viewport.renderModule(module);
-        viewport.selectBySourceOffset(
+        const scope = viewport.sourceEvaluationAt(
+          module,
           cursor.file,
           cursor.start,
-          undefined,
           module.activeDesignContextId,
         );
+        const selection = {
+          file: cursor.file,
+          offset: cursor.start,
+          contextId:
+            scope?.evaluation.contextId ?? module.activeDesignContextId,
+          order: scope?.evaluation.runtime.order,
+          callId: scope?.evaluation.inspectCallId,
+        };
+        const scene = await compiler.inspect(module, selection);
+        if (!scene) throw new Error('Missing inspection');
+        viewport.renderInspection(module, scene, selection);
         const guiModeling = await bytes(
           await viewport.captureImage(960, 720, modeling.data.render.view),
         );
@@ -180,6 +190,124 @@ export default shape;`;
       assert.equal(png.readUInt32BE(20), 720);
       await writeFile(`/tmp/code3d-agent-mode-${name}.png`, png);
     }
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
+  'observe captures mixed inspect scenes and pages generated geometry and local sketch topology',
+  {timeout: 120_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const url = new URL(
+      '/__agent-mixed-inspect-test__',
+      process.env.CODE3D_TEST_URL,
+    ).href;
+    await page.route(url, route =>
+      route.fulfill({
+        contentType: 'text/html',
+        headers: appIsolationHeaders,
+        body: '<link rel="stylesheet" href="/src/style.css">',
+      }),
+    );
+    await page.goto(url);
+    const result = await page.evaluate(async () => {
+      const {AgentObserver} = await import('/src/agent/observer.ts');
+      const {browserPackageFiles} =
+        await import('/src/project/browser-packages.ts');
+      const source = `import {box, sketch} from '@code3d/core';
+const stock = box(20,20,20);
+const base = sketch([['point', 1, [2,3]], ['point', 2, [15,0]], ['line', 3, [1,2]]]);
+const profile = base.relate(s => s.plane.align(stock.up));
+const side = base.relate(s => s.plane.align(stock.right));
+/** @code3d.inspect show.inspect */
+function show() { return stock; }
+namespace show { export function inspect() { return {ambient: [stock], target: [box(7,3,4), profile, side]}; } }
+export default show();`;
+      const observer = new AgentObserver(browserPackageFiles, () => 1);
+      const observe = async (
+        input: import('@code3d/agent').ApplyInput,
+        offset = source.lastIndexOf('show();'),
+      ) => {
+        const response = await observer.observe({
+          agentId: 'mixed',
+          revision: 1,
+          project: {files: [{path: '/model.ts', source}]},
+          cursor: {
+            file: '/model.ts',
+            start: offset,
+            end: source.length,
+          },
+          input,
+        });
+        if (!response.ok) throw new Error(JSON.stringify(response));
+        return {
+          data: response.data as any,
+          png: response.artifacts?.[0].base64,
+        };
+      };
+      const first = await observe({render: {view: 'front'}, topology: true});
+      const snapshotId = first.data.snapshotId;
+      const sketch = await observe({
+        render: {view: 'front'},
+        topology: {snapshotId, model: 's0'},
+      });
+      const side = await observe({topology: {snapshotId, model: 's1'}});
+      const ambient = await observe({topology: {snapshotId, model: 'm1'}});
+      const custom = await observe({
+        render: {view: {direction: [2, 3, 4], up: [0, 1, 0]}},
+        topology: {snapshotId},
+      });
+      const relate = await observe(
+        {topology: true},
+        source.indexOf('base.relate(') + 5,
+      );
+      return {
+        relate,
+        first,
+        sketch,
+        side,
+        ambient,
+        differentView: first.png !== custom.png,
+      };
+    });
+    assert.equal(result.relate.data.topology.kind, 'sketch');
+    assert.equal(result.relate.data.models[0].kind, 'sketch');
+    assert.ok(
+      result.relate.data.models.some(
+        (model: {kind: string}) => model.kind === 'solid',
+      ),
+    );
+    assert.equal(result.first.data.modelsTotal, 4);
+    assert.deepEqual(
+      result.first.data.models.map((m: {key: string}) => m.key),
+      ['m0', 's0', 's1', 'm1'],
+    );
+    assert.ok(Math.abs(result.first.data.topology.bounds.size[0] - 7) < 1e-5);
+    assert.ok(
+      Math.abs(result.ambient.data.topology.bounds.size[0] - 20) < 1e-5,
+    );
+    assert.equal(result.sketch.data.topology.coordinates.space, 'sketch-local');
+    assert.deepEqual(result.sketch.data.topology.items[0].position, [2, 3]);
+    assert.notDeepEqual(
+      result.sketch.data.models[0].geometryToScene.quaternion,
+      result.side.data.models[0].geometryToScene.quaternion,
+    );
+    assert.equal(result.sketch.png, result.first.png);
+    assert.equal(result.differentView, true);
+    await writeFile(
+      '/tmp/code3d-180-observe-mixed.png',
+      Buffer.from(result.first.png!, 'base64url'),
+    );
     assert.deepEqual(errors, []);
   },
 );

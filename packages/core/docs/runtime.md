@@ -51,6 +51,209 @@ Tooling integrations own evaluation lifetimes and disposal. Follow the existing
 [App compiler](../../app/src/model/compiler.ts) when embedding the runtime. Ordinary
 model files should stay on the authoring API.
 
+## Source inspection
+
+Ordinary expression values preview directly, including models, anchors and collections.
+Model values retain their authored material opacity: an opaque color stays opaque,
+explicit alpha stays unchanged, and unstyled surfaces keep the default translucency.
+This also applies to ordinary call results and parameter fallbacks. Inspection
+scenes apply the target/focused/ambient opacity limits; an anchor's owner remains
+context behind the reference in both kinds of preview.
+Use `@code3d.inspect parameter callback` when a parameter needs additional context;
+use `@code3d.inspect callback` for an exceptional call-result view. A parameter
+first tries its parameter inspector, then the call inspector, then the ordinary
+call result. A declared closure body has its own scope: declining it continues
+outward without re-entering that same call's parameter or call inspector. The callback
+receives the original argument tuple and `InspectContext`; method receivers are
+in `context.receiver`. Its `target` and `ambient` arrays own the complete scene.
+Returning `undefined` declines the scope; returning `{}` intentionally displays
+an empty scene. Target values matching `context.focused.values` receive focus;
+generated geometry does not inherit focus from its inputs.
+
+Selecting an array member focuses that value while keeping the other inspection
+targets visible at a weaker level; selecting the whole array focuses its members.
+For cut tools and intersect operands, selected inputs are targets and other inputs
+are ambient. The generated cut volume (orange) or intersection (cyan) is a separate
+target, including when inspecting a single input. A failed intersection still
+shows the selected inputs and ambient operands without inventing a result.
+These region inspectors use ordinary unlit materials with depth testing disabled,
+so their colors remain visible through the translucent inputs.
+
+Core uses this mechanism for distance measurements, relate calls and their
+closures, on/align references, relative transformation stages, group children,
+expose sources, Boolean operands and loft sections/spines, plus box and extrusion
+dimensions. Selecting a normal constructor or Boolean function name
+still previews its return value. Inspectors retain the original operation frame,
+so a later relation or a different consumer cannot move its inspection.
+
+A closure can independently declare a context factory with
+`@code3d.inspect.context parameter callback` and a renderer with
+`@code3d.inspect.closure parameter callback`. Context factories run lazily once
+per actual execution. Inner inspectors can read `context.closure.data` and its
+parent contexts regardless of which renderer is selected. The first non-undefined
+inspector wins, searching from the selected expression outward.
+
+For relate, context includes only actual consumed relation participants. Unrelated
+values use ordinary preview. A collection is handled only when every member is
+related; mixed collections fall through as a whole, preserving every previewable
+member. Selecting an individual member tests that member independently.
+Relative transformation functions and pivot/axis chains share a call inspector:
+numeric and reference arguments inspect the consumed relation stage. Unconsumed
+chains do not invent a stage. The tool can edit an ambient participant without
+promoting its display tier.
+
+Topology accessors (`vertex`, `edge`, `surface` and their plural forms) keep
+ordinary anchor preview when they return references. Their inspector returns
+the owner as `ambient` when the call fails or the reference collection is empty.
+The owner therefore has the same background appearance before and after a
+selection; missing or invalid IDs still produce their normal modeling errors.
+
+### Call data
+
+The App runs JSDoc inspection callbacks when the corresponding source is selected.
+Callbacks return `target` and `ambient` preview values. The viewport retains its
+previous scene until the new inspection is ready; an inspection error preserves
+that scene and is reported separately from model evaluation errors.
+
+Models, anchors, sketches, sketch points and passive annotations share this scene.
+Sketches show their points and curves at their actual 3D placement, including open
+curves, inherited layers and multiple noncoplanar sketches. They do not need to
+form a face. The App's **Edit sketch** tool opens the selected authored sketch in
+its 2D plane; **Finish sketch** returns to the 3D preview. Inspection callbacks
+control passive appearance; editing and selection remain tool responsibilities.
+
+Use `captureInspectData(data)` inside a modeling function to retain facts from
+that invocation for its inspector. The function keeps its ordinary return type.
+`InspectContext<Return, Receiver, Data>` describes the callback's return value,
+receiver and recorded data. For example, a scalar query can retain its bounds:
+
+```ts
+import {
+  captureInspectData,
+  dimension,
+  type InspectContext,
+  type InspectResult,
+  type Model,
+  type Vec3,
+} from '@code3d/core';
+
+type SpanData = {owner: Model; minimum: Vec3; maximum: Vec3};
+
+/** @code3d.inspect spanX.inspect */
+export function spanX(owner: Model): number {
+  const {minimum, maximum} = owner.bounds();
+  captureInspectData({owner, minimum, maximum} satisfies SpanData);
+  return maximum[0] - minimum[0];
+}
+
+/** @internal */
+export namespace spanX {
+  export function inspect(
+    _args: [Model],
+    context: InspectContext<number, unknown, SpanData | undefined>,
+  ): InspectResult | undefined {
+    const data = context.data;
+    if (!data || context.return === undefined) return undefined;
+    return {
+      target: [
+        data.owner,
+        dimension({
+          owner: data.owner,
+          start: data.minimum,
+          end: [data.maximum[0], data.minimum[1], data.minimum[2]],
+          value: context.return,
+        }),
+      ],
+    };
+  }
+}
+```
+
+Data belongs to the actual call, including nested calls with equal return values.
+Without a record, `context.data` is `undefined`; multiple records in one call use
+the last value. Closure context factories can read their owning call's data from
+`execution.call.data`. The executor retains references without cloning them, so
+capture immutable facts when later changes must not alter the inspection.
+Inspectors do not run the modeling function again.
+
+A modeling function that throws can still be inspected if it was actually invoked.
+Its original evaluated arguments and last captured data remain available, with
+`context.return === undefined`. Argument evaluation failures and optional-chain
+short circuits do not create an invocation of the outer function. Entered closure
+callbacks follow the same rule. The original modeling diagnostic remains separate
+from any inspection error; inspectors decide what to render when no result exists.
+
+Without an inspection recording session, `captureInspectData` does nothing.
+Calls from an inspector also do not overwrite modeling records. Published
+callbacks use normal runtime exports; `@internal` with TypeScript's
+`stripInternal` can hide their declarations while keeping those exports.
+
+A dimension can provide fixed `start`/`end` points or a nonempty `candidates` list.
+All points use the owner's local frame. For candidates, the renderer picks the
+nearest segment when inspection begins, then retains it while orbiting or
+rechecking the same parameter. Leaving that inspection resets the choice.
+Both forms show a number, endpoint ticks and a screen-sized dashed line.
+
+```ts
+import {dimension, type Model} from '@code3d/core';
+
+function showLength(owner: Model) {
+  return {
+    target: [
+      owner,
+      dimension({
+        owner,
+        value: 10,
+        candidates: [
+          {start: [-5, -2, -3], end: [5, -2, -3]},
+          {start: [-5, 2, 3], end: [5, 2, 3]},
+        ],
+      }),
+    ],
+  };
+}
+```
+
+`boundsAnnotation` represents a finite range without adding CAD geometry. Its
+`frame` is relative to `owner`, centered on the box; `size` measures its three
+local axes. The App draws the existing bounds corners at a fixed screen width.
+It can represent the exact support range of an `on` relation, including flat or
+linear ranges, instead of substituting the whole owner's bounding box.
+
+```ts
+import {boundsAnnotation, type Model} from '@code3d/core';
+
+function showRange(owner: Model) {
+  return {
+    target: [
+      owner,
+      boundsAnnotation({
+        owner,
+        size: [20, 10, 5],
+        frame: {position: [0, 0, 0], quaternion: [0, 0, 0, 1]},
+      }),
+    ],
+  };
+}
+```
+
+Use `anchorAnnotation(reference, {direction})` to choose `'none'`, `'forward'`
+or `'both'` for direction arrows while keeping the reference's geometry and
+placement. For curves, arrows follow the real endpoint tangents; reversing the
+reference reverses its authored direction. The annotation retains the reference's
+focus identity. Returning an ordinary Anchor keeps its default object preview.
+
+```ts
+import {anchorAnnotation, type SolidModel} from '@code3d/core';
+
+function showAxis(owner: SolidModel) {
+  return {
+    ambient: [owner],
+    target: [anchorAnnotation(owner.axis, {direction: 'forward'})],
+  };
+}
+```
+
 ## Source and development
 
 For changes to Core itself, start with the [modeling architecture](../../../.agents/docs/architecture/modeling.md)

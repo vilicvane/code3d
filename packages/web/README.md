@@ -137,8 +137,9 @@ See the [project documentation maintenance rules](../../.agents/skills/code3d-pr
 Example code is bundled into App's managed examples, loaded by Astro's
 content collection, and executed by the image renderer. Keep snippets and
 gallery content connected to these source files.
-App and the image renderer share `../app/src/model/source-decorations.ts` so
-relation, bound, operation, and origin markers appear consistently in both.
+App and the image renderer use the same package resolution, compiler inspection
+and viewport scene publication, including public inspectors and annotations. Spatial editing
+controls remain in `../app/src/model/source-decorations.ts`.
 
 ## Build and verify
 

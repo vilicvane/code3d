@@ -1,3 +1,4 @@
+import type {DimensionSegment} from '@code3d/core';
 import * as THREE from 'three';
 import {spatialAxisColors} from '../spatial-axis-colors';
 import type {ViewportMeasurementDecoration} from '../viewport-decoration';
@@ -31,7 +32,7 @@ export class MeasurementDecorationObject extends THREE.Group {
   private readonly texture: THREE.CanvasTexture;
   private readonly labelWidth: number;
 
-  constructor(decoration: ViewportMeasurementDecoration) {
+  constructor(decoration: ViewportMeasurementDecoration & DimensionSegment) {
     super();
     this.name = decoration.id;
     this.userData.decoration = decoration;
@@ -117,6 +118,7 @@ export class MeasurementDecorationObject extends THREE.Group {
       new THREE.MeshBasicMaterial({
         map: this.texture,
         transparent: true,
+        opacity,
         depthTest: false,
         depthWrite: false,
         toneMapped: false,

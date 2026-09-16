@@ -35,12 +35,20 @@ for (const perspective of [true, false]) {
     const configurations: ViewportAnchorDecoration[] = [
       {...base, elementKind: 'face', facing: 1},
       {...base, elementKind: 'face', facing: -1},
+      {...base, elementKind: 'face', facing: 1, directionDisplay: 'none'},
+      {...base, elementKind: 'face', facing: 1, directionDisplay: 'both'},
       {...base, elementKind: 'line', span: {negative: 3, positive: 7}},
       {
         ...base,
         elementKind: 'line',
         span: {negative: 3, positive: 7},
-        directed: true,
+        directionDisplay: 'none',
+      },
+      {
+        ...base,
+        elementKind: 'line',
+        span: {negative: 3, positive: 7},
+        directionDisplay: 'forward',
         direction: -1,
       },
     ];
@@ -64,9 +72,13 @@ for (const perspective of [true, false]) {
               });
               assert.equal(
                 heads.length,
-                decoration.elementKind === 'line' && !decoration.directed
-                  ? 2
-                  : 1,
+                decoration.directionDisplay === 'none'
+                  ? 0
+                  : decoration.directionDisplay === 'both' ||
+                      (decoration.elementKind === 'line' &&
+                        decoration.directionDisplay !== 'forward')
+                    ? 2
+                    : 1,
               );
               for (const head of heads) {
                 const tip = head
@@ -77,11 +89,13 @@ for (const perspective of [true, false]) {
                   .project(camera);
                 near((Math.abs(tip.y - tail.y) * height) / 2, 28);
                 const direction =
-                  decoration.elementKind === 'face'
-                    ? decoration.facing
-                    : decoration.directed
-                      ? decoration.direction
-                      : Math.sign(tip.y);
+                  decoration.directionDisplay === 'both'
+                    ? Math.sign(tip.y)
+                    : decoration.elementKind === 'face'
+                      ? decoration.facing
+                      : decoration.directionDisplay === 'forward'
+                        ? decoration.direction
+                        : Math.sign(tip.y);
                 assert.equal(Math.sign(tip.y - tail.y), direction);
               }
             }

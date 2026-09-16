@@ -21,6 +21,7 @@ declare const window: Window & {
     previewState: import('../../src/model/preview-state.ts').ModelPreviewState;
     sketchEditor: import('../../src/tools/sketch-editor-controller.ts').SketchEditorController;
     viewport: import('../../src/viewport.ts').ModelViewport;
+    compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
   };
 };
 let browser: Browser;
@@ -64,7 +65,7 @@ for (const {file} of exampleEntries) {
         response,
         body:
           (await response.text()) +
-          '\nwindow.exampleApp = {codeEditor, viewport, previewState, sketchEditor};',
+          '\nwindow.exampleApp = {codeEditor, viewport, previewState, sketchEditor, compiler};',
       });
     });
     await page.goto(process.env.CODE3D_TEST_URL + '#/file/examples/' + file);
@@ -101,11 +102,18 @@ for (const {file} of exampleEntries) {
         const offset = sourceTokenOffset(source, focus);
         assert.equal(
           await page.evaluate(
-            ({file, offset}) =>
-              window.exampleApp.viewport.selectBySourceOffset(
+            async ({file, offset}) => {
+              const {inspectSource} =
+                await import('/test/browser/inspection-fixture.ts');
+              const {compiler, viewport} = window.exampleApp;
+              return inspectSource(
+                compiler,
+                viewport,
+                viewport.presentedModule!,
                 '/examples/' + file,
                 offset,
-              ),
+              );
+            },
             {file, offset},
           ),
           true,
@@ -364,7 +372,7 @@ test(
         response,
         body:
           (await response.text()) +
-          '\nwindow.exampleApp = {codeEditor, viewport, previewState, sketchEditor};',
+          '\nwindow.exampleApp = {codeEditor, viewport, previewState, sketchEditor, compiler};',
       });
     });
     const path = '/examples/sketches/mounting-plate.ts';
@@ -481,10 +489,14 @@ async function useRegistryPackages(context: BrowserContext) {
 }
 
 async function verifyControllerExports(page: Page) {
-  await page.evaluate(() => {
-    const {codeEditor, viewport} = window.exampleApp;
+  await page.evaluate(async () => {
+    const {codeEditor, viewport, compiler} = window.exampleApp;
+    const {inspectSource} = await import('/test/browser/inspection-fixture.ts');
     const source = codeEditor.editor.getValue();
-    viewport.selectBySourceOffset(
+    await inspectSource(
+      compiler,
+      viewport,
+      viewport.presentedModule!,
       codeEditor.currentFile()!,
       source.indexOf('export default group(') + 'export default '.length,
     );
@@ -652,7 +664,7 @@ test(
         response,
         body:
           (await response.text()) +
-          '\nwindow.exampleApp = {codeEditor, viewport, previewState, sketchEditor};',
+          '\nwindow.exampleApp = {codeEditor, viewport, previewState, sketchEditor, compiler};',
       });
     });
     const registry: string[] = [];

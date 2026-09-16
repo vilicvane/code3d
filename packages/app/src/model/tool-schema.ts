@@ -12,6 +12,7 @@ import {
   type SourceParameterTarget,
 } from './parameter-definitions';
 import {isToolSelectionKind} from './tool-parameter-config';
+import {signatureAnnotationDeclaration} from './annotations';
 
 import {
   toolAnnotations,
@@ -210,7 +211,12 @@ function signatureToolSchema(
   schemas: Map<ts.Signature, Map<ts.Node, ToolSignatureSchema | undefined>>,
 ): ToolSignatureSchema | undefined {
   if (!signature) return undefined;
-  const declaration = annotationDeclaration(signature, expression, checker);
+  const declaration = signatureAnnotationDeclaration(
+    signature,
+    expression,
+    checker,
+    ['param', 'tool'],
+  );
   if (!declaration) return undefined;
   let declarations = schemas.get(signature);
   if (!declarations) {
@@ -227,44 +233,6 @@ function signatureToolSchema(
     );
   }
   return declarations.get(declaration);
-}
-
-function annotationDeclaration(
-  signature: ts.Signature,
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
-): ts.Node | undefined {
-  const declaration = signature.getDeclaration();
-  // Overload-specific annotations remain attached to the resolved signature.
-  if (declaration?.name) {
-    return toolAnnotations(declaration).length ? declaration : undefined;
-  }
-  let symbol = checker.getSymbolAtLocation(expression);
-  const visited = new Set<ts.Symbol>();
-  while (symbol && !visited.has(symbol)) {
-    visited.add(symbol);
-    if (symbol.flags & ts.SymbolFlags.Alias) {
-      symbol = checker.getAliasedSymbol(symbol);
-      continue;
-    }
-    const annotated = symbol.declarations?.find(
-      node => toolAnnotations(node).length > 0,
-    );
-    if (annotated) return annotated;
-    const variable = symbol.valueDeclaration;
-    if (
-      !variable ||
-      !ts.isVariableDeclaration(variable) ||
-      !variable.initializer
-    )
-      break;
-    // Follow ordinary aliases, but do not borrow annotations from a factory's
-    // implementation or assume that a wrapper preserves its input signature.
-    symbol = checker.getSymbolAtLocation(variable.initializer);
-  }
-  return declaration && toolAnnotations(declaration).length
-    ? declaration
-    : undefined;
 }
 
 export function toolCallKey(start: number, end: number): string {

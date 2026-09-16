@@ -19,7 +19,10 @@ import {
 } from '../model/sketch-drag';
 import type {CompiledSketch} from '../model/sketch-trace';
 import type {ModelDiagnostic} from '../model/diagnostic';
-import {SketchEditor} from '../ui/sketch-editor';
+import {SketchEditor, type SketchEditorView} from '../ui/sketch-editor';
+import {action, computed, makeObservable, observableRef, reaction} from 'mobx';
+import {Pencil} from 'lucide';
+import {Toolbar} from '../ui/toolbar';
 import {
   sketchContextOutlines,
   type SketchContextOutline,
@@ -44,9 +47,14 @@ export class SketchEditorController {
   private revision = 0;
   private context: readonly SketchContextOutline[] = [];
   private viewScope = '';
+  private editing = false;
+  private readonly toolbar = new Toolbar('Sketch preview tools');
+  private readonly stopView: () => void;
+  private readonly stopToolbar: () => void;
 
   constructor(
     container: HTMLElement,
+    toolbarContainer: HTMLElement,
     private readonly host: {
       readSource(ref: SourceRef): string | undefined;
       resolveSourceRef(ref: SourceRef): SourceRef | undefined;
@@ -58,25 +66,89 @@ export class SketchEditorController {
       ): Promise<SketchDragPreview>;
     },
   ) {
+    makeObservable<
+      this,
+      | 'active'
+      | 'layers'
+      | 'sourceLayers'
+      | 'selectionRef'
+      | 'data'
+      | 'stale'
+      | 'revision'
+      | 'context'
+      | 'viewScope'
+      | 'editing'
+      | 'view'
+      | 'commit'
+    >(this, {
+      active: observableRef,
+      layers: observableRef,
+      sourceLayers: observableRef,
+      selectionRef: observableRef,
+      data: observableRef,
+      stale: observableRef,
+      revision: observableRef,
+      context: observableRef,
+      viewScope: observableRef,
+      editing: observableRef,
+      view: computed,
+      hasTarget: computed,
+      canEdit: computed,
+      diagnosticScope: computed,
+      isStale: computed,
+      select: action,
+      edit: action,
+      finish: action,
+      hide: action,
+      invalidate: action,
+      retain: action,
+      commit: action,
+      dispose: action,
+    });
     this.editor = new SketchEditor(
       container,
       (change, preview) => this.commit(change, preview),
       (id, position, previous, mergeTarget) =>
         this.preview(id, position, previous, mergeTarget),
       error => this.host.reportResult('move', error),
+      () => this.finish(),
+    );
+    this.toolbar.add(this.toolbar.group('Sketch'), {
+      name: 'Edit sketch',
+      title: 'Edit sketch in its 2D plane',
+      icon: Pencil,
+      run: () => this.edit(),
+    });
+    toolbarContainer.prepend(this.toolbar.root);
+    this.stopView = reaction(
+      () => this.view,
+      view => {
+        if (view) this.editor.show(view);
+        else this.editor.hide();
+      },
+      {fireImmediately: true},
+    );
+    this.stopToolbar = reaction(
+      () => this.canEdit && !this.hasTarget,
+      visible => {
+        this.toolbar.root.hidden = !visible;
+      },
+      {fireImmediately: true},
     );
   }
 
-  show(
+  select(
     id: string | undefined,
     sketches: ReadonlyMap<string, CompiledSketch>,
     selectionRef: SourceRef | undefined,
     viewScope: string,
     objects: ReadonlyMap<string, ModelSnapshotObject> = new Map(),
   ): void {
+    const next = id ? sketches.get(id) : undefined;
+    if (!next || viewScope !== this.viewScope) this.editing = false;
     this.revision++;
     this.viewScope = viewScope;
-    this.active = id ? sketches.get(id) : undefined;
+    this.active = next;
     this.context = this.active
       ? sketchContextOutlines(this.active, objects)
       : [];
@@ -92,11 +164,23 @@ export class SketchEditorController {
       layers.unshift(layer);
     this.layers = layers;
     this.sourceLayers = layers;
-    this.render();
+  }
+
+  get canEdit(): boolean {
+    return !!this.active && !this.stale;
+  }
+
+  edit(): void {
+    if (this.canEdit) this.editing = true;
+  }
+
+  finish(): void {
+    this.revision++;
+    this.editing = false;
   }
 
   get diagnosticScope(): readonly CompiledSketch[] | undefined {
-    return this.active ? this.sourceLayers : undefined;
+    return this.hasTarget ? this.sourceLayers : undefined;
   }
 
   get dragPreview() {
@@ -109,15 +193,27 @@ export class SketchEditorController {
 
   dispose(): void {
     this.revision++;
+    this.stopView();
+    this.stopToolbar();
+    this.toolbar.close();
+    this.toolbar.root.remove();
     this.editor.dispose();
   }
 
   get hasTarget(): boolean {
-    return this.active !== undefined;
+    return this.editing && this.active !== undefined;
   }
 
   get isStale(): boolean {
-    return !!this.active && this.stale;
+    return this.hasTarget && this.stale;
+  }
+
+  containsSource(file: string, offset: number): boolean {
+    const ref =
+      this.selectionRef && this.host.resolveSourceRef(this.selectionRef);
+    return (
+      !!ref && ref.file === file && offset >= ref.start && offset <= ref.end
+    );
   }
 
   sourceRefs(): SourceRef[] {
@@ -143,6 +239,7 @@ export class SketchEditorController {
     const selection =
       this.selectionRef && this.host.resolveSourceRef(this.selectionRef);
     if (
+      !this.hasTarget ||
       !this.active ||
       sketches.has(this.active.id) ||
       !diagnostic ||
@@ -161,22 +258,20 @@ export class SketchEditorController {
     }));
     this.active = this.sourceLayers.at(-1);
     this.stale = true;
-    this.render();
     return true;
   }
 
   hide(): void {
     this.revision++;
     this.active = undefined;
+    this.editing = false;
     this.sourceLayers = [];
     this.selectionRef = undefined;
-    this.editor.hide();
   }
   invalidate(): void {
     this.revision++;
     this.stale = true;
     this.editor.cancel();
-    this.render();
   }
 
   private async preview(
@@ -218,17 +313,14 @@ export class SketchEditorController {
     return solved;
   }
 
-  private render(): void {
-    if (!this.active) {
-      this.editor.hide();
-      return;
-    }
+  private get view(): SketchEditorView | undefined {
+    if (!this.hasTarget || !this.active) return;
     const source =
       this.active.definitionRef &&
       this.host.readSource(this.active.definitionRef);
     const parsed =
       source === undefined ? undefined : analyzeSketchSource(source);
-    this.editor.show({
+    return {
       key: JSON.stringify([this.viewScope, this.active.id]),
       id: this.active.id,
       revision: this.revision,
@@ -243,7 +335,7 @@ export class SketchEditorController {
         : source === undefined
           ? 'This sketch has no editable inline tuple array.'
           : parsed?.reason,
-    });
+    };
   }
 
   private commit(change: SketchChange, preview?: SketchSnapshot): boolean {
@@ -281,7 +373,6 @@ export class SketchEditorController {
       // Source expressions are evaluated in the real project scope by the next
       // compile. Do not publish a snapshot with a guessed numeric constraint.
       this.stale = true;
-      this.render();
       return true;
     }
     const removed =
@@ -374,7 +465,6 @@ export class SketchEditorController {
       ...this.layers.slice(0, -1),
       preview ?? {...local, entities, constraints},
     ];
-    this.render();
     return true;
   }
 }

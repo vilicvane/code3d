@@ -1840,7 +1840,12 @@ kbd {
   justify-self: end;
   margin: 0 var(--viewport-inset) var(--viewport-inset) 0;
 }
+.tool-toolbar[hidden] {
+  display: none;
+}
+
 .tool-toolbar {
+  pointer-events: auto;
   --tool-inset: 3px;
   position: relative;
   z-index: 1;

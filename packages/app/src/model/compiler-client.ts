@@ -25,6 +25,8 @@ import {
 import CompilerWorker from './compiler.worker?worker';
 import {ArtifactStoreHost} from './artifact-store-host';
 import {ModelDiagnosticError} from './diagnostic';
+import type {InspectSelection} from './inspection';
+import type {InspectionSnapshot} from './inspection-snapshot';
 import ExecutorWorker from './executor.worker?worker';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {ProjectBuildArtifact} from './project-compiler';
@@ -72,6 +74,12 @@ export class ModelCompilerClient {
   private queuedExecution?: Execution;
   private runningExecution?: Execution;
   private exportable?: {module: ModelModule; compileId: number};
+  private inspection?: {
+    id: number;
+    cancellation: Int32Array<SharedArrayBuffer>;
+    resolve(scene: InspectionSnapshot | undefined): void;
+    reject(error: Error): void;
+  };
   phase: CompilationPhase | undefined;
   /** Undefined until the current compilation has prepared its dependency graph. */
   language: ProjectLanguage | undefined;
@@ -232,6 +240,36 @@ export class ModelCompilerClient {
   canExport(module: ModelModule): boolean {
     return !this.pending && this.exportable?.module === module;
   }
+  inspect(
+    module: ModelModule,
+    selection: InspectSelection,
+  ): Promise<InspectionSnapshot | undefined> {
+    this.cancelInspection();
+    if (this.exportable?.module !== module)
+      return Promise.reject(
+        new Error('The inspected model execution is no longer available.'),
+      );
+    const id = this.nextId++;
+    const signal = cancellation();
+    return new Promise((resolve, reject) => {
+      this.inspection = {id, cancellation: signal, resolve, reject};
+      this.sendExecution({
+        kind: 'inspect',
+        id,
+        compileId: this.exportable!.compileId,
+        selection,
+        cancellation: signal,
+      });
+    });
+  }
+
+  private cancelInspection(): void {
+    const pending = this.inspection;
+    if (!pending) return;
+    this.inspection = undefined;
+    Atomics.store(pending.cancellation, 0, 1);
+    pending.reject(new Error('Inspection superseded.'));
+  }
   export(
     module: ModelModule,
     instances: readonly ModelExportInstance[],
@@ -258,6 +296,7 @@ export class ModelCompilerClient {
   }
 
   cancel(): boolean {
+    this.cancelInspection();
     if (this.restoreCancellation) Atomics.store(this.restoreCancellation, 0, 1);
     this.restoreCancellation = undefined;
     this.preparationRevision++;
@@ -527,6 +566,14 @@ export class ModelCompilerClient {
     worker.onmessage = ({data}: MessageEvent<ExecutorResponse>) =>
       runInAction(() => {
         if (worker !== this.executor) return;
+        if (data.kind === 'inspect') {
+          const pending = this.inspection;
+          if (pending?.id !== data.id) return;
+          this.inspection = undefined;
+          if (data.ok) pending.resolve(data.scene);
+          else pending.reject(new ModelDiagnosticError(data.diagnostic));
+          return;
+        }
         const running =
           this.runningExecution?.request.id === data.id
             ? this.runningExecution
@@ -634,6 +681,7 @@ export class ModelCompilerClient {
     this.lastEntry = undefined;
   }
   private restartExecutor(): void {
+    this.cancelInspection();
     this.finishExecution();
     this.executor.terminate();
     this.storage.disconnect(this.executor);

@@ -498,3 +498,35 @@ test('response streaming limits do not trust content-length', async () => {
     true,
   );
 });
+
+test('failure responses retain validated artifacts without accepting success data', () => {
+  const response = {
+    ok: false,
+    error: {
+      code: 'model_failed',
+      message: 'No intersection',
+      details: {snapshotId: 'failed'},
+    },
+    artifacts: [
+      {
+        name: 'render.png',
+        mimeType: 'image/png',
+        base64: encodeBase64(new Uint8Array([1, 2])),
+      },
+    ],
+  };
+  assert.deepEqual(parseResponse(response), response);
+  assert.throws(() => parseResponse({...response, data: {}}));
+  assert.throws(() =>
+    parseResponse({
+      ...response,
+      artifacts: [{...response.artifacts[0], base64: '!'}],
+    }),
+  );
+  assert.throws(() =>
+    parseResponse({
+      ...response,
+      artifacts: [{...response.artifacts[0], unknown: true}],
+    }),
+  );
+});

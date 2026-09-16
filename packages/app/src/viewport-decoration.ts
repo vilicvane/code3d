@@ -1,3 +1,4 @@
+import type {DimensionSegment} from '@code3d/core';
 import type {
   ModelModule,
   SourceTarget,
@@ -9,7 +10,6 @@ import type {
   EdgeId,
   ElementKind,
   ModelOperationInputRole,
-  ModelParameterDimension,
   RenderMesh,
   TopologyId,
   TopologyKind,
@@ -65,8 +65,8 @@ type ViewportAnchorDecorationBase = ViewportDecorationBase &
     transform: Transform;
     facing?: 1 | -1;
     direction?: 1 | -1;
-    /** Draw a single arrow in a line reference's authored direction. */
-    directed?: boolean;
+    /** Explicit arrow display; absence keeps ordinary reference semantics. */
+    directionDisplay?: 'none' | 'forward' | 'both';
     /** Existing curve geometry supplies the shaft; this frame is its endpoint. */
     headOnly?: boolean;
     layer?: 'reference' | 'foreground';
@@ -113,23 +113,14 @@ export type ViewportTopologyDecoration = ViewportDecorationBase &
     appearance: ViewportDecorationAppearance;
   }>;
 
-export type ViewportDimensionDecoration = ViewportDecorationBase &
-  Readonly<{
-    kind: 'dimension';
-    mesh: RenderMesh;
-    dimension: ModelParameterDimension;
-    appearance: ViewportDecorationAppearance;
-  }>;
-
 export type ViewportMeasurementDecoration = ViewportDecorationBase &
   Readonly<{
     kind: 'measurement';
-    start: Vec3;
-    end: Vec3;
     value: number;
     axisLabel?: string;
     appearance: ViewportDecorationAppearance;
-  }>;
+  }> &
+  (DimensionSegment | Readonly<{candidates: readonly DimensionSegment[]}>);
 
 export type ViewportDecoration =
   | ViewportMeasurementDecoration
@@ -138,7 +129,6 @@ export type ViewportDecoration =
   | ViewportSurfaceDecoration
   | ViewportBoundsDecoration
   | ViewportTopologyDecoration
-  | ViewportDimensionDecoration
   | ViewportAnchorDecoration;
 
 export type SourceDecorationContext = Readonly<{

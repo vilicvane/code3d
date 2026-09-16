@@ -97,36 +97,47 @@ test('CLI submits complete JSON requests, preserves source escapes and recovers 
   );
 });
 
-test('CLI saves artifacts using safe generated names and reports paths instead of base64', async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'c3d-test-'));
-  t.after(() => rm(directory, {recursive: true, force: true}));
-  const bytes = new Uint8Array([137, 80, 78, 71]);
-  const server = await transport(t, async () => ({
-    ok: true,
-    data: {snapshot: 'v3'},
-    artifacts: [
-      {
-        name: '../../escape.png',
-        mimeType: 'image/png',
-        base64: encodeBase64(bytes),
-      },
-    ],
-  }));
-  const configPath = join(directory, 'project.json');
-  await writeFile(configPath, JSON.stringify(await server.grant()));
-  const result = await run(
-    [configPath, '--output-dir', directory],
-    JSON.stringify({operation: 'apply', input: {render: true}}),
-  );
-  assert.equal(result.code, 0, result.stdout + result.stderr);
-  const output = JSON.parse(result.stdout);
-  assert.ok(output.artifacts[0].path.startsWith(directory + '/c3d-'));
-  assert.equal(output.artifacts[0].base64, undefined);
-  assert.deepEqual(
-    new Uint8Array(await readFile(output.artifacts[0].path)),
-    bytes,
-  );
-});
+for (const ok of [true, false])
+  test(`CLI saves ${ok ? 'successful' : 'failed'} response artifacts without changing status`, async t => {
+    const directory = await mkdtemp(join(tmpdir(), 'c3d-test-'));
+    t.after(() => rm(directory, {recursive: true, force: true}));
+    const bytes = new Uint8Array([137, 80, 78, 71]);
+    const server = await transport(t, async () => ({
+      ...(ok
+        ? {ok: true as const, data: {snapshot: 'v3'}}
+        : {
+            ok: false as const,
+            error: {
+              code: 'model_failed',
+              message: 'No intersection',
+              details: {snapshotId: 'failed-v3'},
+            },
+          }),
+      artifacts: [
+        {
+          name: '../../escape.png',
+          mimeType: 'image/png',
+          base64: encodeBase64(bytes),
+        },
+      ],
+    }));
+    const configPath = join(directory, 'project.json');
+    await writeFile(configPath, JSON.stringify(await server.grant()));
+    const result = await run(
+      [configPath, '--output-dir', directory],
+      JSON.stringify({operation: 'apply', input: {render: true}}),
+    );
+    assert.equal(result.code, ok ? 0 : 1, result.stdout + result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.ok, ok);
+    if (!ok) assert.equal(output.error.code, 'model_failed');
+    assert.ok(output.artifacts[0].path.startsWith(directory + '/c3d-'));
+    assert.equal(output.artifacts[0].base64, undefined);
+    assert.deepEqual(
+      new Uint8Array(await readFile(output.artifacts[0].path)),
+      bytes,
+    );
+  });
 
 test('App validates operation schemas; malformed JSON, removed syntax and oversized stdin stay local', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'c3d-test-'));

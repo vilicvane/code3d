@@ -10,6 +10,7 @@ import type {CompilationProgress} from './compilation-progress';
 import type {ModelModule} from './compiler';
 import {ModelDiagnosticError, diagnosticFromError} from './diagnostic';
 import {createModelExecutor} from './executor';
+import type {InspectSelection} from './inspection';
 import {
   exportModel,
   type ModelExportInstance,
@@ -31,6 +32,7 @@ export class ProjectExecutor {
   private identity?: string;
   private executor?: ReturnType<typeof createModelExecutor>;
   private geometry?: ModelGeometrySnapshot;
+  private inspectionGeometry?: ModelGeometrySnapshot;
   private snapshotPool?: SnapshotWorkerPool;
   private resourceStats?: ProjectBuildArtifact['resourceStats'];
   constructor(
@@ -123,7 +125,12 @@ export class ProjectExecutor {
         'The model has changed. Reopen export after compilation finishes.',
       );
     return exportModel(
-      this.geometry,
+      {
+        shapes: new Map([
+          ...this.geometry.shapes,
+          ...(this.inspectionGeometry?.shapes ?? []),
+        ]),
+      },
       instances,
       options,
       this.runtime.replicad,
@@ -149,7 +156,61 @@ export class ProjectExecutor {
   ): TopologyInspection {
     if (!this.geometry)
       throw new Error('The model geometry snapshot is unavailable.');
-    return this.geometry.inspect(nodeId, options);
+    return (
+      this.inspectionGeometry?.shapes.has(nodeId)
+        ? this.inspectionGeometry
+        : this.geometry
+    ).inspect(nodeId, options);
+  }
+
+  async inspect(
+    selection: InspectSelection,
+    checkCancelled: () => void = () => {},
+  ) {
+    if (!this.runtime || !this.executor) return;
+    this.runtime.tooling.setKernelArtifactStore(
+      this.storage?.scope(this.runtime.artifactIdentity),
+    );
+    let nextGeometry: ModelGeometrySnapshot | undefined;
+    try {
+      const scene = await this.executor.inspect(
+        selection,
+        objects =>
+          this.snapshotPool!.compute(
+            this.runtime!.tooling.planModelSnapshotQueries(objects),
+            checkCancelled,
+          ),
+        checkCancelled,
+        objects => {
+          nextGeometry = this.runtime!.tooling.retainModelGeometry(objects);
+        },
+      );
+      checkCancelled();
+      if (scene !== undefined) {
+        this.inspectionGeometry?.dispose();
+        this.inspectionGeometry = nextGeometry;
+        nextGeometry = undefined;
+      }
+      return scene;
+    } catch (error) {
+      checkCancelled();
+      const diagnostic = diagnosticFromError(
+        error,
+        'inspect',
+        this.runtime.tooling.describeOpenCascadeException,
+      );
+      throw new ModelDiagnosticError({
+        ...diagnostic,
+        sourceRef: diagnostic.sourceRef ?? {
+          file: selection.file,
+          start: selection.offset,
+          end: selection.offset + 1,
+        },
+      });
+    } finally {
+      nextGeometry?.dispose();
+      this.runtime.tooling.setKernelArtifactStore(undefined);
+    }
   }
 
   get compiledBytes(): number {
@@ -169,6 +230,7 @@ export class ProjectExecutor {
     };
   }
   private disposeRuntime(): void {
+    this.executor?.dispose();
     this.disposeGeometry();
     this.snapshotPool?.dispose();
     this.snapshotPool = undefined;
@@ -178,6 +240,8 @@ export class ProjectExecutor {
     this.executor = undefined;
   }
   private disposeGeometry(): void {
+    this.inspectionGeometry?.dispose();
+    this.inspectionGeometry = undefined;
     this.geometry?.dispose();
     this.geometry = undefined;
   }

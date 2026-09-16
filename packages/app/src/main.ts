@@ -60,10 +60,7 @@ import {
   describeDiagnosticCounts,
   type ModelDiagnostic,
 } from './model/diagnostic';
-import {
-  elementSourceDecoration,
-  namedElementDecorations,
-} from './model/element-decorations';
+import {namedElementDecorations} from './model/element-decorations';
 import {
   ModelPreviewState,
   type ModelPreviewRequest,
@@ -781,8 +778,19 @@ const viewport = new ModelViewport(viewportHost, {
     selectOccurrence(occurrence, occurrence.view === 'model');
   },
   onDrillDown: node => drillToObjectSource(node),
-  onNavigateSource: sourceRef => {
+  onNavigateSource: (sourceRef, contextId) => {
+    if (contextId) preferredEvaluationContextId = contextId;
     codeEditor.revealSource(sourceRef);
+    const module = previewState.module;
+    if (module && compiler.canExport(module))
+      void inspectSourceSelection(
+        module,
+        sourceRef.file,
+        sourceRef.start,
+        undefined,
+        contextId,
+        sourceRef,
+      );
   },
   onPositionTool: handlePositionTool,
   canEditPosition: canEditPositionBinding,
@@ -842,10 +850,6 @@ const elementsPanel = new ElementsPanel(elements, elementsCount, {
       sourceElement?.nodeId === occurrence.node.nodeId &&
       sourceElement.name === element.name &&
       sourceElement.kind === element.kind;
-    viewport.setSourceDecorationVisible(
-      elementSourceDecoration.id,
-      preview === undefined || previewsSourceElement,
-    );
     if (!preview || !occurrence || previewsSourceElement) return;
     viewport.setDecorations(
       elementsDecorationOwner,
@@ -914,18 +918,22 @@ const toolEngine = new ToolEngine({
   commitPreview: preview => commitToolPreview(preview),
   clearPreview: preview => clearToolPreview(preview),
 });
-const sketchEditor = new SketchEditorController(viewportHost, {
-  reportResult: (operation, error) =>
-    toolFeedback.report(`sketch:${operation}`, error),
-  solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
-  resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
-  readSource: ref => {
-    const current = codeEditor.resolveSourceRef(ref);
-    return current && codeEditor.readSource(current);
+const sketchEditor = new SketchEditorController(
+  viewportHost,
+  viewportToolStack,
+  {
+    reportResult: (operation, error) =>
+      toolFeedback.report(`sketch:${operation}`, error),
+    solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
+    resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
+    readSource: ref => {
+      const current = codeEditor.resolveSourceRef(ref);
+      return current && codeEditor.readSource(current);
+    },
+    commit: intent =>
+      commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
   },
-  commit: intent =>
-    commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
-});
+);
 const spatialToolbar = new SpatialToolbar(
   viewportToolStack,
   viewport.positionTools,
@@ -933,18 +941,28 @@ const spatialToolbar = new SpatialToolbar(
     visible: () => !sketchEditor.hasTarget && viewport.renderMode !== 'render',
     availableTools: () => viewport.availablePositionTools,
     cancel: cancelRotationReferenceSelection,
-    activateSource: tool => {
+    activateSource: async tool => {
       const scope = viewport.sourceContext;
       const module = previewState.module;
-      if (!scope || !module) return;
+      if (!scope || !module) return false;
       const tools = viewport.positionTools;
-      codeEditor.activateSourceTool(
+      const selection = codeEditor.activateSourceTool(
         contextualToolActivation(
           module,
           scope,
           tool,
           tools.toolBinding ?? tools.rotationBinding,
         ),
+      );
+      if (!selection) return false;
+      pendingAgentFollow = undefined;
+      return inspectSourceSelection(
+        module,
+        selection.file,
+        selection.offset,
+        undefined,
+        preferredEvaluationContextId,
+        selection.sourceRef,
       );
     },
   },
@@ -965,6 +983,7 @@ const stopContextualTool = reaction(
   () => ({
     context: viewport.sourceContext,
     occurrence: viewport.getSelected(),
+    sketchId: viewport.inspectedSketchId,
     model: previewState.module,
     modelVersion: previewState.sourceVersion,
     sourceVersion: codeEditor.sourceVersion(),
@@ -973,6 +992,7 @@ const stopContextualTool = reaction(
   {
     equals: (a, b) =>
       a.context === b.context &&
+      a.sketchId === b.sketchId &&
       a.occurrence === b.occurrence &&
       a.model === b.model &&
       a.modelVersion === b.modelVersion &&
@@ -980,6 +1000,11 @@ const stopContextualTool = reaction(
   },
 );
 window.addEventListener('pagehide', stopContextualTool, {once: true});
+const stopSketchFeedback = reaction(
+  () => [sketchEditor.diagnosticScope, sketchEditor.isStale] as const,
+  () => refreshViewportFeedback(),
+);
+window.addEventListener('pagehide', stopSketchFeedback, {once: true});
 const stopRotationReferences = reaction(
   () => ({
     tool: viewport.positionTools.referencePicking,
@@ -1066,7 +1091,7 @@ const stopPreviewPresentation = reaction(
   () => ({
     empty: previewState.empty,
     hint: previewState.showHint,
-    retaining: previewState.retainingView,
+    retaining: previewState.retainingView || previewState.inspecting,
   }),
   ({empty, hint, retaining}) => {
     viewportHost.dataset.empty = String(empty);
@@ -1116,11 +1141,17 @@ codeEditor.onChange(change => {
 
 codeEditor.onCursorOffset(({file, offset, sourceRef}) => {
   pendingAgentFollow = undefined;
-  if (previewState.pendingFile) return;
-  const matched = viewport.selectBySourceOffset(
+  const module = previewState.module;
+  if (previewState.pendingFile || !module) return;
+  if (!compiler.canExport(module)) {
+    if (sketchEditor.isStale && !sketchEditor.containsSource(file, offset))
+      sketchEditor.hide();
+    return;
+  }
+  const matched = viewport.sourceEvaluationAt(
+    module,
     file,
     offset,
-    undefined,
     preferredEvaluationContextId,
     sourceRef,
   );
@@ -1134,6 +1165,52 @@ codeEditor.onCursorOffset(({file, offset, sourceRef}) => {
       return;
     }
   }
+  void inspectSourceSelection(
+    module,
+    file,
+    offset,
+    undefined,
+    preferredEvaluationContextId,
+    sourceRef,
+  );
+});
+
+async function inspectSourceSelection(
+  module: ModelModule,
+  file: string,
+  offset: number,
+  selectedKey?: string,
+  contextId = preferredEvaluationContextId,
+  preferredSource?: SourceRef,
+): Promise<boolean> {
+  const scope = viewport.sourceEvaluationAt(
+    module,
+    file,
+    offset,
+    contextId,
+    preferredSource,
+  );
+  const selection = {
+    file,
+    offset,
+    contextId: scope?.evaluation.contextId ?? contextId,
+    order: scope?.evaluation.runtime.order,
+    callId: scope?.evaluation.inspectCallId,
+  };
+  const published = await previewState.inspect(
+    () => compiler.inspect(module, selection),
+    scene => {
+      if (previewState.module !== module) return;
+      viewport.renderInspection(module, scene, selection, selectedKey);
+      previewState.presented(hasViewportTarget(), viewport.presentedModule);
+      updatePresentedSourceSelection();
+    },
+  );
+  refreshViewportFeedback();
+  return published;
+}
+
+function updatePresentedSourceSelection(): void {
   preferredEvaluationContextId = viewport.sourceContext?.evaluation.contextId;
   if (
     selectedDesignInvocation &&
@@ -1148,7 +1225,7 @@ codeEditor.onCursorOffset(({file, offset, sourceRef}) => {
   } else if (previewState.module) {
     renderDesignArguments(previewState.module);
   }
-});
+}
 codeEditor.onCompletionFocus(handleCompletionFocus);
 codeEditor.onEditorActivation(cursor => {
   if (!codeEditor.hasPendingToolEdits()) return;
@@ -1842,25 +1919,21 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       ) {
         preferredEvaluationContextId = undefined;
       }
-      viewport.renderModule(
-        nextModule,
-        selectedKey,
-        cursor
-          ? {...cursor, contextId: preferredEvaluationContextId}
-          : undefined,
-        retainOnError,
-      );
-      preferredEvaluationContextId =
-        viewport.sourceContext?.evaluation.contextId;
-      const selected = viewport.getSelected();
-      if (selected) {
-        selectOccurrence(selected, false);
-      } else {
-        renderElementsPanel();
-        renderDesignArguments(nextModule);
+      if (!cursor) {
+        viewport.renderModule(nextModule, selectedKey, retainOnError);
+        previewState.presented(hasViewportTarget(), viewport.presentedModule);
+        updatePresentedSourceSelection();
       }
-      previewState.presented(hasViewportTarget());
     });
+    if (cursor) {
+      await inspectSourceSelection(
+        nextModule,
+        cursor.file,
+        cursor.offset,
+        selectedKey,
+      );
+      if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
+    }
     if (following && pendingAgentFollow === following) {
       pendingAgentFollow = undefined;
       if (
@@ -1917,6 +1990,7 @@ function clearPresentedView(): void {
 function activeViewportDiagnostic(): ModelDiagnostic | undefined {
   const scope = sketchEditor.diagnosticScope;
   return (
+    previewState.inspectionDiagnostic ??
     viewportDiagnostic(previewState.diagnostic, scope) ??
     [...previewState.warnings]
       .sort(
@@ -2055,14 +2129,28 @@ async function runCompletionPreview(
       restoreModelStatus();
       return;
     }
+    const scope = viewport.sourceEvaluationAt(
+      module,
+      preview.cursor.file,
+      preview.cursor.offset,
+      preferredEvaluationContextId,
+    );
+    const selection = {
+      file: preview.cursor.file,
+      offset: preview.cursor.offset,
+      contextId: scope?.evaluation.contextId ?? preferredEvaluationContextId,
+      order: scope?.evaluation.runtime.order,
+      callId: scope?.evaluation.inspectCallId,
+    };
+    const scene = await compiler.inspect(module, selection);
     if (
-      viewport.previewCompletedProject(
-        module,
-        preview.cursor.file,
-        preview.cursor.offset,
-        preferredEvaluationContextId,
-      )
-    ) {
+      revision !== previewState.revision ||
+      activeCompletionFocus !== focus ||
+      preview.sourceVersion !== codeEditor.sourceVersion()
+    )
+      return;
+    if (scene) {
+      viewport.previewCompletedProject(module, scene, selection);
       renderElementsPanel(viewport.getSelected());
     }
     restoreModelStatus();
@@ -2107,14 +2195,27 @@ function selectCompiledEvaluationContext(
   contextId: string,
   design: boolean,
 ): boolean {
-  if (!viewport.selectEvaluationContext(contextId)) return false;
+  const module = previewState.module;
+  const scope = viewport.sourceContext;
+  const cursor = codeEditor.cursorSource();
+  if (
+    !module ||
+    !scope ||
+    !cursor ||
+    !scope.target.evaluations.some(value => value.contextId === contextId)
+  )
+    return false;
   selectedDesignInvocation = undefined;
   cancelPendingDesignCompile();
   preferredEvaluationContextId = contextId;
   selectedDesignContextId = design ? contextId : undefined;
-  const occurrence = viewport.getSelected();
-  if (occurrence) selectOccurrence(occurrence, false);
-  else renderDesignArguments(previewState.module);
+  void inspectSourceSelection(
+    module,
+    cursor.file,
+    cursor.offset,
+    undefined,
+    contextId,
+  );
   return true;
 }
 
@@ -2206,15 +2307,13 @@ function drillToObjectSource(node: ModelSnapshotObject): void {
     codeEditor.resolveSourceRef(compiledSource) ?? compiledSource;
   const evaluationContextId = viewport.sourceContext?.evaluation.contextId;
   codeEditor.revealSource(sourceRef, true);
-  const matched = viewport.selectBySourceOffset(
+  void inspectSourceSelection(
+    previewState.module,
     sourceRef.file,
     sourceRef.start,
     undefined,
     evaluationContextId,
   );
-  preferredEvaluationContextId = matched ? evaluationContextId : undefined;
-  const selected = matched ? viewport.getSelected() : undefined;
-  if (selected) selectOccurrence(selected, false);
 }
 
 function preferredObjectSource(
@@ -2313,10 +2412,10 @@ function syncContextualTool(): void {
     sourceTargetFocused &&
     previewState.module &&
     previewState.sourceVersion === codeEditor.sourceVersion() &&
-    scope?.evaluation.sketchIds?.[0]
+    viewport.inspectedSketchId
   ) {
-    sketchEditor.show(
-      scope.evaluation.sketchIds[0],
+    sketchEditor.select(
+      viewport.inspectedSketchId,
       previewState.module.sketches,
       scope.target.sourceRef,
       JSON.stringify([
@@ -3699,12 +3798,14 @@ function restoreModelStatus(): void {
       : 'ready'
     : previewState.status;
   previewState.showStatus(
-    state,
-    state === 'error'
-      ? 'Model error'
-      : sketchEditor.isStale
-        ? 'Last valid sketch'
-        : 'Ready',
+    previewState.inspectionDiagnostic ? 'error' : state,
+    previewState.inspectionDiagnostic
+      ? 'Inspection error'
+      : state === 'error'
+        ? 'Model error'
+        : sketchEditor.isStale
+          ? 'Last valid sketch'
+          : 'Ready',
   );
 }
 

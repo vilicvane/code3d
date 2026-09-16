@@ -21,7 +21,7 @@ export type ModelDiagnosticAction = Readonly<{
 }>;
 
 export type ModelDiagnosticKind =
-  'syntax' | 'module' | 'evaluation' | 'project';
+  'syntax' | 'module' | 'evaluation' | 'project' | 'inspect';
 
 export type ModelDiagnostic = Readonly<{
   kind: ModelDiagnosticKind;
@@ -41,8 +41,10 @@ export type ModelDiagnostic = Readonly<{
 }>;
 
 export class ModelDiagnosticError extends Error {
-  constructor(readonly diagnostic: ModelDiagnostic) {
+  readonly diagnostic: ModelDiagnostic;
+  constructor(diagnostic: ModelDiagnostic) {
     super(diagnostic.summary);
+    this.diagnostic = diagnostic;
     this.name = 'ModelDiagnosticError';
   }
 }

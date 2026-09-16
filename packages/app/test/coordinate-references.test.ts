@@ -7,7 +7,6 @@ import {createAppTestServer} from './vite-test-server.ts';
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let compiler: Awaited<ReturnType<typeof createTestModelPipeline>>;
 let ModelViewport: typeof import('../src/viewport.ts').ModelViewport;
-let decorations: typeof import('../src/model/element-decorations.ts');
 let context: typeof import('../src/model/constraint-context.ts');
 before(async () => {
   server = await createAppTestServer();
@@ -16,9 +15,6 @@ before(async () => {
     await server.ssrLoadModule<typeof import('../src/viewport.ts')>(
       '/src/viewport.ts',
     ));
-  decorations = await server.ssrLoadModule<typeof decorations>(
-    '/src/model/element-decorations.ts',
-  );
   context = await server.ssrLoadModule<typeof context>(
     '/src/model/constraint-context.ts',
   );
@@ -59,14 +55,21 @@ export default group([point(), part]);`;
       assert.equal(constraint.targetElement.kind, kind);
       assert.equal(constraint.sourceElement.topology, undefined);
       assert.equal(constraint.targetElement.topology, undefined);
-      const markers = decorations.relationSourceDecoration.decorations({
-        module,
-        target,
-        evaluation,
-      });
-      const anchors = markers.filter(item => item.kind === 'anchor');
+      const scene = defined(
+        await compiler.executor.inspect({
+          file: '/main.ts',
+          offset:
+            source.indexOf(token) +
+            (token.startsWith(receiver) ? receiver.length + 2 : 1),
+        }),
+      );
+      const anchors = scene.target.filter(item => item.kind === 'anchor');
       assert.equal(anchors.length, 2);
-      assert.ok(anchors.every(item => item.elementKind === kind));
+      assert.ok(
+        anchors.every(
+          item => item.elements.length === 1 && item.elements[0].kind === kind,
+        ),
+      );
     }
   });
 }

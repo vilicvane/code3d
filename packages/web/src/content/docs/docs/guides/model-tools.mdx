@@ -187,6 +187,13 @@ argument that can be appended is editable, even when later parameters have
 default placeholders. Editing never fills intermediate positions with
 `undefined`.
 
+An empty topology call such as `body.vertex()` still opens its selection tool.
+Pick a candidate in the viewport to insert the missing ID; Undo restores the
+empty call and keeps its candidates available. The tool does not require a
+successful preview result from the incomplete call. For topology references,
+the owner keeps the same background color and transparency with an empty or
+valid selection; the candidates and selected elements show the selection state.
+
 At and after a spread argument such as `spacer(...args)`, the panel cannot
 map individual parameter positions to source arguments. Those controls remain
 disabled without default placeholders.
@@ -217,27 +224,29 @@ example, including parameter tools, placement, and colors.
 
 ## Which models appear in a source preview?
 
-The cursor selects an operation and a runtime occurrence. Related context depends
-on that operation; it is not every model in the file.
+Ordinary values preview directly. Extra context comes from public JSDoc
+inspectors, independently of the tool annotations on this page. Inspectors
+return the complete `target` and `ambient` scene. A parameter first tries its
+own inspector, then the call inspector, then the ordinary call result.
 
-| Source focus                                   | Related context and emphasis                                                                                                                                                                 |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Standalone model value                         | That value in its local frame; a collection retains its members' composition positions                                                                                                       |
-| A constructor directly inside a composition    | The current result plus the other inputs of that composition                                                                                                                                 |
-| `group`, `union`, `cut`, or `intersect` result | The resulting model; select an input to inspect its peers                                                                                                                                    |
-| Composition input or array member              | The selected input and dimmed peers from the same call; Boolean previews also show relevant overlap geometry                                                                                 |
-| Origin changes, rotation, or scaling           | The current step and peers from later compositions that consume it                                                                                                                           |
-| `relate(...)` call                             | The related result, references from this call at secondary emphasis, and dimmed composition peers                                                                                            |
-| `on` or `align`                                | The focused element, the other side at secondary emphasis, and dimmed surrounding models                                                                                                     |
-| Vertex, edge, or face topology reference       | The selected topology against its dimmed owner, within any enclosing operation context                                                                                                       |
-| Named point, axis, or bound reference          | The reference marker and its owner; a standalone reference keeps the model's normal appearance                                                                                               |
-| Fillet or chamfer result                       | The result with faint original geometry and the original selected edges                                                                                                                      |
-| Loft or extrude input                          | The selected input, other inputs from that call, and a result overlay                                                                                                                        |
-| `expose(...)` call or receiver                 | The existing model and assembled members; named references do not add separate copies                                                                                                        |
-| `distance(...)` call or whitespace             | Both measured objects, the line and value; whole models retain their appearance, while element owners and relation context are dimmed                                                        |
-| Inside a `distance(...)` argument              | The selected model with the other model dimmed, or the selected element with the other element at secondary emphasis; the measurement stays visible and a selected bound shows its direction |
+Ordinary model values preserve their material opacity, including explicit opaque
+colors and alpha values. Only unstyled surfaces use the default translucency.
+Inspector scenes apply additional transparency to distinguish focused targets,
+other targets and ambient context.
 
-A placement step keeps its own stage even if a later consumer moves the value
-again. A measurement keeps the geometry and positions at the time it ran; models
-created later from its numeric result do not become part of that measurement.
-See [relations and measurements](../../../../../../core/docs/relations.mdx) for the selection and coordinate rules.
+For example, `group` inputs show their assembled positions, `intersect` inputs
+show the operands around the shared result, and `distance` returns a number but
+inspects its original references and measurement. A `relate` call includes its
+actual participants; its declared closure supplies context to inner inspectors.
+Unrelated expressions do not inherit that scene.
+
+Targets matching the selected values are focused. Other targets and ambient
+values form the remaining display tiers. Editing handles, topology picking and
+hover styling remain tool responsibilities; editing an ambient participant does
+not promote its display tier. A tool does not automatically add passive geometry
+to the inspection scene.
+
+See [source inspection](../../../../../../core/docs/runtime.md#source-inspection)
+for runnable TypeScript examples, callback signatures, call data, annotations and
+closure context. [Relations and measurements](../../../../../../core/docs/relations.mdx)
+explains the built-in selection and coordinate rules.

@@ -119,15 +119,25 @@ export function createComputationCache({
    */
   function beginKernelOperationEvaluation(
     checkCancelled?: () => void,
+    kind: 'model' | 'inspect' = 'model',
   ): () => void {
     const used = new Set<string>();
     currentEvaluation = {used, checkCancelled};
     return () => {
       flushPendingPersistence();
-      for (const id of retainedEvaluation) {
-        if (!used.has(id)) historicalEntries.set(id, entries.get(id)!);
+      if (kind === 'model') {
+        for (const id of retainedEvaluation) {
+          if (!used.has(id)) historicalEntries.set(id, entries.get(id)!);
+        }
+        retainedEvaluation = used;
+      } else {
+        // Inspection owns temporary geometry, without replacing the model's
+        // retained working set or accumulating every previously inspected scene.
+        for (const id of used) {
+          if (!retainedEvaluation.has(id))
+            historicalEntries.set(id, entries.get(id)!);
+        }
       }
-      retainedEvaluation = used;
       currentEvaluation = undefined;
       evictHistoricalEntries();
       accessStore(store => store.flush());

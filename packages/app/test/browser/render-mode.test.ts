@@ -41,10 +41,10 @@ test(
       const {browserPackageFiles} =
         await import('/src/project/browser-packages.ts');
       const {ModelViewport} = await import('/src/viewport.ts');
+      const {inspectSource} =
+        await import('/test/browser/inspection-fixture.ts');
       const {createModelMaterial, disposeModelMaterial} =
         await import('/src/rendering/model-material.ts');
-      const {elementSourceDecoration, relationSourceDecoration} =
-        await import('/src/model/element-decorations.ts');
       const client = new ModelCompilerClient(browserPackageFiles);
       const viewport = new ModelViewport(document.querySelector('main')!, {
         onSelect() {},
@@ -52,10 +52,7 @@ test(
         onNavigateSource() {},
         onPositionTool() {},
         onTopologySelection() {},
-        sourceDecorationProviders: [
-          elementSourceDecoration,
-          relationSourceDecoration,
-        ],
+        sourceDecorationProviders: [],
       });
       const source = `import {offset, box, group, rectangle, line, point} from '@code3d/core';
 const base = box(30, 4, 20).material('#48a');
@@ -174,7 +171,10 @@ export default result;`;
         const restored = await measure('modeling');
         // Rebuild the source view while already in Render, then return to its guides.
         viewport.setRenderMode('render');
-        viewport.selectBySourceOffset(
+        await inspectSource(
+          client,
+          viewport,
+          module,
           '/model.ts',
           source.indexOf('/* target */') + 1,
         );

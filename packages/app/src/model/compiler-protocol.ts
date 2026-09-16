@@ -13,6 +13,8 @@ import type {CompilationPhase} from './compilation-progress';
 import type {DesignContext, ModelModule} from './compiler';
 import type {DependencyArtifact} from './dependency-builder';
 import type {ModelDiagnostic} from './diagnostic';
+import type {InspectSelection} from './inspection';
+import type {InspectionSnapshot} from './inspection-snapshot';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {ProjectBuildArtifact} from './project-compiler';
 import type {SketchDrag, SketchDragPreview} from './sketch-drag';
@@ -41,6 +43,13 @@ export type FileRequest = FileQuery &
 
 type WorkerRequest =
   | CompileRequest
+  | Readonly<{
+      kind: 'inspect';
+      id: number;
+      compileId: number;
+      selection: InspectSelection;
+      cancellation: CompilationCancellation;
+    }>
   | Readonly<{kind: 'cancel-compile'; id: number}>
   | Readonly<{kind: 'refresh-project'}>
   | Readonly<{kind: 'clear-build-cache'; projectIdentity: string}>
@@ -98,6 +107,18 @@ type WorkerRequest =
 
 type WorkerResponse =
   | FileRequest
+  | Readonly<{
+      kind: 'inspect';
+      id: number;
+      ok: true;
+      scene?: InspectionSnapshot;
+    }>
+  | Readonly<{
+      kind: 'inspect';
+      id: number;
+      ok: false;
+      diagnostic: ModelDiagnostic;
+    }>
   | Readonly<{kind: 'build-cache-cleared'; error?: string}>
   | Readonly<{kind: 'cached'; id: number} & ArtifactMessage>
   | Readonly<{kind: 'compiled'; id: number} & ArtifactMessage>
@@ -124,17 +145,27 @@ export type ExecutorRequest =
   | ArtifactStoreInitialization
   | Extract<
       WorkerRequest,
-      {kind: 'execute' | 'export' | 'topology' | 'sketch'}
+      {kind: 'execute' | 'export' | 'topology' | 'sketch' | 'inspect'}
     >;
 export type CompilerRequest =
   ArtifactStoreInitialization | Exclude<WorkerRequest, ExecutorRequest>;
 export type ExecutorResponse = Extract<
   WorkerResponse,
-  {kind: 'result' | 'export' | 'topology' | 'sketch' | 'progress' | 'cancelled'}
+  {
+    kind:
+      | 'result'
+      | 'export'
+      | 'topology'
+      | 'sketch'
+      | 'inspect'
+      | 'progress'
+      | 'cancelled';
+  }
 >;
 export type CompilerResponse = Exclude<
   WorkerResponse,
-  {kind: 'export' | 'topology' | 'sketch'} | {kind: 'result'; ok: true}
+  | {kind: 'export' | 'topology' | 'sketch' | 'inspect'}
+  | {kind: 'result'; ok: true}
 >;
 
 export type ArtifactMessage = Readonly<{

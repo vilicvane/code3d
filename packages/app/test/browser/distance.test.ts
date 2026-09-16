@@ -87,7 +87,10 @@ test(
           d =>
             Math.abs(
               d.opacity -
-                0.18 * (d.nodeId === selected.operands[operand] ? 1 : 0.7),
+                0.18 *
+                  (kind === 'element' && d.nodeId === selected.operands[operand]
+                    ? 1
+                    : 0.7),
             ) < 1e-6,
         ),
       );
@@ -113,7 +116,7 @@ test(
       }, token);
       assert.equal(
         selected.focusKind,
-        operand === undefined ? 'measurement' : 'value',
+        operand === undefined ? 'inspect' : 'value',
       );
       assert.deepEqual(
         selected.focused,
@@ -177,11 +180,11 @@ test(
     );
     assert.ok(exported.pngBytes > 1000);
     for (const [token, text, highlight] of [
-      ['distance(a,b)', '5', 'anchor'],
-      ['distance(a,a)', '0', 'anchor'],
-      ['distance(edge,b)', '', 'edges'],
+      ['distance(a,b)', '5', 'vertex'],
+      ['distance(a,a)', '0', 'vertex'],
+      ['distance(edge,b)', '', 'edge'],
       ['distance(left.surface', '', 'mesh'],
-      ['distance(cluster,probe)', '', 'anchor'],
+      ['distance(cluster,probe)', '', 'vertex'],
       ["distance(left.up,left.up,'y')", '0 · Y', 'surface'],
     ]) {
       const sample = await page.evaluate(async token => {
@@ -203,7 +206,10 @@ test(
           sample.kinds.filter(value => value === 'surface').length,
           1,
         );
-      assert.ok(sample.kinds.includes(highlight), token);
+      assert.ok(
+        [...sample.kinds, ...sample.renderedKinds].includes(highlight),
+        token,
+      );
       assert.ok(Math.abs(sample.lineLength - sample.expected) < 1e-5);
     }
     const pointToFace = await page.evaluate(async () => {
@@ -227,8 +233,8 @@ test(
       const fixture: typeof import('./distance-fixture.ts') = await import(
         path
       );
-      const result = fixture.clearDistance();
-      const exposed = fixture.clearDistance('expose({');
+      const result = await fixture.clearDistance();
+      const exposed = await fixture.clearDistance('expose({');
       fixture.finishDistanceFixture();
       return [result, exposed];
     });
