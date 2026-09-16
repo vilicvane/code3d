@@ -192,7 +192,7 @@ test('does not treat malformed project metadata as permission to use built-ins',
   await assert.rejects(packages.update(emptyProject), /Invalid \/package.json/);
 });
 
-test('isolates the built-in dependency closure and gives source, screws and reusable packages one core identity and type graph', async () => {
+test('isolates the built-in dependency closure and gives source, layout, screws, materials and reusable packages one core identity and type graph', async () => {
   const exports = {types: './index.d.ts', default: './index.js'};
   const builtins = memoryFiles({
     '/node_modules/@code3d/core/package.json': {
@@ -204,6 +204,15 @@ test('isolates the built-in dependency closure and gives source, screws and reus
       'import {origin} from "replicad"; export const core = {origin};',
     '/node_modules/@code3d/core/index.d.ts':
       'import {origin} from "replicad"; export declare const core: {origin: typeof origin};',
+    '/node_modules/@code3d/layout/package.json': {
+      name: '@code3d/layout',
+      type: 'module',
+      exports,
+    },
+    '/node_modules/@code3d/layout/index.js':
+      'export {core as layoutCore} from "@code3d/core";',
+    '/node_modules/@code3d/layout/index.d.ts':
+      'export {core as layoutCore} from "@code3d/core";',
     '/node_modules/@code3d/screws/package.json': {
       name: '@code3d/screws',
       type: 'module',
@@ -275,14 +284,16 @@ test('isolates the built-in dependency closure and gives source, screws and reus
         path: '/model.ts',
         source: [
           'import {core} from "@code3d/core";',
+          'import {layoutCore} from "@code3d/layout";',
           'import {screwCore} from "@code3d/screws";',
           'import {materialCore} from "@code3d/materials";',
           'import {reusableCore} from "reusable";',
           'import {origin} from "replicad";',
           'const builtinOrigin: "builtin" = core.origin;',
+          'const layoutOrigin: "builtin" = layoutCore.origin;',
           'const projectOrigin: "project" = origin;',
           'const reusableOrigin: "builtin" = reusableCore.origin;',
-          'export {core, screwCore, materialCore, reusableCore, origin};',
+          'export {core, layoutCore, screwCore, materialCore, reusableCore, origin};',
         ].join('\n'),
       },
     ],
@@ -293,6 +304,7 @@ test('isolates the built-in dependency closure and gives source, screws and reus
     'export * from "/model.ts";',
   );
   const result = await importTestModule(bundle.source);
+  assert.equal(result.core, result.layoutCore);
   assert.equal(result.core, result.screwCore);
   assert.equal(result.core, result.materialCore);
   assert.equal(result.core, result.reusableCore);
@@ -306,6 +318,7 @@ test('isolates the built-in dependency closure and gives source, screws and reus
     new Set(language.packageSpecifiers),
     new Set([
       '@code3d/core',
+      '@code3d/layout',
       '@code3d/screws',
       '@code3d/materials',
       'replicad',

@@ -7,6 +7,7 @@ import {writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {builtinPackageNames} from '../src/project/builtin-packages.ts';
 
 test('watches published package bytes without linking them into the App module graph', async () => {
   const server = await createAppTestServer();
@@ -51,17 +52,13 @@ test('watches before the first package snapshot and invalidates newly created pu
       path.join(root, 'package.json'),
       JSON.stringify({workspaces: ['node_modules/@code3d/*']}),
     );
-    const screws = path.join(root, 'node_modules/@code3d/screws');
-    for (const [name, disk] of [
-      ['core', core],
-      ['screws', screws],
-      ['materials', path.join(root, 'node_modules/@code3d/materials')],
-    ] as const) {
+    for (const name of builtinPackageNames) {
+      const disk = path.join(root, 'node_modules', name);
       await mkdir(disk, {recursive: true});
       await writeFile(
         path.join(disk, 'package.json'),
         JSON.stringify({
-          name: '@code3d/' + name,
+          name,
           version: '1.0.0',
           files: ['*.js'],
         }),
