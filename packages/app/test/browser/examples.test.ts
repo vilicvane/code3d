@@ -41,12 +41,18 @@ before(async () => {
       );
 });
 after(async () => browser?.close());
+
+// Software-rendered CI runs examples several times slower than host Chrome, and
+// a cold registry install into a browser context dominates the packaged ones.
+const usesRegistryPackages = (file: string): boolean =>
+  file.startsWith('npm/') || file.startsWith('assemblies/screw-box/');
+const exampleBudget = (file: string): number =>
+  usesRegistryPackages(file) ? 300_000 : 180_000;
 for (const {file} of exampleEntries) {
-  test(`App example link: ${file}`, {timeout: 120_000}, async t => {
+  test(`App example link: ${file}`, {timeout: exampleBudget(file)}, async t => {
     const context = await browser.newContext();
     t.after(() => context.close());
-    if (file.startsWith('npm/') || file.startsWith('assemblies/screw-box/'))
-      await useRegistryPackages(context);
+    if (usesRegistryPackages(file)) await useRegistryPackages(context);
     const page = await context.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => {
@@ -295,6 +301,9 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
         : file === 'projects/phone-stand.ts'
           ? 2
           : 1;
+    // A sketch expression inspects in 3D; 2D editing starts from its tool.
+    await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
+    await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
     const point = page.locator(
       `.sketch-canvas circle.local[data-id="${pointId}"]`,
     );
@@ -800,18 +809,15 @@ async function verifySketchPresets(page: Page) {
   });
   await page.locator('#design-arguments-panel').waitFor();
   assert.equal(await page.locator('#design-arguments-count').innerText(), '2');
-  await page.keyboard.press('Alt+1');
+  await page.locator('#design-arguments-handle').click();
   const options = page.locator('.design-argument-option');
   await options.nth(1).click();
   await page.waitForFunction(() => {
-    const arc = window.exampleApp.sketchEditor.diagnosticScope
-      ?.at(-1)
+    const {previewState, viewport} = window.exampleApp;
+    const arc = previewState.module?.sketches
+      .get(viewport.inspectedSketchId ?? '')
       ?.entities.find(e => e.kind === 'arc' && e.id === 8);
-    return (
-      arc?.kind === 'arc' &&
-      arc.radius === 6 &&
-      !window.exampleApp.previewState.busy
-    );
+    return arc?.kind === 'arc' && arc.radius === 6 && !previewState.busy;
   });
   assert.equal(
     await page.evaluate(() => window.exampleApp.codeEditor.editor.getValue()),
@@ -820,13 +826,10 @@ async function verifySketchPresets(page: Page) {
   );
   await options.nth(0).click();
   await page.waitForFunction(() => {
-    const arc = window.exampleApp.sketchEditor.diagnosticScope
-      ?.at(-1)
+    const {previewState, viewport} = window.exampleApp;
+    const arc = previewState.module?.sketches
+      .get(viewport.inspectedSketchId ?? '')
       ?.entities.find(e => e.kind === 'arc' && e.id === 8);
-    return (
-      arc?.kind === 'arc' &&
-      arc.radius === 4 &&
-      !window.exampleApp.previewState.busy
-    );
+    return arc?.kind === 'arc' && arc.radius === 4 && !previewState.busy;
   });
 }
