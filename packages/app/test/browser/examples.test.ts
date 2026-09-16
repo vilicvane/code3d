@@ -623,6 +623,16 @@ async function verifyOperationRecovery(page: Page, file: string) {
     },
     file.endsWith('intersect.ts') ? 'intersect([' : 'loft([',
   );
+  const expectedInput = file.endsWith('intersect.ts') ? 'blank' : 'start';
+  await page.waitForFunction(expected => {
+    const {codeEditor, viewport, previewState} = window.exampleApp;
+    const source = viewport.sourceContext?.target.sourceRef;
+    return (
+      !previewState.inspecting &&
+      source !== undefined &&
+      codeEditor.editor.getValue().slice(source.start, source.end) === expected
+    );
+  }, expectedInput);
   // Select the actual argument: a failed operation has no result to inspect.
   assert.deepEqual(
     await page.evaluate(() => {
@@ -636,7 +646,7 @@ async function verifyOperationRecovery(page: Page, file: string) {
       };
     }),
     {
-      input: file.endsWith('intersect.ts') ? 'blank' : 'start',
+      input: expectedInput,
       renderable: true,
     },
     'Inputs remain inspectable after the operation fails',
