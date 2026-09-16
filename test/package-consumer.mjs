@@ -29,10 +29,10 @@ for (const [name, value] of Object.entries(core)) {
     value === browser[name],
     `${name} shares Node and browser identity`,
   );
-  assert.ok(
-    value === tooling.authoringApi[name],
-    `${name} shares tooling identity`,
-  );
+}
+// Runtime-only inspector exports are absent from the authoring declarations.
+for (const [name, value] of Object.entries(tooling.authoringApi)) {
+  assert.ok(value === core[name], `${name} shares tooling identity`);
 }
 assert.ok(three.MeshPhysicalMaterial === nativeThree.MeshPhysicalMaterial);
 assert.ok(interop.replicad.Solid === nativeReplicad.Solid);
