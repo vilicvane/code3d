@@ -3,7 +3,7 @@ import type {TestContext} from 'node:test';
 import {after, before, test} from 'node:test';
 import type {Browser} from 'playwright-core';
 import {chromium} from 'playwright-core';
-import {appIsolationHeaders} from '../../build/isolation.ts';
+import {appIsolationHeaders} from '../../build/response-headers.ts';
 type CompilationPhase =
   import('../../src/model/compilation-progress.ts').CompilationPhase;
 declare const packageFiles: typeof import('../../src/project/browser-packages.ts').browserPackageFiles;

@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parse} from 'parse5';
 import {markdownHeaderRules} from './document-sources.mjs';
+import {appHeaderRules} from '../../app/build/response-headers.ts';
 import {
   featuredPackages,
   markdownDocuments,
@@ -20,16 +21,19 @@ const base = site.pathname.replace(/\/$/, '');
 const pages = new Map();
 const issues = [];
 const documents = await markdownDocuments();
+const headers = await readFile(path.join(directory, '_headers'), 'utf8');
+assert.ok(
+  headers.startsWith(appHeaderRules(`${base}/app`)),
+  'Missing App response header rules',
+);
+assert.ok(
+  headers.split('\n').filter(line => line && !/^\s|#/.test(line)).length <= 100,
+  'Cloudflare supports at most 100 header rules',
+);
 if (process.env.CODE3D_SITE_URL) {
-  const headers = await readFile(path.join(directory, '_headers'), 'utf8');
   assert.ok(
     headers.includes(markdownHeaderRules(documents, site)),
     'Missing Markdown canonical header rules',
-  );
-  assert.ok(
-    headers.split('\n').filter(line => line && !/^\s|#/.test(line)).length <=
-      100,
-    'Cloudflare supports at most 100 header rules',
   );
 }
 for (const document of documents) {

@@ -2,7 +2,7 @@ import {spatialAxisColors} from '../../src/spatial-axis-colors.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {chromium} from 'playwright-core';
-import {appIsolationHeaders} from '../../build/isolation.ts';
+import {appIsolationHeaders} from '../../build/response-headers.ts';
 
 test(
   'distance renders solved context, both operands and stable labels in frames and PNG exports',

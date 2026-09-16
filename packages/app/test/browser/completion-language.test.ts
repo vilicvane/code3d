@@ -1,4 +1,4 @@
-import {appIsolationHeaders} from '../../build/isolation.ts';
+import {appIsolationHeaders} from '../../build/response-headers.ts';
 import type {ProjectTypeScriptWorker} from '../../src/monaco/typescript-protocol.ts';
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';

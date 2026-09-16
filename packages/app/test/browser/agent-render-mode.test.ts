@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {writeFile} from 'node:fs/promises';
 import {test} from 'node:test';
 import {chromium} from 'playwright-core';
-import {appIsolationHeaders} from '../../build/isolation.ts';
+import {appIsolationHeaders} from '../../build/response-headers.ts';
 
 test(
   'agent modes match GUI captures and reset defaults across snapshots and agents',

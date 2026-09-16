@@ -1,4 +1,4 @@
-import {appIsolationHeaders} from '../../build/isolation.ts';
+import {appIsolationHeaders} from '../../build/response-headers.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Page} from 'playwright-core';
