@@ -44,14 +44,19 @@ after(async () => browser?.close());
 
 // Software-rendered CI runs examples several times slower than host Chrome, and
 // a cold registry install into a browser context dominates the packaged ones.
+// Individual waits share one generous default; the per-example budget below
+// stays the hard bound, so a stuck example still fails the run.
+const defaultWait = 120_000;
+const defaultBudget = 180_000;
 const usesRegistryPackages = (file: string): boolean =>
   file.startsWith('npm/') || file.startsWith('assemblies/screw-box/');
 const exampleBudget = (file: string): number =>
-  usesRegistryPackages(file) ? 300_000 : 180_000;
+  usesRegistryPackages(file) ? 300_000 : defaultBudget;
 for (const {file} of exampleEntries) {
   test(`App example link: ${file}`, {timeout: exampleBudget(file)}, async t => {
     const context = await browser.newContext();
     t.after(() => context.close());
+    context.setDefaultTimeout(defaultWait);
     if (usesRegistryPackages(file)) await useRegistryPackages(context);
     const page = await context.newPage();
     const errors: string[] = [];
@@ -78,7 +83,7 @@ for (const {file} of exampleEntries) {
     await page.waitForFunction(
       () => window.exampleApp && !window.exampleApp.previewState.busy,
       undefined,
-      {timeout: 90_000},
+      {timeout: defaultWait},
     );
     const diagnostic = await page.evaluate(
       () => window.exampleApp.previewState.diagnostic,
@@ -367,13 +372,14 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
 
 test(
   'mounting plate supports agent render, versioned handoff and user Undo',
-  {timeout: 120_000},
+  {timeout: defaultBudget},
   async t => {
     const {AgentClient} = await import('@code3d/agent');
     const {createLocalBridge} = await import('../../../cli/src/bridge.ts');
     const {reserveLocalPort} = await import('./local-port.ts');
     const context = await browser.newContext();
     t.after(() => context.close());
+    context.setDefaultTimeout(defaultWait);
     const page = await context.newPage();
     await page.route('**/src/main.ts*', async route => {
       const response = await route.fetch();
@@ -672,10 +678,11 @@ async function verifyOperationRecovery(page: Page, file: string) {
 
 test(
   'default project and legacy links run without installation and preserve user files',
-  {timeout: 120_000},
+  {timeout: defaultBudget},
   async t => {
     const context = await browser.newContext();
     t.after(() => context.close());
+    context.setDefaultTimeout(defaultWait);
     const page = await context.newPage();
     await page.route('**/src/main.ts*', async route => {
       const response = await route.fetch();
