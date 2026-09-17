@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {after, before, test, type TestContext} from 'node:test';
 import {chromium, type Browser, type Page} from 'playwright-core';
-import {appIsolationHeaders} from '../../build/isolation.ts';
+import {appIsolationHeaders} from '../../build/response-headers.ts';
 import {normalizedModelSnapshot} from '../model-snapshot.ts';
 import type {CacheRequest, CacheResult} from './persistent-cache.worker.ts';
 

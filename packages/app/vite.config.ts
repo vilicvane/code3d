@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {defineConfig} from 'vite';
 import {browserPackages} from './build/browser-packages.ts';
 import {compilerRecipe} from './build/compiler-recipe.ts';
-import {appIsolationHeaders, appIsolationRules} from './build/isolation.ts';
+import {appHeaderRules, appIsolationHeaders} from './build/response-headers.ts';
 
 const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
 const primaryDevelopmentPort = 0xc3d;
@@ -27,12 +27,12 @@ export default defineConfig({
   plugins: [
     compilerRecipe(path.resolve(packageDirectory, '../..')),
     {
-      name: 'code3d-app-isolation',
+      name: 'code3d-app-headers',
       generateBundle() {
         this.emitFile({
           type: 'asset',
           fileName: '_headers',
-          source: appIsolationRules('/*'),
+          source: appHeaderRules(''),
         });
       },
     },

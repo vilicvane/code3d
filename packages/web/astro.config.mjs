@@ -12,9 +12,9 @@ import {
   markdownHeaderRules,
 } from './scripts/document-sources.mjs';
 import {
+  appHeaderRules,
   appIsolationHeaders,
-  appIsolationRules,
-} from '../app/build/isolation.ts';
+} from '../app/build/response-headers.ts';
 
 const configuredUrl = process.env.CODE3D_SITE_URL
   ? new URL(process.env.CODE3D_SITE_URL)
@@ -137,7 +137,7 @@ export default defineConfig({
           await cp(appDirectory, new URL('app/', dir), {recursive: true});
           await writeFile(
             new URL('_headers', dir),
-            appIsolationRules(`${sitePath('app')}/*`) +
+            appHeaderRules(sitePath('app')) +
               (configuredUrl
                 ? '\n' +
                   markdownHeaderRules(await markdownDocuments(), configuredUrl)

@@ -9,7 +9,7 @@ import {runCli, startServe} from '../../../cli/test/process.ts';
 import {type AgentConfig} from '@code3d/agent';
 import {createLocalBridge} from '../../../cli/bld/bridge.js';
 import {reserveLocalPort} from './local-port.ts';
-import {appIsolationHeaders} from '../../build/isolation.ts';
+import {appIsolationHeaders} from '../../build/response-headers.ts';
 
 test(
   'HTTPS App prompt starts a real CLI service, permits local access, renders models and persists editable agent ports',

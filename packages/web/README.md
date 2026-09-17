@@ -162,8 +162,12 @@ and [breadcrumb guidance](https://developers.google.com/search/docs/appearance/s
 For every Markdown document with an HTML counterpart, the shared document
 catalog generates a `Link: <HTML URL>; rel="canonical"` header. Astro dev emits it
 when a site is configured; production writes exact rules into Cloudflare's
-`_headers`, alongside App's existing isolation headers. Markdown-only agent
-instructions retain their own URLs. This follows Google's
+`_headers`, alongside [App's response headers](../../app/build/response-headers.ts):
+isolation, immutable caching for hashed assets, and compressible content types
+for the TypeScript declaration, navigation and CommonJS package sources that
+Cloudflare otherwise serves as the uncompressible `video/mp2t` and
+`application/node`. Markdown-only agent instructions retain their own URLs. This
+follows Google's
 [canonical guidance for alternate formats](https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls)
 without blocking agents or crawlers from the Markdown sources.
 

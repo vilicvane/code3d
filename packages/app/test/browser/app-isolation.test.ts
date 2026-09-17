@@ -5,7 +5,10 @@ import {fileURLToPath} from 'node:url';
 import {preview as previewApp} from 'vite';
 import {preview as previewWebsite} from 'astro';
 import {chromium} from 'playwright-core';
-import {appIsolationHeaders, appIsolationRules} from '../../build/isolation.ts';
+import {
+  appHeaderRules,
+  appIsolationHeaders,
+} from '../../build/response-headers.ts';
 
 for (const target of ['app', 'website'] as const) {
   test(
@@ -25,7 +28,7 @@ for (const target of ['app', 'website'] as const) {
             new URL('../../dist/_headers', import.meta.url),
             'utf8',
           ),
-          appIsolationRules('/*'),
+          appHeaderRules(''),
         );
         const server = await previewApp({
           root: fileURLToPath(new URL('../..', import.meta.url)),
@@ -37,12 +40,16 @@ for (const target of ['app', 'website'] as const) {
         assert.ok(address && typeof address === 'object');
         url = `http://127.0.0.1:${address.port}/`;
       } else {
-        assert.equal(
-          await readFile(
-            new URL('../../../web/dist/www/_headers', import.meta.url),
-            'utf8',
-          ),
-          appIsolationRules('/app/*'),
+        // The website build appends Markdown canonical rules when a site URL is
+        // configured, so the App rules only lead the file.
+        assert.ok(
+          (
+            await readFile(
+              new URL('../../../web/dist/www/_headers', import.meta.url),
+              'utf8',
+            )
+          ).startsWith(appHeaderRules('/app')),
+          'Missing App response header rules',
         );
         const server = await previewWebsite({
           root: fileURLToPath(new URL('../../../web/', import.meta.url)),
