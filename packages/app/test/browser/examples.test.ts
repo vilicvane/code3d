@@ -46,13 +46,21 @@ after(async () => browser?.close());
 // a cold registry install into a browser context dominates the packaged ones.
 // Individual waits share one generous default; the per-example budget below
 // stays the hard bound, so a stuck example still fails the run.
-const defaultWait = 120_000;
-const defaultBudget = 180_000;
+const defaultWait = 180_000;
+const defaultBudget = 300_000;
+const packagedBudget = 600_000;
 const usesRegistryPackages = (file: string): boolean =>
   file.startsWith('npm/') || file.startsWith('assemblies/screw-box/');
 const exampleBudget = (file: string): number =>
-  usesRegistryPackages(file) ? 300_000 : defaultBudget;
-for (const {file} of exampleEntries) {
+  usesRegistryPackages(file) ? packagedBudget : defaultBudget;
+// CI spreads the examples over several runners; local runs keep every entry.
+const [shardIndex, shardCount] = (process.env.CODE3D_EXAMPLE_SHARD ?? '1/1')
+  .split('/')
+  .map(Number);
+const runsStandaloneTests = shardIndex === shardCount;
+for (const {file} of exampleEntries.filter(
+  (_, index) => index % shardCount === shardIndex - 1,
+)) {
   test(`App example link: ${file}`, {timeout: exampleBudget(file)}, async t => {
     const context = await browser.newContext();
     t.after(() => context.close());
@@ -372,7 +380,7 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
 
 test(
   'mounting plate supports agent render, versioned handoff and user Undo',
-  {timeout: defaultBudget},
+  {timeout: defaultBudget, skip: !runsStandaloneTests},
   async t => {
     const {AgentClient} = await import('@code3d/agent');
     const {createLocalBridge} = await import('../../../cli/src/bridge.ts');
@@ -678,7 +686,7 @@ async function verifyOperationRecovery(page: Page, file: string) {
 
 test(
   'default project and legacy links run without installation and preserve user files',
-  {timeout: defaultBudget},
+  {timeout: defaultBudget, skip: !runsStandaloneTests},
   async t => {
     const context = await browser.newContext();
     t.after(() => context.close());

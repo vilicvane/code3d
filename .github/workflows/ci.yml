@@ -15,7 +15,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
 
     steps:
       - name: Check out repository
@@ -51,9 +51,6 @@ jobs:
       - name: Install render browser
         run: npx playwright-core install --with-deps chromium
 
-      - name: Exercise every example in the App
-        run: npm run test:examples:browser --workspace @code3d/app
-
       - name: Generate website model images
         run: npm run render:web-images
 
@@ -66,3 +63,37 @@ jobs:
           name: code3d-www
           path: packages/web/dist/www
           if-no-files-found: error
+
+  # Software-rendered runners need minutes per example, so the App examples run
+  # as independent shards instead of one serial step.
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build packages
+        run: npm run build:packages
+
+      - name: Install render browser
+        run: npx playwright-core install --with-deps chromium
+
+      - name: Exercise the App example shard
+        run: npm run test:examples:browser --workspace @code3d/app
+        env:
+          CODE3D_EXAMPLE_SHARD: ${{ matrix.shard }}/4
