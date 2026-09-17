@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import {decorationRenderOrder} from './source-appearance';
 import type {
   ViewportAnchorDecoration,
   ViewportDecoration,
@@ -151,7 +152,12 @@ export class AnchorDecorationObject extends THREE.Group {
       const material = 'material' in object ? object.material : undefined;
       for (const candidate of Array.isArray(material) ? material : [material]) {
         if (!(candidate instanceof THREE.Material)) continue;
-        object.renderOrder = 24;
+        // Faces composite before their outlines and arrows: sharing one order
+        // let a coincident patch cover the glyphs through distance sorting.
+        object.renderOrder =
+          object instanceof THREE.Mesh
+            ? decorationRenderOrder.surface
+            : decorationRenderOrder.glyph;
         candidate.depthTest = appearance.depthTest ?? false;
         candidate.depthWrite = false;
         candidate.transparent = true;

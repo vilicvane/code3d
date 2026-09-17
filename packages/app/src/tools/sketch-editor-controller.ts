@@ -18,11 +18,8 @@ import {
   type SketchGeometryData,
 } from '../model/sketch-drag';
 import type {CompiledSketch} from '../model/sketch-trace';
-import type {ModelDiagnostic} from '../model/diagnostic';
 import {SketchEditor, type SketchEditorView} from '../ui/sketch-editor';
 import {action, computed, makeObservable, observableRef, reaction} from 'mobx';
-import {Pencil} from 'lucide';
-import {Toolbar} from '../ui/toolbar';
 import {
   sketchContextOutlines,
   type SketchContextOutline,
@@ -47,14 +44,11 @@ export class SketchEditorController {
   private revision = 0;
   private context: readonly SketchContextOutline[] = [];
   private viewScope = '';
-  private editing = false;
-  private readonly toolbar = new Toolbar('Sketch preview tools');
+  private sourceRange?: SourceRef;
   private readonly stopView: () => void;
-  private readonly stopToolbar: () => void;
 
   constructor(
     container: HTMLElement,
-    toolbarContainer: HTMLElement,
     private readonly host: {
       readSource(ref: SourceRef): string | undefined;
       resolveSourceRef(ref: SourceRef): SourceRef | undefined;
@@ -77,7 +71,6 @@ export class SketchEditorController {
       | 'revision'
       | 'context'
       | 'viewScope'
-      | 'editing'
       | 'view'
       | 'commit'
     >(this, {
@@ -90,15 +83,11 @@ export class SketchEditorController {
       revision: observableRef,
       context: observableRef,
       viewScope: observableRef,
-      editing: observableRef,
       view: computed,
       hasTarget: computed,
-      canEdit: computed,
       diagnosticScope: computed,
       isStale: computed,
       select: action,
-      edit: action,
-      finish: action,
       hide: action,
       invalidate: action,
       retain: action,
@@ -111,27 +100,12 @@ export class SketchEditorController {
       (id, position, previous, mergeTarget) =>
         this.preview(id, position, previous, mergeTarget),
       error => this.host.reportResult('move', error),
-      () => this.finish(),
     );
-    this.toolbar.add(this.toolbar.group('Sketch'), {
-      name: 'Edit sketch',
-      title: 'Edit sketch in its 2D plane',
-      icon: Pencil,
-      run: () => this.edit(),
-    });
-    toolbarContainer.prepend(this.toolbar.root);
     this.stopView = reaction(
       () => this.view,
       view => {
         if (view) this.editor.show(view);
         else this.editor.hide();
-      },
-      {fireImmediately: true},
-    );
-    this.stopToolbar = reaction(
-      () => this.canEdit && !this.hasTarget,
-      visible => {
-        this.toolbar.root.hidden = !visible;
       },
       {fireImmediately: true},
     );
@@ -145,10 +119,10 @@ export class SketchEditorController {
     objects: ReadonlyMap<string, ModelSnapshotObject> = new Map(),
   ): void {
     const next = id ? sketches.get(id) : undefined;
-    if (!next || viewScope !== this.viewScope) this.editing = false;
     this.revision++;
     this.viewScope = viewScope;
     this.active = next;
+    this.sourceRange = next?.callRef ?? next?.definitionRef;
     this.context = this.active
       ? sketchContextOutlines(this.active, objects)
       : [];
@@ -166,21 +140,8 @@ export class SketchEditorController {
     this.sourceLayers = layers;
   }
 
-  get canEdit(): boolean {
-    return !!this.active && !this.stale;
-  }
-
-  edit(): void {
-    if (this.canEdit) this.editing = true;
-  }
-
-  finish(): void {
-    this.revision++;
-    this.editing = false;
-  }
-
   get diagnosticScope(): readonly CompiledSketch[] | undefined {
-    return this.hasTarget ? this.sourceLayers : undefined;
+    return this.active ? this.sourceLayers : undefined;
   }
 
   get dragPreview() {
@@ -194,18 +155,15 @@ export class SketchEditorController {
   dispose(): void {
     this.revision++;
     this.stopView();
-    this.stopToolbar();
-    this.toolbar.close();
-    this.toolbar.root.remove();
     this.editor.dispose();
   }
 
   get hasTarget(): boolean {
-    return this.editing && this.active !== undefined;
+    return this.active !== undefined;
   }
 
   get isStale(): boolean {
-    return this.hasTarget && this.stale;
+    return !!this.active && this.stale;
   }
 
   containsSource(file: string, offset: number): boolean {
@@ -213,6 +171,58 @@ export class SketchEditorController {
       this.selectionRef && this.host.resolveSourceRef(this.selectionRef);
     return (
       !!ref && ref.file === file && offset >= ref.start && offset <= ref.end
+    );
+  }
+
+  /** The instance the caret still edits: the active sketch while the caret
+   * target spans that sketch's own definition, even when the target names
+   * another instance of the same source, such as the plain value behind a
+   * related sketch. Selection elsewhere retargets as usual.
+   */
+  editingSketchId(
+    cursor: {file: string; offset: number} | undefined,
+    target: SourceRef | undefined,
+    sketches: ReadonlyMap<string, CompiledSketch>,
+  ): string | undefined {
+    const active = this.active;
+    const source = this.sketchSource();
+    if (!active || !sketches.has(active.id) || !source) return undefined;
+    return this.withinSource(cursor, source) || this.spansSource(target, source)
+      ? active.id
+      : undefined;
+  }
+
+  /** The call that authors this sketch, used to decide whether the caret still
+   * edits it; the definition alone excludes the callee identifier the editor
+   * leaves the caret on after a commit.
+   */
+  private sketchSource(): SourceRef | undefined {
+    const ref =
+      this.sourceRange ?? this.active?.callRef ?? this.active?.definitionRef;
+    return ref && this.host.resolveSourceRef(ref);
+  }
+
+  private withinSource(
+    cursor: {file: string; offset: number} | undefined,
+    source: SourceRef,
+  ): boolean {
+    return (
+      !!cursor &&
+      cursor.file === source.file &&
+      cursor.offset >= source.start &&
+      cursor.offset <= source.end
+    );
+  }
+
+  private spansSource(
+    target: SourceRef | undefined,
+    source: SourceRef,
+  ): boolean {
+    return (
+      !!target &&
+      target.file === source.file &&
+      target.start <= source.start &&
+      target.end >= source.end
     );
   }
 
@@ -227,46 +237,33 @@ export class SketchEditorController {
       : [];
   }
 
-  /** Keep an explicitly selected last-good view only when evaluation cannot reach it.
-   * An error after a successful sketch must not put it through a read-only state:
-   * that would cancel the active tool even though this sketch remains editable.
+  /** Follow the caret: restore the last successful sketch while it stays inside
+   * that sketch's source range, and mark the view stale once the settled
+   * compilation no longer provides it. A failing edit therefore keeps showing
+   * what was last drawn instead of closing the 2D tool.
    */
   retain(
-    diagnostic: ModelDiagnostic | undefined,
     cursor: {file: string; offset: number} | undefined,
     sketches: ReadonlyMap<string, CompiledSketch>,
   ): boolean {
-    const selection =
-      this.selectionRef && this.host.resolveSourceRef(this.selectionRef);
-    if (
-      !this.hasTarget ||
-      !this.active ||
-      sketches.has(this.active.id) ||
-      !diagnostic ||
-      !cursor ||
-      !selection ||
-      selection.file !== cursor.file ||
-      cursor.offset < selection.start ||
-      cursor.offset > selection.end
-    )
-      return false;
-    this.selectionRef = selection;
+    const source = this.sketchSource();
+    if (!source || !this.withinSource(cursor, source)) return false;
     this.sourceLayers = this.sourceLayers.map(layer => ({
       ...layer,
       definitionRef:
         layer.definitionRef && this.host.resolveSourceRef(layer.definitionRef),
     }));
-    this.active = this.sourceLayers.at(-1);
-    this.stale = true;
+    const last = this.sourceLayers.at(-1);
+    if (!last) return false;
+    this.active = last;
+    this.stale = !sketches.has(last.id);
     return true;
   }
 
+  /** Hide the 2D tool; the memorized sketch stays so the caret can restore it. */
   hide(): void {
     this.revision++;
     this.active = undefined;
-    this.editing = false;
-    this.sourceLayers = [];
-    this.selectionRef = undefined;
   }
   invalidate(): void {
     this.revision++;
@@ -314,7 +311,7 @@ export class SketchEditorController {
   }
 
   private get view(): SketchEditorView | undefined {
-    if (!this.hasTarget || !this.active) return;
+    if (!this.active) return;
     const source =
       this.active.definitionRef &&
       this.host.readSource(this.active.definitionRef);

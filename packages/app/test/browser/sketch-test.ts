@@ -65,7 +65,6 @@ export async function open(
     await page.keyboard.press('ArrowLeft');
     await page.keyboard.press('ArrowLeft');
   }
-  await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
   await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
   return page;
 }

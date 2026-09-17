@@ -24,6 +24,7 @@ import {
   sketchPointResolver,
 } from '@code3d/core/tooling';
 import {
+  applySketchEmphasis,
   applySourceEmphasis,
   modelRenderOrder,
   type SourceEmphasis,
@@ -426,7 +427,7 @@ export function createRenderedSketch(
         );
       }
       primitive.userData.sketchEntity = {layer: layer.id, id: entity.id};
-      applySourceEmphasis(primitive, role);
+      applySketchEmphasis(primitive, role);
       object.add(primitive);
     }
   return object;

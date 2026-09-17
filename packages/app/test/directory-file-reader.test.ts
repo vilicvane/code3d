@@ -262,6 +262,27 @@ test('initialization writes the current manifest without discarding directory de
   );
 });
 
+test('a truncated manifest lets a used project open without losing user files', async () => {
+  const entries: DirectoryEntries = {
+    '.code3d': {'project.json': new File([''], 'project.json')},
+    'model.ts': new File(['user source'], 'model.ts'),
+  };
+  const fs = await openDirectoryProjectFileSystem(directory(entries));
+  await fs.initialize(async () => {
+    throw new Error('A used project must not be seeded');
+  });
+  assert.deepEqual(
+    JSON.parse(
+      new TextDecoder().decode(await fs.readFile('/.code3d/project.json')),
+    ),
+    {version: 1, managedDirectories: {}},
+  );
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/model.ts')),
+    'user source',
+  );
+});
+
 test('declining examples survives reopening and new revisions until an explicit reset', async () => {
   const entries: DirectoryEntries = {};
   const handle = directory(entries);

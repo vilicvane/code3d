@@ -314,9 +314,6 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
         : file === 'projects/phone-stand.ts'
           ? 2
           : 1;
-    // A sketch expression inspects in 3D; 2D editing starts from its tool.
-    await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
-    await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
     const point = page.locator(
       `.sketch-canvas circle.local[data-id="${pointId}"]`,
     );
@@ -828,11 +825,14 @@ async function verifySketchPresets(page: Page) {
   const options = page.locator('.design-argument-option');
   await options.nth(1).click();
   await page.waitForFunction(() => {
-    const {previewState, viewport} = window.exampleApp;
-    const arc = previewState.module?.sketches
-      .get(viewport.inspectedSketchId ?? '')
+    const arc = window.exampleApp.sketchEditor.diagnosticScope
+      ?.at(-1)
       ?.entities.find(e => e.kind === 'arc' && e.id === 8);
-    return arc?.kind === 'arc' && arc.radius === 6 && !previewState.busy;
+    return (
+      arc?.kind === 'arc' &&
+      arc.radius === 6 &&
+      !window.exampleApp.previewState.busy
+    );
   });
   assert.equal(
     await page.evaluate(() => window.exampleApp.codeEditor.editor.getValue()),
@@ -841,10 +841,13 @@ async function verifySketchPresets(page: Page) {
   );
   await options.nth(0).click();
   await page.waitForFunction(() => {
-    const {previewState, viewport} = window.exampleApp;
-    const arc = previewState.module?.sketches
-      .get(viewport.inspectedSketchId ?? '')
+    const arc = window.exampleApp.sketchEditor.diagnosticScope
+      ?.at(-1)
       ?.entities.find(e => e.kind === 'arc' && e.id === 8);
-    return arc?.kind === 'arc' && arc.radius === 4 && !previewState.busy;
+    return (
+      arc?.kind === 'arc' &&
+      arc.radius === 4 &&
+      !window.exampleApp.previewState.busy
+    );
   });
 }

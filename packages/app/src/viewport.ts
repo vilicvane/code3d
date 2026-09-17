@@ -85,6 +85,7 @@ import type {SpatialObjectPreview, SpatialPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 import {pickScreenTopology} from './rendering/topology-picking';
 import {boundAppearance} from './rendering/bound-appearance';
+import {decorationRenderOrder} from './rendering/source-appearance';
 import {
   applySourceEmphasis,
   type SourceEmphasis,
@@ -440,7 +441,6 @@ export class ModelViewport {
     >(this, {
       module: observableRef,
       inspectionScene: observableRef,
-      inspectedSketchId: computed,
       renderInspection: action,
       sourceParameter: observableRef,
       parameterPreviews: observableShallow,
@@ -1033,17 +1033,6 @@ export class ModelViewport {
           mesh.topologyVertices.length > 0)
       );
     });
-  }
-
-  /** A single authored sketch can be offered to the independent 2D editing tool. */
-  get inspectedSketchId(): string | undefined {
-    const sketches =
-      this.inspectionScene?.target.filter(item => item.kind === 'sketch') ?? [];
-    const focused = sketches.filter(item => item.focused);
-    const ids = new Set(
-      (focused.length ? focused : sketches).map(item => item.sourceSketchId),
-    );
-    return ids.size === 1 ? ids.values().next().value : undefined;
   }
 
   /** The current semantic focus, shared by panels, handles and reference picking. */
@@ -2002,7 +1991,9 @@ export class ModelViewport {
         kind: 'bounds',
         ...boundAppearance,
         lineWidth: symbolLineWidth,
-        renderOrder: 20,
+        // Selection fills stay in the decoration band, below sketch geometry
+        // and below the glyphs that share that band.
+        renderOrder: decorationRenderOrder.surface,
       },
     );
     this.scene.add(modelingHelper(this.selectionHighlight));
@@ -2361,7 +2352,6 @@ export class ModelViewport {
         ),
       ),
       '#d8ff3e',
-      31,
     );
     if (selected) overlay.add(selected);
     if (selection.hoveredId !== undefined) {
@@ -2370,9 +2360,13 @@ export class ModelViewport {
         selection.kind,
         new TopologyIdSet([selection.hoveredId]),
         selection.selectedIds.has(selection.hoveredId) ? '#ffad66' : '#63dcff',
-        33,
       );
-      if (hovered) overlay.add(hovered);
+      if (hovered) {
+        hovered.traverse(object => {
+          object.renderOrder = decorationRenderOrder.hover;
+        });
+        overlay.add(hovered);
+      }
     }
     selection.guide.add(overlay);
     this.topologySelectionOverlay = overlay;
@@ -2570,7 +2564,7 @@ export class ModelViewport {
           lineWidth: symbolLineWidth,
           pointSize: topologyPointSize,
           surfaceOpacity: impactSurfaceOpacity,
-          renderOrder: 19,
+          renderOrder: decorationRenderOrder.glyph,
         },
       );
       this.impactHighlights.push(highlight);
@@ -2907,7 +2901,6 @@ function createTopologyDecorationObject(
     decoration.topologyKind,
     new TopologyIdSet(decoration.ids),
     decoration.appearance.color,
-    28,
     symbolLineWidth,
   );
   if (highlight) container.add(highlight);
@@ -2936,7 +2929,7 @@ function createBoundsDecorationObject(
       symbolLineWidth,
       appearance.opacity,
       appearance.depthTest,
-      20,
+      decorationRenderOrder.mark,
     );
     lines.geometry.instanceCount = count * 2;
     container.add(lines);
@@ -3061,7 +3054,7 @@ function createObjectGeometryHighlight(
           appearance.pointSize,
           appearance.opacity,
           false,
-          appearance.renderOrder,
+          decorationRenderOrder.glyph,
         ),
       );
     }
@@ -3085,7 +3078,7 @@ function createObjectGeometryHighlight(
           toneMapped: false,
         }),
       );
-      surface.renderOrder = appearance.renderOrder;
+      surface.renderOrder = decorationRenderOrder.surface;
       highlight.add(surface);
     }
     if (mesh.edges.length > 0) {
@@ -3096,7 +3089,7 @@ function createObjectGeometryHighlight(
           appearance.lineWidth,
           appearance.opacity,
           node.kind === 'solid' || node.kind === 'face',
-          appearance.renderOrder + 1,
+          decorationRenderOrder.glyph,
         ),
       );
     }
@@ -3149,7 +3142,6 @@ function createTopologyHighlight(
   kind: TopologyKind,
   ids: TopologyIdSet,
   color: string,
-  renderOrder: number,
   lineWidth = interactiveLineWidth,
 ): THREE.Object3D | undefined {
   if (kind === 'vertex') {
@@ -3161,7 +3153,7 @@ function createTopologyHighlight(
           topologyPointSize,
           1,
           false,
-          renderOrder,
+          decorationRenderOrder.mark,
         )
       : undefined;
   }
@@ -3174,7 +3166,7 @@ function createTopologyHighlight(
           lineWidth,
           1,
           false,
-          renderOrder,
+          decorationRenderOrder.mark,
         )
       : undefined;
   }
@@ -3206,7 +3198,9 @@ function createTopologyHighlight(
       toneMapped: false,
     }),
   );
-  surface.renderOrder = renderOrder;
+  // Selected/hovered faces stay in the decoration surface band so inspected
+  // sketch geometry above it is not tinted by the fill.
+  surface.renderOrder = decorationRenderOrder.surface;
   return surface;
 }
 

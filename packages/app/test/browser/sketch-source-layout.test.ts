@@ -35,7 +35,6 @@ for (const options of ['', ', {}', ', {constraints: []}']) {
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('End');
-    await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
     await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
     await page.getByText('Ready', {exact: true}).waitFor();
     const before = await text(page);

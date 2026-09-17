@@ -139,12 +139,12 @@ the editor empty, while preserving the project's files.
 When you load a file without a preview, the viewport shows **Select to preview**.
 Place the cursor in a model or sketch expression to open it. The hint stays
 dismissed after your first preview until you load another file. Moving outside
-an expression keeps the last 3D preview. Sketch points and curves appear in 3D at
-their actual placement, alongside any models or other sketches in the inspection.
-Select a single authored sketch and click **Edit sketch** to open its 2D drawing
-tools, including for an empty sketch. Click **Finish sketch** to return to 3D. Selecting an editable call that fails also opens the viewport and its
-parameter panel, so you can correct the arguments without first producing a
-valid model. Dimension-based primitives such as `box()` provide
+an expression keeps the last 3D preview. A sketch expression opens its 2D
+drawing tools, including for an empty sketch. Sketches that only appear in a
+mixed inspection render as points and curves in 3D at their actual placement,
+alongside any models. Selecting an editable call that fails also opens the
+viewport and its parameter panel, so you can correct the arguments without
+first producing a valid model. Dimension-based primitives such as `box()` provide
 [runtime defaults](../../../../../../core/docs/api.md#runtime-defaults-while-editing) for a
 preview while the editor continues to report missing required arguments.
 

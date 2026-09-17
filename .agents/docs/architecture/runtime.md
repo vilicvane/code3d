@@ -319,9 +319,9 @@ closure 工厂可通过 `execution.call.data` 读取所属调用的记录。宿�
 保留临时草图。草图点线按 `[x, y] → [x, 0, -y]` 放入自身平面，再应用参考架的
 实际位姿；开放曲线、上游层与跨层点别名直接绘制，不经过 B-Rep 面构造。关系检查
 保留选中阶段的草图参考架及原值身份，Sketch 与 Model 可混合分配 target/ambient。
-草图快照同时保留源码草图身份，二维编辑工具通过显式 Edit sketch / Finish sketch
-进入和退出；其编辑状态、可用性及画布视图由 SketchEditorController 的 MobX 状态
-统一驱动，避免选择被动预览时自动进入二维。
+草图快照同时保留源码草图身份，光标落入求值为草图的源码目标时自动打开二维编辑工具，
+移出后回到三维检查；仅出现在混合检查场景中的草图不接管编辑，其可用性及画布视图由
+SketchEditorController 的 MobX 状态统一驱动。
 `beginModelInspection` 保留原模型 trace 与缓存工作集，检查生成的
 几何在结束后进入有预算的历史缓存；不能借一次检查替换整次建模的保留范围。
 ProjectExecutor 另持有最新成功检查场景的原生几何快照，供该场景的拓扑查询和导出

@@ -918,22 +918,18 @@ const toolEngine = new ToolEngine({
   commitPreview: preview => commitToolPreview(preview),
   clearPreview: preview => clearToolPreview(preview),
 });
-const sketchEditor = new SketchEditorController(
-  viewportHost,
-  viewportToolStack,
-  {
-    reportResult: (operation, error) =>
-      toolFeedback.report(`sketch:${operation}`, error),
-    solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
-    resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
-    readSource: ref => {
-      const current = codeEditor.resolveSourceRef(ref);
-      return current && codeEditor.readSource(current);
-    },
-    commit: intent =>
-      commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
+const sketchEditor = new SketchEditorController(viewportHost, {
+  reportResult: (operation, error) =>
+    toolFeedback.report(`sketch:${operation}`, error),
+  solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
+  resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
+  readSource: ref => {
+    const current = codeEditor.resolveSourceRef(ref);
+    return current && codeEditor.readSource(current);
   },
-);
+  commit: intent =>
+    commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
+});
 const spatialToolbar = new SpatialToolbar(
   viewportToolStack,
   viewport.positionTools,
@@ -983,7 +979,6 @@ const stopContextualTool = reaction(
   () => ({
     context: viewport.sourceContext,
     occurrence: viewport.getSelected(),
-    sketchId: viewport.inspectedSketchId,
     model: previewState.module,
     modelVersion: previewState.sourceVersion,
     sourceVersion: codeEditor.sourceVersion(),
@@ -992,7 +987,6 @@ const stopContextualTool = reaction(
   {
     equals: (a, b) =>
       a.context === b.context &&
-      a.sketchId === b.sketchId &&
       a.occurrence === b.occurrence &&
       a.model === b.model &&
       a.modelVersion === b.modelVersion &&
@@ -1902,11 +1896,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     runInAction(() => {
       previewState.accept(request, nextModule);
       codeEditor.setDesignArguments(nextModule.designArguments);
-      sketchEditor.retain(
-        nextModule.diagnostic,
-        codeEditor.cursorSource(),
-        nextModule.sketches,
-      );
+      sketchEditor.retain(codeEditor.cursorSource(), nextModule.sketches);
       codeEditor.trackSourceRefs([
         ...toolSourceRefs(nextModule),
         ...sketchEditor.sourceRefs(),
@@ -2408,14 +2398,19 @@ function renderCurrentPanels(): void {
 function syncContextualTool(): void {
   const scope = viewport.sourceContext;
   const sourceTargetFocused = scope !== undefined;
-  if (
-    sourceTargetFocused &&
-    previewState.module &&
-    previewState.sourceVersion === codeEditor.sourceVersion() &&
-    viewport.inspectedSketchId
-  ) {
+  // A pending compilation keeps the current sketch view instead of closing it.
+  const settled = previewState.sourceVersion === codeEditor.sourceVersion();
+  const cursor = codeEditor.cursorSource();
+  const sketches = previewState.module?.sketches ?? new Map();
+  // A target that evaluates to a sketch opens its 2D editing tool directly; an
+  // edit that moves the caret onto the definition keeps editing the same
+  // instance instead of switching to another instance of that shared source.
+  const sketchId =
+    sketchEditor.editingSketchId(cursor, scope?.target.sourceRef, sketches) ??
+    scope?.evaluation.sketchIds?.[0];
+  if (sourceTargetFocused && previewState.module && settled && sketchId) {
     sketchEditor.select(
-      viewport.inspectedSketchId,
+      sketchId,
       previewState.module.sketches,
       scope.target.sourceRef,
       JSON.stringify([
@@ -2424,15 +2419,7 @@ function syncContextualTool(): void {
       ]),
       previewState.module.objects,
     );
-  } else if (
-    (!sourceTargetFocused ||
-      previewState.sourceVersion === codeEditor.sourceVersion()) &&
-    !sketchEditor.retain(
-      previewState.diagnostic,
-      codeEditor.cursorSource(),
-      previewState.module?.sketches ?? new Map(),
-    )
-  ) {
+  } else if (settled && !sketchEditor.retain(cursor, sketches)) {
     sketchEditor.hide();
   }
   refreshViewportFeedback();

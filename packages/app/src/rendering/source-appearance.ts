@@ -16,6 +16,28 @@ export const sourceContextAppearance = {
   edgeOpacity: 0.28,
 } as const;
 
+/**
+ * The decoration band above model layers: translucent surfaces composite
+ * first, then inspected sketch geometry, bounds marks, glyphs (rings, arrows,
+ * frames), hover marks and topology highlights, so no member of the band is
+ * tinted by a coincident patch and pick feedback stays on top.
+ */
+export const decorationRenderOrder = {
+  contextSketch: -1,
+  surface: 24,
+  sketch: 25,
+  mark: 26,
+  glyph: 27,
+  hover: 28,
+  topology: 29,
+} as const;
+
+/** Sketch geometry keeps the 2D drawing accent instead of the model palette. */
+export const sketchAppearance = {
+  color: '#d8ff3e',
+  opacity: {primary: 1, secondary: 0.7, context: 0.35},
+} as const;
+
 const opacityLimits = {
   primary: {surface: 0.82, line: 1},
   secondary: {surface: 0.4, line: 0.5},
@@ -72,5 +94,31 @@ export function applySourceEmphasis(
         material.depthWrite = false;
       }
     }
+  });
+}
+
+/**
+ * Sketch geometry lies on or inside models, so it composites after the
+ * translucent bodies of its level instead of being dimmed by a face drawn
+ * later; only the weakened context level keeps depth testing.
+ */
+export function applySketchEmphasis(
+  object: THREE.Object3D,
+  emphasis: SourceEmphasis,
+): void {
+  object.traverse(child => {
+    if (!(child instanceof THREE.Line || child instanceof THREE.Points)) return;
+    const material = child.material as
+      THREE.LineBasicMaterial | THREE.PointsMaterial;
+    material.color.set(sketchAppearance.color);
+    material.toneMapped = false;
+    material.transparent = true;
+    material.depthWrite = false;
+    material.depthTest = emphasis === 'context';
+    material.opacity = sketchAppearance.opacity[emphasis];
+    child.renderOrder =
+      emphasis === 'context'
+        ? decorationRenderOrder.contextSketch
+        : decorationRenderOrder.sketch;
   });
 }
