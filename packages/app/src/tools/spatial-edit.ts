@@ -252,7 +252,12 @@ export class SpatialTransformResolver implements ToolIntentResolver {
                             change.method === 'pivot'
                             ? (change.constructor?.name ?? change.method)
                             : change.method
-                          : intent.operation,
+                          : // An origin drag commits by writing originOffset; focus
+                            // the written call so the presented scene shows the
+                            // committed coordinates, not the pre-offset value.
+                            change.kind === 'origin-offset'
+                            ? 'originOffset'
+                            : intent.operation,
                   ),
                 },
               ],

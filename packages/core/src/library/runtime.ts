@@ -227,6 +227,7 @@ type RelateInspectionContext = RelateInspectData &
     owns(value: unknown): boolean;
     poses(
       relation?: RelationExpression,
+      insertion?: number,
     ): ReadonlyMap<RelationObject, RigidTransform>;
   }>;
 
@@ -1992,7 +1993,21 @@ export abstract class RelationObject {
   /** @internal Continuous constraints solve together; transformations cut the ordered prefix. */
   inspectionPoses(
     relation?: RelationExpression,
+    insertion?: number,
   ): ReadonlyMap<RelationObject, RigidTransform> {
+    if (insertion !== undefined) {
+      const placements = this.placements.slice(0, insertion);
+      if (placements.at(-1)?.kind !== 'transformation')
+        while (
+          placements.length < this.placements.length &&
+          this.placements[placements.length].kind !== 'transformation'
+        )
+          placements.push(this.placements[placements.length]);
+      return RelationObject.createSolveContext(
+        [this],
+        new Map([[this, placements]]),
+      ).poses;
+    }
     if (!relation) return RelationObject.createSolveContext([this]).poses;
     const reference = relation.traceReference();
     const id =
@@ -4653,9 +4668,11 @@ export class ModelObject<
     data: RelateInspectionContext,
     focus: unknown,
     values: readonly PreviewValue[],
+    insertion?: number,
   ): InspectResult {
     const poses = data.poses(
       focus instanceof RelationExpression ? focus : undefined,
+      insertion,
     );
     const frame = this.inspectionFrame(poses);
     const selected = values.flatMap<PreviewValue>(value => {
@@ -5695,7 +5712,9 @@ export namespace relate {
     );
     const context: RelateInspectionContext = {
       ...data,
-      poses(relation) {
+      poses(relation, insertion) {
+        if (insertion !== undefined)
+          return data.self.inspectionPoses(undefined, insertion);
         let frame = frames.get(relation);
         if (!frame) {
           frame = data.self.inspectionPoses(relation);
@@ -5730,8 +5749,7 @@ export namespace relate {
             : Set.prototype.values
           ).call(value),
         ];
-        const related =
-          members.length > 0 && members.every(member => owns(member, seen));
+        const related = members.every(member => owns(member, seen));
         seen.delete(value);
         return related;
       }
@@ -5746,9 +5764,9 @@ export namespace relate {
       const members = Object.keys(value).map(key =>
         Object.getOwnPropertyDescriptor(value, key)!,
       );
-      const related =
-        members.length > 0 &&
-        members.every(member => 'value' in member && owns(member.value, seen));
+      const related = members.every(
+        member => 'value' in member && owns(member.value, seen),
+      );
       seen.delete(value);
       return related;
     }
@@ -5797,6 +5815,7 @@ export namespace relate {
       data,
       context.focused.value,
       context.focused.values,
+      context.focused.insertion,
     );
   }
 }

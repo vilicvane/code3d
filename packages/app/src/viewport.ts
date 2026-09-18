@@ -146,6 +146,8 @@ type SourceViewSelection = Readonly<{
   file: string;
   offset: number;
   contextId?: string;
+  /** The resolved target identity when an offset is shared by multiple targets. */
+  sourceRef?: SourceRef;
 }>;
 
 type SelectionGesture = {
@@ -683,6 +685,7 @@ export class ModelViewport {
         source.file,
         source.offset,
         source.contextId,
+        source.sourceRef,
       );
     if (!scene) {
       if (this.module !== module)
@@ -916,6 +919,35 @@ export class ModelViewport {
             depthTest: false,
           },
         });
+      }
+    }
+    // Every iteration of the focused target stays visible as context, each
+    // staged at the focused transformation by its own relation preview.
+    const presentedNodeIds = new Set(
+      [...bodies.values()].map(({model}) => authoredNodeId(model)),
+    );
+    for (const evaluation of scope?.target.evaluations ?? []) {
+      for (const nodeId of evaluation.nodeIds) {
+        if (presentedNodeIds.has(nodeId)) continue;
+        const model = module.objects.get(nodeId);
+        if (!model) continue;
+        presentedNodeIds.add(nodeId);
+        const preview =
+          evaluation.relationPreview?.nodeId === nodeId
+            ? evaluation.relationPreview
+            : undefined;
+        const node = preview ? {...model, ...preview} : model;
+        const targetId = scope!.target.id;
+        const key = `context/${targetId}:${nodeId}`;
+        this.root.add(
+          this.buildContextObject(
+            node,
+            key,
+            targetId,
+            'composition',
+            'context',
+          ),
+        );
       }
     }
     this.selectionEmphasized = focused;
@@ -1182,6 +1214,7 @@ export class ModelViewport {
         file: target.sourceRef.file,
         offset: target.sourceRef.start,
         contextId: evaluation.contextId,
+        sourceRef: target.sourceRef,
       },
     );
     return true;
@@ -1815,13 +1848,15 @@ export class ModelViewport {
     );
     // A call end and a zero-width insertion gap can share one caret. Navigation
     // carries its registered source identity; recompilation retains that choice
-    // through the existing selected source context.
+    // through the existing selected source context. Bare inspector targets only
+    // provide scenes: they never shadow a semantic target reached by identity.
     const preferred = preferredSource
       ? candidates.filter(
-          ({sourceRef}) =>
-            sourceRef.file === preferredSource.file &&
-            sourceRef.start === preferredSource.start &&
-            sourceRef.end === preferredSource.end,
+          target =>
+            target.kind !== 'inspect' &&
+            target.sourceRef.file === preferredSource.file &&
+            target.sourceRef.start === preferredSource.start &&
+            target.sourceRef.end === preferredSource.end,
         )
       : [];
     const atExpressionStart = candidates.some(
@@ -2009,7 +2044,10 @@ export class ModelViewport {
     const scope =
       source && this.module ? contextualToolScope(this.module, source) : source;
     const attach = (bindings: readonly TransformGizmoBinding[]) => {
-      const name = scope?.target.tool?.signature.name;
+      // Operation outputs stand in for their tool when no call-site target was
+      // produced (e.g. an origin operation on a group expression).
+      const name =
+        scope?.target.tool?.signature.name ?? scope?.target.operation?.kind;
       const explicit =
         name &&
         [

@@ -1005,10 +1005,15 @@ const stopRotationReferences = reaction(
     binding: viewport.positionTools.rotationBinding,
     target: viewport.sourceContext?.target.id,
     occurrence: viewport.getSelected()?.key,
+    inspecting: previewState.inspecting,
     modelVersion: previewState.sourceVersion,
     sourceVersion: codeEditor.sourceVersion(),
   }),
-  ({tool, modelVersion, sourceVersion}) => {
+  ({tool, inspecting, modelVersion, sourceVersion}) => {
+    // A source inspection only reads the displayed model; its in-flight window
+    // masks sourceVersion without changing anything. Keep the reference picking
+    // session alive until the inspection commits its own rebuild.
+    if (inspecting) return;
     cancelRotationReferenceSelection();
     if (tool && modelVersion === sourceVersion)
       beginRotationReferenceSelection(tool);
@@ -1019,6 +1024,7 @@ const stopRotationReferences = reaction(
       a.binding === b.binding &&
       a.target === b.target &&
       a.occurrence === b.occurrence &&
+      a.inspecting === b.inspecting &&
       a.modelVersion === b.modelVersion &&
       a.sourceVersion === b.sourceVersion,
   },
@@ -1060,7 +1066,11 @@ const stopViewportStatus = reaction(
   ({status, diagnostic}) => {
     clearTimeout(statusRevealTimer);
     statusRevealTimer = undefined;
-    viewportStatus.hidden = !status.label || status.delay > 0;
+    // The reveal delay only applies when the status is not already visibly
+    // busy; hiding between busy phases would flicker a working indicator.
+    const visiblyBusy =
+      !viewportStatus.hidden && viewportStatus.dataset.state === 'busy';
+    viewportStatus.hidden = !status.label || (status.delay > 0 && !visiblyBusy);
     viewportStatus.dataset.state = status.state;
     viewportStatusLabel.textContent = status.label ?? '';
     viewportStatus.setAttribute('aria-busy', String(status.state === 'busy'));
@@ -1073,7 +1083,7 @@ const stopViewportStatus = reaction(
     viewportStatus.setAttribute('role', navigable ? 'button' : 'status');
     if (navigable) viewportStatus.tabIndex = 0;
     else viewportStatus.removeAttribute('tabindex');
-    if (status.label && status.delay > 0)
+    if (status.label && status.delay > 0 && viewportStatus.hidden)
       statusRevealTimer = setTimeout(() => {
         statusRevealTimer = undefined;
         viewportStatus.hidden = false;
@@ -1190,12 +1200,24 @@ async function inspectSourceSelection(
     contextId: scope?.evaluation.contextId ?? contextId,
     order: scope?.evaluation.runtime.order,
     callId: scope?.evaluation.inspectCallId,
+    relationArray: scope?.target.relationArray
+      ? {
+          array: scope.target.relationArray,
+          gap: scope.target.sourceRef,
+          ownerNodeId: scope.evaluation.relationOwnerNodeId,
+        }
+      : undefined,
   };
   const published = await previewState.inspect(
     () => compiler.inspect(module, selection),
     scene => {
       if (previewState.module !== module) return;
-      viewport.renderInspection(module, scene, selection, selectedKey);
+      viewport.renderInspection(
+        module,
+        scene,
+        {...selection, sourceRef: scope?.target.sourceRef ?? preferredSource},
+        selectedKey,
+      );
       previewState.presented(hasViewportTarget(), viewport.presentedModule);
       updatePresentedSourceSelection();
     },
@@ -1916,11 +1938,14 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       }
     });
     if (cursor) {
+      const previousSource = viewport.sourceContext?.target.sourceRef;
       await inspectSourceSelection(
         nextModule,
         cursor.file,
         cursor.offset,
         selectedKey,
+        preferredEvaluationContextId,
+        previousSource?.end === cursor.offset ? previousSource : undefined,
       );
       if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
     }
@@ -2205,6 +2230,7 @@ function selectCompiledEvaluationContext(
     cursor.offset,
     undefined,
     contextId,
+    scope.target.sourceRef,
   );
   return true;
 }
@@ -2877,6 +2903,9 @@ function syncTopologyReferenceSelectionProvider(
       parameter.multiple,
       selectedIds,
       selection.scope,
+      // Reference picking accompanies the focused tool: keep its gizmo
+      // interactive, as rotation reference picking already does.
+      true,
     );
   } catch (error) {
     showToolIssue(error instanceof Error ? error.message : String(error));

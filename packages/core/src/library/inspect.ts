@@ -162,6 +162,8 @@ export type InspectContext<
     path: readonly (string | number)[];
     values: readonly PreviewValue[];
     solids: readonly SolidModel<{}>[];
+    /** Absolute placement prefix count when the caret is at a relate array gap. */
+    insertion?: number;
   }>;
 }>;
 

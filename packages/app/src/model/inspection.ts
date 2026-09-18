@@ -23,6 +23,13 @@ export type InspectSelection = Readonly<{
   contextId?: string;
   order?: number;
   callId?: string;
+  /** The caret resolved to a relate array insertion gap. */
+  relationArray?: Readonly<{
+    array: SourceRef;
+    gap: SourceRef;
+    /** Loop instances share a contextId; the owner retains the instance. */
+    ownerNodeId?: string;
+  }>;
 }>;
 
 type CallbackGetters = readonly ((() => unknown) | undefined)[];
@@ -68,6 +75,8 @@ type RecordedValue = Readonly<{
   value: unknown;
   call?: InspectExecution;
   closure?: ClosureRecord;
+  /** Absolute placement prefix when this record stands for an array insertion gap. */
+  insertion?: number;
 }>;
 
 /** Raw model values and callable closures never leave their execution Worker. */
@@ -93,6 +102,13 @@ export class InspectionSession {
     private readonly importModule: (path: string) => Promise<ModuleExports>,
     private readonly previewValues: (value: unknown) => readonly PreviewValue[],
     private readonly isSolid: (value: PreviewValue) => value is SolidModel<{}>,
+    private readonly relationArraySites: readonly Readonly<{
+      sourceRef: SourceRef;
+      gaps: readonly SourceRef[];
+    }>[] = [],
+    private readonly relationArrayOwner?: (
+      callReturn: unknown,
+    ) => string | undefined,
   ) {}
 
   enter(
@@ -295,7 +311,7 @@ export class InspectionSession {
     selection: InspectSelection,
   ): Promise<InspectedValues | undefined> {
     if (this.disposed) return;
-    const focus = this.focus(selection);
+    const focus = this.gapFocus(selection) ?? this.focus(selection);
     if (!focus) return;
     const selected = (result: InspectResult): InspectedValues => ({
       ...result,
@@ -437,6 +453,54 @@ export class InspectionSession {
       )[0];
   }
 
+  /** An insertion gap focuses its array value with the preceding element count. */
+  private gapFocus(selection: InspectSelection): RecordedValue | undefined {
+    const relationArray = selection.relationArray;
+    if (!relationArray) return undefined;
+    const site = this.relationArraySites.find(
+      site =>
+        site.sourceRef.file === relationArray.array.file &&
+        site.sourceRef.start === relationArray.array.start &&
+        site.sourceRef.end === relationArray.array.end,
+    );
+    const index = site?.gaps.findIndex(
+      gap =>
+        gap.file === relationArray.gap.file &&
+        gap.start === relationArray.gap.start &&
+        gap.end === relationArray.gap.end,
+    );
+    if (!site || index === undefined || index < 0) return undefined;
+    let records = this.values.filter(
+      value =>
+        Array.isArray(value.value) &&
+        value.sourceRef.file === site.sourceRef.file &&
+        value.sourceRef.start === site.sourceRef.start &&
+        value.sourceRef.end === site.sourceRef.end &&
+        (!selection.callId || belongsToCall(value.call, selection.callId)) &&
+        (!selection.contextId || value.contextId === selection.contextId),
+    );
+    const ownerNodeId = relationArray.ownerNodeId;
+    if (ownerNodeId && this.relationArrayOwner) {
+      const owned = records.filter(
+        record =>
+          this.relationArrayOwner!(record.closure?.call.return) === ownerNodeId,
+      );
+      if (owned.length) records = owned;
+    }
+    const record = records.sort(
+      (a, b) =>
+        Number(b.order === selection.order) -
+          Number(a.order === selection.order) || b.order - a.order,
+    )[0];
+    if (!record) return undefined;
+    // The recorded array length anchors the site to this evaluation, keeping
+    // the prefix right for derived values whose array prepends extra elements.
+    const insertion =
+      (record.value as readonly unknown[]).length -
+      (site.gaps.length - 1 - index);
+    return {...record, insertion};
+  }
+
   private focusedParameter(
     site: InspectCallSite,
     call: InspectExecution,
@@ -532,6 +596,7 @@ export class InspectionSession {
           solids: values.filter(this.isSolid),
           parameter,
           path,
+          insertion: focus.insertion,
         },
       };
       if (this.disposed) return;
