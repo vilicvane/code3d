@@ -154,6 +154,8 @@ export type ToolCommitResult =
 
 export type ToolCommitOptions = Readonly<{
   undoGroup?: string;
+  /** Keep the source caret where it is instead of focusing the committed call. */
+  preserveCursor?: boolean;
 }>;
 
 export interface ToolHost {

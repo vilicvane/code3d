@@ -174,28 +174,7 @@ export class SketchEditorController {
     );
   }
 
-  /** The instance the caret still edits: the active sketch while the caret
-   * target spans that sketch's own definition, even when the target names
-   * another instance of the same source, such as the plain value behind a
-   * related sketch. Selection elsewhere retargets as usual.
-   */
-  editingSketchId(
-    cursor: {file: string; offset: number} | undefined,
-    target: SourceRef | undefined,
-    sketches: ReadonlyMap<string, CompiledSketch>,
-  ): string | undefined {
-    const active = this.active;
-    const source = this.sketchSource();
-    if (!active || !sketches.has(active.id) || !source) return undefined;
-    return this.withinSource(cursor, source) || this.spansSource(target, source)
-      ? active.id
-      : undefined;
-  }
-
-  /** The call that authors this sketch, used to decide whether the caret still
-   * edits it; the definition alone excludes the callee identifier the editor
-   * leaves the caret on after a commit.
-   */
+  /** The authored call of the sketch being edited, rebased to current source. */
   private sketchSource(): SourceRef | undefined {
     const ref =
       this.sourceRange ?? this.active?.callRef ?? this.active?.definitionRef;
@@ -211,18 +190,6 @@ export class SketchEditorController {
       cursor.file === source.file &&
       cursor.offset >= source.start &&
       cursor.offset <= source.end
-    );
-  }
-
-  private spansSource(
-    target: SourceRef | undefined,
-    source: SourceRef,
-  ): boolean {
-    return (
-      !!target &&
-      target.file === source.file &&
-      target.start <= source.start &&
-      target.end >= source.end
     );
   }
 
@@ -246,8 +213,18 @@ export class SketchEditorController {
     cursor: {file: string; offset: number} | undefined,
     sketches: ReadonlyMap<string, CompiledSketch>,
   ): boolean {
+    const memorized = this.sourceLayers.at(-1);
+    if (!memorized) return false;
     const source = this.sketchSource();
-    if (!source || !this.withinSource(cursor, source)) return false;
+    const selection =
+      this.selectionRef && this.host.resolveSourceRef(this.selectionRef);
+    if (
+      (!source || !this.withinSource(cursor, source)) &&
+      (!selection || !this.withinSource(cursor, selection))
+    )
+      return false;
+    // A compilation that still provides this sketch lets the caret drive.
+    if (sketches.has(memorized.id)) return false;
     this.sourceLayers = this.sourceLayers.map(layer => ({
       ...layer,
       definitionRef:

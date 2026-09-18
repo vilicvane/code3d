@@ -877,13 +877,18 @@ kbd {
 
 .monaco-editor .code3d-context-word {
   background: #d8ff3e1a;
-  outline: 1px solid #d8ff3e44;
-  border-radius: 2px;
+  /* 22px line box: the 17px inline box plus 2.5px above and below. */
+  padding: 2.5px 0;
 }
 
+/* The static caret mirrors the native one: full line height, no layout width. */
 .monaco-editor .code3d-context-caret {
+  position: relative;
+  left: 2px;
   border-left: 2px solid #d8ff3ecc;
-  margin-left: -1px;
+  /* Keep the border out of the text flow without moving where it is drawn. */
+  margin-left: -2px;
+  padding: 2.5px 0;
 }
 
 .code3d-active-tool-source {

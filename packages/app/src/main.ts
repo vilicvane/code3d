@@ -928,7 +928,9 @@ const sketchEditor = new SketchEditorController(viewportHost, {
     return current && codeEditor.readSource(current);
   },
   commit: intent =>
-    commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
+    commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent, {
+      preserveCursor: true,
+    }),
 });
 const spatialToolbar = new SpatialToolbar(
   viewportToolStack,
@@ -942,17 +944,16 @@ const spatialToolbar = new SpatialToolbar(
       const module = previewState.module;
       if (!scope || !module) return false;
       const tools = viewport.positionTools;
-      const selection = codeEditor.activateSourceTool(
-        contextualToolActivation(
-          module,
-          scope,
-          tool,
-          tools.toolBinding ?? tools.rotationBinding,
-        ),
+      const activationRef = contextualToolActivation(
+        module,
+        scope,
+        tool,
+        tools.toolBinding ?? tools.rotationBinding,
       );
+      const selection = codeEditor.activateSourceTool(activationRef);
       if (!selection) return false;
       pendingAgentFollow = undefined;
-      return inspectSourceSelection(
+      const presented = await inspectSourceSelection(
         module,
         selection.file,
         selection.offset,
@@ -960,21 +961,27 @@ const spatialToolbar = new SpatialToolbar(
         preferredEvaluationContextId,
         selection.sourceRef,
       );
+      return presented;
     },
   },
 );
 viewportToolStack.prepend(spatialToolbar.root);
-codeEditor.observeSourceContext(() => {
-  const scope = viewport.sourceContext;
-  const module = previewState.module;
-  if (!scope || !module || sketchEditor.hasTarget) return;
-  const tools = viewport.positionTools;
-  const tool = contextualToolSource(module, scope.target, tools.tool);
-  return {
-    tool,
-    caretOnly: !!scope.target.relationArray,
-  };
-});
+codeEditor.observeSourceContext(
+  () => {
+    const scope = viewport.sourceContext;
+    const module = previewState.module;
+    if (!scope || !module || sketchEditor.hasTarget) return;
+    const tools = viewport.positionTools;
+    const tool = contextualToolSource(module, scope.target, tools.tool);
+    return {
+      tool,
+      caretOnly: !!scope.target.relationArray,
+    };
+  },
+  // A sketch keeps its blurred caret and word box without marking the whole
+  // call, and the marks stay decorative: they never reach source edits.
+  () => (sketchEditor.hasTarget ? {tool: [], caretOnly: false} : undefined),
+);
 const stopContextualTool = reaction(
   () => ({
     context: viewport.sourceContext,
@@ -2054,7 +2061,9 @@ function refreshViewportFeedback(): void {
         return;
       }
       if (
-        commitToolSession(toolEngine.begin('diagnostic-fix'), action.intent)
+        commitToolSession(toolEngine.begin('diagnostic-fix'), action.intent, {
+          preserveCursor: action.intent.kind === 'sketch.edit',
+        })
       ) {
         refreshViewportFeedback();
       }
@@ -2431,9 +2440,7 @@ function syncContextualTool(): void {
   // A target that evaluates to a sketch opens its 2D editing tool directly; an
   // edit that moves the caret onto the definition keeps editing the same
   // instance instead of switching to another instance of that shared source.
-  const sketchId =
-    sketchEditor.editingSketchId(cursor, scope?.target.sourceRef, sketches) ??
-    scope?.evaluation.sketchIds?.[0];
+  const sketchId = scope?.evaluation.sketchIds?.[0];
   if (sourceTargetFocused && previewState.module && settled && sketchId) {
     sketchEditor.select(
       sketchId,
