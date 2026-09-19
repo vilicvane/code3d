@@ -26,6 +26,7 @@ import {
 import {sourceTokenOffset} from '../render-samples/source-focus.ts';
 
 const expectedSolids: Record<string, readonly [string, number]> = {
+  'gear-studies.ts': ['default', 5],
   'iso-screws.ts': ['default', 10],
   'gb-screws.ts': ['default', 10],
   'projects/phone-stand.ts': ['default', 1],

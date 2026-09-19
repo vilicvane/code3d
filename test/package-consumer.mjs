@@ -11,6 +11,7 @@ import * as nativeReplicad from 'replicad';
 import * as layout from '@code3d/layout';
 import * as materials from '@code3d/materials';
 import * as screws from '@code3d/screws';
+import * as gears from '@code3d/gears';
 import * as ISO4762 from '@code3d/screws/iso4762';
 import * as ISO10642 from '@code3d/screws/iso10642';
 import * as ISO14583 from '@code3d/screws/iso14583';
@@ -46,6 +47,7 @@ for (const specifier of ['@code3d/opencascade/wasm', '@code3d/solver/wasm']) {
 for (const specifier of [
   '@code3d/core/bld/library/runtime.js',
   '@code3d/screws/bld/library/thread.js',
+  '@code3d/gears/bld/library/tooth-solid.js',
 ])
   await assert.rejects(import(specifier), {
     code: 'ERR_PACKAGE_PATH_NOT_EXPORTED',
@@ -162,6 +164,12 @@ try {
     GB70_3.clearanceHole('M3', {depth: 8, countersink: {diameter: 8}}),
     GB5281.screw(6.5, 10),
     GB5281.clearanceHole(6.5, {depth: 8, counterbore: true}),
+    gears.spurGear({
+      module: 1,
+      teeth: 18,
+      faceWidth: 5,
+      mounting: {kind: 'bore', diameter: 4},
+    }),
   );
   const snapshot = tooling.createModelSnapshotter();
   for (const shape of shapes) {
@@ -173,7 +181,7 @@ try {
   }
   assert.ok(tooling.kernelOperationCacheStats().persistentWrites > 0);
   console.log(
-    'Installed Node/browser/tooling share state; text topology, extrusion, Layout and Screws evaluate successfully.',
+    'Installed Node/browser/tooling share state; text topology, extrusion, Layout, Screws and Gears evaluate successfully.',
   );
 } finally {
   tooling.disposeModelObjects(shapes);

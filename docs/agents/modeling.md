@@ -35,6 +35,7 @@ task benefits from several forms of evidence.
 | Arrange collections with Flex/Grid or fill target bounds           | [Layout README](../../packages/layout/README.md)                                                                                                                          |
 | Add realistic material presets                                     | [Materials README](../../packages/materials/README.md)                                                                                                                    |
 | Add standard fasteners or matching holes                           | [Screws README](../../packages/screws/README.md)                                                                                                                          |
+| Build spur, helical or internal gear parts                         | [Gears README](../../packages/gears/README.md) and [gear API](../../packages/gears/docs/api.md)                                                                           |
 | Reuse a parametric design or expose editing controls               | [Reusable models](../../packages/web/src/content/docs/docs/guides/reusable-models.mdx) and [model tools](../../packages/web/src/content/docs/docs/guides/model-tools.mdx) |
 | Extend the modeling runtime                                        | [Custom primitives](../../packages/core/docs/custom-primitives.mdx)                                                                                                       |
 

@@ -81,6 +81,17 @@ The pilot bores omit internal thread geometry. Follow the [Screws README](../../
 example directory and choose **Reload folder**; the App does not run npm for you.
 Node-only packages, install scripts and npm workspaces are not browser features.
 
+## Build complete gear parts
+
+<ModelExample id="gear-studies" />
+
+The five models call the public `@code3d/gears` constructors for straight,
+helical and internal teeth. Compare a plain bore, keyed hub, integral shaft,
+helical hub and bolted ring, then change the tooth and mounting parameters in
+the source. Read the [Gears API](../../packages/gears/api.md) for the normal
+module, local axis and standard-reference rules. These are nominal solids for
+layout and visualization, without manufactured tolerance or gear-pair checks.
+
 ## Inspect operation inputs
 
 <ModelExample id="intersect" />

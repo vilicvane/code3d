@@ -253,7 +253,7 @@ context. Browser storage remains available when folder access is unsupported.
 
 You can start without installing packages. When the model’s package scope and its ancestors do
 not declare `@code3d/core` (or there is no `package.json`), the App provides
-built-in `@code3d/core`, `@code3d/layout`, `@code3d/screws` and `@code3d/materials`, with matching
+built-in `@code3d/core`, `@code3d/layout`, `@code3d/screws`, `@code3d/gears` and `@code3d/materials`, with matching
 editor types.
 The built-in modeling packages remain available without declaring them.
 Declaring your own modeling runtime requires those packages to be available in
@@ -261,7 +261,7 @@ the npm registry (browser storage) or already installed (local folders).
 
 Declaring `@code3d/core` in `dependencies`, `devDependencies`, `peerDependencies`
 or `optionalDependencies` switches the complete modeling runtime to your
-project's installed packages. Install `@code3d/layout`, `@code3d/screws` or
+project's installed packages. Install `@code3d/layout`, `@code3d/screws`, `@code3d/gears` or
 `@code3d/materials` too if your model imports them. Missing declared packages produce an error; the App does not silently use
 its built-in copies. Choose **Reload folder** after external dependency changes.
 

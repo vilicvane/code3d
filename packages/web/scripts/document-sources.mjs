@@ -4,7 +4,13 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 export const repository = fileURLToPath(new URL('../../../', import.meta.url));
-export const featuredPackages = ['core', 'layout', 'materials', 'screws'];
+export const featuredPackages = [
+  'core',
+  'layout',
+  'materials',
+  'screws',
+  'gears',
+];
 export const contentRoot = 'packages/web/src/content/docs/docs/';
 export const websiteDocumentPatterns = [
   `${contentRoot}**/*.{md,mdx}`,

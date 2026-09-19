@@ -9,7 +9,7 @@ const sourcePath = filename => {
   if (!filename.startsWith(packages)) return;
   const relative = filename.slice(packages.length).split(path.sep).join('/');
   const match =
-    /^(core|layout|materials|screws|agent|cli)\/(bld|src)\/(.+)\.[jt]s$/.exec(
+    /^(core|gears|layout|materials|screws|agent|cli)\/(bld|src)\/(.+)\.[jt]s$/.exec(
       relative,
     );
   if (!match) return;
