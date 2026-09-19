@@ -5,6 +5,10 @@ sidebar:
   order: 2
 ---
 
+Build models from reusable values, then measure their geometry or relative
+placement. Queries return ordinary numbers and vectors; modeling operations
+return new model values.
+
 ## Model values and coordinates
 
 Operations produce new model values. Building another result must not change an
@@ -22,27 +26,10 @@ angles use degrees. Read [local coordinates](local-coordinates.md)
 and [relations](relations.mdx) before mixing
 origin changes, alignment, and rotation.
 
-Constraints express `on` and `align` only. Put relative `offset` and `rotate`
-transformations in the `relate` array after the constraints. Zero values add no
-centering or orientation condition; use point or axis alignment to center a part.
-The App's gizmos edit or insert independent array entries.
-
-Choose a
-center with `pivot([x,y,z])`, self topology with `pivotVertex(id)`/`axisEdge(id)`,
-or references with `pivotPoint(pointRef)`/`axisLine(lineRef)`; finish each selector
-with `rotate`. Point rotations retain self XYZ axes, including external centers. Consecutive constraints solve jointly; transformations
-then act on that result in order. A later constraint starts a new segment using
-the preceding pose. Independent offsets use fixed composition axes, and rotations
-default to self's current origin. Each completed transformation is one array item,
-for example `[offset(0, 8, 0), rotate(0, 25, 0)]`. Only pivot/axis selections
-chain into `rotate`; completed transformations cannot chain into another operation.
-Keep a selected reference while moving it with
-`pivotVertex(id).pivotOffset(dx, dy, dz).rotate(x, y, z)` or
-`axisLine(axis).axisOffset(dx, dy, dz).rotate(angle)`. Point offsets use self local
-axes; axis offsets use the selected axis frame and preserve its direction.
-Each selector accepts one matching offset, followed by `rotate`.
-See the [transformation example](../../app/examples/constraints/transformations.ts)
-and [placement guide](relations.mdx#transform-a-joint-result).
+Constraints express `on` and `align`; relative `offset` and `rotate` operations
+follow them as separate items in the `relate` array. For pivots, reference axes
+and operation order, see the [placement guide](relations.mdx#transform-a-joint-result)
+and [transformation example](../../app/examples/constraints/transformations.ts).
 
 Build readable models from named intermediate values and public operations. A
 profile followed by extrusion, or solids combined with Boolean operations,
@@ -62,6 +49,20 @@ and the [fitted beam example](../../app/examples/operations/distance.ts). They c
 finite geometry, nested occurrences, axis frames and source-order dependencies.
 
 ## Geometry measurements
+
+Read a model's dimensions in its own frame, or query its bounds and position
+relative to another model:
+
+```ts
+import {box, group, offset} from '@code3d/core';
+
+const base = box(20, 4, 20);
+const part = box(8, 12, 4).relate(self => [self.on(base.up), offset(20, 0, 0)]);
+const size = part.bounds().size; // [8, 12, 4]
+const origin = part.position(base); // [20, 8, 0]
+const minimum = part.bounds(base).minimum; // [16, 2, -2]
+export default group([base, part]);
+```
 
 Finite edges and edge models provide readonly `.length`; finite surfaces and
 face models provide `.area`. Solids provide `.area` for their total boundary
@@ -85,16 +86,7 @@ changes the model or its placement. These methods are available on every model
 kind, including groups. As model members, `bounds` and `position` are reserved
 names and cannot be used as exposed element names.
 
-```ts
-import {box, group, offset} from '@code3d/core';
-
-const base = box(20, 4, 20);
-const part = box(8, 12, 4).relate(self => [self.on(base.up), offset(20, 0, 0)]);
-const size = part.bounds().size; // [8, 12, 4]
-const origin = part.position(base); // [20, 8, 0]
-const minimum = part.bounds(base).minimum; // [16, 2, -2]
-export default group([base, part]);
-```
+## Editing incomplete calls
 
 Dimension-based primitives and numeric modeling methods retain required TypeScript
 signatures while providing runtime defaults for omitted or `undefined` values.
@@ -110,6 +102,8 @@ for example, dragging the X ring of `rotate()` writes `rotate(angle, 0, 0)`. The
 edit and completion share one undo step. Use explicit dimensions in finished
 models; the [reference](api.md#runtime-defaults-while-editing)
 lists the actual defaults.
+
+## Composition and topology
 
 Topology capabilities follow dimension: vertices expose vertex selection, edges
 add edge selection, and faces and solids add surface selection. Only solids

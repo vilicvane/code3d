@@ -88,6 +88,52 @@ copied prompt → entry → topic → package README → source or complete exam
 The website build checks published Markdown alongside HTML links and anchors.
 See the [project documentation maintenance rules](../../.agents/skills/code3d-prototyping/SKILL.md#documentation).
 
+## Package documentation style
+
+Featured package READMEs use a plain `# @code3d/<name>` title and a one- or
+two-sentence introduction, followed by these sections in this order:
+
+1. **Installation**: the npm command for the package and its required peers,
+   such as Core, plus built-in App availability. Do not include example-only
+   dependencies in this section.
+2. **Example**: a short goal, TypeScript code, its image, a result or interaction
+   explanation, and a `Complete example:` source link. Explain and install any
+   example-only dependencies here, before the TypeScript code. Keep code before images.
+3. **Usage notes**: concise units, essential conventions and modeling limits.
+   Link to detailed semantics instead of expanding the reference here.
+4. **Documentation**: a list of links, each followed by a short description.
+5. **Source and development**: source, tests and the shared development guide,
+   using the same link-list format. Keep contributor details at the end.
+
+Write for model authors. Use short paragraphs, consistent API spelling in code
+formatting, and descriptions of what the reader can do or see. Captions explain
+the result or the next interaction, not how a maintainer produced the screenshot.
+Keep installation in its own section and avoid repeating catalogs or commands
+in several places.
+
+Detailed reference pages introduce the purpose, show an example, then explain
+parameters, behavior and relevant limits. Use tables for option catalogs and
+links for deeper topics. Tutorials retain their task-oriented steps rather than
+copying the reference outline. Existing `ModelExample` components show source,
+image and caption in that order; their Markdown form retains executable source
+and the App link. Do not copy models or technical prose into a second website
+document. Preserve useful anchors and update incoming links when headings change.
+
+Package screenshots use ordinary Markdown images pointing to the existing
+`src/assets/models/` files, with descriptive alt text and a link to the executable
+example. Match the code's dimensions and operations to at least one object in the
+picture. Prefer isolated layout examples and equal-size material samples over
+unrelated assemblies. Capture materials in Render mode; select the final material
+call for finished threaded parts to avoid inspection transparency. Core
+interaction illustrations capture the actual App viewport with its gizmo and
+tool panel, not just exported model geometry. Add missing render subjects to the
+shared App catalog rather than copying models into the docs.
+
+HTML leaves local image paths to Astro's image pipeline; plain Markdown publishes
+raw repository image URLs at the source commit. The Markdown tests check overview
+section order, code/image order and canonical examples; the site validator checks
+rendered example order, links, anchors and assets.
+
 ## Content
 
 - User documentation: `src/content/docs/docs/` (the inner directory is the
@@ -120,6 +166,12 @@ See the [project documentation maintenance rules](../../.agents/skills/code3d-pr
   for thin parts or assemblies whose working details need a particular angle.
   The renderer retains the full source context even when identical
   method calls occur elsewhere in the file.
+  Optional `mode: 'render'` selects surface rendering for material comparisons;
+  other samples keep the modeling view. App UI captures such as
+  `core-relate-tools.png` are taken separately from the actual App: open
+  `constraints/relate.ts`, select `rotate(0, 0, 25)` and capture the viewport pane
+  with its rotation gizmo and parameter panel visible. Update that capture when
+  its example or UI changes; the geometry-only renderer does not replace it.
 - Generated model images: `src/assets/models/`. Regenerate after changing
   examples, source contexts, or the renderer; CI regenerates them on every build.
 - Site identity and URL helpers: `src/lib/site.ts`.
@@ -192,6 +244,10 @@ Set `CODE3D_SITE_URL` to the public site URL for production, for example
 `https://example.com/` or `https://example.com/code3d/`. It sets canonical URLs,
 sitemap origin, and the optional deployment base path. Use the same value for
 build and preview. Without it, local builds omit origin-specific metadata.
+With it, the build also validates `sitemap-index.xml`, full public HTML page
+coverage and the sitemap declaration in `robots.txt`. Markdown counterparts and
+the 404 page are not indexed separately; the copied App is outside Astro's page
+catalog.
 
 Astro's checker uses the website's TypeScript 6 compiler for its whole process.
 This isolates the JavaScript compiler API required by Volar from the repository's

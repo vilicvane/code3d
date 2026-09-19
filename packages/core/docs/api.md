@@ -5,6 +5,9 @@ sidebar:
   order: 1
 ---
 
+Construct geometry, combine models and query the result with the public Core
+API. For a first runnable model, see the [Core example](../README.md#example).
+
 Import these functions from `@code3d/core`. The editor's TypeScript signatures
 provide exact overloads and inferred model interfaces.
 

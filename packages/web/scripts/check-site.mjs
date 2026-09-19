@@ -111,6 +111,17 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
     const attributes = Object.fromEntries(
       (node.attrs || []).map(a => [a.name, a.value]),
     );
+    if (attributes.class?.split(/\s+/).includes('model-example')) {
+      const order = [];
+      walk(node, child => {
+        if (['source-code', 'img', 'figcaption'].includes(child.tagName))
+          order.push(child.tagName);
+      });
+      if (order.join(',') !== 'source-code,img,figcaption')
+        issues.push(
+          `${file}: model examples must show code, image, then caption`,
+        );
+    }
     if (node.nodeName === '#text' && /[\u2196-\u2199]/u.test(node.value)) {
       issues.push(`${file}: diagonal arrows must use SVG, not Unicode glyphs`);
     }
@@ -177,6 +188,14 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
       }
     }
     if (attributes.src) references.push(attributes.src);
+    if (
+      node.tagName === 'img' &&
+      /^https:\/\/github\.com\/[^/]+\/[^/]+\/blob\//.test(attributes.src || '')
+    ) {
+      issues.push(
+        `${file}: image points to a GitHub file viewer: ${attributes.src}`,
+      );
+    }
     if (node.tagName === 'meta' && attributes.property === 'og:image')
       references.push(attributes.content);
     if (attributes.srcset)
@@ -318,6 +337,49 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
       );
   }
   pages.set(route, {ids, references, file});
+}
+
+if (process.env.CODE3D_SITE_URL) {
+  const locations = xml =>
+    [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match => match[1]);
+  const index = await readFile(
+    path.join(directory, 'sitemap-index.xml'),
+    'utf8',
+  );
+  const sitemaps = locations(index);
+  assert.ok(sitemaps.length, 'Sitemap index must list at least one sitemap');
+  const urls = [];
+  for (const location of sitemaps) {
+    const url = new URL(location);
+    assert.equal(
+      url.origin,
+      site.origin,
+      'Sitemap must use the configured origin',
+    );
+    assert.ok(
+      url.pathname.startsWith(base + '/'),
+      'Sitemap must stay within the site base',
+    );
+    const xml = await readFile(
+      path.join(directory, url.pathname.slice(base.length)),
+      'utf8',
+    );
+    urls.push(...locations(xml));
+  }
+  assert.deepEqual(
+    urls.sort(),
+    [...pages]
+      .filter(([, page]) => page.file.endsWith('index.html'))
+      .map(([route]) => site.origin + base + route)
+      .sort(),
+    'Sitemap must cover every public HTML page, without Markdown duplicates or the 404 page',
+  );
+  const robots = await readFile(path.join(directory, 'robots.txt'), 'utf8');
+  assert.deepEqual(
+    robots.split('\n').filter(line => line.startsWith('Sitemap:')),
+    [`Sitemap: ${site.origin}${base}/sitemap-index.xml`],
+    'robots.txt must advertise the configured sitemap index',
+  );
 }
 
 for (const [route, page] of pages) {

@@ -74,7 +74,8 @@ npm 发布版本、依赖版本和防止覆盖修改的内容修订号不属于�
 - 建模 agent 文档保持两层：入口是必读的最小可执行工作流，读完能连接、获取现场上下文、读取和修改文件、观察结果；[专题](../../../docs/agents/) 展开具体功能、高级用法和异常恢复。入口列出完整专题目录，并简要介绍对建模有用的包；不罗列全部 workspace 或底层依赖。专题按任务需要互相链接。
 - agent 文档与包 README 的相对链接指向真实仓库文件。通过 [网站 Markdown 发布器](../../../packages/web/scripts/markdown-documents.mjs) 映射为可直接读取的相对 Markdown 链接或对应提交的源码链接；发布产物在提交后构建并确保该提交已推送。技术指南与可执行示例共用现有源文件，不手工维护第二份镜像。新增 MDX 组件时同时提供它的纯 Markdown 表达。
 - 主推包维护 `README.md` 概览 + `docs/` 详细文档两级来源：README 提供安装、最小示例、文档目录和源码入口，详细页保留 API 语义、参数、约束和实际用例，支持直接阅读与搜索收录，不再仅依赖 AI/agent 自读源码。网站 `Packages` 按完整 npm 包名分组，HTML 与纯 Markdown 共用包内来源；当前版本读取包 `package.json`，不维护多版本文档。包内 `docs/` 随 npm 包发布，新增或调整公开能力时同步对应文档。
-- 网站 packages 文档只发布少数主推建模包，当前为 Core、Layout、Materials、Screws，由发布器的 `featuredPackages` 显式选择。底层包让 agent 沿 `package.json` 依赖在 GitHub 或已安装的 `node_modules` 中查阅 README，不自动镜像或加入入口目录。
+- 网站 packages 文档只发布由发布器 `featuredPackages` 显式选择的主推建模包，不在技能中维护第二份包名单。底层包让 agent 沿 `package.json` 依赖在 GitHub 或已安装的 `node_modules` 中查阅 README，不自动镜像或加入入口目录。
+- 主推包的概览顺序、详细页组织与图文风格遵循 [Web 文档风格约定](../../../packages/web/README.md#package-documentation-style)，同步包内来源、HTML 与纯 Markdown；不在各包另建一套写作规则。
 - 所有自维护包（含 private App/Web）仍提供人和 agent 共用的 README：说明职责、适用入口、最小示例或启动方式，并链接公共类型、源码、测试和完整示例。包的使用说明与内部架构各按职责维护，README 将贡献者引向相关内部专题和代码，不重复维护完整架构或另建 agent 专用包 README。内部文档及研究记录沿仓库链接查阅，不因 README 引用而自动发布到网站。
 - 修改 agent 操作、连接、配置或公开建模 API 时，在同一任务更新受影响专题、示例、包 README 与入口目录。只有必读规则或首次可执行流程改变时才增加入口内容；高级细节保留在专题。文档描述唯一现行语义，不保留旧命令或兼容路线。
 - App 复制的初始和更新 prompt 只提供任务/身份、私有配置、必读 Markdown 入口和最小 CLI 包选择（显式 `@latest`）。默认 agent 先读文档，服务启动、获取实时上下文的演示及操作规则统一放在入口和专题中，不在 prompt 重复，也不把现场上下文固化进 prompt。

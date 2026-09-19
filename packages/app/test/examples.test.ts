@@ -43,6 +43,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/area.ts': ['default', 1],
   'operations/volume.ts': ['default', 2],
   'materials.ts': ['plain', 1],
+  'material-presets.ts': ['default', 10],
   'text.ts': ['lettering', 4],
   'operations/rotate.ts': ['default', 1],
   'operations/revolve.ts': ['default', 1],
