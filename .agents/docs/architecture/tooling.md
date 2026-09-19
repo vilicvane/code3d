@@ -528,3 +528,17 @@ AgentRenderView 观察 activeAgentIds，在本次视图生命周期首次有活�
 记录 connectedThisSession。持久化历史加载不会自行显示小窗；连接激活后断连
 不清除此事实，页面刷新则重新开始。该会话事实与用户关闭小窗的 dismissedFrames
 独立，连接本身不会取消用户关闭选择，历史图像与筛选/时间轴位置也不受断连影响。
+
+## Getter 属性观察
+
+`@code3d.inspect callback` 同时用于 getter 和包的公开 readonly 属性声明。
+TypeChecker 按属性符号查注释；普通属性读取仍走现有元素 trace，带注释的读取
+与调用共用 InspectionSession 的独立执行记录。receiver 和 getter 仅求值一次，
+选择时用空参数 tuple、记录的 return 和 captureInspectData 调用 inspector。
+本地 getter 在实际进入时保存词法回调绑定；不读取 descriptor 或重新运行 getter
+来获取绑定。可选链的 guard 先执行，只有到达的属性读取才登记 invocation。
+Worker 记录与序列化快照沿原有生命周期，视图继续消费现有响应式 inspection 状态。
+
+Core 的 length / area / volume 使用相同机制；曲边、面积及体积标注使用 dimension 的 at 位置
+形式，只画稳定屏幕尺寸的读数，被测几何仍由 target 中的有限参考或模型展示。
+不把曲边端点之间的弦长当成弧长，也不从相等数值推断测量来源。

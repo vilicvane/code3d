@@ -14,6 +14,9 @@ import {
   makeSphere,
   makeThreePointArc,
   makeVertex,
+  measureShapeLinearProperties,
+  measureShapeSurfaceProperties,
+  measureShapeVolumeProperties,
   sketchCircle,
   sketchEllipse,
   sketchPolysides,
@@ -853,8 +856,33 @@ export interface Vertex
   readonly id: VertexId;
 }
 
+interface LengthMeasurement {
+  /** Actual arc length of this finite edge.
+   * @code3d.inspect inspectLength
+   */
+  readonly length: number;
+}
+
+interface AreaMeasurement {
+  /** Finite surface area; solids include all boundary faces.
+   * @code3d.inspect inspectArea
+   */
+  readonly area: number;
+}
+
+interface VolumeMeasurement {
+  /** Volume occupied by the solid, excluding cavities.
+   * @code3d.inspect inspectVolume
+   */
+  readonly volume: number;
+}
+
 export interface Edge
-  extends LineAnchor, GeometryQueryCapabilities, EdgeTopologyCapabilities {
+  extends
+    LineAnchor,
+    GeometryQueryCapabilities,
+    EdgeTopologyCapabilities,
+    LengthMeasurement {
   readonly kind: 'edge';
   readonly id: EdgeId;
   readonly start: PointAnchor;
@@ -863,7 +891,11 @@ export interface Edge
 }
 
 export interface Surface
-  extends FaceAnchor, GeometryQueryCapabilities, SurfaceTopologyCapabilities {
+  extends
+    FaceAnchor,
+    GeometryQueryCapabilities,
+    SurfaceTopologyCapabilities,
+    AreaMeasurement {
   readonly kind: 'surface';
   readonly id: SurfaceId;
 }
@@ -872,7 +904,9 @@ export interface Solid
   extends
     Anchor<'frame'>,
     GeometryQueryCapabilities,
-    SurfaceTopologyCapabilities {
+    SurfaceTopologyCapabilities,
+    AreaMeasurement,
+    VolumeMeasurement {
   readonly kind: 'solid';
 }
 
@@ -1101,12 +1135,14 @@ export type VertexModel<Elements extends NamedElements = {}> =
 export type EdgeModel<Elements extends NamedElements = CurveElements> =
   ModelCapabilities<Elements, 'edge'> &
     GeometryCapabilities<Elements, 'edge'> &
-    EdgeTopologyCapabilities & {reverse(): Edge} & Elements;
+    EdgeTopologyCapabilities &
+    LengthMeasurement & {reverse(): Edge} & Elements;
 
 export type FaceModel<Elements extends NamedElements = PlanarElements> =
   ModelCapabilities<Elements, 'face'> &
     GeometryCapabilities<Elements, 'face'> &
-    SurfaceTopologyCapabilities & {
+    SurfaceTopologyCapabilities &
+    AreaMeasurement & {
       flip(): Surface;
       /**
        * Extrudes along the face's local plane normal. Signed distance; no recentering.
@@ -1142,6 +1178,8 @@ export type SolidModel<Elements extends NamedElements = CanonicalElements> =
     GeometryCapabilities<Elements, 'solid'> &
     SurfaceTopologyCapabilities &
     SolidModificationCapabilities<Elements> &
+    AreaMeasurement &
+    VolumeMeasurement &
     Elements;
 
 type RuntimeModel<
@@ -1281,6 +1319,21 @@ class ModelTopologyElement extends ModelAnchor {
       'center',
       topologyCenter(geometry, this.#topology.selection),
     );
+  }
+
+  /** @code3d.inspect inspectLength */
+  get length(): number {
+    return measureFiniteGeometry(this, 'length');
+  }
+
+  /** @code3d.inspect inspectArea */
+  get area(): number {
+    return measureFiniteGeometry(this, 'area');
+  }
+
+  /** @code3d.inspect inspectVolume */
+  get volume(): number {
+    return measureFiniteGeometry(this, 'volume');
   }
 
   get start(): PointAnchor {
@@ -3057,6 +3110,21 @@ export class ModelObject<
     Kind extends ModelKind = ModelKind,
   >(init: ModelObjectInit<Kind>): ModelObject<Elements, Kind> {
     return new ModelObject<Elements, Kind>(init);
+  }
+
+  /** @code3d.inspect inspectLength */
+  get length(): number {
+    return measureFiniteGeometry(this, 'length');
+  }
+
+  /** @code3d.inspect inspectArea */
+  get area(): number {
+    return measureFiniteGeometry(this, 'area');
+  }
+
+  /** @code3d.inspect inspectVolume */
+  get volume(): number {
+    return measureFiniteGeometry(this, 'volume');
   }
 
   get origin(): PointAnchor {
@@ -6019,6 +6087,136 @@ export namespace relate {
       context.focused.insertion,
     );
   }
+}
+
+type MeasurementInspectData = Readonly<{
+  owner: Model;
+  target: Model | Anchor;
+  placement: DimensionSegment | Readonly<{at: Vec3}>;
+}>;
+
+function measureFiniteGeometry(
+  value: ModelObject | ModelTopologyElement,
+  measure: 'length' | 'area' | 'volume',
+): number {
+  const topology =
+    value instanceof ModelTopologyElement
+      ? value[anchorReferenceValue].topology
+      : undefined;
+  const owner =
+    value instanceof ModelObject ? value : value[anchorReferenceValue].model;
+  const geometry = (topology?.source ?? (value as ModelObject))[
+    modelGeometry
+  ]()!.value;
+  const scale = topology?.scale ?? 1;
+  const position = (point: Vec3): Vec3 =>
+    topology ? topologyTransform(topology, translation(point)).position : point;
+  const read = (shape: AnyShape): number => {
+    const properties =
+      measure === 'length'
+        ? measureShapeLinearProperties(shape)
+        : measure === 'area'
+          ? measureShapeSurfaceProperties(shape as ReplicadFace | Shape3D)
+          : measureShapeVolumeProperties(shape as Shape3D);
+    try {
+      const magnitude =
+        'length' in properties
+          ? properties.length
+          : 'area' in properties
+            ? properties.area
+            : properties.volume;
+      const power = measure === 'length' ? 1 : measure === 'area' ? 2 : 3;
+      const result = magnitude * scale ** power;
+      if (isRecordingInspection()) {
+        const edge = shape as ReplicadEdge;
+        const edgePoint = (parameter: number): Vec3 => {
+          const point = edge.pointAt(parameter);
+          try {
+            return position(point.toTuple());
+          } finally {
+            point.delete();
+          }
+        };
+        const placement =
+          measure === 'length' && edge.geomType === 'LINE'
+            ? {start: edgePoint(0), end: edgePoint(1)}
+            : {
+                at:
+                  measure === 'length'
+                    ? edgePoint(0.5)
+                    : position(properties.centerOfMass),
+              };
+        const target =
+          value instanceof ModelObject
+            ? value.kind === 'edge'
+              ? value.edges()[0]
+              : value.kind === 'face'
+                ? value.surfaces()[0]
+                : value
+            : value;
+        captureInspectData({owner, target, placement});
+      }
+      return result;
+    } finally {
+      properties.delete();
+    }
+  };
+  return topology
+    ? withTopologyShape(
+        geometry.shape,
+        geometry.topology,
+        topology.selection,
+        read,
+      )
+    : read(geometry.shape);
+}
+
+/** @internal */
+export function inspectLength(
+  _args: readonly [],
+  context: InspectContext<number, unknown, MeasurementInspectData | undefined>,
+): InspectResult | undefined {
+  return inspectMeasurement(context, 'length');
+}
+
+/** @internal */
+export function inspectArea(
+  _args: readonly [],
+  context: InspectContext<number, unknown, MeasurementInspectData | undefined>,
+): InspectResult | undefined {
+  return inspectMeasurement(context, 'area');
+}
+
+/** @internal */
+export function inspectVolume(
+  _args: readonly [],
+  context: InspectContext<number, unknown, MeasurementInspectData | undefined>,
+): InspectResult | undefined {
+  return inspectMeasurement(context, 'volume');
+}
+
+function inspectMeasurement(
+  context: InspectContext<number, unknown, MeasurementInspectData | undefined>,
+  kind: 'length' | 'area' | 'volume',
+): InspectResult | undefined {
+  if (context.return === undefined || !context.data) return;
+  const {owner, target, placement} = context.data;
+  return {
+    target: [
+      target,
+      dimension({
+        owner,
+        value: context.return,
+        ...placement,
+        axisLabel:
+          kind === 'length'
+            ? 'at' in placement
+              ? 'arc length'
+              : undefined
+            : kind,
+      }),
+    ],
+  };
 }
 
 /** @internal */

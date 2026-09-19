@@ -120,7 +120,11 @@ export type ViewportMeasurementDecoration = ViewportDecorationBase &
     axisLabel?: string;
     appearance: ViewportDecorationAppearance;
   }> &
-  (DimensionSegment | Readonly<{candidates: readonly DimensionSegment[]}>);
+  (
+    | DimensionSegment
+    | Readonly<{candidates: readonly DimensionSegment[]}>
+    | Readonly<{at: Vec3}>
+  );
 
 export type ViewportDecoration =
   | ViewportMeasurementDecoration

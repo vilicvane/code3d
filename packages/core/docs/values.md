@@ -63,6 +63,15 @@ finite geometry, nested occurrences, axis frames and source-order dependencies.
 
 ## Geometry measurements
 
+Finite edges and edge models provide readonly `.length`; finite surfaces and
+face models provide `.area`. Solids provide `.area` for their total boundary
+surface, including inner walls, and `.volume` for material volume, excluding holes
+and cavities. These are plain numbers, follow geometry scaling, and retain the
+original value when later operations create a new model. Infinite axes/planes
+and groups do not have these measurements. See [length and area](api.md#length-and-area)
+and [volume](api.md#volume), and select these properties in App for a read-only
+visual measurement.
+
 `model.bounds(relativeTo?)` returns readonly `minimum`, `maximum` and `size`
 XYZ vectors for tight finite geometry bounds. By default it uses the model's
 own local frame. An explicit reference includes solved placement and nested

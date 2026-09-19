@@ -52,6 +52,10 @@ and the [agent file workflow](../../docs/agents/files.md).
 | Extend the runtime with Replicad geometry                                           | [Custom primitives](docs/custom-primitives.mdx)                                    |
 | Known boundaries                                                                    | [Current limitations](../web/src/content/docs/docs/getting-started/limitations.md) |
 
+Read finite edge `.length`, face or solid `.area`, and solid `.volume` as ordinary
+numbers; select the property in App to inspect the measurement. See
+[length and area](docs/api.md#length-and-area) and [volume](docs/api.md#volume).
+
 See also [model values and measurements](docs/values.md), [editable sketches](docs/sketches.md),
 [text and fonts](docs/text.md), and [runtime integration](docs/runtime.md).
 

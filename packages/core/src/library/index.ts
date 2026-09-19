@@ -13,6 +13,9 @@ export {
   align,
   expose,
   inspectTopologyReference,
+  inspectLength,
+  inspectArea,
+  inspectVolume,
 } from './runtime.js';
 export type {
   Dimension,

@@ -781,11 +781,33 @@ export function createModelCompiler() {
       const {factory} = context;
 
       return sourceFile => {
+        const traceProperty = (
+          node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+          read: ts.Expression,
+          id: string,
+        ): ts.Expression => {
+          const selector = ts.isPropertyAccessExpression(node)
+            ? node.name
+            : node.argumentExpression;
+          return traceExpression(
+            read,
+            node.getStart(sourceFile),
+            node.end,
+            selector.getStart(sourceFile),
+            selector.end,
+            sourceFile.fileName,
+            id,
+            selector.getText(sourceFile),
+            factory,
+          );
+        };
         const inspections = new InspectTransform(
           sourceFile,
           inspection,
           factory,
           inspectCallSites,
+          node => stableSourceId('property', node, sourceFile),
+          traceProperty,
         );
         const insertions = createTransformationInsertions(sourceFile);
         const rotationSelection = (
@@ -1123,6 +1145,20 @@ export function createModelCompiler() {
           }
 
           if (
+            (ts.isPropertyAccessExpression(node) ||
+              ts.isElementAccessExpression(node)) &&
+            (ts.isPropertyAccessExpression(visited) ||
+              ts.isElementAccessExpression(visited)) &&
+            isTraceableExpression(node, sourceFile) &&
+            !continuesOptionalChain(node) &&
+            isReadablePropertyAccess(node)
+          ) {
+            const siteId = stableSourceId('property', node, sourceFile);
+            const read = inspections.property(node, visited, siteId);
+            if (read) return traceProperty(node, read, siteId);
+          }
+
+          if (
             ts.isPropertyAccessExpression(node) &&
             ts.isPropertyAccessExpression(visited) &&
             !ts.isMetaProperty(node.expression) &&
@@ -1364,21 +1400,28 @@ export function createModelCompiler() {
   }
 
   function isReadablePropertyAccess(
-    node: ts.PropertyAccessExpression,
+    node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
   ): boolean {
-    const {parent} = node;
+    let current: ts.Node = node;
+    while (
+      ts.isParenthesizedExpression(current.parent) ||
+      ts.isNonNullExpression(current.parent) ||
+      ts.isAsExpression(current.parent)
+    )
+      current = current.parent;
+    const parent = current.parent;
     if (
       (ts.isCallExpression(parent) || ts.isNewExpression(parent)) &&
-      parent.expression === node
+      parent.expression === current
     ) {
       return false;
     }
-    if (ts.isTaggedTemplateExpression(parent) && parent.tag === node) {
+    if (ts.isTaggedTemplateExpression(parent) && parent.tag === current) {
       return false;
     }
     if (
       ts.isBinaryExpression(parent) &&
-      parent.left === node &&
+      parent.left === current &&
       parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
       parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
     ) {
@@ -1392,7 +1435,7 @@ export function createModelCompiler() {
     ) {
       return false;
     }
-    return !(ts.isDeleteExpression(parent) && parent.expression === node);
+    return !(ts.isDeleteExpression(parent) && parent.expression === current);
   }
 
   function continuesOptionalChain(node: ts.Node): boolean {

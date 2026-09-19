@@ -1371,3 +1371,158 @@ test('invalid author-returned annotations fail before replacing retained inspect
     assert.ok(Math.abs(geometry.bounds!.size[0] - 7) < 1e-5);
   }
 });
+
+test('getter inspectors retain each read, lexical callbacks, receiver and data without rerunning getters', async () => {
+  const inspect =
+    await compile(`import {box, captureInspectData} from '@code3d/core';
+    let reads = 0;
+    let receivers = 0;
+    function create(size: number) {
+      const body = box(size, 2, 3);
+      function show(args, context) {
+        if (reads !== 3 || receivers !== 1 || args.length || context.return !== 7 || context.receiver.size !== size || context.data !== body)
+          throw new Error('Getter was repeated or mixed with another read');
+        return {target: [body]};
+      }
+      return new class {
+        size = size;
+        /** @code3d.inspect show */
+        get reading() { reads++; captureInspectData(body); return 7; }
+      };
+    }
+    const a = create(11), b = create(17);
+    function receiver() { receivers++; return a; }
+    const first = receiver().reading;
+    const second = b['reading'];
+    const third = a?.reading;
+    const absent: typeof a | undefined = undefined;
+    absent?.reading;
+    export default box(1, 1, 1);`);
+  for (let repeat = 0; repeat < 2; repeat++) {
+    assert.equal(
+      width(defined(await inspect('receiver().reading', 12)).target[0]),
+      11,
+    );
+    assert.equal(
+      width(defined(await inspect("b['reading']", 4)).target[0]),
+      17,
+    );
+    assert.equal(width(defined(await inspect('a?.reading', 4)).target[0]), 11);
+    assert.equal(await inspect('absent?.reading', 9), undefined);
+  }
+});
+
+test('published readonly measurement properties inspect line, arc and surface geometry', async () => {
+  const inspect =
+    await compile(`import {line, arc, rectangle, box} from '@code3d/core';
+    const straight = line([3, 4, 0]);
+    const curved = arc([10, 0, 0], [0, 10, 0], [-10, 0, 0]);
+    const face = rectangle(4, 6);
+    const solid = box(2, 3, 4);
+    const a = straight.length;
+    const b = curved.length;
+    const c = face.area;
+    const d = solid.area;
+    const e = solid.edge(1).length;
+    const f = solid.surface(1).area;
+    export default solid;`);
+  assert.equal(defined(await inspect('straight.length', 1)).kind, 'preview');
+  for (const [text, value, point] of [
+    ['straight.length', 5, false],
+    ['curved.length', 10 * Math.PI, true],
+    ['face.area', 24, true],
+    ['solid.area', 52, true],
+  ] as const) {
+    const scene = defined(await inspect(text, text.lastIndexOf('.') + 1));
+    const measurement = scene.target.find(item => item.kind === 'dimension');
+    assert.equal(measurement?.kind, 'dimension');
+    assert.ok(Math.abs(measurement!.value - value) < 1e-5);
+    assert.equal('at' in measurement!, point);
+  }
+  for (const text of ['solid.edge(1).length', 'solid.surface(1).area']) {
+    const scene = defined(await inspect(text, text.lastIndexOf('.') + 1));
+    assert.ok(scene.target.some(item => item.kind === 'dimension'));
+    assert.ok(scene.target.some(item => item.kind === 'anchor'));
+  }
+});
+
+test('getter inspection preserves thrown reads and super/private receiver semantics', async () => {
+  const inspect = await compile(
+    `import {box, captureInspectData} from '@code3d/core';
+    let reads = 0;
+    function show(_args, context) {
+      if (reads !== 2) throw new Error('Repeated getter');
+      return {target: [context.data]};
+    }
+    class Base {
+      #body = box(19, 2, 3);
+      /** @code3d.inspect show */
+      get reading() { reads++; captureInspectData(this.#body); return 5; }
+    }
+    class Derived extends Base {
+      read() { return super.reading; }
+      /** @code3d.inspect show */
+      get broken() { reads++; captureInspectData(box(23, 2, 3)); throw new Error('Broken getter'); }
+    }
+    const model = new Derived();
+    model.read();
+    model.broken;`,
+    /Broken getter/,
+  );
+  assert.equal(width(defined(await inspect('super.reading', 7)).target[0]), 19);
+  assert.equal(width(defined(await inspect('model.broken', 7)).target[0]), 23);
+});
+
+test('property inspection keeps continued optional chains and writes intact', async () => {
+  const inspect = await compile(`import {box} from '@code3d/core';
+    let reads = 0, writes = 0, keys = 0;
+    function show(_args, context) {
+      if (reads !== 3 || writes !== 2 || keys !== 1) throw new Error('Changed evaluation');
+      return {target: [box(context.return, 2, 3)]};
+    }
+    const value = {
+      /** @code3d.inspect show */
+      get reading() { reads++; return 13; },
+      set reading(value: number) { writes++; }
+    };
+    const absent: typeof value | undefined = undefined;
+    function key() { keys++; return 'reading' as const; }
+    value?.reading.toFixed(2);
+    value?.[key()].toFixed(2);
+    value?.reading.real;
+    absent?.reading.toFixed(2);
+    absent?.[key()].toFixed(2);
+    value.reading = 1;
+    (value.reading) = 2;
+    export default box(1, 1, 1);`);
+  for (const text of [
+    'value?.reading.toFixed',
+    'value?.[key()]',
+    'value?.reading.real',
+  ])
+    assert.equal(width(defined(await inspect(text, 9)).target[0]), 13);
+  assert.equal(await inspect('absent?.reading', 10), undefined);
+});
+
+test('volume inspection retains cubic values and centroid positions for exposed solids', async () => {
+  const inspect = await compile(`import {box} from '@code3d/core';
+    const solid = box(2, 3, 4).originOffset(10, 20, 30);
+    const changed = solid.expose({original: solid}).scaled(2).rotate(0, 0, 90);
+    const first = solid.volume;
+    const second = changed.original.volume;
+    export default changed;`);
+  for (const [text, volume, at, target] of [
+    ['solid.volume', 24, [-10, -20, -30], 'model'],
+    ['changed.original.volume', 192, [40, -20, -60], 'anchor'],
+  ] as const) {
+    const scene = defined(await inspect(text, text.lastIndexOf('.') + 1));
+    const measurement = scene.target.find(item => item.kind === 'dimension');
+    assert.ok(measurement && 'at' in measurement);
+    assert.ok(Math.abs(measurement.value - volume) < 1e-6);
+    at.forEach((coordinate, index) =>
+      assert.ok(Math.abs(measurement.at[index] - coordinate) < 1e-6),
+    );
+    assert.equal(measurement.axisLabel, 'volume');
+    assert.ok(scene.target.some(item => item.kind === target));
+  }
+});
