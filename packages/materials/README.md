@@ -72,7 +72,7 @@ In the App, switch to **Render** to compare the surfaces. Back row, left to
 right: plastic, rubber, aluminum, steel, brass. Front row: copper, glass,
 frosted acrylic, ceramic, paint.
 
-Complete example: [material palette](../app/examples/material-presets.ts).
+Complete example: [material palette](../app/examples/packages/material-presets.ts).
 
 ## Usage notes
 

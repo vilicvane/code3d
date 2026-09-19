@@ -27,13 +27,13 @@ const socketCap = ISO4762.screw('M6', 24);
 const button = ISO7380_1.screw('M6', 24);
 ```
 
-![Ten ISO screw models showing different head shapes, drives, shoulders and thread lengths.](../web/src/assets/models/iso-screws.png)
+![Ten ISO screw models showing different head shapes, drives, shoulders and thread lengths.](../web/src/assets/models/screws.png)
 
 The three screws appear at the left of the back row: socket cap, countersunk,
 then button. The gallery also compares hexagon heads, collars, set screws,
 specialized drives and a shoulder screw.
 
-Complete example: [ISO screw gallery](../app/examples/iso-screws.ts).
+Complete example: [screw shapes and drives](../app/examples/packages/screws.ts).
 
 ## Usage notes
 
@@ -50,7 +50,6 @@ Complete example: [ISO screw gallery](../app/examples/iso-screws.ts).
 - [Standards and specifications](docs/standards.md): ISO and GB/T catalogs, drives and modeling scope.
 - [Clearance holes and mounting](docs/clearance-holes.md): passages, head recesses and named references.
 - [Screw box assembly](docs/assembly.mdx): a complete box, lid and fasteners.
-- [GB/T screw gallery](../app/examples/gb-screws.ts): runnable examples of the supported GB/T models.
 
 ## Source and development
 

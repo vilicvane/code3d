@@ -79,6 +79,230 @@ const row = (page: Page, name: string) =>
   page.getByRole('treeitem', {name, exact: true});
 
 test(
+  'browser storage reset confirms deletion and restores the initial project',
+  {timeout: 120_000},
+  async t => {
+    const page = await open(t, [
+      {path: '/examples/sample.ts', source: 'export const sample = 1;'},
+    ]);
+    await page.evaluate(async () => {
+      const {projectFileSystem, codeEditor, agentProject} = window.explorerApp;
+      await projectFileSystem.writeFile(
+        '/extra.bin',
+        new Uint8Array([0, 255, 3]),
+      );
+      await projectFileSystem.writeFile(
+        '/node_modules/custom/index.js',
+        'export default 1;',
+      );
+      await projectFileSystem.writeFile('/code3d-lock.json', '{}');
+      await projectFileSystem.writeFile('/examples/sample.ts', 'changed');
+      codeEditor.applyFiles([
+        {
+          path: '/model.ts',
+          content:
+            "import {box} from '@code3d/core';\nexport default box(14, 6, 8);\n",
+        },
+      ]);
+      await agentProject.flush();
+      localStorage.setItem('code3d-reset-test-preference', 'keep');
+    });
+    const reset = async () => {
+      await page.locator('#project-location').click();
+      await page
+        .getByRole('button', {name: 'Reset browser storage', exact: true})
+        .click();
+      return page.getByRole('dialog', {
+        name: 'Reset browser storage',
+        exact: true,
+      });
+    };
+    const confirmation = await reset();
+    await confirmation
+      .getByRole('button', {name: 'Cancel', exact: true})
+      .click();
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          (await window.explorerApp.projectFileSystem.stat('/extra.bin'))?.kind,
+      ),
+      'file',
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem('code3d-reset-browser-project'),
+      ),
+      null,
+    );
+
+    // Reset also recovers a workspace whose current drafts cannot be saved.
+    await page.evaluate(async () => {
+      const {projectFileSystem, codeEditor, agentProject} = window.explorerApp;
+      projectFileSystem.writeFile = async () => {
+        throw new Error('Test save failure');
+      };
+      codeEditor.applyFiles([
+        {
+          path: '/model.ts',
+          content: "export const unsaved = 'discard on reset';",
+        },
+      ]);
+      await agentProject.flush().catch(() => {});
+    });
+    assert.equal(
+      await page.evaluate(() => window.explorerApp.agentProject.hasUnsaved),
+      true,
+    );
+    const approved = await reset();
+    await Promise.all([
+      page.waitForEvent('load'),
+      approved
+        .getByRole('button', {name: 'Reset browser storage', exact: true})
+        .click(),
+    ]);
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    const state = await page.evaluate(async () => {
+      const files = window.explorerApp.projectFileSystem;
+      const text = async (path: string) =>
+        new TextDecoder().decode(await files.readFile(path));
+      return {
+        model: await text('/model.ts'),
+        example: await text('/examples/sample.ts'),
+        extra: await files.stat('/extra.bin'),
+        dependency: await files.stat('/node_modules/custom/index.js'),
+        lock: await files.stat('/code3d-lock.json'),
+        preference: localStorage.getItem('code3d-reset-test-preference'),
+        command: sessionStorage.getItem('code3d-reset-browser-project'),
+      };
+    });
+    assert.match(state.model, /box\(10, 6, 8\)/);
+    assert.equal(state.example, 'export const sample = 1;');
+    assert.equal(state.extra, undefined);
+    assert.equal(state.dependency, undefined);
+    assert.equal(state.lock, undefined);
+    assert.equal(state.preference, 'keep');
+    assert.equal(state.command, null);
+    await page.evaluate(() =>
+      window.explorerApp.projectFileSystem.writeFile(
+        '/after-reset.txt',
+        'keep after reload',
+      ),
+    );
+    await page.reload();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          (await window.explorerApp.projectFileSystem.stat('/after-reset.txt'))
+            ?.kind,
+      ),
+      'file',
+    );
+  },
+);
+
+test(
+  'browser storage reset waits for other storage connections to close',
+  {timeout: 120_000},
+  async t => {
+    const page = await open(t);
+    const other = await page.context().newPage();
+    await other.goto(
+      new URL('/favicon.svg', process.env.CODE3D_TEST_URL!).href,
+    );
+    await other.evaluate(async () => {
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('code3d-project-v1');
+        request.onsuccess = () => {
+          // Retain the connection until this test-owned page closes.
+          (window as Window & {resetBlocker?: IDBDatabase}).resetBlocker =
+            request.result;
+          resolve();
+        };
+        request.onerror = () => reject(request.error);
+      });
+    });
+    await page.locator('#project-location').click();
+    await page
+      .getByRole('button', {name: 'Reset browser storage', exact: true})
+      .click();
+    await page
+      .getByRole('dialog', {name: 'Reset browser storage', exact: true})
+      .getByRole('button', {name: 'Reset browser storage', exact: true})
+      .click();
+    const blocked = page.getByText(
+      'Close other Code3D tabs using this browser storage',
+      {exact: false},
+    );
+    await blocked.waitFor();
+    // A reload during the wait must not silently abandon the confirmed reset.
+    await page.reload({waitUntil: 'commit'});
+    await blocked.waitFor();
+    await other.close();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem('code3d-reset-browser-project'),
+      ),
+      null,
+    );
+  },
+);
+
+test(
+  'browser storage reset reports deletion errors without removing the project',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await page.evaluate(() =>
+      window.explorerApp.projectFileSystem.writeFile('/keep.txt', 'keep'),
+    );
+    await page.addInitScript(() => {
+      const original = indexedDB.deleteDatabase.bind(indexedDB);
+      indexedDB.deleteDatabase = name => {
+        if (name === 'code3d-project-v1')
+          throw new DOMException(
+            'Test storage deletion denied',
+            'UnknownError',
+          );
+        return original(name);
+      };
+    });
+    await page.locator('#project-location').click();
+    await page
+      .getByRole('button', {name: 'Reset browser storage', exact: true})
+      .click();
+    await page
+      .getByRole('dialog', {name: 'Reset browser storage', exact: true})
+      .getByRole('button', {name: 'Reset browser storage', exact: true})
+      .click();
+    const error = page.getByRole('dialog', {
+      name: 'Could not reset browser storage',
+      exact: true,
+    });
+    await error
+      .getByText('Test storage deletion denied', {exact: true})
+      .waitFor();
+    await error.getByRole('button', {name: 'OK', exact: true}).click();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    assert.equal(
+      await page.evaluate(async () =>
+        new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile('/keep.txt'),
+        ),
+      ),
+      'keep',
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem('code3d-reset-browser-project'),
+      ),
+      null,
+    );
+  },
+);
+
+test(
   'the workspace root menu clears build caches and rebuilds the active model',
   {timeout: 90_000},
   async t => {
@@ -540,6 +764,10 @@ test(
     await active(page, undefined);
     assert.equal(await location.innerText(), 'explorer-folder');
     await location.click();
+    assert.equal(
+      await page.locator('#reset-browser-storage-button').isHidden(),
+      true,
+    );
     await actions
       .getByRole('button', {name: 'Change folder', exact: true})
       .waitFor();
@@ -566,6 +794,9 @@ test(
     await location.click();
     await actions
       .getByRole('button', {name: 'Open folder', exact: true})
+      .waitFor();
+    await actions
+      .getByRole('button', {name: 'Reset browser storage', exact: true})
       .waitFor();
     await page.keyboard.press('Escape');
     assert.equal(await location.innerText(), 'Browser storage');

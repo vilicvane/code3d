@@ -30,7 +30,7 @@ test('measured costs balance a fixed workload including unmeasured and standalon
     'operations/cut.ts',
     'operations/group.ts',
     'operations/union.ts',
-    'iso-screws.ts',
+    'packages/screws.ts',
     'operations/origin.ts',
     'operations/rotate.ts',
     'operations/distance.ts',

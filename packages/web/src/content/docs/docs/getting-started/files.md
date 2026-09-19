@@ -199,6 +199,19 @@ Runtime initialization errors link to the relevant Core import when available.
 Errors without a source location remain in the status details. File operation
 errors appear in the project explorer; errors do not open a global floating bar.
 
+## Reset browser storage
+
+Click **Browser storage** in the explorer header, then **Reset browser storage**.
+After confirmation, the App reloads, removes all browser project files and
+installed dependencies, and restores the default model and bundled examples.
+Unsaved edits are discarded too. Copy any files you want to keep to a local
+folder first; the reset cannot be undone.
+
+Local folders and App settings are preserved. The browser project's build cache
+is cleared; shared geometry and download caches are retained. If another tab
+still has the browser project open, the reset waits and asks you to close that
+tab. The command is available only while using browser storage.
+
 ## Local folder
 
 To copy your browser project to disk, click **Browser storage** in the explorer

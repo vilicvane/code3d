@@ -9,7 +9,7 @@ export const renderSamples = [
     description:
       'Compare ten equal-size spheres in a grid: plastic, rubber, four metals, glass, acrylic, ceramic and paint.',
     category: 'Materials',
-    file: 'material-presets.ts',
+    file: 'packages/material-presets.ts',
     focus: {context: 'export default palette;', token: 'palette'},
     mode: 'render',
     view: {direction: [0, 2, 1], up: [0, 1, 0]},
@@ -21,7 +21,7 @@ export const renderSamples = [
     description:
       'Five identical posts at a fixed 16 mm pitch, with no supporting geometry.',
     category: 'Layouts',
-    file: 'layout/linear.ts',
+    file: 'packages/layout/linear.ts',
     focus: {
       context: "export default group(posts, 'Linear posts')",
       token: 'group',
@@ -35,7 +35,7 @@ export const renderSamples = [
     description:
       'Twelve equal-size pins in four columns with 8 mm gaps, without a base or construction space.',
     category: 'Layouts',
-    file: 'layout/grid.ts',
+    file: 'packages/layout/grid.ts',
     focus: {
       context: "export default group(pins, 'Grid of pins')",
       token: 'group',
@@ -44,23 +44,23 @@ export const renderSamples = [
     tags: ['layout', 'grid', 'repeat'],
   },
   {
-    id: 'iso-screws',
-    title: 'ISO screw head shapes and drives',
+    id: 'screws',
+    title: 'Screw head shapes and drives',
     description:
-      'Compare ten nominal ISO screw models, including socket cap, countersunk, button, hexagon, set and shoulder screws.',
+      'Compare ten nominal screw models shared by the ISO and GB/T modules, including socket cap, countersunk, button, hexagon, set and shoulder screws.',
     category: 'Practical models',
-    file: 'iso-screws.ts',
+    file: 'packages/screws.ts',
     focus: {context: ").material('#aaa')", token: 'material'},
     view: {direction: [0.3, 1.6, 1.8], up: [0, 1, 0]},
-    tags: ['screws', 'ISO', 'threads', 'drives'],
+    tags: ['screws', 'ISO', 'GB/T', 'threads', 'drives'],
   },
   {
-    id: 'gear-studies',
-    title: 'Gear types and mounting choices',
+    id: 'gears',
+    title: 'Gears and mounting options',
     description:
       'Build five complete nominal gear parts with the Gears API: a plain bore, keyed hub, integral shaft, helical hub, and bolted internal ring.',
     category: 'Practical models',
-    file: 'gear-studies.ts',
+    file: 'packages/gears.ts',
     focus: {context: 'export default group(', token: 'group'},
     view: {direction: [0.7, 1.7, 1.2], up: [0, 1, 0]},
     tags: ['gears', 'bore', 'hub', 'shaft', 'helical', 'internal'],
@@ -71,7 +71,7 @@ export const renderSamples = [
     description:
       'Fill a related construction space with fins that follow its placement, without including the space in the result.',
     category: 'Practical models',
-    file: 'layout/ventilation.ts',
+    file: 'packages/layout/ventilation.ts',
     focus: {context: 'export default group(', token: 'group'},
     view: {direction: [0.5, 1, 1.3], up: [0, 1, 0]},
     tags: ['layout', 'fill', 'relate', 'frame'],
@@ -82,7 +82,7 @@ export const renderSamples = [
     description:
       'Calculate a complete grid of tiles from the available width, depth and minimum gaps.',
     category: 'Practical models',
-    file: 'layout/fill-grid.ts',
+    file: 'packages/layout/fill-grid.ts',
     focus: {context: 'export default group(', token: 'group'},
     view: {direction: [0.5, 1, 1.3], up: [0, 1, 0]},
     tags: ['layout', 'grid', 'fill', 'bounds'],
@@ -93,7 +93,7 @@ export const renderSamples = [
     description:
       'Distribute six slats across a target width, or pack a fixed gap and align the row to the right.',
     category: 'Practical models',
-    file: 'layout/grille.ts',
+    file: 'packages/layout/grille.ts',
     focus: {context: 'export default group(', token: 'group'},
     view: {direction: [0.5, 1, 1.3], up: [0, 1, 0]},
     tags: ['layout', 'bounds', 'gap', 'justifyContent'],
@@ -104,7 +104,7 @@ export const renderSamples = [
     description:
       'Repeat fins around a circle and rotate each by its sample angle. Layout also supports flex, grid and automatic filling.',
     category: 'Practical models',
-    file: 'layout/radial.ts',
+    file: 'packages/layout/radial.ts',
     focus: {context: 'const fins = radial(', token: 'radial'},
     tags: ['layout', 'radial', 'arrays'],
   },
@@ -375,55 +375,55 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
-  'gear-studies': [
+  gears: [
     {
       id: 'bore',
-      image: 'gear-studies-bore',
+      image: 'gears-bore',
       label: 'Straight teeth and a bore',
       description: 'A straight-tooth wheel with a simple through bore.',
       focus: {
-        context: 'export const spurWithBore = spurGear({',
-        token: 'spurGear',
+        context: ".material('#91aeca')",
+        token: 'material',
       },
     },
     {
       id: 'keyed-hub',
-      image: 'gear-studies-keyed-hub',
+      image: 'gears-keyed-hub',
       label: 'Keyed hub',
       description: 'A projecting hub and a shaft keyway surround the bore.',
       focus: {
-        context: 'export const spurWithKeyedHub = spurGear({',
-        token: 'spurGear',
+        context: ".material('#d3b46c')",
+        token: 'material',
       },
     },
     {
       id: 'shaft',
-      image: 'gear-studies-shaft',
+      image: 'gears-shaft',
       label: 'Integral shaft',
       description: 'The pinion and its shaft form one solid part.',
       focus: {
-        context: 'export const spurWithShaft = spurGear({',
-        token: 'spurGear',
+        context: ".material('#d49a85')",
+        token: 'material',
       },
     },
     {
       id: 'helical',
-      image: 'gear-studies-helical',
+      image: 'gears-helical',
       label: 'Helical teeth and a hub',
       description: 'Twisted tooth traces, a hub, and a through bore.',
       focus: {
-        context: 'export const helicalWithHub = helicalGear({',
-        token: 'helicalGear',
+        context: ".material('#83bba6')",
+        token: 'material',
       },
     },
     {
       id: 'internal',
-      image: 'gear-studies-internal',
+      image: 'gears-internal',
       label: 'Internal ring',
       description: 'Inward-facing teeth in a ring with six mounting holes.',
       focus: {
-        context: 'export const internalRingWithBoltHoles = internalGear({',
-        token: 'internalGear',
+        context: ".material('#b9a9cc')",
+        token: 'material',
       },
     },
   ],
@@ -509,9 +509,8 @@ export const sourceContextSets: Readonly<
 
 // Every runnable source, including reusable project parts, is checked by the example tests.
 export const exampleEntries = [
-  {file: 'gear-studies.ts'},
-  {file: 'iso-screws.ts'},
-  {file: 'gb-screws.ts'},
+  {file: 'packages/gears.ts'},
+  {file: 'packages/screws.ts'},
   {
     file: 'projects/desktop-controller/enclosure.ts',
   },
@@ -547,7 +546,7 @@ export const exampleEntries = [
   {
     file: 'materials.ts',
   },
-  {file: 'material-presets.ts'},
+  {file: 'packages/material-presets.ts'},
   {
     file: 'text.ts',
   },
@@ -587,15 +586,15 @@ export const exampleEntries = [
   {
     file: 'npm/model.ts',
   },
-  {file: 'layout/linear.ts'},
-  {file: 'layout/grille.ts'},
-  {file: 'layout/ventilation.ts'},
-  {file: 'layout/grid.ts'},
-  {file: 'layout/radial.ts'},
-  {file: 'layout/flex.ts'},
-  {file: 'layout/flex-space.ts'},
-  {file: 'layout/flex-wrap.ts'},
-  {file: 'layout/fill-grid.ts'},
+  {file: 'packages/layout/linear.ts'},
+  {file: 'packages/layout/grille.ts'},
+  {file: 'packages/layout/ventilation.ts'},
+  {file: 'packages/layout/grid.ts'},
+  {file: 'packages/layout/radial.ts'},
+  {file: 'packages/layout/flex.ts'},
+  {file: 'packages/layout/flex-space.ts'},
+  {file: 'packages/layout/flex-wrap.ts'},
+  {file: 'packages/layout/fill-grid.ts'},
 
   {
     file: 'sketches/constraints.ts',
@@ -627,7 +626,8 @@ export const movedExamplePaths: Readonly<Record<string, string>> = {
     '/examples/assemblies/screw-box/box.ts',
   '/examples/assemblies/fastener-joint/model.ts':
     '/examples/assemblies/screw-box/model.ts',
-  '/examples/patterns/post-array/model.ts': '/examples/layout/linear.ts',
+  '/examples/patterns/post-array/model.ts':
+    '/examples/packages/layout/linear.ts',
 
   '/examples/basics/boolean-operations.ts': '/examples/operations/cut.ts',
   '/examples/basics/group-origins.ts': '/examples/operations/group.ts',
@@ -665,7 +665,6 @@ export const movedExamplePaths: Readonly<Record<string, string>> = {
   '/examples/combined-constraints.ts':
     '/examples/constraints/combined-constraints.ts',
   '/examples/relations-and-elements.ts': '/examples/expose.ts',
-  '/examples/material-presets.ts': '/examples/assemblies/screw-box/model.ts',
   '/examples/geometric-alignment.ts':
     '/examples/projects/desktop-controller/model.ts',
   '/examples/exposed-topology.ts':

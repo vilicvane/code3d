@@ -109,6 +109,7 @@ import {filePathFromRoute, fileRoute} from './project/file-route';
 import type {BrowserProjectFileSystem} from './project/filesystem';
 import {
   openBrowserProjectFileSystem,
+  resetBrowserProjectFileSystem,
   openDirectoryProjectFileSystem,
 } from './project/filesystem';
 import {mapProjectIO} from './project/io';
@@ -158,7 +159,7 @@ import {createIcon} from './ui/icons';
 import {ImageExportDialog} from './ui/image-export';
 import {ModelExportDialog} from './ui/model-export';
 import {ProjectTree} from './ui/project-tree';
-import {dialogs} from './ui/dialog';
+import {AppDialog, dialogs} from './ui/dialog';
 import {parsePackageSpecifier} from './project/package-manifest';
 import {SourceEditPopover} from './ui/source-edit-popover';
 import {ViewportContextMenu} from './ui/viewport-context-menu';
@@ -173,6 +174,35 @@ import {
 const directoryWorkspaceId = new URL(window.location.href).searchParams.get(
   'workspace',
 );
+const browserResetStorageKey = 'code3d-reset-browser-project';
+let browserProjectReset = false;
+if (!directoryWorkspaceId && sessionStorage.getItem(browserResetStorageKey)) {
+  // Keep the confirmed command until startup completes, including across reloads
+  // while another tab blocks deletion. It never lives in a shareable URL.
+  const progress = new AppDialog({
+    title: 'Resetting browser storage',
+    className: 'message-dialog',
+    canDismiss: () => false,
+  });
+  // A delete queued behind an earlier page's request need not fire "blocked".
+  // Keep the instruction visible throughout the pending operation.
+  progress.element.innerHTML =
+    '<div class="app-dialog-content"><h2>Resetting browser storage</h2><p role="status">Removing browser project files and installed dependencies…</p><p>Close other Code3D tabs using this browser storage to allow the reset to finish. Local folders will not be changed.</p></div>';
+  progress.open();
+  try {
+    await resetBrowserProjectFileSystem();
+    browserProjectReset = true;
+  } catch (error) {
+    sessionStorage.removeItem(browserResetStorageKey);
+    progress.close();
+    await dialogs.alert({
+      title: 'Could not reset browser storage',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    progress.dispose();
+  }
+}
 const storedDirectoryHandle = directoryWorkspaceId
   ? await storedProjectDirectory(directoryWorkspaceId)
   : undefined;
@@ -260,6 +290,7 @@ app.innerHTML = `
                 <button id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
                 <button id="reload-folder-button" type="button" hidden>Reload folder</button>
                 <button id="browser-storage-button" type="button" hidden>Use browser storage</button>
+                <button id="reset-browser-storage-button" type="button" hidden>Reset browser storage</button>
               </div>
               <div class="project-actions">
                 <button id="new-file-button" type="button" title="New file" aria-label="New file"></button>
@@ -392,6 +423,9 @@ const copyLocalFolderButton = requiredElement<HTMLButtonElement>(
   'copy-local-folder-button',
 );
 const projectLocationBusy = observable.box(false);
+const resetBrowserStorageButton = requiredElement<HTMLButtonElement>(
+  'reset-browser-storage-button',
+);
 const newFileButton = requiredElement<HTMLButtonElement>('new-file-button');
 const newFolderButton = requiredElement<HTMLButtonElement>('new-folder-button');
 const refreshFilesButton = requiredElement<HTMLButtonElement>(
@@ -642,7 +676,10 @@ retrySaveButton.addEventListener('click', () => {
   void agentProject.retrySaves().catch(showProjectIssue);
 });
 window.addEventListener('beforeunload', event => {
-  if (agentProject.hasUnsaved) {
+  if (
+    agentProject.hasUnsaved &&
+    (directoryConnected || !sessionStorage.getItem(browserResetStorageKey))
+  ) {
     event.preventDefault();
     event.returnValue = '';
   }
@@ -1480,6 +1517,9 @@ copyLocalFolderButton.addEventListener('click', () => {
 browserStorageButton.addEventListener('click', () => {
   void useBrowserStorage();
 });
+resetBrowserStorageButton.addEventListener('click', () => {
+  void resetBrowserStorage();
+});
 
 window.addEventListener('keydown', event => {
   if (event.key === 'Escape' && spatialToolbar.selection) {
@@ -1507,6 +1547,10 @@ window.addEventListener('pagehide', stopProjectLocation, {once: true});
 renderProjectNavigation();
 void projectDirectory.refresh();
 if (initialFileError) projectDirectory.showError(initialFileError);
+if (browserProjectReset) {
+  await compiler.clearBuildCache().catch(showProjectIssue);
+  sessionStorage.removeItem(browserResetStorageKey);
+}
 runModel();
 
 function renderProjectLocation(): void {
@@ -1516,6 +1560,8 @@ function renderProjectLocation(): void {
   reconnectFolderButton.disabled = busy;
   reloadFolderButton.disabled = busy;
   browserStorageButton.disabled = busy;
+  resetBrowserStorageButton.disabled = busy;
+  resetBrowserStorageButton.hidden = directoryConnected;
   copyLocalFolderButton.disabled = busy || !supportsProjectDirectories();
   copyLocalFolderButton.hidden = directoryConnected;
   if (directoryConnected) {
@@ -1627,6 +1673,29 @@ async function useBrowserStorage(): Promise<void> {
   }
 }
 
+async function resetBrowserStorage(): Promise<void> {
+  setProjectLocationBusy(true);
+  try {
+    if (
+      !(await dialogs.confirm({
+        title: 'Reset browser storage',
+        message:
+          'Permanently delete all browser project files, unsaved edits and installed dependencies, then restore the default model and bundled examples? Copy any files you want to keep to a local folder first. Local folders and App settings will not change.',
+        submit: 'Reset browser storage',
+        danger: true,
+      }))
+    )
+      return;
+    sessionStorage.setItem(browserResetStorageKey, 'reset');
+    openBrowserWorkspace();
+  } catch (error) {
+    sessionStorage.removeItem(browserResetStorageKey);
+    showProjectIssue(error);
+  } finally {
+    setProjectLocationBusy(false);
+  }
+}
+
 function openDirectoryWorkspace(workspaceId: string, file?: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set('workspace', workspaceId);
@@ -1638,7 +1707,8 @@ function openBrowserWorkspace(): void {
   const url = new URL(window.location.href);
   url.searchParams.delete('workspace');
   url.hash = '';
-  window.location.replace(url);
+  window.history.replaceState(null, '', url);
+  window.location.reload();
 }
 
 function setProjectLocationBusy(busy: boolean): void {

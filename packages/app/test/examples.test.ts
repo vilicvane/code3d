@@ -26,9 +26,8 @@ import {
 import {sourceTokenOffset} from '../render-samples/source-focus.ts';
 
 const expectedSolids: Record<string, readonly [string, number]> = {
-  'gear-studies.ts': ['default', 5],
-  'iso-screws.ts': ['default', 10],
-  'gb-screws.ts': ['default', 10],
+  'packages/gears.ts': ['default', 5],
+  'packages/screws.ts': ['default', 10],
   'projects/phone-stand.ts': ['default', 1],
   'assemblies/screw-box/model.ts': ['default', 6],
   'assemblies/screw-box/box.ts': ['default', 1],
@@ -43,7 +42,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/area.ts': ['default', 1],
   'operations/volume.ts': ['default', 2],
   'materials.ts': ['plain', 1],
-  'material-presets.ts': ['default', 10],
+  'packages/material-presets.ts': ['default', 10],
   'text.ts': ['lettering', 4],
   'operations/rotate.ts': ['default', 1],
   'operations/revolve.ts': ['default', 1],
@@ -59,15 +58,15 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'expose.ts': ['model', 3],
   'primitives/custom-primitives.ts': ['customPrimitivesExample', 3],
   'npm/model.ts': ['default', 1],
-  'layout/linear.ts': ['default', 5],
-  'layout/grille.ts': ['default', 13],
-  'layout/ventilation.ts': ['default', 9],
-  'layout/grid.ts': ['default', 12],
-  'layout/radial.ts': ['default', 12],
-  'layout/flex.ts': ['default', 3],
-  'layout/flex-space.ts': ['default', 3],
-  'layout/flex-wrap.ts': ['default', 5],
-  'layout/fill-grid.ts': ['default', 13],
+  'packages/layout/linear.ts': ['default', 5],
+  'packages/layout/grille.ts': ['default', 13],
+  'packages/layout/ventilation.ts': ['default', 9],
+  'packages/layout/grid.ts': ['default', 12],
+  'packages/layout/radial.ts': ['default', 12],
+  'packages/layout/flex.ts': ['default', 3],
+  'packages/layout/flex-space.ts': ['default', 3],
+  'packages/layout/flex-wrap.ts': ['default', 5],
+  'packages/layout/fill-grid.ts': ['default', 13],
 
   'projects/desktop-controller/enclosure.ts': ['default', 1],
   'projects/desktop-controller/panel.ts': ['default', 5],
@@ -222,12 +221,12 @@ for (const entry of exampleEntries) {
         validateGeometry(snapshot(exports[expected[0]])),
         expected[1],
       );
-      if (entry.file === 'layout/grille.ts') {
+      if (entry.file === 'packages/layout/grille.ts') {
         const bounds = exports.default.bounds();
         assert.deepEqual(bounds.minimum, [0, -1, -18]);
         assert.deepEqual(bounds.maximum, [100, 21, 18]);
       }
-      if (entry.file === 'layout/ventilation.ts') {
+      if (entry.file === 'packages/layout/ventilation.ts') {
         const bounds = exports.default.bounds();
         const near = (value: number, expected: number) =>
           assert.ok(Math.abs(value - expected) < 1e-6);

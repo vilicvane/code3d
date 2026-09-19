@@ -122,7 +122,9 @@ document. Preserve useful anchors and update incoming links when headings change
 Package screenshots use ordinary Markdown images pointing to the existing
 `src/assets/models/` files, with descriptive alt text and a link to the executable
 example. Match the code's dimensions and operations to at least one object in the
-picture. Prefer isolated layout examples and equal-size material samples over
+picture. A snippet may cover only part of a multi-object screenshot; it does not
+need to reproduce the full scene. Preserve the colored Gears overview and select
+the material call for its individual finished-part images. Prefer isolated layout examples and equal-size material samples over
 unrelated assemblies. Capture materials in Render mode; select the final material
 call for finished threaded parts to avoid inspection transparency. Core
 interaction illustrations capture the actual App viewport with its gizmo and
@@ -291,8 +293,11 @@ configuration after the build if necessary. For source changes, use Astro dev.
 
 Keep each example focused on one learning goal. Group basic operations under
 `operations/`, relations under `constraints/`, and shape constructors under
-`primitives/`. Keep standalone text, expose, materials and topology-paths files at the example
-root; do not wrap one file in a directory of the same name.
+`primitives/`. Keep standalone Core text, expose, materials and topology-paths files at the example
+root. Put focused extension-package examples in `examples/packages/`: `gears.ts`,
+the shared ISO/GB screw gallery `screws.ts`, `material-presets.ts` and `layout/`.
+Complete projects and assemblies retain their existing directories even when they
+use extension packages; do not wrap one file in a directory of the same name.
 The primitive overview is a visual vocabulary of the built-in shapes, with each
 shape exported separately and no positioning transforms. Keep cut, union and
 intersect in separate files; names describe the API topic rather than preview
