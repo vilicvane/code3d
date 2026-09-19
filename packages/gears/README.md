@@ -30,16 +30,17 @@ export const wheel = spurGear({
     keyway: {width: 2.4, depth: 1.2},
     hub: {diameter: 22, length: 6, side: 'up'},
   },
-});
+}).material('#d3b46c');
 ```
 
-![A 22-tooth spur gear with an 8 mm keyed bore and a 22 mm hub.](../web/src/assets/models/gear-studies-keyed-hub.png)
+![Five colored gears showing a plain bore, keyed hub, integral shaft, helical hub and internal ring.](../web/src/assets/models/gears.png)
 
-The 22-tooth wheel has an 8 mm bore, a 2.4 mm keyway and a 22 mm hub.
+The gold wheel in the back row matches this example: 22 teeth, an 8 mm bore,
+a 2.4 mm keyway and a 22 mm hub.
 The gallery also includes a plain bore, an integral shaft, a helical gear and
 an internal ring.
 
-Complete example: [gear studies](../app/examples/gear-studies.ts).
+Complete example: [gears and mounting options](../app/examples/packages/gears.ts).
 
 ## Usage notes
 

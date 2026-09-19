@@ -130,7 +130,7 @@ export default group(pins, 'Grid of pins');
 
 Each pin has a 6 mm diameter, with an 8 mm clear gap between neighbors.
 
-Complete example: [grid of pins](../../app/examples/layout/grid.ts).
+Complete example: [grid of pins](../../app/examples/packages/layout/grid.ts).
 
 `axes` explicitly names the column and row axes, for example `['x', 'z']`; the
 third axis is preserved. Inputs fill columns first, then proceed to the next row.
@@ -231,7 +231,7 @@ export default group(fins, 'Radial fins');
 
 The fins are equally spaced around a 30 mm radius circle.
 
-Complete example: [radial fins](../../app/examples/layout/radial.ts).
+Complete example: [radial fins](../../app/examples/packages/layout/radial.ts).
 
 `radial(items, {radius, axis: 'y', startAngle: 0, sweepAngle: 360, rotate: false})`
 requires `radius` and `axis`. It places the inputs on a circle or arc about local

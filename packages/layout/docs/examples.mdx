@@ -5,11 +5,11 @@ description: Arrange model collections with Flex, Grid, linear steps and circles
 
 import ModelExample from '../../web/src/components/ModelExample.astro';
 import SourceCode from '../../web/src/components/SourceCode.astro';
-import linearSource from '../../app/examples/layout/linear.ts?raw';
-import gridSource from '../../app/examples/layout/grid.ts?raw';
-import flexSource from '../../app/examples/layout/flex.ts?raw';
-import flexSpaceSource from '../../app/examples/layout/flex-space.ts?raw';
-import flexWrapSource from '../../app/examples/layout/flex-wrap.ts?raw';
+import linearSource from '../../app/examples/packages/layout/linear.ts?raw';
+import gridSource from '../../app/examples/packages/layout/grid.ts?raw';
+import flexSource from '../../app/examples/packages/layout/flex.ts?raw';
+import flexSpaceSource from '../../app/examples/packages/layout/flex-space.ts?raw';
+import flexWrapSource from '../../app/examples/packages/layout/flex-wrap.ts?raw';
 
 `@code3d/layout` separates arranging a known collection from calculating how many
 copies fit. The App includes it with built-in Core; installed projects need both
@@ -36,7 +36,7 @@ position and orientation established with `relate`.
 `axis` is required. `gap` is nonnegative boundary-to-boundary clearance, default
 zero. `padding` is a number for both ends or `{start, end}` for asymmetric insets.
 
-<SourceCode source={flexSource} file="layout/flex.ts" />
+<SourceCode source={flexSource} file="packages/layout/flex.ts" />
 
 `justifyContent` allocates unused space after model widths and minimum gaps:
 
@@ -59,7 +59,7 @@ container. This requires an explicit `crossAxis` different from `axis`.
 starts at zero and fits the largest item. Without `alignItems`, single-line Flex
 preserves cross coordinates. The third axis is always preserved.
 
-<SourceCode source={flexSpaceSource} file="layout/flex-space.ts" />
+<SourceCode source={flexSpaceSource} file="packages/layout/flex-space.ts" />
 
 ## Fill a row
 
@@ -99,7 +99,7 @@ inside wrapped lines; `alignContent` distributes the lines in the cross interval
 using the same six alignment values. With wrapping disabled, `alignContent` and
 `rowGap` have no effect. `fillFlex` supports only a single line.
 
-<SourceCode source={flexWrapSource} file="layout/flex-wrap.ts" />
+<SourceCode source={flexWrapSource} file="packages/layout/flex-wrap.ts" />
 
 ## Grid and grid filling
 
@@ -117,7 +117,7 @@ sizing rules. Fractional tracks respect the model bounds as minimum sizes.
 Without a target, they use the smallest common fractional unit that fits them.
 Changing a cell's size does not scale its model.
 
-<SourceCode source={gridSource} file="layout/grid.ts" />
+<SourceCode source={gridSource} file="packages/layout/grid.ts" />
 
 `gap`, or separate `columnGap` and `rowGap`, defines clearance between **tracks**.
 Smaller models inside those cells can have larger actual clearances.
@@ -152,7 +152,7 @@ size. The first input keeps its geometry coordinates. Steps can be negative or
 zero; unlike gap-based layouts, changing a model's width does not change the pitch.
 Compose grouped linear layouts along different axes for exact multi-axis arrays.
 
-<SourceCode source={linearSource} file="layout/linear.ts" />
+<SourceCode source={linearSource} file="packages/layout/linear.ts" />
 
 `radial(items, {radius, axis, startAngle, sweepAngle, rotate})` uses the collection
 length to place its members around local zero. `radius` and `axis` are required;

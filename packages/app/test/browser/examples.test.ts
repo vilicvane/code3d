@@ -297,7 +297,7 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
   // parameter tools. Exercise a real editor transaction and the same geometry
   // and Undo contract instead of treating that example as a sketch.
   const sourceEdit =
-    file === 'gear-studies.ts'
+    file === 'packages/gears.ts'
       ? {before: 'faceWidth: 10', after: 'faceWidth: 11'}
       : undefined;
   if (sourceEdit) {

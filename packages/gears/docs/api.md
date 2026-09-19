@@ -47,11 +47,11 @@ const shaftPinion = helicalGear({
 });
 ```
 
-![A 22-tooth straight gear with a projecting 22 mm hub and a keyway in its 8 mm through bore.](../../web/src/assets/models/gear-studies-keyed-hub.png)
+![A 22-tooth straight gear with a projecting 22 mm hub and a keyway in its 8 mm through bore.](../../web/src/assets/models/gears-keyed-hub.png)
 
 The keyed hub has an 8 mm through bore and a 2.4 mm keyway.
 
-Complete example: [gear studies](../../app/examples/gear-studies.ts).
+Complete example: [gears and mounting options](../../app/examples/packages/gears.ts).
 
 `kind: 'solid'` is the explicit solid choice. A `bore` is through all axial
 features. Its optional rectangular `keyway` runs along the whole bore; `depth`
@@ -77,11 +77,11 @@ const ring = internalGear({
 });
 ```
 
-![A 48-tooth internal gear ring with six holes on a 116 mm bolt circle.](../../web/src/assets/models/gear-studies-internal.png)
+![A 48-tooth internal gear ring with six holes on a 116 mm bolt circle.](../../web/src/assets/models/gears-internal.png)
 
 The ring has 48 teeth and six 3 mm holes on a 116 mm bolt circle.
 
-Complete example: [gear studies](../../app/examples/gear-studies.ts).
+Complete example: [gears and mounting options](../../app/examples/packages/gears.ts).
 
 The interior tooth space passes through the ring. `outerDiameter` defines the
 annular blank; optional equally spaced through-holes use the given bolt-circle

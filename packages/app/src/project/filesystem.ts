@@ -71,6 +71,17 @@ export interface ProjectFileSystem extends ProjectFileReader {
 
 let configureBrowserPromise: Promise<void> | undefined;
 
+/** Run on the new page before opening ZenFS, after the old page's writers stop. */
+export async function resetBrowserProjectFileSystem(): Promise<void> {
+  if (configureBrowserPromise)
+    throw new Error('Reset browser storage before opening the project.');
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(browserStoreName);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
+}
+
 export interface BrowserProjectFileSystem extends ProjectFileSystem {
   /** Atomically replace an installer-owned file; explorer renames never overwrite. */
   replaceFile(from: string, to: string): Promise<void>;

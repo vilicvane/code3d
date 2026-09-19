@@ -29,7 +29,7 @@ export default group(posts, 'Linear posts');
 
 Each post is 8 mm wide, leaving 8 mm of clear space between neighbors.
 
-Complete example: [linear posts](../app/examples/layout/linear.ts).
+Complete example: [linear posts](../app/examples/packages/layout/linear.ts).
 
 ## Usage notes
 

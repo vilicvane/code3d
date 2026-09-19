@@ -21,13 +21,14 @@ const socketCap = ISO4762.screw('M6', 24); // Back row, first.
 const shoulder = ISO7379.screw(8, 20); // Front row, last.
 ```
 
-![Two rows of ISO screw models, with common head forms above and collars, set screws and specialized drives below.](../../web/src/assets/models/iso-screws.png)
+![Two rows of ISO screw models, with common head forms above and collars, set screws and specialized drives below.](../../web/src/assets/models/screws.png)
 
 Each row follows the table order: ISO 4762 through ISO 4014, then ISO 7380-2
 through ISO 7379.
 The shoulder screw uses an 8 mm shoulder; the other examples use M6 threads.
 
-Complete example: [ISO screw gallery](../../app/examples/iso-screws.ts).
+Complete example: [screw shapes and drives](../../app/examples/packages/screws.ts).
+The shared gallery labels each shape with both its ISO and GB/T module name.
 
 | Namespace   | Import subpath             | Form                               | Presets                      |
 | ----------- | -------------------------- | ---------------------------------- | ---------------------------- |

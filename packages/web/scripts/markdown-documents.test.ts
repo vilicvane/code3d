@@ -203,10 +203,10 @@ test('package screenshots follow code and canonical overview examples stay in sy
   }
   for (const [document, example] of [
     ['core/README.md', 'constraints/relate.ts'],
-    ['layout/README.md', 'layout/linear.ts'],
-    ['materials/README.md', 'material-presets.ts'],
-    ['layout/docs/layouts.md', 'layout/grid.ts'],
-    ['layout/docs/layouts.md', 'layout/radial.ts'],
+    ['layout/README.md', 'packages/layout/linear.ts'],
+    ['materials/README.md', 'packages/material-presets.ts'],
+    ['layout/docs/layouts.md', 'packages/layout/grid.ts'],
+    ['layout/docs/layouts.md', 'packages/layout/radial.ts'],
   ]) {
     const markdown = await readFile(
       path.join(repository, 'packages', document),
@@ -226,6 +226,28 @@ test('package screenshots follow code and canonical overview examples stay in sy
       `${document}: use the actual ${example} source`,
     );
   }
+});
+
+test('Gears pairs a short related snippet with the colored multi-gear overview', async () => {
+  const markdown = await readFile(
+    path.join(repository, 'packages/gears/README.md'),
+    'utf8',
+  );
+  const gallery = await readFile(
+    path.join(repository, 'packages/app/examples/packages/gears.ts'),
+    'utf8',
+  );
+  const snippet = fromMarkdown(markdown).children.find(
+    node => node.type === 'code' && node.lang === 'ts',
+  );
+  assert.ok(snippet?.type === 'code');
+  const wheel = snippet.value
+    .slice(snippet.value.indexOf('spurGear({'))
+    .trim()
+    .replace(/;$/, '');
+  assert.ok(wheel.startsWith('spurGear({'));
+  assert.ok(gallery.replace(/\s+/g, '').includes(wheel.replace(/\s+/g, '')));
+  assert.ok(markdown.includes('../web/src/assets/models/gears.png'));
 });
 
 test('package overview and detail pages share source links and current manifest versions', async t => {
