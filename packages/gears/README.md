@@ -1,44 +1,63 @@
-# `@code3d/gears`
+# @code3d/gears
 
 Build complete nominal spur, helical and internal cylindrical gear solids from
 tooth dimensions and mounting parameters. Results are regular Code3D solids
-with named gear-axis and face references. Dimensions are in millimetres; angles
-are in degrees.
+with named gear-axis and face references.
+
+## Installation
+
+```sh
+npm install @code3d/core @code3d/gears
+```
+
+The App includes Gears with its built-in Core. Install both packages when
+using Node or a project with its own Core installation.
+
+## Example
+
+Build a spur gear with a keyed bore and a projecting hub.
 
 ```ts
 import {spurGear} from '@code3d/gears';
 
 export const wheel = spurGear({
   module: 2,
-  teeth: 24,
+  teeth: 22,
   faceWidth: 10,
   mounting: {
     kind: 'bore',
     diameter: 8,
     keyway: {width: 2.4, depth: 1.2},
-    hub: {diameter: 20, length: 6, side: 'up'},
+    hub: {diameter: 22, length: 6, side: 'up'},
   },
-  standards: {toothProfile: 'ISO53', moduleSeries: 'ISO54'},
 });
 ```
 
-Install Core alongside Gears when using Node or your own package runtime:
+![A 22-tooth spur gear with an 8 mm keyed bore and a 22 mm hub.](../web/src/assets/models/gear-studies-keyed-hub.png)
 
-```sh
-npm install @code3d/core @code3d/gears
-```
+The 22-tooth wheel has an 8 mm bore, a 2.4 mm keyway and a 22 mm hub.
+The gallery also includes a plain bore, an integral shaft, a helical gear and
+an internal ring.
 
-The App includes this package with its built-in modeling runtime. Read the
-[API and modeling limits](docs/api.md) for all three constructors, standard
-references, mounting options, validation and assembly coordinates. Explore the
-[five complete parts](../app/examples/gear-studies.ts) in the App gallery.
+Complete example: [gear studies](../app/examples/gear-studies.ts).
 
-The library generates nominal layout and visualization geometry. Involute
-flanks are sampled as short chords; root transitions are simplified. The result
-does not establish manufactured tolerances, load capacity, or interference-free
-meshing with a second gear.
+## Usage notes
 
-## Source and verification
+- Dimensions are in millimetres and angles are in degrees.
+- Results are solids with named axis and face references for placement.
+- Geometry is intended for nominal layout and visualization. Flanks use sampled
+  involute chords and simplified root transitions, not production tooth surfaces.
+- A pair of generated gears is not a validated gear pair. Tolerances, load
+  capacity and interference-free meshing require separate checks.
 
-[Public constructors](src/library/index.ts), [tooth geometry](src/library/tooth-solid.ts),
-[geometry tests](test/gears.test.ts), and [agent modeling workflow](../../docs/agents/modeling.md).
+## Documentation
+
+- [Gear API](docs/api.md): constructors, dimensions, mounting and named references.
+- [Standards and scope](docs/api.md#standards-and-scope): nominal profiles, validation and modeling limits.
+
+## Source and development
+
+- [Public API](src/library/index.ts): gear constructors and options.
+- [Tooth geometry](src/library/tooth-solid.ts): nominal tooth construction.
+- [Geometry tests](test/gears.test.ts): tooth dimensions, mounting and validation.
+- [Development guide](../../.agents/docs/development.md): repository setup and test commands.

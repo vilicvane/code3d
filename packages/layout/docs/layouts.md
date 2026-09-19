@@ -3,6 +3,9 @@ title: Layout API
 description: Arrange fixed-size models with Flex, Grid, linear steps and radial patterns.
 ---
 
+Arrange model collections by spacing, tracks or exact positions. For a first
+runnable model, see the [linear layout example](../README.md#example).
+
 ## Quantities and inputs
 
 `repeat(model, count)` supplies an explicit number of occurrences of an immutable
@@ -30,13 +33,35 @@ Inputs are unchanged. Counts must be nonnegative safe integers.
 
 ## Flex
 
+Flex places fixed-size model bounds consecutively along an axis. Arrange a known
+collection with `flex`, or calculate how many copies fit with `fillFlex`:
+
 ```ts
 flex(items, config);
 flex(items, space, config);
 fillFlex(model, space, config);
 ```
 
-Flex places fixed-size model bounds consecutively along the required `axis`.
+For a 100 mm space and 10 mm slats, compare an explicit count with filling:
+
+```ts
+// Known quantity: left clearance 5, right flush, gaps 7 for width 100 and slat width 10.
+const counted = flex(repeat(slat, 6), space, {
+  axis: 'x',
+  padding: {start: 5},
+  justifyContent: 'space-between',
+});
+
+// Calculated quantity: six copies at gap 5, right flush, left clearance 15.
+const filled = fillFlex(slat, space, {
+  axis: 'x',
+  gap: 5,
+  padding: {start: 5},
+  justifyContent: 'end',
+});
+```
+
+`axis` is required.
 `gap` is the minimum boundary-to-boundary clearance, default zero. With no target,
 the interval fits the content and starts at local zero. With a target, it uses
 `space.bounds()` along that axis. `padding` can be a number applied to both ends
@@ -56,23 +81,6 @@ or `{start, end}`; omitted sides are zero.
 The default is `start`, for both explicit collections and filling. A singleton
 with `space-between` uses start; `space-around` and `space-evenly` center it.
 Padding reserves a usable interval; alignment can leave more empty space at an end.
-
-```ts
-// Known quantity: left clearance 5, right flush, gaps 7 for width 100 and slat width 10.
-const counted = flex(repeat(slat, 6), space, {
-  axis: 'x',
-  padding: {start: 5},
-  justifyContent: 'space-between',
-});
-
-// Calculated quantity: six copies at gap 5, right flush, left clearance 15.
-const filled = fillFlex(slat, space, {
-  axis: 'x',
-  gap: 5,
-  padding: {start: 5},
-  justifyContent: 'end',
-});
-```
 
 `alignItems: 'start' | 'center' | 'end'` optionally aligns the cross bounds.
 `crossAxis` is required when `alignItems` is provided or wrapping is enabled;
@@ -96,15 +104,36 @@ It does not accept wrapping controls.
 
 ## Grid
 
+Grid first sizes column and row tracks, then aligns each model inside its cell.
+
 ```ts
 grid(items, config);
 grid(items, space, config);
 fillGrid(model, space, config);
 ```
 
-Grid first sizes column and row tracks, then aligns each model inside its cell.
-`axes` explicitly names the column and row axes, for example `['x', 'z']`; the third axis is
-preserved. Inputs fill columns first, then proceed to the next row.
+For example, arrange twelve pins into four columns:
+
+```ts
+import {cylinder, group} from '@code3d/core';
+import {grid, repeat} from '@code3d/layout';
+
+const pins = grid(repeat(cylinder(3, 10), 12), {
+  columns: 4,
+  axes: ['x', 'z'],
+  gap: 8,
+});
+export default group(pins, 'Grid of pins');
+```
+
+![Twelve cylindrical pins arranged in four columns and three rows.](../../web/src/assets/models/layout-grid.png)
+
+Each pin has a 6 mm diameter, with an 8 mm clear gap between neighbors.
+
+Complete example: [grid of pins](../../app/examples/layout/grid.ts).
+
+`axes` explicitly names the column and row axes, for example `['x', 'z']`; the
+third axis is preserved. Inputs fill columns first, then proceed to the next row.
 
 `columns` is required. `rows` is optional; missing rows are added as auto tracks
 until every input has a cell. Each can be a positive number of auto tracks or an
@@ -166,10 +195,9 @@ otherwise layout reports an error rather than shrinking or dropping inputs.
 
 ## Precise steps and circles
 
-`linear(items, {axis: 'x', step})` moves input i by `i * step`, preserving the first
-input's geometry coordinates. Step is a displacement between copies, not a gap;
-it may be negative or zero. With unequal inputs, each retains its own initial
-geometry offset before its step is applied.
+Use `linear` for fixed displacements and `radial` for circles or arcs.
+
+### Linear steps
 
 Compose linear layouts for multi-axis arrays with exact pitches:
 
@@ -178,26 +206,44 @@ const row = group(linear(repeat(pin, 4), {axis: 'x', step: 14}));
 const rows = linear(repeat(row, 3), {axis: 'z', step: 14});
 ```
 
+`linear(items, {axis: 'x', step})` moves input i by `i * step`, preserving the first
+input's geometry coordinates. Step is a displacement between copies, not a gap;
+it may be negative or zero. With unequal inputs, each retains its own initial
+geometry offset before its step is applied.
+
+### Radial patterns
+
+Arrange twelve fins on a circle, rotating each one with the layout:
+
+```ts
+import {box, group} from '@code3d/core';
+import {radial, repeat} from '@code3d/layout';
+
+const fins = radial(repeat(box(12, 8, 3), 12), {
+  radius: 30,
+  axis: 'y',
+  rotate: true,
+});
+export default group(fins, 'Radial fins');
+```
+
+![Twelve 12 by 8 by 3 mm fins placed around a 30 mm radius circle and rotated with the layout.](../../web/src/assets/models/layout-radial.png)
+
+The fins are equally spaced around a 30 mm radius circle.
+
+Complete example: [radial fins](../../app/examples/layout/radial.ts).
+
 `radial(items, {radius, axis: 'y', startAngle: 0, sweepAngle: 360, rotate: false})`
 requires `radius` and `axis`. It places the inputs on a circle or arc about local
 zero. Start angle defaults to zero, sweep to 360 degrees and rotation to false.
-Y circles start at +X
-and move toward −Z; X circles start at +Y toward +Z; Z circles start at +X toward
-+Y. Sweeps can be positive, negative or zero, within one full turn. Full circles
-omit the duplicate endpoint; partial arcs include both endpoints. A singleton
-uses `startAngle`.
+Y circles start at +X and move toward −Z; X circles start at +Y toward +Z;
+Z circles start at +X toward +Y. Sweeps can be positive, negative or zero, within
+one full turn. Full circles omit the duplicate endpoint; partial arcs include
+both endpoints. A singleton uses `startAngle`.
 
 `rotate: true` rotates each input by its sample angle about the same local axis,
 then applies the radial displacement. `false` preserves its supplied orientation.
-Apply any additional orientation to the input model itself:
-
-```ts
-const fins = radial(repeat(fin.rotate(0, 90, 0), 12), {
-  axis: 'y',
-  radius: 30,
-  rotate: true,
-});
-```
+Apply any additional orientation to the input model itself.
 
 ## Coordinates and numerical bounds
 

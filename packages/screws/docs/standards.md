@@ -5,7 +5,29 @@ sidebar:
   order: 1
 ---
 
+Choose a standard and nominal size, then use its screw and clearance-hole
+constructors. Each standard has a public subpath; multipart numbers use hyphens
+in subpaths and underscores in namespace names.
+
 ## ISO standards and sizes
+
+Create a socket-cap screw by thread size, or a shoulder screw by shoulder diameter:
+
+```ts
+import * as ISO4762 from '@code3d/screws/iso4762';
+import * as ISO7379 from '@code3d/screws/iso7379';
+
+const socketCap = ISO4762.screw('M6', 24); // Back row, first.
+const shoulder = ISO7379.screw(8, 20); // Front row, last.
+```
+
+![Two rows of ISO screw models, with common head forms above and collars, set screws and specialized drives below.](../../web/src/assets/models/iso-screws.png)
+
+Each row follows the table order: ISO 4762 through ISO 4014, then ISO 7380-2
+through ISO 7379.
+The shoulder screw uses an 8 mm shoulder; the other examples use M6 threads.
+
+Complete example: [ISO screw gallery](../../app/examples/iso-screws.ts).
 
 | Namespace   | Import subpath             | Form                               | Presets                      |
 | ----------- | -------------------------- | ---------------------------------- | ---------------------------- |
@@ -64,6 +86,8 @@ that set, such as M7 hexagon bolts and the M16 button-screw thread-length rule,
 are not included. Material, strength, coating, marking and tolerance
 requirements are outside the model scope. In particular, GB/T 5782/5783 use
 the modern M10/M12 hexagon widths of 16/18 mm, not older 17/19 mm variants.
+
+### GB/T clearance tools
 
 GB/T 70.1 holes include a counterbore by default; GB/T 70.3 holes include a
 90° countersink. Other headed GB/T entries accept an optional `counterbore`;

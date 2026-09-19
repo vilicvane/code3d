@@ -3,6 +3,9 @@ import {test} from 'node:test';
 import {mkdtemp, mkdir, writeFile, rm, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {tmpdir} from 'node:os';
+import {pathToFileURL} from 'node:url';
+import {satteri} from '@astrojs/markdown-satteri';
+import {fromMarkdown} from 'mdast-util-from-markdown';
 import {
   markdownDocuments,
   renderMarkdown,
@@ -10,7 +13,220 @@ import {
   markdownHeadings,
   repository,
 } from './markdown-documents.mjs';
-import {publishLink} from './document-sources.mjs';
+import {featuredPackages, publishLink} from './document-sources.mjs';
+import {htmlDocuments} from './html-documents.mjs';
+
+test('featured package overviews share the same reading order in source and published Markdown', async () => {
+  const documents = await markdownDocuments();
+  const headings = [
+    'Installation',
+    'Example',
+    'Usage notes',
+    'Documentation',
+    'Source and development',
+  ];
+  for (const document of documents.filter(item => item.overview)) {
+    const source = await readFile(
+      path.join(repository, document.source),
+      'utf8',
+    );
+    assert.ok(source.startsWith(`# ${document.package!.name}\n`));
+    for (const markdown of [
+      source,
+      await renderMarkdown(document, documents),
+    ]) {
+      const nodes = fromMarkdown(markdown).children;
+      const sections = nodes.flatMap((node, index) =>
+        node.type === 'heading' && node.depth === 2
+          ? [
+              {
+                index,
+                title: node.children
+                  .map(child => ('value' in child ? child.value : ''))
+                  .join(''),
+              },
+            ]
+          : [],
+      );
+      assert.deepEqual(
+        sections.map(section => section.title),
+        headings,
+        document.source,
+      );
+      const content = (title: string) => {
+        const index = sections.findIndex(section => section.title === title);
+        return nodes.slice(
+          sections[index].index + 1,
+          sections[index + 1]?.index,
+        );
+      };
+      assert.deepEqual(
+        content('Installation').flatMap(node =>
+          node.type === 'code' && node.lang === 'sh' ? [node.value] : [],
+        ),
+        [
+          'npm install ' +
+            [...new Set(['@code3d/core', document.package!.name])].join(' '),
+        ],
+        `${document.source}: installation must not include example-only dependencies`,
+      );
+      const example = content('Example');
+      if (document.package!.name === '@code3d/materials') {
+        const extraInstall = example.findIndex(
+          node =>
+            node.type === 'code' &&
+            node.lang === 'sh' &&
+            node.value === 'npm install @code3d/layout',
+        );
+        assert.ok(
+          extraInstall >= 0 &&
+            extraInstall <
+              example.findIndex(
+                node => node.type === 'code' && node.lang === 'ts',
+              ),
+          'Explain Layout installation in the material grid example before its source',
+        );
+      }
+      assert.equal(
+        example[0].type,
+        'paragraph',
+        'Introduce the example before the code',
+      );
+      assert.ok(
+        example.some(node => node.type === 'code' && node.lang === 'ts'),
+      );
+      assert.ok(
+        example.some(
+          node =>
+            node.type === 'paragraph' &&
+            node.children.some(child => child.type === 'image'),
+        ),
+      );
+      for (const title of ['Documentation', 'Source and development']) {
+        const section = content(title);
+        assert.equal(
+          section.length,
+          1,
+          `${document.source}: ${title} is a link list`,
+        );
+        assert.equal(section[0].type, 'list');
+      }
+    }
+  }
+});
+
+test('package screenshots stay local for HTML and become raw images in Markdown', async () => {
+  const documents = await markdownDocuments();
+  const renderer = await satteri({
+    mdastPlugins: [htmlDocuments],
+  }).createRenderer({syntaxHighlight: false});
+  for (const name of featuredPackages) {
+    const document = documents.find(
+      item => item.source === `packages/${name}/README.md`,
+    )!;
+    const source = await readFile(
+      path.join(repository, document.source),
+      'utf8',
+    );
+    const screenshots = fromMarkdown(source).children.flatMap(node =>
+      node.type === 'paragraph'
+        ? node.children.filter(child => child.type === 'image')
+        : [],
+    );
+    assert.ok(screenshots.length, `${name}: missing overview screenshot`);
+    const html = await renderer.render(source, {
+      fileURL: pathToFileURL(path.join(repository, document.source)),
+    });
+    const references = markdownReferences(
+      await renderMarkdown(document, documents),
+    );
+    for (const screenshot of screenshots) {
+      assert.ok(screenshot.alt?.trim(), `${name}: screenshot needs alt text`);
+      assert.ok(
+        html.metadata.localImagePaths.includes(screenshot.url),
+        `${name}: screenshot must reach Astro's local image pipeline`,
+      );
+      const published = await publishLink(screenshot.url, document, documents);
+      assert.match(published, /^https:\/\/raw\.githubusercontent\.com\//);
+      assert.ok(references.includes(published));
+    }
+    assert.ok(
+      !html.code.includes(
+        'github.com/vilicvane/code3d/blob/' +
+          document.sourceCommit +
+          '/packages/web/src/assets/models/',
+      ),
+    );
+  }
+});
+
+test('HTML preserves a linked screenshot while rewriting its documentation target', async () => {
+  const renderer = await satteri({
+    mdastPlugins: [htmlDocuments],
+  }).createRenderer({syntaxHighlight: false});
+  const result = await renderer.render(
+    '[![Sketch on a mounting plate](../../web/src/assets/models/mounting-plate.png)](../README.md)',
+    {
+      fileURL: pathToFileURL(
+        path.join(repository, 'packages/core/docs/sketches.md'),
+      ),
+    },
+  );
+  assert.deepEqual(result.metadata.localImagePaths, [
+    '../../web/src/assets/models/mounting-plate.png',
+  ]);
+  assert.ok(result.code.includes('href="../"'));
+});
+
+test('package screenshots follow code and canonical overview examples stay in sync', async () => {
+  const documents = await markdownDocuments();
+  for (const document of documents.filter(
+    item => item.package && item.source.endsWith('.md'),
+  )) {
+    const source = await readFile(
+      path.join(repository, document.source),
+      'utf8',
+    );
+    let hasCode = false;
+    for (const node of fromMarkdown(source).children) {
+      if (node.type === 'heading') hasCode = false;
+      if (node.type === 'code' && node.lang === 'ts') hasCode = true;
+      if (
+        node.type === 'paragraph' &&
+        node.children.some(child => child.type === 'image')
+      )
+        assert.ok(
+          hasCode,
+          `${document.source}: show the example code before its screenshot`,
+        );
+    }
+  }
+  for (const [document, example] of [
+    ['core/README.md', 'constraints/relate.ts'],
+    ['layout/README.md', 'layout/linear.ts'],
+    ['materials/README.md', 'material-presets.ts'],
+    ['layout/docs/layouts.md', 'layout/grid.ts'],
+    ['layout/docs/layouts.md', 'layout/radial.ts'],
+  ]) {
+    const markdown = await readFile(
+      path.join(repository, 'packages', document),
+      'utf8',
+    );
+    const canonical = await readFile(
+      path.join(repository, 'packages/app/examples', example),
+      'utf8',
+    );
+    assert.ok(
+      fromMarkdown(markdown).children.some(
+        node =>
+          node.type === 'code' &&
+          node.lang === 'ts' &&
+          node.value.trim() === canonical.trim(),
+      ),
+      `${document}: use the actual ${example} source`,
+    );
+  }
+});
 
 test('package overview and detail pages share source links and current manifest versions', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'c3d-package-docs-'));

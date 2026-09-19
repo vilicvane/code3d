@@ -21,6 +21,7 @@ const renderProjects = Object.fromEntries(
       files: bundledExamples.files,
       focus: sample.focus,
       view: 'view' in sample ? sample.view : undefined,
+      mode: 'mode' in sample ? sample.mode : ('modeling' as const),
     },
   ]),
 );
@@ -109,6 +110,7 @@ async function renderModel(): Promise<void> {
         'The requested source position has no renderable context.',
       );
     viewport.renderInspection(module, scene, selection);
+    viewport.setRenderMode(project.mode);
     document.documentElement.dataset.renderFocus = 'source';
 
     await new Promise<void>(resolve =>

@@ -5,6 +5,10 @@ sidebar:
   order: 1
 ---
 
+Choose a gear constructor, define its mounting features, and use named
+references to place the result. These models describe nominal geometry for
+layout and visualization.
+
 ## Choose a part constructor
 
 `spurGear(options)` makes an external straight-tooth gear.
@@ -12,6 +16,79 @@ sidebar:
 helix angle and hand. `internalGear(options)` makes an internal straight-tooth
 ring gear. All three return one Code3D `Gear` solid that supports `material()`,
 `relate()`, Boolean operations and the usual model methods.
+
+## External gear mounting
+
+Omitting `mounting` gives a solid wheel. Specify a discriminated mounting
+choice to make a complete part:
+
+```ts
+import {spurGear, helicalGear} from '@code3d/gears';
+
+const keyedHub = spurGear({
+  module: 2,
+  teeth: 22,
+  faceWidth: 10,
+  mounting: {
+    kind: 'bore',
+    diameter: 8,
+    keyway: {width: 2.4, depth: 1.2},
+    hub: {diameter: 22, length: 6, side: 'up'},
+  },
+});
+
+const shaftPinion = helicalGear({
+  normalModule: 2,
+  teeth: 22,
+  faceWidth: 12,
+  helixAngle: 20,
+  hand: 'right',
+  mounting: {kind: 'shaft', diameter: 8, upExtension: 14, downExtension: 20},
+});
+```
+
+![A 22-tooth straight gear with a projecting 22 mm hub and a keyway in its 8 mm through bore.](../../web/src/assets/models/gear-studies-keyed-hub.png)
+
+The keyed hub has an 8 mm through bore and a 2.4 mm keyway.
+
+Complete example: [gear studies](../../app/examples/gear-studies.ts).
+
+`kind: 'solid'` is the explicit solid choice. A `bore` is through all axial
+features. Its optional rectangular `keyway` runs along the whole bore; `depth`
+is the radial distance from the bore radius to the slot's outer wall. An
+optional `hub` projects by `length` from the selected `up` or `down` gear face.
+A `shaft` is integral with the wheel and can extend by different lengths from
+both gear faces. The builder checks that bores, keyways, hubs and shafts fit
+inside the tooth root circle.
+
+## Internal ring and bolt circle
+
+Create inward-facing teeth in an annular blank, with optional mounting holes.
+
+```ts
+import {internalGear} from '@code3d/gears';
+
+const ring = internalGear({
+  module: 2,
+  teeth: 48,
+  faceWidth: 10,
+  outerDiameter: 130,
+  boltPattern: {count: 6, circleDiameter: 116, holeDiameter: 3},
+});
+```
+
+![A 48-tooth internal gear ring with six holes on a 116 mm bolt circle.](../../web/src/assets/models/gear-studies-internal.png)
+
+The ring has 48 teeth and six 3 mm holes on a 116 mm bolt circle.
+
+Complete example: [gear studies](../../app/examples/gear-studies.ts).
+
+The interior tooth space passes through the ring. `outerDiameter` defines the
+annular blank; optional equally spaced through-holes use the given bolt-circle
+diameter. The builder requires every hole to lie within the rim beyond the
+internal tooth root circle.
+
+## Dimensions and references
 
 | Common field         | Meaning                                                                          |
 | -------------------- | -------------------------------------------------------------------------------- |
@@ -27,63 +104,6 @@ The shaft axis is local **+Y**. The tooth face spans `-faceWidth/2` to
 exposes `gearAxis`, `gearFaceUp` and `gearFaceDown` for relation placement. These
 refer to the toothed body's original faces, including when a hub or shaft
 extends past them. The canonical `axis`, `up` and `down` remain available.
-
-## External gear mounting
-
-Omitting `mounting` gives a solid wheel. Specify a discriminated mounting
-choice to make a complete part:
-
-```ts
-import {spurGear, helicalGear} from '@code3d/gears';
-
-const keyedHub = spurGear({
-  module: 2,
-  teeth: 24,
-  faceWidth: 10,
-  mounting: {
-    kind: 'bore',
-    diameter: 8,
-    keyway: {width: 2.4, depth: 1.2},
-    hub: {diameter: 20, length: 6, side: 'up'},
-  },
-});
-
-const shaftPinion = helicalGear({
-  normalModule: 2,
-  teeth: 22,
-  faceWidth: 12,
-  helixAngle: 20,
-  hand: 'right',
-  mounting: {kind: 'shaft', diameter: 8, upExtension: 14, downExtension: 20},
-});
-```
-
-`kind: 'solid'` is the explicit solid choice. A `bore` is through all axial
-features. Its optional rectangular `keyway` runs along the whole bore; `depth`
-is the radial distance from the bore radius to the slot's outer wall. An
-optional `hub` projects by `length` from the selected `up` or `down` gear face.
-A `shaft` is integral with the wheel and can extend by different lengths from
-both gear faces. The builder checks that bores, keyways, hubs and shafts fit
-inside the tooth root circle.
-
-## Internal ring and bolt circle
-
-```ts
-import {internalGear} from '@code3d/gears';
-
-const ring = internalGear({
-  module: 2,
-  teeth: 48,
-  faceWidth: 10,
-  outerDiameter: 130,
-  boltPattern: {count: 6, circleDiameter: 116, holeDiameter: 3},
-});
-```
-
-The interior tooth space passes through the ring. `outerDiameter` defines the
-annular blank; optional equally spaced through-holes use the given bolt-circle
-diameter. The builder requires every hole to lie within the rim beyond the
-internal tooth root circle.
 
 ## Standards and scope
 
@@ -106,6 +126,3 @@ Manufacturing tolerances, keyway fit classes, material, heat treatment,
 strength, backlash and pair motion are outside these constructors. In
 particular, selecting a standard here does not assert conformance with
 [ISO 1328-1 tooth-flank tolerance classes](https://www.iso.org/standard/45309.html).
-
-For a visual comparison of complete parts, open the
-[gear examples](../../app/examples/gear-studies.ts).

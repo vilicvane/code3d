@@ -15,6 +15,7 @@ const {data} = example;
 ---
 
 <figure class="model-example">
+  <SourceCode source={data.source} file={data.file} />
   <Image
     src={modelImage(id)}
     alt={data.description}
@@ -27,7 +28,6 @@ const {data} = example;
       >Open in Code3D <ArrowIcon /></a
     >
   </figcaption>
-  <SourceCode source={data.source} file={data.file} />
 </figure>
 <style>
   figure {
@@ -35,6 +35,7 @@ const {data} = example;
   }
   img {
     display: block;
+    margin-top: 16px;
     width: 100%;
     height: auto;
     border: 1px solid var(--sl-color-hairline, #30342a);

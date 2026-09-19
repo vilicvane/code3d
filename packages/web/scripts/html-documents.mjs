@@ -32,7 +32,8 @@ export function htmlDocuments({fileURL}) {
       if (document.overview && node.depth === 1) context.removeNode(node);
     },
     link: rewrite,
-    image: rewrite,
+    // Keep local image paths for Astro's native asset pipeline, not GitHub's
+    // HTML source viewer. Plain Markdown publishes readable raw image URLs.
     definition: rewrite,
   };
 }

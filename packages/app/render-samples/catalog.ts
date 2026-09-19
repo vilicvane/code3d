@@ -1,7 +1,59 @@
 import type {ImageView} from '../src/rendering/image-camera';
+import type {ModelRenderMode} from '../src/rendering/model-renderer';
 import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
+  {
+    id: 'material-presets',
+    title: 'Material presets under the same light',
+    description:
+      'Compare ten equal-size spheres in a grid: plastic, rubber, four metals, glass, acrylic, ceramic and paint.',
+    category: 'Materials',
+    file: 'material-presets.ts',
+    focus: {context: 'export default palette;', token: 'palette'},
+    mode: 'render',
+    view: {direction: [0, 2, 1], up: [0, 1, 0]},
+    tags: ['materials', 'presets', 'grid', 'render'],
+  },
+  {
+    id: 'layout-linear',
+    title: 'Linear layout',
+    description:
+      'Five identical posts at a fixed 16 mm pitch, with no supporting geometry.',
+    category: 'Layouts',
+    file: 'layout/linear.ts',
+    focus: {
+      context: "export default group(posts, 'Linear posts')",
+      token: 'group',
+    },
+    view: {direction: [0.4, 0.7, 1.5], up: [0, 1, 0]},
+    tags: ['layout', 'linear', 'repeat'],
+  },
+  {
+    id: 'layout-grid',
+    title: 'Grid layout',
+    description:
+      'Twelve equal-size pins in four columns with 8 mm gaps, without a base or construction space.',
+    category: 'Layouts',
+    file: 'layout/grid.ts',
+    focus: {
+      context: "export default group(pins, 'Grid of pins')",
+      token: 'group',
+    },
+    view: {direction: [0.5, 1.5, 1.2], up: [0, 1, 0]},
+    tags: ['layout', 'grid', 'repeat'],
+  },
+  {
+    id: 'iso-screws',
+    title: 'ISO screw head shapes and drives',
+    description:
+      'Compare ten nominal ISO screw models, including socket cap, countersunk, button, hexagon, set and shoulder screws.',
+    category: 'Practical models',
+    file: 'iso-screws.ts',
+    focus: {context: ").material('#aaa')", token: 'material'},
+    view: {direction: [0.3, 1.6, 1.8], up: [0, 1, 0]},
+    tags: ['screws', 'ISO', 'threads', 'drives'],
+  },
   {
     id: 'gear-studies',
     title: 'Gear types and mounting choices',
@@ -310,6 +362,7 @@ export const renderSamples = [
   focus: SourceToken;
   tags: readonly string[];
   view?: ImageView;
+  mode?: ModelRenderMode;
 }[];
 
 export type SourceContext = Readonly<{
@@ -494,6 +547,7 @@ export const exampleEntries = [
   {
     file: 'materials.ts',
   },
+  {file: 'material-presets.ts'},
   {
     file: 'text.ts',
   },

@@ -5,6 +5,9 @@ sidebar:
   order: 2
 ---
 
+Cut a passage and head recess, then seat a screw using the hole's named
+references. Choose dimensions from the same standard as the fastener.
+
 ## Length and mounting
 
 For ordinary headed screws, `screw(size, length)` measures length below the
@@ -34,6 +37,27 @@ for the Ø8 preset.
 ## Clearance tools
 
 Use a hole model with `cut(stock, [hole])` and its named references for mounting.
+
+```ts
+import {box, cut} from '@code3d/core';
+import * as ISO10642 from '@code3d/screws/iso10642';
+
+const stock = box(30, 10, 30);
+const hole = ISO10642.clearanceHole('M6', 10);
+const plate = cut(stock, [hole]);
+const screw = ISO10642.screw('M6', 20).relate(part =>
+  part.headTop.on(hole.countersinkTop),
+);
+```
+
+The countersunk head meets the top of the recess. All hole models expose
+`shaftTop`, `shaftBottom`, and `shaftAxis`. Counterbored holes add
+`counterboreTop`/`counterboreBottom`; countersunk holes add
+`countersinkTop`/`countersinkBottom`. Plain-hole return types omit these recess
+references.
+
+### Fits and recesses
+
 For headed metric screws, `fit: 'close' | 'normal' | 'loose'` selects ISO 273
 clearance; the default is `normal`. A custom `diameter` overrides it.
 
@@ -56,6 +80,8 @@ its dedicated counterbore table). Countersinks default to head diameter +
 0.5 mm. These recess allowances are modeling defaults, not dimensions imposed
 by the screw product standards.
 
+### Shoulder screw mounting
+
 ISO 7379 supports the same counterbore options as ordinary headed standards:
 
 ```ts
@@ -75,22 +101,11 @@ Use `counterbore: true` for preset allowances. Within the counterbore options,
 `axialClearance` sets the extra depth above the head; an explicit `depth`
 overrides it. For example, `{axialClearance: 0}` seats the head flush.
 
-```ts
-import {box, cut} from '@code3d/core';
-import * as ISO10642 from '@code3d/screws/iso10642';
+## Reference placement
 
-const stock = box(30, 10, 30);
-const hole = ISO10642.clearanceHole('M6', 10);
-const plate = cut(stock, [hole]);
-const screw = ISO10642.screw('M6', 20).relate(part =>
-  part.headTop.on(hole.countersinkTop),
-);
-```
-
-All hole models expose `shaftTop`, `shaftBottom`, and `shaftAxis`. Counterbored
-holes add `counterboreTop`/`counterboreBottom`; countersunk holes add
-`countersinkTop`/`countersinkBottom`. Plain-hole return types omit these recess
-references. Named boundaries are finite `Bound` values. For example,
+Named boundaries are finite `Bound` values. For example,
 `tool.shaftBottom.on(plate.down.flip())` places a hole against the plate's lower
 boundary without rotating it; `flip()` reverses facing and preserves its offset
-coordinate frame. See the [socket-cap mounting example](../../app/examples/assemblies/screw-box/model.ts).
+coordinate frame.
+
+Complete example: [screw box assembly](../../app/examples/assemblies/screw-box/model.ts).
