@@ -110,6 +110,31 @@ errors are shown in status and source diagnostics, not as a general viewport Fix
 
 This model positions three sections with contacts and pivot rotations before lofting. Inspect `start`, `via`, `end` and the completed loft. See [relations](../../../../../../core/docs/relations.mdx) for their coordinate frames.
 
+For rotational parts, [`revolve`](../../../../../../core/docs/api.md#rotational-solids)
+turns a face around a straight directed axis. Add `advance` to the required
+`RevolveConfig` to create a simple helical solid over multiple turns.
+
+<p>
+  <a target="_blank" rel="noopener" href={appUrl('operations/revolve.ts')}>
+    {'Open the five-turn spring '}
+    <ArrowIcon />
+  </a>
+</p>
+
+Change `angle` to set the number of turns and `advance` to set the total axial
+travel. The round profile is offset from the axis by 8 mm.
+
+For a freeform curved path, [`sweep`](../../../../../../core/docs/api.md#path-sweeps)
+carries a planar profile from the path start. The example keeps a circular
+profile's +Y normal aligned with a Bézier path's starting tangent.
+
+<p>
+  <a target="_blank" rel="noopener" href={appUrl('operations/sweep.ts')}>
+    {'Open the curved sweep '}
+    <ArrowIcon />
+  </a>
+</p>
+
 ## Explore a complete project
 
 <ModelExample id="desktop-controller" />

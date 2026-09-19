@@ -8,7 +8,7 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 ## What works
 
 - TypeScript model functions and relative imports across project files.
-- B-Rep primitives, curves, profiles, lofts, boolean operations, fillets,
+- B-Rep primitives, curves, profiles, rotation and helical revolution, path sweeps, lofts, boolean operations, fillets,
   chamfers, uniform-wall shells, and threaded geometry.
 - Source-context inspection, topology selection, supported parameter editing,
   and relative-position tools.
@@ -40,6 +40,9 @@ objects. See [parameter editing](../guides/model-tools.mdx#what-a-panel-can-edit
 
 **Geometric operations can fail.** A fillet, chamfer, or shell must fit the input
 geometry. Shelling requires one connected solid and cannot remove every face.
+Sweeps require an open curve whose start meets the profile origin and whose
+initial tangent follows the profile normal. Tight bends and intersecting
+sections may fail to form a valid solid.
 Offsets through tight curvature, narrow features, or complex intersections can
 fail even when the thickness looks reasonable. On some lofts between different
 profile shapes, adding openings fails even though a closed cavity succeeds.

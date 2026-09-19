@@ -439,7 +439,13 @@ export function contextualParameterAt(
     );
   };
   const argument = context.arguments.find(
-    argument => argument.target && contains(argument.target.sourceRef),
+    argument =>
+      argument.target &&
+      contains(
+        argument.target.kind === 'present'
+          ? (argument.target.focusSourceRef ?? argument.target.sourceRef)
+          : argument.target.sourceRef,
+      ),
   );
   return (
     argument?.name ??

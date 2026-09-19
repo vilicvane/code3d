@@ -41,6 +41,29 @@ For example:
 /** @code3d.param radius {kind: 'length', label: 'Radius', constraints: {min: 1}} */
 ```
 
+For a numeric field in a typed object parameter, use a dotted path:
+
+```ts
+type TurnConfig = Readonly<{angle: number; advance?: number}>;
+
+/**
+ * @code3d.param config.angle {kind: 'angle', label: 'Angle'}
+ * @code3d.param config.advance {kind: 'length', default: 0, label: 'Advance'}
+ */
+function turn(config: TurnConfig) {
+  // Build the model using config.angle and config.advance.
+}
+
+turn({angle: 720, advance: 12});
+```
+
+The App can edit an existing numeric property assignment, insert an omitted
+property into an object literal, or create a missing object argument when the
+preceding required fields have annotated defaults. Put the cursor on a property
+key or value and press Tab to focus its input. An object supplied through a
+variable or spread is not rewritten as a new literal; edit its unique upstream
+numeric definition when the App can trace it.
+
 Place the cursor in `spacer(12, 5, 6)` to open its parameter panel. Change an
 input and the App writes to the corresponding source value. Normal source
 Undo and Redo still apply.

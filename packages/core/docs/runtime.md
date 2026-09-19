@@ -81,7 +81,7 @@ so their colors remain visible through the translucent inputs.
 
 Core uses this mechanism for distance measurements, relate calls and their
 closures, on/align references, relative transformation stages, group children,
-expose sources, Boolean operands and loft sections/spines, plus box and extrusion
+expose sources, Boolean operands, loft sections/spines and sweep profiles/spines, plus box and extrusion
 dimensions. Selecting a normal constructor or Boolean function name
 still previews its return value. Inspectors retain the original operation frame,
 so a later relation or a different consumer cannot move its inspection.

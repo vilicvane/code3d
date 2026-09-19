@@ -32,7 +32,11 @@ import {
   type ProjectInspectionIndex,
 } from './inspect-schema';
 import {InspectTransform} from './inspect-transform';
-import {argumentExpression, unwrapArgument} from './argument-path';
+import {
+  argumentExpression,
+  literalObjectProperty,
+  unwrapArgument,
+} from './argument-path';
 import {
   designArgumentAnnotationSites,
   designFunctionsIn,
@@ -294,7 +298,7 @@ type ParsedDesignArgumentContext = DesignArgumentContext &
   }>;
 
 type ParameterArgument = Readonly<{
-  path: readonly number[];
+  path: readonly (number | string)[];
   name: string;
   label: string;
   kind: ParameterKind;
@@ -1856,7 +1860,7 @@ export function createModelCompiler() {
           factory.createArrayLiteralExpression(targets),
         ],
       );
-      const root = argumentDefinition.path[0];
+      const root = argumentDefinition.path[0] as number;
       const transformed = ts.transform(argumentsWithTracing[root], [
         context => node => {
           const replace: ts.Visitor = child =>
@@ -2261,22 +2265,126 @@ export function createModelCompiler() {
 
   function toolArgumentLocation(
     call: ts.CallExpression,
-    path: readonly number[],
+    path: readonly (number | string)[],
     signature: ToolSignatureSchema,
     sourceFile: ts.SourceFile,
   ): Pick<ToolArgumentSource, 'presence' | 'target'> {
-    let container: ts.CallExpression | ts.ArrayLiteralExpression = call;
+    let container:
+      | ts.CallExpression
+      | ts.ArrayLiteralExpression
+      | ts.ObjectLiteralExpression = call;
     let arguments_: ts.NodeArray<ts.Expression> = call.arguments;
     for (const [depth, index] of path.entries()) {
+      if (typeof index === 'string') {
+        if (!ts.isObjectLiteralExpression(container))
+          return {presence: 'unknown'};
+        const properties = container.properties;
+        const member = literalObjectProperty(container, index);
+        if (member.kind === 'unknown') return {presence: 'unknown'};
+        if (member.kind === 'omitted') {
+          if (depth !== path.length - 1) return {presence: 'omitted'};
+          const position = container.getEnd() - 1;
+          return {
+            presence: 'omitted',
+            target: {
+              kind: 'omitted',
+              sourceRef: sourceRef(sourceFile.fileName, position, position),
+              needsComma: properties.length > 0 && !properties.hasTrailingComma,
+              property: index,
+            },
+          };
+        }
+        const property = member.property;
+        if (depth < path.length - 1) {
+          const nested = unwrapArgument(property.initializer);
+          if (!ts.isObjectLiteralExpression(nested))
+            return {presence: 'unknown'};
+          container = nested;
+          continue;
+        }
+        const location = sourceRef(
+          sourceFile.fileName,
+          property.initializer.getStart(sourceFile),
+          property.initializer.getEnd(),
+        );
+        const propertyIndex = properties.indexOf(property);
+        const previous = properties[propertyIndex - 1];
+        const next = properties[propertyIndex + 1];
+        const removalSourceRef = sourceRef(
+          sourceFile.fileName,
+          previous ? previous.getEnd() : property.getStart(sourceFile),
+          previous
+            ? property.getEnd()
+            : next
+              ? next.getStart(sourceFile)
+              : property.getEnd(),
+        );
+        return {
+          presence: 'present',
+          target: {
+            kind: 'present',
+            sourceRef: location,
+            focusSourceRef: sourceRef(
+              sourceFile.fileName,
+              property.name.getStart(sourceFile),
+              property.initializer.getEnd(),
+            ),
+            removalSourceRef,
+          },
+        };
+      }
       if (arguments_.slice(0, index + 1).some(ts.isSpreadElement))
         return {presence: 'unknown'};
       const argument = arguments_[index];
       if (!argument || ts.isOmittedExpression(argument)) {
+        const objectProperty = path[depth + 1];
+        if (typeof objectProperty === 'string') {
+          if (depth !== path.length - 2) return {presence: 'omitted'};
+          const siblings = signature.parameters.filter(parameter => {
+            const candidate = parameter.path ?? [parameter.index];
+            return (
+              candidate.length === path.length &&
+              typeof candidate.at(-1) === 'string' &&
+              candidate
+                .slice(0, -1)
+                .every((part, level) => part === path[level])
+            );
+          });
+          const current = siblings.findIndex(parameter => {
+            const candidate = parameter.path ?? [parameter.index];
+            return candidate.at(-1) === path.at(-1);
+          });
+          if (current < 0) return {presence: 'omitted'};
+          const defaults: {property: string; value: number}[] = [];
+          for (const parameter of siblings.slice(0, current)) {
+            if (parameter.optional) continue;
+            if (
+              isToolSelectionParameter(parameter) ||
+              parameter.default === undefined
+            )
+              return {presence: 'omitted'};
+            defaults.push({
+              property: (parameter.path ?? [parameter.index]).at(-1) as string,
+              value: parameter.default,
+            });
+          }
+          const position = container.getEnd() - 1;
+          return {
+            presence: 'omitted',
+            target: {
+              kind: 'omitted',
+              sourceRef: sourceRef(sourceFile.fileName, position, position),
+              needsComma: arguments_.length > 0 && !arguments_.hasTrailingComma,
+              object: {property: objectProperty, defaults},
+            },
+          };
+        }
         const prefixes: number[][] = [];
         for (let level = depth; level < path.length; level++) {
           const values: number[] = [];
           const start = level === depth ? arguments_.length : 0;
-          for (let sibling = start; sibling < path[level]; sibling++) {
+          const targetIndex = path[level] as number;
+          for (let sibling = start; sibling < targetIndex; sibling++) {
             const siblingPath = [...path.slice(0, level), sibling];
             const parameter = signature.parameters.find(parameter => {
               const candidate = parameter.path ?? [parameter.index];
@@ -2312,10 +2420,16 @@ export function createModelCompiler() {
       }
       if (depth < path.length - 1) {
         const expression = unwrapArgument(argument);
-        if (!ts.isArrayLiteralExpression(expression))
-          return {presence: 'unknown'};
-        container = expression;
-        arguments_ = expression.elements;
+        if (typeof path[depth + 1] === 'string') {
+          if (!ts.isObjectLiteralExpression(expression))
+            return {presence: 'unknown'};
+          container = expression;
+        } else {
+          if (!ts.isArrayLiteralExpression(expression))
+            return {presence: 'unknown'};
+          container = expression;
+          arguments_ = expression.elements;
+        }
         continue;
       }
       const previous = arguments_[index - 1];

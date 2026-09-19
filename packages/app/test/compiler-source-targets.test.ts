@@ -2533,6 +2533,169 @@ export const ray = line([10, 0, 0]);`;
   }
 });
 
+test('object-literal config fields expose editable numeric arguments and provenance', async () => {
+  const source = `import {circle, line, revolve} from '@code3d/core';
+const turns = 3;
+const profile = circle(1).rotate(90, 0, 0).originOffset(-8, 0, 0);
+const axis = line([0, -20, 0], [0, 20, 0]);
+export const spring = revolve(profile, axis, {angle: turns * 360, advance: 18});`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const target = defined(
+    module.sourceTargets.find(
+      target => target.tool?.signature.name === 'revolve',
+    ),
+  );
+  const tool = defined(target.tool);
+  assert.deepEqual(
+    tool.signature.parameters.map(parameter => parameter.name),
+    ['config.angle', 'config.advance'],
+  );
+  assert.deepEqual(
+    tool.arguments.map(argument => argument.target?.kind),
+    ['present', 'present'],
+  );
+  assert.deepEqual(
+    Object.values(defined(target.evaluations[0].toolArguments)),
+    [1080, 18],
+  );
+  const angle = defined(tool.arguments[0].target);
+  const advance = defined(tool.arguments[1].target);
+  assert.ok(angle.kind === 'present');
+  assert.ok(advance.kind === 'present');
+  assert.equal(
+    source.slice(angle.sourceRef.start, angle.sourceRef.end),
+    'turns * 360',
+  );
+  assert.equal(
+    source.slice(angle.focusSourceRef!.start, angle.focusSourceRef!.end),
+    'angle: turns * 360',
+  );
+  assert.equal(
+    source.slice(advance.sourceRef.start, advance.sourceRef.end),
+    '18',
+  );
+  assert.equal(
+    source.slice(advance.focusSourceRef!.start, advance.focusSourceRef!.end),
+    'advance: 18',
+  );
+  const usage = defined(
+    target.evaluations[0].parameters?.find(
+      usage => usage.argument === 'config.angle',
+    ),
+  );
+  assert.equal(usage.sensitivity, 360);
+  const omittedSource = source.replace(
+    '{angle: turns * 360, advance: 18}',
+    '{angle: 360}',
+  );
+  const omittedModule = await compileProject(
+    {files: [{path: '/model.ts', source: omittedSource}]},
+    '/model.ts',
+  );
+  assert.equal(omittedModule.diagnostic, undefined);
+  const omittedCall = defined(
+    omittedModule.sourceTargets.find(
+      target => target.tool?.signature.name === 'revolve',
+    )?.tool,
+  );
+  const omitted = defined(omittedCall.arguments[1].target);
+  assert.equal(omitted.kind, 'omitted');
+  if (omitted.kind !== 'omitted') return;
+  assert.equal(omitted.property, 'advance');
+  const {argumentInsertionSource} = await server.ssrLoadModule<
+    typeof import('../src/tools/source-expression.ts')
+  >('/src/tools/source-expression.ts');
+  assert.equal(argumentInsertionSource('18', omitted), ', advance: 18');
+  const missingSource = source.replace(
+    ', {angle: turns * 360, advance: 18}',
+    '',
+  );
+  const missingModule = await compileProject(
+    {files: [{path: '/model.ts', source: missingSource}]},
+    '/model.ts',
+  );
+  assert.equal(missingModule.diagnostic, undefined);
+  const missingCall = defined(
+    missingModule.sourceTargets.find(
+      target => target.tool?.signature.name === 'revolve',
+    )?.tool,
+  );
+  const missingAngle = defined(missingCall.arguments[0].target);
+  const missingAdvance = defined(missingCall.arguments[1].target);
+  assert.equal(missingAngle.kind, 'omitted');
+  assert.equal(missingAdvance.kind, 'omitted');
+  if (missingAngle.kind !== 'omitted' || missingAdvance.kind !== 'omitted')
+    return;
+  assert.equal(argumentInsertionSource('540', missingAngle), ', {angle: 540}');
+  assert.equal(
+    argumentInsertionSource('18', missingAdvance),
+    ', {angle: 360, advance: 18}',
+  );
+  const shorthandSource = source
+    .replace('const turns = 3;', 'const turns = 3; const advance = 18;')
+    .replace('advance: 18', 'advance');
+  const shorthandModule = await compileProject(
+    {files: [{path: '/model.ts', source: shorthandSource}]},
+    '/model.ts',
+  );
+  assert.equal(shorthandModule.diagnostic, undefined);
+  const shorthand = defined(
+    shorthandModule.sourceTargets.find(
+      target => target.tool?.signature.name === 'revolve',
+    )?.tool,
+  );
+  assert.equal(shorthand.arguments[1].presence, 'unknown');
+});
+
+test('face revolve method exposes fields in its config object', async () => {
+  const source = `import {circle, line} from '@code3d/core';
+const profile = circle(1).rotate(90, 0, 0).originOffset(-8, 0, 0);
+const axis = line([0, -20, 0], [0, 20, 0]);
+export const ring = profile.revolve(axis, {angle: 360});`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const call = defined(
+    module.sourceTargets.find(
+      target => target.tool?.signature.name === 'revolve',
+    ),
+  );
+  assert.deepEqual(
+    defined(call.tool).signature.parameters.map(parameter => parameter.name),
+    ['config.angle', 'config.advance'],
+  );
+  assert.deepEqual(
+    Object.values(defined(call.evaluations[0].toolArguments)),
+    [360],
+  );
+  assert.equal(defined(call.tool).arguments[1].presence, 'omitted');
+  const missingSource = source.replace(', {angle: 360}', '');
+  const missingModule = await compileProject(
+    {files: [{path: '/model.ts', source: missingSource}]},
+    '/model.ts',
+  );
+  assert.equal(missingModule.diagnostic, undefined);
+  const missingCall = defined(
+    missingModule.sourceTargets.find(
+      target => target.tool?.signature.name === 'revolve',
+    )?.tool,
+  );
+  const angle = defined(missingCall.arguments[0].target);
+  assert.equal(angle.kind, 'omitted');
+  if (angle.kind === 'omitted') {
+    const {argumentInsertionSource} = await server.ssrLoadModule<
+      typeof import('../src/tools/source-expression.ts')
+    >('/src/tools/source-expression.ts');
+    assert.equal(argumentInsertionSource('270', angle), ', {angle: 270}');
+  }
+});
+
 test('empty topology calls retain an editable selection target', async () => {
   for (const method of [
     'vertex',

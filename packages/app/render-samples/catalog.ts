@@ -467,6 +467,8 @@ export const exampleEntries = [
   {
     file: 'operations/rotate.ts',
   },
+  {file: 'operations/revolve.ts'},
+  {file: 'operations/sweep.ts'},
   {file: 'operations/origin.ts'},
   {
     file: 'primitives/primitives.ts',

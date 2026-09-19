@@ -28,8 +28,10 @@ import {
   rectangle,
   regularPolygon,
   regularPrism,
+  revolve,
   sketch,
   spline,
+  sweep,
   sphere,
   text,
   tube,
@@ -52,6 +54,7 @@ import {
   type Model,
   type PlanarElements,
   type PointAnchor,
+  type RevolveConfig,
   type SolidModel,
   type Surface,
   type SurfaceId,
@@ -247,6 +250,16 @@ const faceModel: FaceModel<PlanarElements> = circle(4);
 const extrudedFace: SolidModel = faceModel.extrude(3);
 const extrudedProfile: SolidModel = extrude(faceModel.rotate(0, 0, 90), -3);
 const extrudedFaces: readonly SolidModel[] = extrude([faceModel], 3);
+const revolveConfig: RevolveConfig = {angle: 360, advance: 12};
+const revolvedFace: SolidModel = revolve(faceModel, solid.axis, revolveConfig);
+const revolvedMethod: SolidModel = faceModel.revolve(solid.axis, {angle: 180});
+const revolvedAboutLine: SolidModel = revolve(faceModel, line([0, 1, 0]), {
+  angle: 180,
+});
+// @ts-expect-error The grouped core config is required in the authoring signature.
+revolve(faceModel, solid.axis);
+// @ts-expect-error A grouped core config requires its angle.
+revolve(faceModel, solid.axis, {advance: 12});
 // @ts-expect-error A solid is not an extrusion profile.
 extrude(solid, 3);
 // @ts-expect-error Only face models expose extrusion.
@@ -256,6 +269,10 @@ faceModel.extrude();
 // @ts-expect-error Extrusion distance is numeric.
 faceModel.extrude('3');
 const edgeModel: EdgeModel<CurveElements> = line([0, 0, 0], vector);
+const sweptFace: SolidModel = sweep(faceModel, edgeModel);
+const sweptMethod: SolidModel = faceModel.sweep(edgeModel);
+// @ts-expect-error A sweep spine is a curve model, not a line anchor.
+sweep(faceModel, solid.axis);
 const vertexModel: VertexModel = point(vector);
 const groupModel: GroupModel = group([
   solid,
@@ -409,6 +426,10 @@ void [
   ellipse,
   extrudedFace,
   extrudedProfile,
+  revolveConfig,
+  revolvedFace,
+  revolvedMethod,
+  revolvedAboutLine,
   faceModel,
   frustum,
   group,

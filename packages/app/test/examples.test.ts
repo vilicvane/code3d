@@ -42,6 +42,8 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'materials.ts': ['plain', 1],
   'text.ts': ['lettering', 4],
   'operations/rotate.ts': ['default', 1],
+  'operations/revolve.ts': ['default', 1],
+  'operations/sweep.ts': ['default', 1],
   'operations/origin.ts': ['centered', 1],
   'primitives/primitives.ts': ['cuboid', 1],
   'constraints/relate.ts': ['default', 2],

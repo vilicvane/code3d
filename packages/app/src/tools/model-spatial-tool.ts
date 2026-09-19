@@ -232,7 +232,11 @@ export function spatialBindings(
       source = {
         kind: 'call-argument',
         sourceRef: target.sourceRef,
-        path: schema?.path ?? (kind === 'pivot' ? [0, index] : [argumentIndex]),
+        path: schema?.path?.every(value => typeof value === 'number')
+          ? (schema.path as readonly number[])
+          : kind === 'pivot'
+            ? [0, index]
+            : [argumentIndex],
         values:
           kind === 'pivot'
             ? [spatial.vector]

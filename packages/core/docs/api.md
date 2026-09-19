@@ -41,19 +41,21 @@ To build a solid beyond these primitives, import `definePrimitive` and
 
 Planar profiles lie in the local XZ plane with a +Y normal.
 
-| Function                                   | Meaning                                      |
-| ------------------------------------------ | -------------------------------------------- |
-| `circle(radius)`                           | Circular face                                |
-| `ellipse(xRadius, zRadius)`                | Elliptical face                              |
-| `rectangle(x, z)`                          | Rectangular face                             |
-| `regularPolygon(radius, sides, rotation?)` | Regular polygonal face                       |
-| `point()` or `point([x, y, z])`            | Vertex model                                 |
-| `line([x, y, z])` or `line(start, end)`    | Straight edge                                |
-| `arc(start, middle, end)`                  | Arc through three points                     |
-| `bezier(points)`                           | Bézier curve                                 |
-| `spline(points)`                           | Interpolating spline                         |
-| `loft(sections, options?)`                 | Solid through sections; optional curve spine |
-| `extrude(faceOrFaces, distance)`           | Solid extruded along one face's local normal |
+| Function                                   | Meaning                                                                   |
+| ------------------------------------------ | ------------------------------------------------------------------------- |
+| `circle(radius)`                           | Circular face                                                             |
+| `ellipse(xRadius, zRadius)`                | Elliptical face                                                           |
+| `rectangle(x, z)`                          | Rectangular face                                                          |
+| `regularPolygon(radius, sides, rotation?)` | Regular polygonal face                                                    |
+| `point()` or `point([x, y, z])`            | Vertex model                                                              |
+| `line([x, y, z])` or `line(start, end)`    | Straight edge                                                             |
+| `arc(start, middle, end)`                  | Arc through three points                                                  |
+| `bezier(points)`                           | Bézier curve                                                              |
+| `spline(points)`                           | Interpolating spline                                                      |
+| `loft(sections, options?)`                 | Solid through sections; optional curve spine                              |
+| `extrude(faceOrFaces, distance)`           | Solid extruded along one face's local normal                              |
+| `revolve(profile, axis, config)`           | Solid rotated about a straight directed axis, with optional axial advance |
+| `sweep(profile, spine)`                    | Solid formed by carrying one face along an open curve                     |
 
 See [local coordinates and placement](local-coordinates.md) for
 the coordinate frame of a model, reference, or composition.
@@ -83,6 +85,72 @@ import {circle, extrude, rectangle} from '@code3d/core';
 export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
 export const pin = extrude(circle(2), -10);
 ```
+
+### Rotational solids
+
+`revolve(profile, axis, config: RevolveConfig)` and
+`profile.revolve(axis, config)` rotate one face about a straight directed axis.
+`line(...)` can be passed directly; an existing straight edge or axis reference
+also works.
+`config.angle` is a required finite, non-zero angle in degrees. `config.advance`
+is the signed total distance traveled along the directed axis during that angle;
+it defaults to zero. A positive angle follows the axis's right-hand direction.
+Reversing the axis reverses both the rotation sense and the direction of a positive
+advance. With zero advance, the angle may cover at most one turn. With non-zero
+advance, it may cover multiple turns to form a simple screw-motion solid.
+
+```ts
+import {circle, line, rectangle, revolve} from '@code3d/core';
+
+const axis = line([0, -20, 0], [0, 20, 0]);
+const ringSection = rectangle(4, 6).rotate(90, 0, 0).originOffset(-8, 0, 0);
+export const ring = revolve(ringSection, axis, {angle: 360});
+
+const wireSection = circle(1).rotate(90, 0, 0).originOffset(-8, 0, 0);
+export const spring = wireSection.revolve(axis, {angle: 5 * 360, advance: 25});
+```
+
+The authoring signature requires `config`. While editing an incomplete call,
+the App uses 360 degrees and zero advance so its parameter tool can add the
+config object.
+
+The result keeps the profile's local frame and is an ordinary `SolidModel`.
+The axis participates in the same relation solve as the profile; its own model
+placement is respected. A helical profile must have one outer boundary without
+holes. Intersecting turns and profiles that cross the axis may fail to produce a
+valid solid; leave clearance between turns and keep the profile off the axis.
+For a multi-turn coil with round wire and automatic pitch clearance checks,
+[`coil`](#solid-primitives) remains the shorter constructor.
+
+### Path sweeps
+
+`sweep(profile, spine)` and `profile.sweep(spine)` carry one planar face along a
+continuous open `EdgeModel`, such as a line or Bézier curve. The face's local
+origin must meet the path's start, and its normal must point along the starting
+tangent. The operation respects the solved placement of both inputs and returns
+a solid in the profile's local frame; it does not move or rotate the supplied
+profile to fit the path.
+
+```ts
+import {bezier, circle, sweep} from '@code3d/core';
+
+const profile = circle(2);
+const spine = bezier([
+  [0, 0, 0],
+  [0, 8, 0],
+  [5, 16, 0],
+  [5, 24, 0],
+]);
+export const bentRod = sweep(profile, spine);
+```
+
+The path must be open with a non-zero starting tangent. The output is an ordinary
+`SolidModel` that supports subsequent Boolean and finishing operations. Very
+tight bends or self-intersections may prevent the kernel from producing a valid
+solid. One through hole in the profile is supported; profiles with multiple
+holes currently need explicit contour correspondence. Use the
+[App example](../../app/examples/operations/sweep.ts) to inspect
+the profile, path and result.
 
 ## Measurements
 
