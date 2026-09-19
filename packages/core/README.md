@@ -6,8 +6,8 @@ in the App or a supported Node.js runtime.
 
 Model constructors define the initial origin; derived operations inherit their main
 input frame. `group`, `union`, and `intersect` use the first member or operand,
-`cut` uses the stock, `loft` uses the first section, and `revolve` uses the
-profile. See the
+`cut` uses the stock, `loft` uses the first section, and `revolve` and `sweep`
+use the profile. See the
 [default origin rules](docs/local-coordinates.md#default-origin-rules)
 for all constructors and explicit origin operations.
 
@@ -39,18 +39,18 @@ and the [agent file workflow](../../docs/agents/files.md).
 
 ## Find the modeling API
 
-| Task                                                                            | Start here                                                                         |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Solids, planar profiles, curves, points, Boolean operations, extrusion, revolution and loft | [Modeling reference](docs/api.md)                                                  |
-| Place parts with bounds, align geometry or match coordinate frames              | [Relations](docs/relations.mdx)                                                    |
-| Change origins and rotate parts                                                 | [Origins and rotation](docs/origins-and-rotation.mdx)                              |
-| Hollow a solid or choose openings                                               | [Shells](docs/shells.mdx)                                                          |
-| Select vertices, edges and surfaces, or expose named elements                   | [Topology](docs/topology.md)                                                       |
-| Build reusable model functions                                                  | [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx)         |
-| Give functions editing tools and example arguments                              | [Model tools](../web/src/content/docs/docs/guides/model-tools.mdx)                 |
-| Customize parameter and call inspection                                         | [Source inspection](docs/runtime.md#source-inspection)                             |
-| Extend the runtime with Replicad geometry                                       | [Custom primitives](docs/custom-primitives.mdx)                                    |
-| Known boundaries                                                                | [Current limitations](../web/src/content/docs/docs/getting-started/limitations.md) |
+| Task                                                                                | Start here                                                                         |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Solids, profiles, curves, Boolean operations, extrusion, revolution, sweep and loft | [Modeling reference](docs/api.md)                                                  |
+| Place parts with bounds, align geometry or match coordinate frames                  | [Relations](docs/relations.mdx)                                                    |
+| Change origins and rotate parts                                                     | [Origins and rotation](docs/origins-and-rotation.mdx)                              |
+| Hollow a solid or choose openings                                                   | [Shells](docs/shells.mdx)                                                          |
+| Select vertices, edges and surfaces, or expose named elements                       | [Topology](docs/topology.md)                                                       |
+| Build reusable model functions                                                      | [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx)         |
+| Give functions editing tools and example arguments                                  | [Model tools](../web/src/content/docs/docs/guides/model-tools.mdx)                 |
+| Customize parameter and call inspection                                             | [Source inspection](docs/runtime.md#source-inspection)                             |
+| Extend the runtime with Replicad geometry                                           | [Custom primitives](docs/custom-primitives.mdx)                                    |
+| Known boundaries                                                                    | [Current limitations](../web/src/content/docs/docs/getting-started/limitations.md) |
 
 See also [model values and measurements](docs/values.md), [editable sketches](docs/sketches.md),
 [text and fonts](docs/text.md), and [runtime integration](docs/runtime.md).

@@ -113,6 +113,17 @@ turns a face around a straight directed axis. Add `advance` to the required
 Change `angle` to set the number of turns and `advance` to set the total axial
 travel. The round profile is offset from the axis by 8 mm.
 
+For a freeform curved path, [`sweep`](../../../../../../core/docs/api.md#path-sweeps)
+carries a planar profile from the path start. The example keeps a circular
+profile's +Y normal aligned with a Bézier path's starting tangent.
+
+<p>
+  <a target="_blank" rel="noopener" href={appUrl('operations/sweep.ts')}>
+    {'Open the curved sweep '}
+    <ArrowIcon />
+  </a>
+</p>
+
 ## Explore a complete project
 
 <ModelExample id="desktop-controller" />

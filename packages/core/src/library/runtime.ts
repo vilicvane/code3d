@@ -66,7 +66,7 @@ import {
   shapeSubshapes,
   transformShape,
 } from './kernel-shapes.js';
-import {loftWithTopology} from './loft.js';
+import {loftWithTopology, sweepWithTopology} from './loft.js';
 import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
 import {
   axisRotation,
@@ -278,6 +278,7 @@ export type ModelOperationKind =
   | 'text'
   | 'extrude'
   | 'revolve'
+  | 'sweep'
   | 'primitive'
   | 'material'
   | 'scaled'
@@ -1122,6 +1123,12 @@ export type FaceModel<Elements extends NamedElements = PlanarElements> =
        * @code3d.param config.advance {kind: 'length', default: 0, label: 'Axial advance'}
        */
       revolve(axis: LineAnchor, config: RevolveConfig): SolidModel;
+      /**
+       * Sweep this face along an open curve beginning at its local origin.
+       * @code3d.inspect this sweep.inspectMethodProfile
+       * @code3d.inspect spine sweep.inspectMethodSpine
+       */
+      sweep(spine: EdgeModel<{}>): SolidModel;
     } & Elements;
 
 /** Core parameters for rotational and screw-motion solids. */
@@ -3672,6 +3679,72 @@ export class ModelObject<
     return result as unknown as SolidModel;
   }
 
+  sweep(this: ModelObject<Elements, 'face'>, spine: EdgeModel<{}>): SolidModel {
+    if (this.kind !== 'face')
+      throw new Error('sweep requires a single face model.');
+    const path = requireModelKind(
+      spine,
+      'edge',
+      'sweep requires an edge model as its spine.',
+    );
+    const context = ModelObject.createSolveContext([this, path]);
+    const profilePose = this.solvePose(context);
+    const pathTransform = relativeTransform(
+      path.solvePose(context),
+      profilePose,
+    );
+    const source = this.requireGeometry();
+    const pathGeometry = path.requireGeometry();
+    const normal = rotateVector(
+      [0, 1, 0],
+      this.geometryAnchor.transform.quaternion,
+    );
+    ModelObject.recordCompositionInspection(context, []);
+    const geometry = evaluateSolidGeometry(
+      'sweep',
+      [pathTransform.position, pathTransform.quaternion, normal],
+      [source, pathGeometry],
+      () => {
+        const positionedPath = shapeWithTransform(
+          pathGeometry.value.shape as ReplicadEdge,
+          pathTransform,
+        );
+        try {
+          return sweepWithTopology(
+            {
+              shape: source.value.shape,
+              topology: source.value.topology,
+              namespace: 1,
+            },
+            positionedPath,
+            normal,
+          );
+        } finally {
+          positionedPath.delete();
+        }
+      },
+    );
+    const result = ModelObject.create<CanonicalElements, 'solid'>({
+      kind: 'solid',
+      name: 'Sweep',
+      geometry,
+      material: this.materialSnapshot,
+      placements: this.placements,
+      sourceRefs: [...this.sourceRefs, ...path.sourceRefs],
+      parameters: uniqueParameters([
+        ...this.allParameters(),
+        ...path.allParameters(),
+      ]),
+      meshTolerance: Math.min(this.meshTolerance, path.meshTolerance),
+      operation: storedOperation('sweep', [
+        {model: this, role: 'receiver', index: 0},
+        {model: path, role: 'spine', index: 1},
+      ]),
+    });
+    ModelObject.recordCompositionInspection(context, [[result, this]]);
+    return result as unknown as SolidModel;
+  }
+
   cut(
     this: ModelObject<Elements, 'solid'>,
     tools: readonly SolidModel<{}>[],
@@ -6091,6 +6164,22 @@ export function revolve(
 }
 
 /**
+ * Sweeps one planar profile along an open curve.
+ * @code3d.inspect profile sweep.inspectProfile
+ * @code3d.inspect spine sweep.inspectSpine
+ */
+export function sweep(
+  profile: FaceModel<{}>,
+  spine: EdgeModel<{}>,
+): SolidModel {
+  return requireModelKind(
+    profile,
+    'face',
+    'sweep requires a face model.',
+  ).sweep(spine);
+}
+
+/**
  * Creates connected text faces on the XZ plane: +X right, -Z up, normal +Y.
  * All faces share the baseline origin. Size is the font em in model units.
  * @code3d.param size {kind: 'length', label: 'Text size'}
@@ -6637,6 +6726,8 @@ export const authoringApi = Object.freeze({
   bezier,
   spline,
   loft,
+  revolve,
+  sweep,
   box,
   cylinder,
   tube,
@@ -7747,6 +7838,63 @@ export namespace revolve {
         'axis',
       )
     );
+  }
+}
+
+/** @internal */
+export namespace sweep {
+  export function inspectProfile(
+    [profile, spine]: [FaceModel<{}>, EdgeModel<{}>],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectComposition(
+      context.data,
+      [spine, ...(context.return ? [context.return] : [])],
+      [profile],
+    );
+  }
+
+  export function inspectSpine(
+    [profile, spine]: [FaceModel<{}>, EdgeModel<{}>],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectComposition(
+      context.data,
+      [profile, ...(context.return ? [context.return] : [])],
+      [spine],
+    );
+  }
+
+  export function inspectMethodProfile(
+    [spine]: [EdgeModel<{}>],
+    context: InspectContext<
+      SolidModel,
+      FaceModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return inspectProfile([context.receiver, spine], context);
+  }
+
+  export function inspectMethodSpine(
+    [spine]: [EdgeModel<{}>],
+    context: InspectContext<
+      SolidModel,
+      FaceModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return inspectSpine([context.receiver, spine], context);
   }
 }
 

@@ -73,6 +73,7 @@ export {
   regularPrism,
   revolve,
   spline,
+  sweep,
   sphere,
   tube,
   union,

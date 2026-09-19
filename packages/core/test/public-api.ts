@@ -31,6 +31,7 @@ import {
   revolve,
   sketch,
   spline,
+  sweep,
   sphere,
   text,
   tube,
@@ -268,6 +269,10 @@ faceModel.extrude();
 // @ts-expect-error Extrusion distance is numeric.
 faceModel.extrude('3');
 const edgeModel: EdgeModel<CurveElements> = line([0, 0, 0], vector);
+const sweptFace: SolidModel = sweep(faceModel, edgeModel);
+const sweptMethod: SolidModel = faceModel.sweep(edgeModel);
+// @ts-expect-error A sweep spine is a curve model, not a line anchor.
+sweep(faceModel, solid.axis);
 const vertexModel: VertexModel = point(vector);
 const groupModel: GroupModel = group([
   solid,

@@ -1,7 +1,10 @@
 import {
+  assembleWire,
   cast,
   getOC,
+  measureVolume,
   type AnyShape,
+  type Edge,
   type Face,
   type Wire,
   type Shape3D,
@@ -19,6 +22,66 @@ import {
   type TopologyInput,
   type ShapeTopology,
 } from './topology.js';
+import type {Vec3} from './spatial.js';
+
+/** Sweep a face along one open edge, keeping the authored starting frame. */
+export function sweepWithTopology(
+  profile: TopologyInput,
+  path: Edge,
+  normal: Vec3,
+): Readonly<{shape: Shape3D; topology: ShapeTopology}> {
+  if (path.isClosed || !(path.length > 1e-9))
+    throw new Error('Sweep spine must be a non-degenerate open curve.');
+  const start = path.pointAt(0);
+  let tangent: ReturnType<Edge['tangentAt']> | undefined;
+  try {
+    tangent = path.tangentAt(0);
+    const position = start.toTuple();
+    const direction = tangent.toTuple();
+    const magnitude = Math.hypot(...direction);
+    if (!(magnitude > 1e-9))
+      throw new Error('Sweep spine must have a non-zero starting tangent.');
+    if (Math.hypot(...position) > 1e-6)
+      throw new Error(
+        'Sweep profile origin must coincide with the spine start.',
+      );
+    if (
+      (normal[0] * direction[0] +
+        normal[1] * direction[1] +
+        normal[2] * direction[2]) /
+        magnitude <
+      1 - 1e-6
+    )
+      throw new Error(
+        'Sweep profile normal must point along the spine start tangent.',
+      );
+  } finally {
+    tangent?.delete();
+    start.delete();
+  }
+  const spine = assembleWire([path]);
+  let result: Readonly<{shape: Shape3D; topology: ShapeTopology}> | undefined;
+  try {
+    result = loftWithTopology([profile], spine, false);
+    if (!(Math.abs(measureVolume(result.shape)) > 0))
+      throw new Error('Sweep did not produce a non-degenerate solid.');
+    const validation = new (getOC().BRepCheck_Analyzer)(result.shape.wrapped);
+    try {
+      if (!validation.IsValid())
+        throw new Error(
+          'Sweep produced an invalid solid. Adjust the profile or path to avoid tight bends and intersections.',
+        );
+    } finally {
+      validation.delete();
+    }
+    return result;
+  } catch (error) {
+    result?.shape.delete();
+    throw error;
+  } finally {
+    spine.delete();
+  }
+}
 
 export function loftWithTopology(
   sections: readonly TopologyInput[],
@@ -48,7 +111,7 @@ export function loftWithTopology(
       throw new Error('Loft sections must have matching hole counts.');
     if (holes[0].length > 1)
       throw new Error(
-        'Loft currently supports at most one hole per section; multiple holes need explicit correspondence.',
+        'A swept or lofted profile currently supports at most one hole; multiple holes need explicit correspondence.',
       );
     outer = loftContoursWithTopology(sections, spine, ruled);
     if (!holes[0].length) {
@@ -115,7 +178,9 @@ function loftContoursWithTopology(
     }
     result = castOwnedShape3D(builder.Shape());
     caps[0] = castOwnedShape(builder.FirstShape()) as Face;
-    caps[sections.length - 1] = castOwnedShape(builder.LastShape()) as Face;
+    // A single profile has one inherited start cap; its end cap is new topology.
+    if (sections.length > 1)
+      caps[sections.length - 1] = castOwnedShape(builder.LastShape()) as Face;
     const topology = transferShapeTopology(
       sections,
       result,

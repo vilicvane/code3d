@@ -54,6 +54,7 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `loft(sections, options?)`                 | Solid through sections; optional curve spine                              |
 | `extrude(faceOrFaces, distance)`           | Solid extruded along one face's local normal                              |
 | `revolve(profile, axis, config)`           | Solid rotated about a straight directed axis, with optional axial advance |
+| `sweep(profile, spine)`                    | Solid formed by carrying one face along an open curve                     |
 
 See [local coordinates and placement](local-coordinates.md) for
 the coordinate frame of a model, reference, or composition.
@@ -119,6 +120,36 @@ holes. Intersecting turns and profiles that cross the axis may fail to produce a
 valid solid; leave clearance between turns and keep the profile off the axis.
 For a multi-turn coil with round wire and automatic pitch clearance checks,
 [`coil`](#solid-primitives) remains the shorter constructor.
+
+### Path sweeps
+
+`sweep(profile, spine)` and `profile.sweep(spine)` carry one planar face along a
+continuous open `EdgeModel`, such as a line or Bézier curve. The face's local
+origin must meet the path's start, and its normal must point along the starting
+tangent. The operation respects the solved placement of both inputs and returns
+a solid in the profile's local frame; it does not move or rotate the supplied
+profile to fit the path.
+
+```ts
+import {bezier, circle, sweep} from '@code3d/core';
+
+const profile = circle(2);
+const spine = bezier([
+  [0, 0, 0],
+  [0, 8, 0],
+  [5, 16, 0],
+  [5, 24, 0],
+]);
+export const bentRod = sweep(profile, spine);
+```
+
+The path must be open with a non-zero starting tangent. The output is an ordinary
+`SolidModel` that supports subsequent Boolean and finishing operations. Very
+tight bends or self-intersections may prevent the kernel from producing a valid
+solid. One through hole in the profile is supported; profiles with multiple
+holes currently need explicit contour correspondence. Use the
+[App example](../../app/examples/operations/sweep.ts) to inspect
+the profile, path and result.
 
 ## Measurements
 

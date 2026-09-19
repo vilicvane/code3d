@@ -44,9 +44,11 @@ const authoringValues = [
   'rectangle',
   'regularPolygon',
   'regularPrism',
+  'revolve',
   'sketch',
   'sphere',
   'spline',
+  'sweep',
   'tube',
   'union',
 ].sort();

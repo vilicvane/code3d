@@ -903,6 +903,32 @@ test('revolve inspection keeps profile, axis and solid in the solved frame', asy
   assert.equal(output.ambient.length, 0);
 });
 
+test('sweep inspection distinguishes profile, spine and solid', async () => {
+  const inspect =
+    await compile(`import {circle, bezier, sweep} from '@code3d/core';
+    const profile = circle(2);
+    const spine = bezier([[0, 0, 0], [0, 8, 0], [5, 16, 0], [5, 24, 0]]);
+    export default sweep(profile, spine);`);
+  const profile = defined(await inspect('profile, spine'));
+  assert.equal(profile.target.length, 1);
+  assert.equal(profile.ambient.length, 2);
+  const spine = defined(await inspect('spine);'));
+  assert.equal(spine.target.length, 1);
+  assert.equal(spine.ambient.length, 2);
+  const result = defined(await inspect('sweep(profile'));
+  assert.equal(result.target.length, 1);
+  assert.equal(result.ambient.length, 0);
+
+  const inspectMethod =
+    await compile(`import {circle, line} from '@code3d/core';
+    const profile = circle(2);
+    const spine = line([0, 12, 0]);
+    export default profile.sweep(spine);`);
+  const methodSpine = defined(await inspectMethod('spine);'));
+  assert.equal(methodSpine.target.length, 1);
+  assert.equal(methodSpine.ambient.length, 2);
+});
+
 test('relate call and closure inspectors use actual consumed participants and relation stages', async () => {
   const inspect =
     await compile(`import {box, group, offset} from '@code3d/core';
