@@ -41,14 +41,14 @@ readers, but the website publishes only the selected modeling packages.
 The [Markdown publisher](scripts/markdown-documents.mjs) serves these existing
 sources through [one static endpoint](src/pages/docs/[...document].md.ts):
 
-| Repository source                                            | Published Markdown                        |
-| ------------------------------------------------------------ | ----------------------------------------- |
-| `docs/agents.md` and `docs/agents/*.md`                      | `/docs/agents.md` and `/docs/agents/*.md` |
-| `packages/{core,layout,materials,screws}/README.md`          | `/docs/packages/<package>.md`             |
-| `packages/{core,layout,materials,screws}/docs/**/*.{md,mdx}` | `/docs/packages/<package>/<topic>.md`     |
-| `src/content/docs/docs/**/*.{md,mdx}`                        | `/docs/<topic>.md`                        |
+| Repository source                                                  | Published Markdown                        |
+| ------------------------------------------------------------------ | ----------------------------------------- |
+| `docs/agents.md` and `docs/agents/*.md`                            | `/docs/agents.md` and `/docs/agents/*.md` |
+| `packages/{core,gears,layout,materials,screws}/README.md`          | `/docs/packages/<package>.md`             |
+| `packages/{core,gears,layout,materials,screws}/docs/**/*.{md,mdx}` | `/docs/packages/<package>/<topic>.md`     |
+| `src/content/docs/docs/**/*.{md,mdx}`                              | `/docs/<topic>.md`                        |
 
-The [shared document catalog](scripts/document-sources.mjs)'s `featuredPackages` list selects Core, Layout, Materials and Screws.
+The [shared document catalog](scripts/document-sources.mjs)'s `featuredPackages` list selects Core, Gears, Layout, Materials and Screws.
 Additional packages are selected for their value to model authors; adding a
 workspace package does not automatically add a website page or an entry in the
 agent guide. Lower-level dependency READMEs stay in their packages, discoverable

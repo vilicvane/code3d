@@ -140,6 +140,10 @@ try {
     path.join(consumer, 'screws-public-api.ts'),
   );
   await copyFile(
+    path.join(root, 'packages/gears/test/public-api.ts'),
+    path.join(consumer, 'gears-public-api.ts'),
+  );
+  await copyFile(
     path.join(root, 'packages/layout/test/public-api.ts'),
     path.join(consumer, 'layout-public-api.ts'),
   );
@@ -163,6 +167,7 @@ try {
       files: [
         'public-api.ts',
         'screws-public-api.ts',
+        'gears-public-api.ts',
         'layout-public-api.ts',
         'public-entries.ts',
       ],

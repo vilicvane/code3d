@@ -3,6 +3,17 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'gear-studies',
+    title: 'Gear types and mounting choices',
+    description:
+      'Build five complete nominal gear parts with the Gears API: a plain bore, keyed hub, integral shaft, helical hub, and bolted internal ring.',
+    category: 'Practical models',
+    file: 'gear-studies.ts',
+    focus: {context: 'export default group(', token: 'group'},
+    view: {direction: [0.7, 1.7, 1.2], up: [0, 1, 0]},
+    tags: ['gears', 'bore', 'hub', 'shaft', 'helical', 'internal'],
+  },
+  {
     id: 'layout-ventilation',
     title: 'Ventilation in a construction space',
     description:
@@ -281,6 +292,58 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  'gear-studies': [
+    {
+      id: 'bore',
+      image: 'gear-studies-bore',
+      label: 'Straight teeth and a bore',
+      description: 'A straight-tooth wheel with a simple through bore.',
+      focus: {
+        context: 'export const spurWithBore = spurGear({',
+        token: 'spurGear',
+      },
+    },
+    {
+      id: 'keyed-hub',
+      image: 'gear-studies-keyed-hub',
+      label: 'Keyed hub',
+      description: 'A projecting hub and a shaft keyway surround the bore.',
+      focus: {
+        context: 'export const spurWithKeyedHub = spurGear({',
+        token: 'spurGear',
+      },
+    },
+    {
+      id: 'shaft',
+      image: 'gear-studies-shaft',
+      label: 'Integral shaft',
+      description: 'The pinion and its shaft form one solid part.',
+      focus: {
+        context: 'export const spurWithShaft = spurGear({',
+        token: 'spurGear',
+      },
+    },
+    {
+      id: 'helical',
+      image: 'gear-studies-helical',
+      label: 'Helical teeth and a hub',
+      description: 'Twisted tooth traces, a hub, and a through bore.',
+      focus: {
+        context: 'export const helicalWithHub = helicalGear({',
+        token: 'helicalGear',
+      },
+    },
+    {
+      id: 'internal',
+      image: 'gear-studies-internal',
+      label: 'Internal ring',
+      description: 'Inward-facing teeth in a ring with six mounting holes.',
+      focus: {
+        context: 'export const internalRingWithBoltHoles = internalGear({',
+        token: 'internalGear',
+      },
+    },
+  ],
   'desktop-stand': [
     {
       id: 'body',
@@ -363,6 +426,7 @@ export const sourceContextSets: Readonly<
 
 // Every runnable source, including reusable project parts, is checked by the example tests.
 export const exampleEntries = [
+  {file: 'gear-studies.ts'},
   {file: 'iso-screws.ts'},
   {file: 'gb-screws.ts'},
   {

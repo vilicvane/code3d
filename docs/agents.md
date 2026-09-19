@@ -125,6 +125,8 @@ The website publishes the same sources with the current package version.
   material presets such as aluminum, plastic and glass for model appearance.
 - [@code3d/screws](../packages/screws/README.md) provides standard screw models
   and matching clearance/counterbore tools when an assembly needs fasteners.
+- [@code3d/gears](../packages/gears/README.md) builds nominal spur, helical and
+  internal gear parts with bores, hubs, integral shafts or ring bolt patterns.
 
 These packages are available in projects using the App's built-in Core. For a
 project with its own dependencies, see [package installation](agents/files.md#install-project-dependencies).

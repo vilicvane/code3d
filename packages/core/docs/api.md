@@ -31,6 +31,7 @@ radius. For coils, `coilRadius` is measured to the wire centerline and
 `pitch` is the advance per turn. Fractional turns are supported; the wire
 must fit inside the coil radius and neighboring turns must remain separated.
 Use [`@code3d/screws`](../../screws/docs/assembly.mdx) for standard fasteners and matching hole tools.
+Use [`@code3d/gears`](../../gears/README.md) for nominal spur, helical and internal gear parts.
 
 To build a solid beyond these primitives, import `definePrimitive` and
 `replicad` from `@code3d/core/replicad`. See

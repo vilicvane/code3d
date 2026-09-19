@@ -17,6 +17,7 @@ for (const name of selected) {
 if (
   selected.has('@code3d/core') ||
   selected.has('@code3d/screws') ||
+  selected.has('@code3d/gears') ||
   selected.has('@code3d/layout')
 ) {
   const core = await import('@code3d/core');
@@ -34,6 +35,14 @@ if (
     }
     if (selected.has('@code3d/screws'))
       models.push((await import('@code3d/screws')).ISO4762.screw('M3', 8));
+    if (selected.has('@code3d/gears'))
+      models.push(
+        (await import('@code3d/gears')).spurGear({
+          module: 1,
+          teeth: 18,
+          faceWidth: 5,
+        }),
+      );
     if (selected.has('@code3d/layout')) {
       const layout = await import('@code3d/layout');
       models.push(
