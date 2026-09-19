@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {after, before, test, type TestContext} from 'node:test';
-import {chromium, type Browser, type Page} from 'playwright-core';
+import {chromium, type Browser, type Page} from './browser-connection.ts';
 
 declare const window: Window & {
   tabsApp: {
@@ -196,14 +196,14 @@ test(
       .getByRole('button', {name: 'New file', exact: true})
       .click({trial: true});
     await page.getByRole('button', {name: 'New file', exact: true}).click();
-    const dialog = page.getByRole('dialog', {name: 'New file', exact: true});
-    const directory = (await dialog.locator('p').textContent())!.slice(3);
-    const newPath = directory === '/' ? '/new.ts' : directory + '/new.ts';
-    await dialog.getByRole('textbox', {name: 'Name'}).fill('new.ts');
-    await dialog.getByRole('button', {name: 'Create', exact: true}).click();
-    await page.waitForFunction(
-      path => window.tabsApp.codeEditor.currentFile() === path,
-      newPath,
+    const name = page.getByRole('textbox', {
+      name: 'New file name',
+      exact: true,
+    });
+    await name.fill('new-empty.ts');
+    await name.press('Enter');
+    await page.waitForFunction(() =>
+      window.tabsApp.codeEditor.currentFile()?.endsWith('/new-empty.ts'),
     );
     assert.equal(await page.locator('#editor-empty-state').isVisible(), false);
   },

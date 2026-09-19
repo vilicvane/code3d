@@ -1,7 +1,7 @@
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 test(
   'direction heads keep their raster size through zoom, scale, resize and pixel ratio',

@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium, type ElementHandle, type Locator} from 'playwright-core';
+import {
+  chromium,
+  type ElementHandle,
+  type Locator,
+} from './browser-connection.ts';
 import {AgentClient, type AgentConfig} from '@code3d/agent';
-import {createLocalBridge} from '../../../cli/bld/bridge.js';
+import {createLocalBridge} from '../../../cli/src/bridge.ts';
 import {reserveLocalPort} from './local-port.ts';
 
 declare const window: Window & {

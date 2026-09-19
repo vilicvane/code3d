@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {writeFile} from 'node:fs/promises';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 
 test(

@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 import {runCli, startServe} from '../../../cli/test/process.ts';
 import {reserveLocalPort} from './local-port.ts';
 

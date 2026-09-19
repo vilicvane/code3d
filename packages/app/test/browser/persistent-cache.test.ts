@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {once} from 'node:events';
 import {readFile} from 'node:fs/promises';
 import {after, before, test, type TestContext} from 'node:test';
-import {chromium, type Browser, type Page} from 'playwright-core';
+import {chromium, type Browser, type Page} from './browser-connection.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import {normalizedModelSnapshot} from '../model-snapshot.ts';
 import type {CacheRequest, CacheResult} from './persistent-cache.worker.ts';

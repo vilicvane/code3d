@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 test(
   'public model types and extensionless imports work in the Monaco language service',
@@ -177,10 +177,9 @@ test(
       });
       assert.ok(result.declarationUri.includes('%40code3d'));
       assert.ok(result.diagnostics.every(group => group.length === 0));
-      assert.equal(
-        result.files.filter(file => file === result.declarationFile).length,
-        1,
-      );
+      assert.ok(result.files.includes('/workspace/model.ts'));
+      assert.ok(!result.files.includes(result.declarationFile));
+      assert.equal(new Set(result.files).size, result.files.length);
       assert.ok(!result.files.includes(result.declarationUri));
       assert.ok(
         result.navigation.childItems!.some(item => item.text === 'box'),

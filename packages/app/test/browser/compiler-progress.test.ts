@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import type {TestContext} from 'node:test';
 import {after, before, test} from 'node:test';
-import type {Browser} from 'playwright-core';
-import {chromium} from 'playwright-core';
+import type {Browser} from './browser-connection.ts';
+import {chromium} from './browser-connection.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 type CompilationPhase =
   import('../../src/model/compilation-progress.ts').CompilationPhase;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 
 declare const window: Window & {

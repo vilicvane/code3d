@@ -3,7 +3,7 @@ import type {ProjectTypeScriptWorker} from '../../src/monaco/typescript-protocol
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 interface CompletionHarness {
   editor: import('../../src/editor.ts').CodeEditor;

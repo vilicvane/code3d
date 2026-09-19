@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import type {Locator, Page} from 'playwright-core';
+import type {Locator, Page} from './browser-connection.ts';
 import {
   open,
   text,

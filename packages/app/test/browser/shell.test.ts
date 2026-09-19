@@ -1,7 +1,7 @@
-import type {Page} from 'playwright-core';
+import type {Page} from './browser-connection.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 declare const window: Window & {
   shellViewport: import('../../src/viewport.ts').ModelViewport;
 };
@@ -139,23 +139,44 @@ async function pickFace(page: Page, id: number) {
     const selection = viewport['topologySelection']!;
     const {mesh, guide} = selection;
     const group = mesh.surfaceGroups.find(group => group.surfaceId === id);
-    const center = guide.position.clone().set(0, 0, 0);
-    const vertex = center.clone();
-    for (let i = group!.start; i < group!.start + group!.count; i++) {
-      center.add(vertex.fromArray(mesh.vertices, mesh.triangles[i] * 3));
-    }
-    center.divideScalar(group!.count);
     guide.updateWorldMatrix(true, true);
     viewport['camera'].updateWorldMatrix(true, false);
-    center.applyMatrix4(guide.matrixWorld).project(viewport['camera']);
     const rect = viewport['renderer'].domElement.getBoundingClientRect();
-    const point = {
-      clientX: rect.left + ((center.x + 1) * rect.width) / 2,
-      clientY: rect.top + ((1 - center.y) * rect.height) / 2,
-    };
-    if (viewport['pickTopology'](point) !== id)
-      throw new Error(`S${id} is not visible at its center`);
-    return point;
+    const vertex = guide.position.clone();
+    const weights = [
+      [1 / 3, 1 / 3, 1 / 3],
+      [0.6, 0.2, 0.2],
+      [0.2, 0.6, 0.2],
+      [0.2, 0.2, 0.6],
+    ];
+    for (let i = group!.start; i < group!.start + group!.count; i += 3) {
+      const corners = [0, 1, 2].map(j =>
+        vertex.clone().fromArray(mesh.vertices, mesh.triangles[i + j] * 3),
+      );
+      for (const weight of weights) {
+        const point = vertex
+          .clone()
+          .set(0, 0, 0)
+          .addScaledVector(corners[0], weight[0])
+          .addScaledVector(corners[1], weight[1])
+          .addScaledVector(corners[2], weight[2])
+          .applyMatrix4(guide.matrixWorld)
+          .project(viewport['camera']);
+        const position = {
+          x: ((point.x + 1) * rect.width) / 2,
+          y: ((1 - point.y) * rect.height) / 2,
+        };
+        const clientX = rect.left + position.x;
+        const clientY = rect.top + position.y;
+        if (
+          document.elementFromPoint(clientX, clientY) ===
+            viewport['renderer'].domElement &&
+          viewport['pickTopology']({clientX, clientY}) === id
+        )
+          return position;
+      }
+    }
+    throw new Error(`No unobscured point on S${id}`);
   }, id);
-  await page.mouse.click(point.clientX, point.clientY);
+  await page.locator('.viewport-canvas').click({position: point});
 }

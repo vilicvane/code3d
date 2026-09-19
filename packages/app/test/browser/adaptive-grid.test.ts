@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 declare const window: Window & {
   gridRenderer: import('../../src/rendering/model-renderer.ts').ModelRenderer;
@@ -32,7 +32,7 @@ test(
         body: `
     <style>html,body,#view{width:100%;height:100%;margin:0}canvas{display:block}</style><div id="view"></div>
     <script type="module">
-      import {BoxGeometry, Mesh, MeshBasicMaterial} from '/@id/three';
+      import {BoxGeometry, Mesh, MeshBasicMaterial} from '/test/browser/browser-dependencies.ts';
       import {ModelRenderer} from '/src/rendering/model-renderer.ts';
       import {createViewCamera} from '/src/rendering/view-camera.ts';
       const renderer = new ModelRenderer(document.querySelector('#view'));
@@ -46,7 +46,16 @@ test(
       }),
     );
     await page.goto(`${process.env.CODE3D_TEST_URL}/grid-test`);
-    await page.waitForFunction(() => window.gridRenderer);
+    await page
+      .waitForFunction(() => window.gridRenderer)
+      .catch(error => {
+        throw new Error(
+          `Grid renderer did not initialize: ${errors.join('; ')}`,
+          {
+            cause: error,
+          },
+        );
+      });
     const result = await page.evaluate(async () => {
       const r = window.gridRenderer;
       const camera = r.camera as import('three').OrthographicCamera;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import type {Page} from 'playwright-core';
+import type {Page} from './browser-connection.ts';
 import {open, point, text, waitForSource} from './sketch-test.ts';
 
 async function center(page: Page, id: number, layer = 'local') {
@@ -129,6 +129,14 @@ const s=sketch([['point',1,[0,0]],['circle',2,[1,10]],['point',3,[10,0]]]);`,
   await page.mouse.up();
   await waitForSource(page, /\['circle',2,\[1,15\]\]/);
   await page.getByText('Ready', {exact: true}).waitFor();
+  // The previous Ready label can precede the debounced compile of this edit.
+  await page.waitForFunction(() => {
+    const {codeEditor, previewState, sketchEditor} = window.sketchTestRuntime;
+    return (
+      previewState.sourceVersion === codeEditor.sourceVersion() &&
+      !sketchEditor.isStale
+    );
+  });
   const resized = await center(page, 3);
   near(resized, {x: origin.x + radius * 1.5, y: origin.y});
   near(await center(page, 1), origin);

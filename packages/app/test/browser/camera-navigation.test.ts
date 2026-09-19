@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
-import {chromium, type Page} from 'playwright-core';
+import {chromium, type Page} from './browser-connection.ts';
 
 declare const window: Window & {
   navigationApp: {
@@ -742,6 +742,13 @@ test(
       await page
         .getByRole('button', {name: 'View from +Z', exact: true})
         .press('Enter');
+      await page.waitForFunction(() => {
+        const controls = window.navigationApp.viewport['controls'];
+        return (
+          controls.capturePose().projection === 'orthographic' &&
+          !controls['transition']
+        );
+      });
       const before = await cameraState(page);
       assert.equal(before.projection, 'orthographic');
       await touch(

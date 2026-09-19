@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {chromium, type Browser} from 'playwright-core';
+import {chromium, type Browser} from './browser-connection.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import {normalizedModelSnapshot} from '../model-snapshot.ts';
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {after, before, test, type TestContext} from 'node:test';
-import {chromium, type Browser, type Page} from 'playwright-core';
+import {chromium, type Browser, type Page} from './browser-connection.ts';
 import {previewOperations} from '../../src/ui/viewport-empty-state.ts';
 
 declare const window: Window & {
@@ -625,9 +625,12 @@ test('creating an empty file after a 3D preview shows the hint and switching fil
     app.previousModule = app.viewport['module'];
   });
   await page.getByRole('button', {name: 'New file', exact: true}).click();
-  const dialog = page.getByRole('dialog', {name: 'New file', exact: true});
-  await dialog.getByRole('textbox', {name: 'Name'}).fill('new.ts');
-  await dialog.getByRole('button', {name: 'Create', exact: true}).click();
+  const name = page.getByRole('textbox', {
+    name: 'New file name',
+    exact: true,
+  });
+  await name.fill('new.ts');
+  await name.press('Enter');
   await page.waitForFunction(
     () =>
       window.emptyViewportApp.codeEditor.currentFile() === '/new.ts' &&
@@ -734,6 +737,14 @@ test('the animation preserves selection timing and visits the hint vocabulary af
     await page.locator('.viewport-preview-text').textContent(),
     'model',
   );
+  await page.emulateMedia({reducedMotion: 'reduce'});
+  await page.waitForFunction(() => {
+    const selection = document.querySelector('.viewport-preview-selection');
+    return (
+      matchMedia('(prefers-reduced-motion: reduce)').matches &&
+      selection?.getAnimations({subtree: true}).length === 0
+    );
+  });
   assert.equal(
     await page
       .locator('.viewport-preview-selection')

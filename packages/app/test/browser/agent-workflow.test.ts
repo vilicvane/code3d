@@ -7,9 +7,9 @@ import {mkdtemp, writeFile, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 import {AgentClient, type AgentConfig, type AgentRequest} from '@code3d/agent';
-import {createLocalBridge} from '../../../cli/bld/bridge.js';
+import {createLocalBridge} from '../../../cli/src/bridge.ts';
 import {reserveLocalPort} from './local-port.ts';
 
 declare const window: Window & {
@@ -20,12 +20,16 @@ declare const window: Window & {
 for (const storage of ['browser', 'directory'] as const)
   test(
     `App prompts drive CLI transactions, cursors, renders, topology and recovery in ${storage} storage`,
-    {timeout: 180_000},
+    {
+      timeout: 180_000,
+      skip:
+        (process.env.CODE3D_ISOLATED_BROWSER !== '1' ||
+          !process.env.CODE3D_PLAYWRIGHT_WS) &&
+        'Agent workflow requires an isolated browser process',
+    },
     async t => {
       assert.ok(process.env.CODE3D_TEST_URL);
-      const browser = await chromium.connectOverCDP(
-        process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
-      );
+      const browser = await chromium.connect(process.env.CODE3D_PLAYWRIGHT_WS!);
       t.after(() => browser.close());
       const context = await browser.newContext({
         viewport: {width: 1440, height: 900},

@@ -1,8 +1,8 @@
-import type {Browser, Page} from 'playwright-core';
+import type {Browser, Page} from './browser-connection.ts';
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 declare const window: Window & {
   topologyTestApp: {
     viewport: import('../../src/viewport.ts').ModelViewport;

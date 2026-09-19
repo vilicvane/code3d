@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 import type {AgentResponse} from '@code3d/agent';
 
 declare const window: Window & {
@@ -50,6 +50,33 @@ test(
     });
     await page.goto(process.env.CODE3D_TEST_URL);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    // The App and agent own separate compiler Workers. Prime the agent path
+    // before making both evaluations intentionally unbounded.
+    const warmed = await page.evaluate(async () => {
+      const session = window.cancellationSession;
+      const file = window.cancellationEditor.currentFile()!;
+      const read = await session.handle('test', 'Test', {
+        operation: 'fs.read',
+        path: file,
+      });
+      if (!read.ok) throw new Error(read.error.message);
+      return session.handle('test', 'Test', {
+        operation: 'apply',
+        input: {
+          files: [
+            {
+              path: file,
+              version: (read.data as {version: string}).version,
+              content:
+                "import {box} from '@code3d/core';\nexport default box(1, 1, 1);",
+            },
+          ],
+          cursor: {file, regex: '(box\\(1, 1, 1\\))'},
+          topology: true,
+        },
+      });
+    });
+    assert.ok(warmed.ok, JSON.stringify(warmed));
     for (const origin of ['user', 'agent']) {
       await page.evaluate(async () => {
         const session = window.cancellationSession;

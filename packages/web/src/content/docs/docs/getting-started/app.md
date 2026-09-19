@@ -452,6 +452,7 @@ ambient results. Selecting one face focuses it; selecting the array focuses all
 faces. The shared distance field updates every extrusion, and inspecting that
 argument shows target results with a dimension on each and ambient input faces.
 After an extrusion fails, select its input argument to inspect the faces.
+The failed call's distance field remains editable so you can correct it or Undo.
 If the current target itself fails or the file cannot be evaluated, its previous
 preview remains visible and its stale tools pause until a new result is available.
 

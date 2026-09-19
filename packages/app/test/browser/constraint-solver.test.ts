@@ -1,8 +1,8 @@
 import {appIsolationHeaders} from '../../build/response-headers.ts';
-import type {Browser} from 'playwright-core';
+import type {Browser} from './browser-connection.ts';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 const appUrl = process.env.CODE3D_TEST_URL;
 let browser: Browser;

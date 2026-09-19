@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium, type Page} from 'playwright-core';
+import {chromium, type Page} from './browser-connection.ts';
 
 declare const window: Window & {
   elementsTestApp: {
@@ -66,7 +66,12 @@ body;`,
     await page.locator('#elements-handle').click();
     const topology = page.getByRole('tab', {name: 'Topology', exact: true});
     const references = page.getByRole('tab', {name: 'References', exact: true});
-    const tabTop = (await topology.boundingBox())!.y;
+    const panel = page.locator('.elements-panel');
+    const panelBottom = async () => {
+      const box = (await panel.boundingBox())!;
+      return box.y + box.height;
+    };
+    const initialBottom = await panelBottom();
     assert.equal(await topology.getAttribute('aria-selected'), 'true');
     assert.equal(await page.locator('#elements-count').textContent(), '26');
     assert.deepEqual(
@@ -117,7 +122,7 @@ body;`,
       await row.focus();
       assert.equal((await preview()).length, 1);
       await references.click();
-      assert.equal((await topology.boundingBox())!.y, tabTop);
+      assert.ok(Math.abs((await panelBottom()) - initialBottom) < 1);
       assert.deepEqual(await preview(), []);
       await topology.click();
     }

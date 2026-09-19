@@ -1,7 +1,7 @@
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 test(
   'ordinary expression previews retain authored opacity through inspection transitions and exports',

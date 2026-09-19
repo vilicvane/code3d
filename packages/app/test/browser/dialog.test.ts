@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {after, before, test, type TestContext} from 'node:test';
-import {chromium, type Browser, type Page} from 'playwright-core';
+import {chromium, type Browser, type Page} from './browser-connection.ts';
 
 declare const window: Window & {
   testDialogs: import('../../src/ui/dialog.ts').AppDialogs;

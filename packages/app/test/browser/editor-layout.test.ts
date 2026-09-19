@@ -1,8 +1,8 @@
-import type {Browser, Page} from 'playwright-core';
+import type {Browser, Page} from './browser-connection.ts';
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 declare const window: Window & {
   layoutEditor: import('../../src/editor.ts').CodeEditor;
   layoutFiles: import('../../src/project/filesystem.ts').ProjectFileSystem;
@@ -130,7 +130,9 @@ test(
     await page.mouse.up();
     await waitWidth(page, 356, explorer);
     await waitWidth(page, codeWidth);
-    // The divider must leave the file tree's adjacent native scrollbar usable.
+    // The divider must not cover the file tree's adjacent scroll strip.
+    // CDP thumb dragging on the host browser is nondeterministic, so verify
+    // pointer hit-testing and actual wheel scrolling at that same position.
     await page.evaluate(async () => {
       for (let index = 0; index < 65; index++)
         await window.layoutFiles.writeFile(
@@ -142,15 +144,32 @@ test(
     const scroll = page.locator(
       '#project-tree [data-file-tree-virtualized-scroll]',
     );
+    await page.waitForFunction(() => {
+      const node = document
+        .querySelector('#project-tree')
+        ?.shadowRoot?.querySelector<HTMLElement>(
+          '[data-file-tree-virtualized-scroll]',
+        );
+      return (
+        node &&
+        node.scrollHeight > node.clientHeight &&
+        node.offsetWidth > node.clientWidth
+      );
+    });
     await scroll.evaluate(node => {
       node.scrollTop = 0;
     });
     const treeRect = (await scroll.boundingBox())!;
     const scrollX = treeRect.x + treeRect.width - 6;
+    assert.equal(
+      await page.evaluate(({x, y}) => document.elementFromPoint(x, y)?.id, {
+        x: scrollX,
+        y: treeRect.y + 40,
+      }),
+      'project-tree',
+    );
     await page.mouse.move(scrollX, treeRect.y + 40);
-    await page.mouse.down();
-    await page.mouse.move(scrollX, treeRect.y + 160, {steps: 5});
-    await page.mouse.up();
+    await page.mouse.wheel(0, 160);
     await page.waitForFunction(
       () =>
         document

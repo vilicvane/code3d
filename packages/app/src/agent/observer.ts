@@ -159,7 +159,7 @@ export class AgentObserver {
         });
       }
       const sketches: ObservedSketch[] = [];
-      const foregroundSketches = new Set<ObservedSketch>();
+      const targetSketches = new Set<ObservedSketch>();
       const seen = new Set<string>();
       for (const item of [
         ...(scene?.target ?? []),
@@ -174,7 +174,7 @@ export class AgentObserver {
             geometryToScene: item.model.compositionTransform,
           };
           sketches.push(entry);
-          if (scene!.target.includes(item)) foregroundSketches.add(entry);
+          if (scene!.target.includes(item)) targetSketches.add(entry);
         }
       }
       const diagnostic =
@@ -193,17 +193,24 @@ export class AgentObserver {
         );
       viewport.renderInspection(module, scene, selection);
       const breps = this.observeBrep(viewport, module);
-      const targets = new Set(
-        viewport.exportScene()?.instances.map(instance => instance.nodeId),
-      );
-      const foreground = (model: ObservedBrep) =>
-        model.role === 'operation-input' || targets.has(model.nodeId);
+      const targetNodeIds = new Set<string>();
+      const includeTarget = (model: ModelSnapshotObject): void => {
+        targetNodeIds.add(model.nodeId);
+        model.children.forEach(includeTarget);
+      };
+      for (const item of scene.target)
+        if (item.kind === 'model') includeTarget(item.model);
+      const prioritized = (model: ObservedBrep) =>
+        model.role === 'operation-input' || targetNodeIds.has(model.nodeId);
+      let nextBrepKey = 0;
       const models = [
-        ...breps.filter(foreground),
-        ...sketches.filter(model => foregroundSketches.has(model)),
-        ...breps.filter(model => !foreground(model)),
-        ...sketches.filter(model => !foregroundSketches.has(model)),
-      ];
+        ...breps.filter(prioritized),
+        ...sketches.filter(model => targetSketches.has(model)),
+        ...breps.filter(model => !prioritized(model)),
+        ...sketches.filter(model => !targetSketches.has(model)),
+      ].map(model =>
+        model.kind === 'brep' ? {...model, key: `m${nextBrepKey++}`} : model,
+      );
       snapshot = {
         id: crypto.randomUUID(),
         request,

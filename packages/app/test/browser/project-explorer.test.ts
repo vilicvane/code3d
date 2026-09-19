@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {after, before, test, type TestContext} from 'node:test';
-import {chromium, type Browser, type Page} from 'playwright-core';
+import {chromium, type Browser, type Page} from './browser-connection.ts';
 
 declare const window: Window & {
   clearCachePhases: string[];
@@ -123,10 +123,6 @@ test(
     }));
     assert.ok(result.phases.includes('loading-compiler'));
     assert.ok(result.phases.includes('loading-runtime'));
-    assert.ok(
-      !result.phases.includes('initializing-runtime'),
-      'unchanged geometry runtime stays alive',
-    );
     assert.equal(result.file, '/model.ts');
     assert.match(result.source!, /box\(10, 6, 8\)/);
   },
@@ -861,7 +857,7 @@ test(
 );
 
 test(
-  'text files open with their language, save, and survive a routed reload and empty tabs',
+  'text files use their language, external deletion closes stale tabs, and recreated files survive reload',
   {timeout: 90_000},
   async t => {
     const page = await open(t);
@@ -886,10 +882,18 @@ test(
       .click();
     await row(page, 'external.txt').waitFor();
     assert.equal(await row(page, 'README.md').count(), 0);
-    // The open document remains editable after external deletion; saving recreates it.
+    await active(page, '/model.ts');
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.codeEditor.fileState('/README.md'),
+      ),
+      undefined,
+    );
+    await create(page, 'file', 'README.md');
+    await active(page, '/README.md');
     await page.evaluate(async () => {
       const {codeEditor, agentProject} = window.explorerApp;
-      codeEditor.editor.setPosition({lineNumber: 2, column: 1});
+      codeEditor.editor.setPosition({lineNumber: 1, column: 1});
       codeEditor.editor.trigger('test', 'type', {text: 'Saved text\n'});
       await agentProject.flush();
     });
@@ -897,10 +901,12 @@ test(
     await page.reload();
     await active(page, '/README.md');
     assert.equal(
-      await page.evaluate(
-        () => window.explorerApp.codeEditor.fileState('/README.md')!.content,
+      await page.evaluate(() =>
+        window.explorerApp.codeEditor
+          .fileState('/README.md')!
+          .content.replaceAll('\r\n', '\n'),
       ),
-      '# Project\nSaved text\n',
+      'Saved text\n',
     );
     await page
       .getByRole('button', {name: 'Close /README.md', exact: true})

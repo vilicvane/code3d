@@ -101,6 +101,14 @@ npm run build --workspace @code3d/app
 interactions; [unit tests](test/) cover independent project and model logic.
 Follow the shared [test conventions and Chrome setup](../../.agents/docs/development.md#测试与格式)
 and choose checks appropriate to the changed behavior.
+`test:browser` runs the bounded-parallel regular lane,
+`test:browser:exclusive` runs timing-, input-focus-, storage- and resource-sensitive files
+serially, `test:browser:isolated` owns a separate browser for OPFS identity and
+agent directory workflow cases,
+and `test:browser:full` adds that lane and the separately managed example suite.
+Every run records per-file timings under the ignored App `.cache` directory.
+CI assigns example shards by measured runtime, including the standalone checks
+on the final shard.
 
 Build App before [the website](../web/README.md), which copies `dist/` into its
 combined static output. To test copied agent prompts locally, set
@@ -122,6 +130,8 @@ Every example has native geometry tests and an App open/edit/Undo test. Run
 `npm run test:run --workspace @code3d/app` for native tests,
 `npm run test:examples:packages --workspace @code3d/app` for clean npm consumers,
 and `CODE3D_TEST_URL=http://127.0.0.1:<reserved-port>/ npm run test:examples:browser
---workspace @code3d/app` against the task server and host Chrome. The independent CI
+--workspace @code3d/app` against the task server and existing host Chrome.
+Local tests only close their own browser connections and contexts; CI owns one
+headless browser for the command. The independent CI
 workflow runs every example asynchronously; website and npm publication workflows
 build and publish without waiting for that test run.

@@ -197,10 +197,10 @@ npm run lint-prettier
 `npm run test:examples:packages --workspace @code3d/app` 在仓库之外的干净临时目录
 安装锁定的公开包并检查类型与建模，避免开发 workspace 掩盖缺依赖。
 `CODE3D_TEST_URL=http://127.0.0.1:<预留端口>/ npm run test:examples:browser --workspace @code3d/app`
-使用 host Chrome，逐例打开、参数写回、几何更新及 Undo，并验证操作失败恢复、完整
-工程导出和实际 agent 接续。独立 CI 自行启动受控服务及浏览器，完整运行这些检查；
+本地连接现有 host Chrome，逐例打开、参数写回、几何更新及 Undo，并验证操作失败恢复、完整
+工程导出和实际 agent 接续；不会启停宿主浏览器。独立 CI 自行启动受控服务及 headless 浏览器，完整运行这些检查；
 构建/发布工作流不重复运行。浏览器几何对比在浏览器内计算 typed array 字节摘要，
-避免通过 CDP 传输整个网格的 JSON；TAP 逐例输出失败断言，任务结束前也能定位失败。
+避免通过浏览器连接传输整个网格的 JSON；TAP 逐例输出失败断言，任务结束前也能定位失败。
 
 新增运行时测试使用 `*.test.ts`、`node:test` 和 `node:assert/strict`。
 Node.js 24 直接执行可擦除的 TypeScript；测试间导入使用显式 `.ts` 扩展。
@@ -231,16 +231,48 @@ systemd-run --user --wait --pipe --working-directory="$PWD" \
 `assert.ok(actual === expected, '说明预期的生命周期')`，不把整个对象交给断言生成
 差异报告。Node 的失败报告会深度展开对象及数组，报告本身可能耗尽内存。
 
-浏览器测试连接已经运行的开发服务器和主机 Chrome：
+浏览器测试连接已经运行的开发服务器；本地默认连接现有宿主 Chrome：
 
 ```bash
 npm run test:packages
 CODE3D_TEST_URL=http://localhost:3133 npm run test:browser --workspace @code3d/app
+CODE3D_TEST_URL=http://localhost:3133 npm run test:browser:exclusive --workspace @code3d/app
+CODE3D_TEST_URL=http://localhost:3133 npm run test:browser:isolated --workspace @code3d/app
+CODE3D_TEST_URL=http://localhost:3133 npm run test:browser:full --workspace @code3d/app
 ```
 
-上例用于主 worktree；任务 worktree 改为自己的端口。Chrome 的默认 CDP 地址为
-`http://localhost:9222`，可通过 `CODE3D_CDP_URL` 指定。使用独立测试页面或上下文，
-保留用户页面和其他任务的服务器。
+上例用于主 worktree；任务 worktree 改为自己的端口。普通、独占和示例测试默认连接
+`http://localhost:9222`，仅关闭自身的连接与上下文，不启动或关闭宿主 Chrome，保留用户
+页面和其他任务的服务器。可用 `CODE3D_CDP_URL` 改变连接地址，或用
+`CODE3D_PLAYWRIGHT_WS` 连接已有 Playwright 浏览器。CI 没有宿主浏览器时，运行器在
+一次命令内自管一个 headless 浏览器；本地显式请求隔离组时也只启动测试自己的浏览器。
+
+默认 `test:browser` 运行普通浏览器回归，文件并发默认为 2；可通过
+`CODE3D_BROWSER_TEST_CONCURRENCY` 调整。涉及真实时间、进程生命周期、持久存储、
+焦点敏感的视口交互或大型浏览器负载的文件由 `test:browser:exclusive` 串行运行；分类的唯一入口是
+`packages/app/scripts/browser-test-plan.mjs`，新增测试若具备这些性质须同时加入独占组。
+已知会使宿主 Chrome 153 崩溃的 OPFS 身份和 agent 目录工作流用例由
+`test:browser:isolated` 在同一个独立 headless 浏览器进程中串行运行，不连接或关闭
+宿主 Chrome。直接运行这些文件时默认跳过；隔离入口会设置所需标志和 WebSocket 地址。
+示例浏览器测试仍由 `test:examples:browser` 独立运行，不再被普通回归重复包含；
+`test:browser:full` 依次运行普通、独占、示例和隔离四组。四组不会作为多个独立受限进程
+并发运行，完整命令仍处于同一资源预算内。
+CI 的四个示例分片按 `packages/app/test/browser/example-shards.ts` 中的实测耗时
+做确定性均衡，最后一个分片额外预留两条非示例检查的耗时。基线取自同一主分支的
+成功 CI 运行；新增示例暂按实测中位数估算，取得新 CI 数据后可更新权重。
+
+定位回归可在普通、独占或隔离入口后追加测试文件名，例如
+`npm run test:browser --workspace @code3d/app -- agent-cursor.test.ts`。
+运行器默认在首个失败后停止启动新文件；诊断多处失败时设置
+`CODE3D_BROWSER_TEST_FAIL_FAST=0` 可继续跑完当前分组。
+本地普通、独占和示例组不会管理宿主浏览器的生命周期；隔离组只管理自身的 headless
+浏览器。测试文件只关闭自己的页面上下文及连接。
+
+运行器将每个文件与分组的实际耗时写入忽略的
+`packages/app/.cache/browser-test-timings.json`；可用
+`CODE3D_BROWSER_TEST_TIMINGS` 指定其他输出路径。调整并发、分类或 CI 分片时使用实际
+耗时比较，不以测试数量或超时上限代替运行成本。普通组增大并发前先以 1 作为基线，
+确认通过、资源预算和耗时变化；独占组不因机器核数增加而并发。
 
 浏览器回调通过 `/src/...` 从 Vite 导入 App 模块，测试 TypeScript 配置映射这些路径。
 fixture 放在 `packages/app/test/browser/`，从浏览器回调内部导入；页面状态由所属

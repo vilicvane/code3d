@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
-import {chromium, type Page} from 'playwright-core';
+import {chromium, type Page} from './browser-connection.ts';
 
 declare const window: Window & {
   parameterTabApp: {
@@ -485,7 +485,7 @@ test(
       ['shell(1, [1])', 'removedSurfaceIds'],
       [
         'relate(self => [self.on(point([0,0,0]).up), pivotVertex(1).rotate(0,0,20)])',
-        'id',
+        'pivotVertex.id',
       ],
       ['edge()', 'id'],
     ];

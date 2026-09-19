@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {after, before, test, type TestContext} from 'node:test';
-import {chromium, type Browser, type Page} from 'playwright-core';
+import {chromium, type Browser, type Page} from './browser-connection.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import type {CacheResult} from './persistent-cache.worker.ts';
 
@@ -187,6 +187,19 @@ test(
       .getByRole('button', {name: 'Reset defaults', exact: true})
       .click();
     await confirmation.waitFor({state: 'hidden'});
+    // The confirmation closes before the waiting resetDefaults continuation
+    // applies its draft values.
+    await page.waitForFunction(expected => {
+      const inputs = [
+        ...document.querySelectorAll<HTMLInputElement>(
+          '.settings-dialog input',
+        ),
+      ];
+      return (
+        inputs.length === Object.keys(expected).length &&
+        inputs.every(input => input.value === expected[input.name])
+      );
+    }, defaults);
     assert.deepEqual(await drafts(), defaults);
     assert.equal((await saved(page)).diskCacheGiB, 256.5);
     await dialog.getByRole('button', {name: 'Save', exact: true}).click();

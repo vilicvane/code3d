@@ -658,8 +658,13 @@ test('rectangle dimensions retain native input, emit persistent sizes and undo t
   assert.equal(await drawingTitle(page), 'Opposite corner');
   await page.keyboard.type('40');
   await page.keyboard.press('Control+z');
+  // Native input undo may group adjacent keystrokes or undo them separately.
+  if ((await field(page, 'Width').inputValue()) === '4')
+    await page.keyboard.press('Control+z');
   assert.equal(await field(page, 'Width').inputValue(), '');
   await page.keyboard.press('Control+Shift+z');
+  if ((await field(page, 'Width').inputValue()) === '4')
+    await page.keyboard.press('Control+Shift+z');
   assert.equal(await field(page, 'Width').inputValue(), '40');
   await page.keyboard.press('Tab');
   await page.keyboard.type('30');
@@ -1254,6 +1259,26 @@ const child = base.derive([]);`,
   // The initial single upstream point is zoomed in; numeric creation may extend
   // beyond that view. Fit the completed geometry before picking its corners.
   await page.getByRole('button', {name: 'Fit', exact: true}).click();
+  await page.waitForFunction(() => {
+    const canvas = document
+      .querySelector('.sketch-canvas')
+      .getBoundingClientRect();
+    const corners = [
+      ...document.querySelectorAll('.sketch-canvas circle.local'),
+    ];
+    return (
+      corners.length === 4 &&
+      corners.every(corner => {
+        const box = corner.getBoundingClientRect();
+        return (
+          box.left >= canvas.left &&
+          box.right <= canvas.right &&
+          box.top >= canvas.top &&
+          box.bottom <= canvas.bottom
+        );
+      })
+    );
+  });
   assert.equal(await page.locator('.sketch-canvas circle.local').count(), 4);
   const upstreamFixed = page.locator(
     '.constraint-badge.constraint-upstream[data-kind="fixed"]',
