@@ -1055,6 +1055,8 @@ export function createModelExecutor(
       importModule,
       inspectValues,
       runtime.isSolidModel,
+      artifact.relationArraySites,
+      callReturn => (isModelObject(callReturn) ? callReturn.nodeId : undefined),
     );
     tracedObjects.clear();
     sourceValueTraces.clear();

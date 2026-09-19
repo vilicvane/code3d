@@ -918,22 +918,20 @@ const toolEngine = new ToolEngine({
   commitPreview: preview => commitToolPreview(preview),
   clearPreview: preview => clearToolPreview(preview),
 });
-const sketchEditor = new SketchEditorController(
-  viewportHost,
-  viewportToolStack,
-  {
-    reportResult: (operation, error) =>
-      toolFeedback.report(`sketch:${operation}`, error),
-    solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
-    resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
-    readSource: ref => {
-      const current = codeEditor.resolveSourceRef(ref);
-      return current && codeEditor.readSource(current);
-    },
-    commit: intent =>
-      commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent),
+const sketchEditor = new SketchEditorController(viewportHost, {
+  reportResult: (operation, error) =>
+    toolFeedback.report(`sketch:${operation}`, error),
+  solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
+  resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
+  readSource: ref => {
+    const current = codeEditor.resolveSourceRef(ref);
+    return current && codeEditor.readSource(current);
   },
-);
+  commit: intent =>
+    commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent, {
+      preserveCursor: true,
+    }),
+});
 const spatialToolbar = new SpatialToolbar(
   viewportToolStack,
   viewport.positionTools,
@@ -946,17 +944,16 @@ const spatialToolbar = new SpatialToolbar(
       const module = previewState.module;
       if (!scope || !module) return false;
       const tools = viewport.positionTools;
-      const selection = codeEditor.activateSourceTool(
-        contextualToolActivation(
-          module,
-          scope,
-          tool,
-          tools.toolBinding ?? tools.rotationBinding,
-        ),
+      const activationRef = contextualToolActivation(
+        module,
+        scope,
+        tool,
+        tools.toolBinding ?? tools.rotationBinding,
       );
+      const selection = codeEditor.activateSourceTool(activationRef);
       if (!selection) return false;
       pendingAgentFollow = undefined;
-      return inspectSourceSelection(
+      const presented = await inspectSourceSelection(
         module,
         selection.file,
         selection.offset,
@@ -964,26 +961,31 @@ const spatialToolbar = new SpatialToolbar(
         preferredEvaluationContextId,
         selection.sourceRef,
       );
+      return presented;
     },
   },
 );
 viewportToolStack.prepend(spatialToolbar.root);
-codeEditor.observeSourceContext(() => {
-  const scope = viewport.sourceContext;
-  const module = previewState.module;
-  if (!scope || !module || sketchEditor.hasTarget) return;
-  const tools = viewport.positionTools;
-  const tool = contextualToolSource(module, scope.target, tools.tool);
-  return {
-    tool,
-    caretOnly: !!scope.target.relationArray,
-  };
-});
+codeEditor.observeSourceContext(
+  () => {
+    const scope = viewport.sourceContext;
+    const module = previewState.module;
+    if (!scope || !module || sketchEditor.hasTarget) return;
+    const tools = viewport.positionTools;
+    const tool = contextualToolSource(module, scope.target, tools.tool);
+    return {
+      tool,
+      caretOnly: !!scope.target.relationArray,
+    };
+  },
+  // A sketch keeps its blurred caret and word box without marking the whole
+  // call, and the marks stay decorative: they never reach source edits.
+  () => (sketchEditor.hasTarget ? {tool: [], caretOnly: false} : undefined),
+);
 const stopContextualTool = reaction(
   () => ({
     context: viewport.sourceContext,
     occurrence: viewport.getSelected(),
-    sketchId: viewport.inspectedSketchId,
     model: previewState.module,
     modelVersion: previewState.sourceVersion,
     sourceVersion: codeEditor.sourceVersion(),
@@ -992,7 +994,6 @@ const stopContextualTool = reaction(
   {
     equals: (a, b) =>
       a.context === b.context &&
-      a.sketchId === b.sketchId &&
       a.occurrence === b.occurrence &&
       a.model === b.model &&
       a.modelVersion === b.modelVersion &&
@@ -1011,10 +1012,15 @@ const stopRotationReferences = reaction(
     binding: viewport.positionTools.rotationBinding,
     target: viewport.sourceContext?.target.id,
     occurrence: viewport.getSelected()?.key,
+    inspecting: previewState.inspecting,
     modelVersion: previewState.sourceVersion,
     sourceVersion: codeEditor.sourceVersion(),
   }),
-  ({tool, modelVersion, sourceVersion}) => {
+  ({tool, inspecting, modelVersion, sourceVersion}) => {
+    // A source inspection only reads the displayed model; its in-flight window
+    // masks sourceVersion without changing anything. Keep the reference picking
+    // session alive until the inspection commits its own rebuild.
+    if (inspecting) return;
     cancelRotationReferenceSelection();
     if (tool && modelVersion === sourceVersion)
       beginRotationReferenceSelection(tool);
@@ -1025,6 +1031,7 @@ const stopRotationReferences = reaction(
       a.binding === b.binding &&
       a.target === b.target &&
       a.occurrence === b.occurrence &&
+      a.inspecting === b.inspecting &&
       a.modelVersion === b.modelVersion &&
       a.sourceVersion === b.sourceVersion,
   },
@@ -1066,7 +1073,11 @@ const stopViewportStatus = reaction(
   ({status, diagnostic}) => {
     clearTimeout(statusRevealTimer);
     statusRevealTimer = undefined;
-    viewportStatus.hidden = !status.label || status.delay > 0;
+    // The reveal delay only applies when the status is not already visibly
+    // busy; hiding between busy phases would flicker a working indicator.
+    const visiblyBusy =
+      !viewportStatus.hidden && viewportStatus.dataset.state === 'busy';
+    viewportStatus.hidden = !status.label || (status.delay > 0 && !visiblyBusy);
     viewportStatus.dataset.state = status.state;
     viewportStatusLabel.textContent = status.label ?? '';
     viewportStatus.setAttribute('aria-busy', String(status.state === 'busy'));
@@ -1079,7 +1090,7 @@ const stopViewportStatus = reaction(
     viewportStatus.setAttribute('role', navigable ? 'button' : 'status');
     if (navigable) viewportStatus.tabIndex = 0;
     else viewportStatus.removeAttribute('tabindex');
-    if (status.label && status.delay > 0)
+    if (status.label && status.delay > 0 && viewportStatus.hidden)
       statusRevealTimer = setTimeout(() => {
         statusRevealTimer = undefined;
         viewportStatus.hidden = false;
@@ -1196,12 +1207,24 @@ async function inspectSourceSelection(
     contextId: scope?.evaluation.contextId ?? contextId,
     order: scope?.evaluation.runtime.order,
     callId: scope?.evaluation.inspectCallId,
+    relationArray: scope?.target.relationArray
+      ? {
+          array: scope.target.relationArray,
+          gap: scope.target.sourceRef,
+          ownerNodeId: scope.evaluation.relationOwnerNodeId,
+        }
+      : undefined,
   };
   const published = await previewState.inspect(
     () => compiler.inspect(module, selection),
     scene => {
       if (previewState.module !== module) return;
-      viewport.renderInspection(module, scene, selection, selectedKey);
+      viewport.renderInspection(
+        module,
+        scene,
+        {...selection, sourceRef: scope?.target.sourceRef ?? preferredSource},
+        selectedKey,
+      );
       previewState.presented(hasViewportTarget(), viewport.presentedModule);
       updatePresentedSourceSelection();
     },
@@ -1902,11 +1925,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     runInAction(() => {
       previewState.accept(request, nextModule);
       codeEditor.setDesignArguments(nextModule.designArguments);
-      sketchEditor.retain(
-        nextModule.diagnostic,
-        codeEditor.cursorSource(),
-        nextModule.sketches,
-      );
+      sketchEditor.retain(codeEditor.cursorSource(), nextModule.sketches);
       codeEditor.trackSourceRefs([
         ...toolSourceRefs(nextModule),
         ...sketchEditor.sourceRefs(),
@@ -1926,11 +1945,14 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
       }
     });
     if (cursor) {
+      const previousSource = viewport.sourceContext?.target.sourceRef;
       await inspectSourceSelection(
         nextModule,
         cursor.file,
         cursor.offset,
         selectedKey,
+        preferredEvaluationContextId,
+        previousSource?.end === cursor.offset ? previousSource : undefined,
       );
       if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
     }
@@ -2039,7 +2061,9 @@ function refreshViewportFeedback(): void {
         return;
       }
       if (
-        commitToolSession(toolEngine.begin('diagnostic-fix'), action.intent)
+        commitToolSession(toolEngine.begin('diagnostic-fix'), action.intent, {
+          preserveCursor: action.intent.kind === 'sketch.edit',
+        })
       ) {
         refreshViewportFeedback();
       }
@@ -2215,6 +2239,7 @@ function selectCompiledEvaluationContext(
     cursor.offset,
     undefined,
     contextId,
+    scope.target.sourceRef,
   );
   return true;
 }
@@ -2408,14 +2433,17 @@ function renderCurrentPanels(): void {
 function syncContextualTool(): void {
   const scope = viewport.sourceContext;
   const sourceTargetFocused = scope !== undefined;
-  if (
-    sourceTargetFocused &&
-    previewState.module &&
-    previewState.sourceVersion === codeEditor.sourceVersion() &&
-    viewport.inspectedSketchId
-  ) {
+  // A pending compilation keeps the current sketch view instead of closing it.
+  const settled = previewState.sourceVersion === codeEditor.sourceVersion();
+  const cursor = codeEditor.cursorSource();
+  const sketches = previewState.module?.sketches ?? new Map();
+  // A target that evaluates to a sketch opens its 2D editing tool directly; an
+  // edit that moves the caret onto the definition keeps editing the same
+  // instance instead of switching to another instance of that shared source.
+  const sketchId = scope?.evaluation.sketchIds?.[0];
+  if (sourceTargetFocused && previewState.module && settled && sketchId) {
     sketchEditor.select(
-      viewport.inspectedSketchId,
+      sketchId,
       previewState.module.sketches,
       scope.target.sourceRef,
       JSON.stringify([
@@ -2424,15 +2452,7 @@ function syncContextualTool(): void {
       ]),
       previewState.module.objects,
     );
-  } else if (
-    (!sourceTargetFocused ||
-      previewState.sourceVersion === codeEditor.sourceVersion()) &&
-    !sketchEditor.retain(
-      previewState.diagnostic,
-      codeEditor.cursorSource(),
-      previewState.module?.sketches ?? new Map(),
-    )
-  ) {
+  } else if (settled && !sketchEditor.retain(cursor, sketches)) {
     sketchEditor.hide();
   }
   refreshViewportFeedback();
@@ -2890,6 +2910,9 @@ function syncTopologyReferenceSelectionProvider(
       parameter.multiple,
       selectedIds,
       selection.scope,
+      // Reference picking accompanies the focused tool: keep its gizmo
+      // interactive, as rotation reference picking already does.
+      true,
     );
   } catch (error) {
     showToolIssue(error instanceof Error ? error.message : String(error));

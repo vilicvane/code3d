@@ -85,6 +85,7 @@ import type {SpatialObjectPreview, SpatialPreview} from './tools/spatial-edit';
 import {ViewportCoordinateReference} from './ui/viewport-coordinate-reference';
 import {pickScreenTopology} from './rendering/topology-picking';
 import {boundAppearance} from './rendering/bound-appearance';
+import {decorationRenderOrder} from './rendering/source-appearance';
 import {
   applySourceEmphasis,
   type SourceEmphasis,
@@ -145,6 +146,8 @@ type SourceViewSelection = Readonly<{
   file: string;
   offset: number;
   contextId?: string;
+  /** The resolved target identity when an offset is shared by multiple targets. */
+  sourceRef?: SourceRef;
 }>;
 
 type SelectionGesture = {
@@ -440,7 +443,6 @@ export class ModelViewport {
     >(this, {
       module: observableRef,
       inspectionScene: observableRef,
-      inspectedSketchId: computed,
       renderInspection: action,
       sourceParameter: observableRef,
       parameterPreviews: observableShallow,
@@ -683,6 +685,7 @@ export class ModelViewport {
         source.file,
         source.offset,
         source.contextId,
+        source.sourceRef,
       );
     if (!scene) {
       if (this.module !== module)
@@ -918,6 +921,35 @@ export class ModelViewport {
         });
       }
     }
+    // Every iteration of the focused target stays visible as context, each
+    // staged at the focused transformation by its own relation preview.
+    const presentedNodeIds = new Set(
+      [...bodies.values()].map(({model}) => authoredNodeId(model)),
+    );
+    for (const evaluation of scope?.target.evaluations ?? []) {
+      for (const nodeId of evaluation.nodeIds) {
+        if (presentedNodeIds.has(nodeId)) continue;
+        const model = module.objects.get(nodeId);
+        if (!model) continue;
+        presentedNodeIds.add(nodeId);
+        const preview =
+          evaluation.relationPreview?.nodeId === nodeId
+            ? evaluation.relationPreview
+            : undefined;
+        const node = preview ? {...model, ...preview} : model;
+        const targetId = scope!.target.id;
+        const key = `context/${targetId}:${nodeId}`;
+        this.root.add(
+          this.buildContextObject(
+            node,
+            key,
+            targetId,
+            'composition',
+            'context',
+          ),
+        );
+      }
+    }
     this.selectionEmphasized = focused;
     for (const [index, {model, emphasis, visible}] of [
       ...bodies.values(),
@@ -1033,17 +1065,6 @@ export class ModelViewport {
           mesh.topologyVertices.length > 0)
       );
     });
-  }
-
-  /** A single authored sketch can be offered to the independent 2D editing tool. */
-  get inspectedSketchId(): string | undefined {
-    const sketches =
-      this.inspectionScene?.target.filter(item => item.kind === 'sketch') ?? [];
-    const focused = sketches.filter(item => item.focused);
-    const ids = new Set(
-      (focused.length ? focused : sketches).map(item => item.sourceSketchId),
-    );
-    return ids.size === 1 ? ids.values().next().value : undefined;
   }
 
   /** The current semantic focus, shared by panels, handles and reference picking. */
@@ -1193,6 +1214,7 @@ export class ModelViewport {
         file: target.sourceRef.file,
         offset: target.sourceRef.start,
         contextId: evaluation.contextId,
+        sourceRef: target.sourceRef,
       },
     );
     return true;
@@ -1826,13 +1848,15 @@ export class ModelViewport {
     );
     // A call end and a zero-width insertion gap can share one caret. Navigation
     // carries its registered source identity; recompilation retains that choice
-    // through the existing selected source context.
+    // through the existing selected source context. Bare inspector targets only
+    // provide scenes: they never shadow a semantic target reached by identity.
     const preferred = preferredSource
       ? candidates.filter(
-          ({sourceRef}) =>
-            sourceRef.file === preferredSource.file &&
-            sourceRef.start === preferredSource.start &&
-            sourceRef.end === preferredSource.end,
+          target =>
+            target.kind !== 'inspect' &&
+            target.sourceRef.file === preferredSource.file &&
+            target.sourceRef.start === preferredSource.start &&
+            target.sourceRef.end === preferredSource.end,
         )
       : [];
     const atExpressionStart = candidates.some(
@@ -2002,7 +2026,9 @@ export class ModelViewport {
         kind: 'bounds',
         ...boundAppearance,
         lineWidth: symbolLineWidth,
-        renderOrder: 20,
+        // Selection fills stay in the decoration band, below sketch geometry
+        // and below the glyphs that share that band.
+        renderOrder: decorationRenderOrder.surface,
       },
     );
     this.scene.add(modelingHelper(this.selectionHighlight));
@@ -2018,7 +2044,10 @@ export class ModelViewport {
     const scope =
       source && this.module ? contextualToolScope(this.module, source) : source;
     const attach = (bindings: readonly TransformGizmoBinding[]) => {
-      const name = scope?.target.tool?.signature.name;
+      // Operation outputs stand in for their tool when no call-site target was
+      // produced (e.g. an origin operation on a group expression).
+      const name =
+        scope?.target.tool?.signature.name ?? scope?.target.operation?.kind;
       const explicit =
         name &&
         [
@@ -2361,7 +2390,6 @@ export class ModelViewport {
         ),
       ),
       '#d8ff3e',
-      31,
     );
     if (selected) overlay.add(selected);
     if (selection.hoveredId !== undefined) {
@@ -2370,9 +2398,13 @@ export class ModelViewport {
         selection.kind,
         new TopologyIdSet([selection.hoveredId]),
         selection.selectedIds.has(selection.hoveredId) ? '#ffad66' : '#63dcff',
-        33,
       );
-      if (hovered) overlay.add(hovered);
+      if (hovered) {
+        hovered.traverse(object => {
+          object.renderOrder = decorationRenderOrder.hover;
+        });
+        overlay.add(hovered);
+      }
     }
     selection.guide.add(overlay);
     this.topologySelectionOverlay = overlay;
@@ -2570,7 +2602,7 @@ export class ModelViewport {
           lineWidth: symbolLineWidth,
           pointSize: topologyPointSize,
           surfaceOpacity: impactSurfaceOpacity,
-          renderOrder: 19,
+          renderOrder: decorationRenderOrder.glyph,
         },
       );
       this.impactHighlights.push(highlight);
@@ -2907,7 +2939,6 @@ function createTopologyDecorationObject(
     decoration.topologyKind,
     new TopologyIdSet(decoration.ids),
     decoration.appearance.color,
-    28,
     symbolLineWidth,
   );
   if (highlight) container.add(highlight);
@@ -2936,7 +2967,7 @@ function createBoundsDecorationObject(
       symbolLineWidth,
       appearance.opacity,
       appearance.depthTest,
-      20,
+      decorationRenderOrder.mark,
     );
     lines.geometry.instanceCount = count * 2;
     container.add(lines);
@@ -3061,7 +3092,7 @@ function createObjectGeometryHighlight(
           appearance.pointSize,
           appearance.opacity,
           false,
-          appearance.renderOrder,
+          decorationRenderOrder.glyph,
         ),
       );
     }
@@ -3085,7 +3116,7 @@ function createObjectGeometryHighlight(
           toneMapped: false,
         }),
       );
-      surface.renderOrder = appearance.renderOrder;
+      surface.renderOrder = decorationRenderOrder.surface;
       highlight.add(surface);
     }
     if (mesh.edges.length > 0) {
@@ -3096,7 +3127,7 @@ function createObjectGeometryHighlight(
           appearance.lineWidth,
           appearance.opacity,
           node.kind === 'solid' || node.kind === 'face',
-          appearance.renderOrder + 1,
+          decorationRenderOrder.glyph,
         ),
       );
     }
@@ -3149,7 +3180,6 @@ function createTopologyHighlight(
   kind: TopologyKind,
   ids: TopologyIdSet,
   color: string,
-  renderOrder: number,
   lineWidth = interactiveLineWidth,
 ): THREE.Object3D | undefined {
   if (kind === 'vertex') {
@@ -3161,7 +3191,7 @@ function createTopologyHighlight(
           topologyPointSize,
           1,
           false,
-          renderOrder,
+          decorationRenderOrder.mark,
         )
       : undefined;
   }
@@ -3174,7 +3204,7 @@ function createTopologyHighlight(
           lineWidth,
           1,
           false,
-          renderOrder,
+          decorationRenderOrder.mark,
         )
       : undefined;
   }
@@ -3206,7 +3236,9 @@ function createTopologyHighlight(
       toneMapped: false,
     }),
   );
-  surface.renderOrder = renderOrder;
+  // Selected/hovered faces stay in the decoration surface band so inspected
+  // sketch geometry above it is not tinted by the fill.
+  surface.renderOrder = decorationRenderOrder.surface;
   return surface;
 }
 

@@ -63,7 +63,6 @@ async function open(
       editor.getModel()!.getPositionAt(source.indexOf('small = sketch') + 10),
     );
   }, source);
-  await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
   await page.locator('.sketch-editor:not([hidden])').waitFor();
   // Other CDP clients can override context media emulation on shared Chrome.
   await page.emulateMedia({reducedMotion});
@@ -95,8 +94,6 @@ async function choose(page: Page, name: string) {
       );
     return before;
   }, name);
-  const edit = page.getByRole('button', {name: 'Edit sketch', exact: true});
-  if (await edit.isVisible()) await edit.click();
   return page.evaluate(before => {
     const {sketchEditor, viewport} = window.sketchNavigationApp;
     return {

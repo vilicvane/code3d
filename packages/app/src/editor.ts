@@ -562,6 +562,8 @@ export class CodeEditor {
   private revision = 1;
   private focusToolParameter?: () => boolean;
   private sourceContext?: () => EditorSourceContext | undefined;
+  /** Marks may follow a context that never reaches source edits. */
+  private decorationContext?: () => EditorSourceContext | undefined;
   private cursorState?: EditorCursorState;
   private operationReadOnly = false;
   private suppressCursorEventDepth = 0;
@@ -1402,12 +1404,16 @@ export class CodeEditor {
   }
 
   /** Observe source context without turning state refreshes into navigation. */
-  observeSourceContext(context: () => EditorSourceContext | undefined): void {
+  observeSourceContext(
+    context: () => EditorSourceContext | undefined,
+    decorationContext?: () => EditorSourceContext | undefined,
+  ): void {
     this.sourceContext = context;
+    this.decorationContext = decorationContext;
     const decorations = this.editor.createDecorationsCollection();
     let revealed: string | undefined;
     const stop = autorun(() => {
-      const current = context();
+      const current = this.decorationContext?.() ?? context();
       const state = this.cursorState;
       const model = state?.model;
       const cursor = state?.cursor;
@@ -1597,8 +1603,9 @@ export class CodeEditor {
                   (edit.sourceRef.end - edit.sourceRef.start),
                 0,
               );
-          const focusOffset =
-            focused.focusOffset !== undefined
+          const focusOffset = options.preserveCursor
+            ? undefined
+            : focused.focusOffset !== undefined
               ? changedOffset + focused.focusOffset
               : (callIdentifierOffset(
                   nextSource,

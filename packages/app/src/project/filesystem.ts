@@ -302,9 +302,18 @@ class ProjectStore implements ProjectFileSystem {
 
   private async readManifest(): Promise<ProjectManifest | undefined> {
     if (!(await this.exists(this.manifestPath))) return undefined;
-    const value = JSON.parse(
-      await this.files.readFile(this.manifestPath, 'utf8'),
-    ) as Partial<ProjectManifest>;
+    let value: Partial<ProjectManifest> | undefined;
+    try {
+      value = JSON.parse(
+        await this.files.readFile(this.manifestPath, 'utf8'),
+      ) as Partial<ProjectManifest>;
+    } catch {
+      value = undefined;
+    }
+    // An interrupted write can leave the manifest empty or truncated; an
+    // unreadable manifest counts as absent, so its directory decisions are
+    // rebuilt while the files on disk stay untouched.
+    if (!value) return undefined;
     // Prototype metadata has one current shape; its marker never selects a format.
     return {
       version: 1,

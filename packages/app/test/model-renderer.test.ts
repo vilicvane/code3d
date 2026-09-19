@@ -10,6 +10,7 @@ import type {ModelSnapshotObject, ModelKind} from '@code3d/core/tooling';
 import {createAppTestServer} from './vite-test-server.ts';
 
 let applySourceEmphasis: (typeof import('../src/rendering/source-appearance.ts'))['applySourceEmphasis'],
+  decorationRenderOrder: (typeof import('../src/rendering/source-appearance.ts'))['decorationRenderOrder'],
   createRenderedModelNode: (typeof import('../src/rendering/model-renderer.ts'))['createRenderedModelNode'],
   createRenderedModel: (typeof import('../src/rendering/model-renderer.ts'))['createRenderedModel'],
   disposeObject: (typeof import('../src/rendering/model-renderer.ts'))['disposeObject'];
@@ -21,7 +22,7 @@ before(async () => {
     await server.ssrLoadModule<
       typeof import('../src/rendering/model-renderer.ts')
     >('/src/rendering/model-renderer.ts'));
-  ({applySourceEmphasis} = await server.ssrLoadModule<
+  ({applySourceEmphasis, decorationRenderOrder} = await server.ssrLoadModule<
     typeof import('../src/rendering/source-appearance.ts')
   >('/src/rendering/source-appearance.ts'));
 });
@@ -523,7 +524,23 @@ test('passive sketches retain open lines, circular curves and upstream aliases i
   assert.ok(
     !Array.isArray(selected.material) && !Array.isArray(other.material),
   );
-  assert.ok(selected.material.opacity > other.material.opacity);
+  const selectedMaterial = selected.material as
+    THREE.PointsMaterial | THREE.LineBasicMaterial;
+  const otherMaterial = other.material as
+    THREE.PointsMaterial | THREE.LineBasicMaterial;
+  assert.ok(selectedMaterial.opacity > otherMaterial.opacity);
+  assert.equal(selectedMaterial.color.getHexString(), 'd8ff3e');
+  assert.equal(otherMaterial.color.getHexString(), 'd8ff3e');
+  // Context sketches keep depth testing and stay behind the decoration band;
+  // highlighted ones composite above translucent surfaces of any level.
+  assert.equal(other.renderOrder, decorationRenderOrder.contextSketch);
+  assert.equal(otherMaterial.depthTest, true);
+  assert.equal(selected.renderOrder, decorationRenderOrder.sketch);
+  assert.equal(selectedMaterial.depthTest, false);
+  assert.ok(
+    decorationRenderOrder.contextSketch < decorationRenderOrder.surface,
+  );
+  assert.ok(decorationRenderOrder.sketch > decorationRenderOrder.surface);
   for (const primitive of primitives) {
     const positions = primitive.geometry.getAttribute('position');
     for (let i = 0; i < positions.count; i++)

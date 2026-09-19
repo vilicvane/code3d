@@ -42,6 +42,15 @@ placed;`;
   assert.ok(Math.abs(Number(position[1]) - 12) < 1e-4);
   assert.ok(Math.abs(Number(position[2]) - 3) < 1e-4);
   await page.getByText('Ready', {exact: true}).waitFor();
+  // Editing the shared source keeps the caret on the related usage, so the
+  // contextual editor keeps showing the host geometry.
+  assert.equal(
+    await page.evaluate(
+      () => window.sketchTestEditor.getPosition()?.lineNumber,
+    ),
+    5,
+  );
+  assert.ok(await page.locator('.sketch-context-edge').count());
   assert.match(
     await text(page),
     /profile\.relate\(s => s\.plane\.align\(host\.plane\)\)/,
@@ -80,4 +89,100 @@ profile;`,
   );
   assert.equal(await point(page, 1).count(), 1);
   assert.equal(await point(page, 2).count(), 1);
+});
+
+test('a related sketch keeps blurred source marks without reflowing the line', async t => {
+  const source = `import {rectangle, sketch} from '@code3d/core';
+const host = rectangle(40, 30).originOffset(0, -10, 0);
+const base = sketch([
+  ['point', 1, [0, 0]],
+  ['point', 2, [10, 0]],
+  ['line', 3, [1, 2]],
+]);
+const placed = base.relate(s => s.plane.align(host.plane));
+placed;`;
+  const page = await open(t, source);
+  // Monaco re-indents inserted source, so read offsets and columns from the model.
+  const cursor = await page.evaluate(() => {
+    const editor = window.sketchTestEditor;
+    const model = editor.getModel()!;
+    const offset = model.getValue().indexOf('.relate(') + 2;
+    const position = model.getPositionAt(offset);
+    editor.setPosition(position);
+    editor.focus();
+    return {offset, lineNumber: position.lineNumber};
+  });
+  const columnOffsets = () =>
+    page.evaluate(({lineNumber}) => {
+      const editor = window.sketchTestEditor;
+      const length = editor.getModel()!.getLineLength(lineNumber) + 1;
+      return [1, 2, length].map(column =>
+        editor.getScrolledVisiblePosition({lineNumber, column}),
+      );
+    }, cursor);
+  const focused = await columnOffsets();
+  const caretHeight = await page
+    .locator('.monaco-editor .cursors-layer .cursor')
+    .first()
+    .evaluate(element => element.getBoundingClientRect().height);
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
+  });
+  await page.waitForFunction(offset => {
+    const model = window.sketchTestEditor.getModel()!;
+    return model
+      .getAllDecorations()
+      .some(
+        mark =>
+          mark.options.beforeContentClassName === 'code3d-context-caret' &&
+          model.getOffsetAt(mark.range.getStartPosition()) === offset,
+      );
+  }, cursor.offset);
+  // The blur keeps the word under the caret, not the whole sketch call.
+  assert.deepEqual(
+    await page.evaluate(() => {
+      const model = window.sketchTestEditor.getModel()!;
+      return {
+        words: model
+          .getAllDecorations()
+          .filter(
+            mark => mark.options.inlineClassName === 'code3d-context-word',
+          )
+          .map(mark => model.getValueInRange(mark.range)),
+        tool: model
+          .getAllDecorations()
+          .flatMap(mark =>
+            mark.options.className === 'code3d-active-tool-source' ||
+            mark.options.inlineClassName === 'code3d-active-tool-source-inline'
+              ? [model.getValueInRange(mark.range)]
+              : [],
+          ),
+      };
+    }),
+    {words: ['relate'], tool: []},
+  );
+  assert.equal(await page.locator('.code3d-active-tool-source').count(), 0);
+  // Simulated marks must not reflow the line they mirror.
+  assert.deepEqual(await columnOffsets(), focused);
+  const word = page.locator('.monaco-editor .code3d-context-word').first();
+  await word.waitFor();
+  const wordStyle = await word.evaluate(element => {
+    const style = getComputedStyle(element);
+    return {
+      outlineStyle: style.outlineStyle,
+      borderRadius: style.borderRadius,
+      height: element.getBoundingClientRect().height,
+    };
+  });
+  assert.equal(wordStyle.outlineStyle, 'none');
+  assert.equal(wordStyle.borderRadius, '0px');
+  const caret = page.locator('.monaco-editor .code3d-context-caret');
+  await caret.waitFor();
+  // Both simulated marks span the native caret's line box.
+  assert.equal(wordStyle.height, caretHeight);
+  assert.equal(
+    await caret.evaluate(element => element.getBoundingClientRect().height),
+    caretHeight,
+  );
 });

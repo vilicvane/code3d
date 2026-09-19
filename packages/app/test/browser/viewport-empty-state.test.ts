@@ -978,11 +978,8 @@ test('pending edits keep mode height stable and delayed preview phases cannot ou
   await assertModeHeight();
   assert.match((await status.getAttribute('title'))!, /source files/);
   await phase('preparing-preview');
-  assert.equal(await status.isVisible(), false);
-  await assertModeHeight();
-  await page.waitForTimeout(100);
-  assert.equal(await status.isVisible(), false);
-  await page.waitForTimeout(125);
+  // Once visibly busy, switching busy phases keeps the status visible and
+  // updates its label immediately instead of hiding for the reveal delay.
   assert.equal(await status.isVisible(), true);
   assert.match(await status.innerText(), /Preparing preview/);
   await assertModeHeight();
@@ -996,6 +993,20 @@ test('pending edits keep mode height stable and delayed preview phases cannot ou
   await page.waitForTimeout(300);
   assert.match(await status.innerText(), /Ready/);
   assert.equal(await status.getAttribute('title'), null);
+  // From a non-busy status the reveal delay still applies: the phase hides
+  // the status first and reveals it once the delay elapses.
+  await phase('preparing-preview');
+  assert.equal(await status.isVisible(), false);
+  await page.waitForTimeout(100);
+  assert.equal(await status.isVisible(), false);
+  await page.waitForTimeout(125);
+  assert.equal(await status.isVisible(), true);
+  assert.match(await status.innerText(), /Preparing preview/);
+  await assertModeHeight();
+  // A reveal scheduled by a superseded phase is cancelled with its run.
+  await page.evaluate(() =>
+    window.emptyViewportApp.previewState.showStatus('ready', 'Ready'),
+  );
   await phase('preparing-preview');
   await page.evaluate(() =>
     window.emptyViewportApp.previewState.showStatus('busy'),

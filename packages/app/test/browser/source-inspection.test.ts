@@ -661,7 +661,7 @@ test(
 );
 
 test(
-  'Sketch inspection draws mixed 3D planes and enters 2D editing explicitly',
+  'Sketch inspection draws mixed 3D planes and opens 2D editing on a sketch',
   {timeout: 120_000},
   async t => {
     assert.ok(process.env.CODE3D_TEST_URL);
@@ -742,12 +742,6 @@ export default show();`;
       await page.getByRole('region', {name: 'Sketch editor'}).isVisible(),
       false,
     );
-    assert.equal(
-      await page
-        .getByRole('button', {name: 'Edit sketch', exact: true})
-        .isVisible(),
-      false,
-    );
     await page.screenshot({path: '/tmp/code3d-180-sketch-3d.png'});
     await page.evaluate(() => {
       const editor = window.inspectionApp.codeEditor.editor;
@@ -757,22 +751,23 @@ export default show();`;
           .getPositionAt(editor.getValue().indexOf('profile =') + 1),
       );
     });
-    await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
     await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
     assert.equal(
       await page.locator('.sketch-canvas circle.local[data-id="1"]').count(),
       1,
     );
     await page.screenshot({path: '/tmp/code3d-180-sketch-2d.png'});
-    await page
-      .getByRole('button', {name: 'Finish sketch', exact: true})
-      .click();
+    await page.evaluate(() => {
+      const editor = window.inspectionApp.codeEditor.editor;
+      editor.setPosition(
+        editor
+          .getModel()!
+          .getPositionAt(editor.getValue().indexOf('show();') + 1),
+      );
+    });
     await page
       .getByRole('region', {name: 'Sketch editor'})
       .waitFor({state: 'hidden'});
-    await page
-      .getByRole('button', {name: 'Edit sketch', exact: true})
-      .waitFor();
     await page.evaluate(() => {
       const editor = window.inspectionApp.codeEditor.editor;
       editor.setValue(
@@ -780,7 +775,6 @@ export default show();`;
       );
       editor.setPosition({lineNumber: 2, column: 8});
     });
-    await page.getByRole('button', {name: 'Edit sketch', exact: true}).click();
     await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
     assert.equal(await page.locator('.sketch-canvas circle.local').count(), 0);
     assert.deepEqual(errors, []);
