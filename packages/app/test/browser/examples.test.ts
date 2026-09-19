@@ -293,7 +293,40 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
     };
     break;
   }
-  if (edit) {
+  // Gear constructors expose structured source configuration, not positional
+  // parameter tools. Exercise a real editor transaction and the same geometry
+  // and Undo contract instead of treating that example as a sketch.
+  const sourceEdit =
+    file === 'gear-studies.ts'
+      ? {before: 'faceWidth: 10', after: 'faceWidth: 11'}
+      : undefined;
+  if (sourceEdit) {
+    const offset = original.indexOf(sourceEdit.before);
+    assert.ok(offset >= 0, 'The representative gear configuration exists');
+    await page.evaluate(
+      ({offset, before, after}) => {
+        const editor = window.exampleApp.codeEditor.editor;
+        const model = editor.getModel()!;
+        const start = model.getPositionAt(offset);
+        const end = model.getPositionAt(offset + before.length);
+        editor.focus();
+        editor.pushUndoStop();
+        editor.executeEdits('example-parameter', [
+          {
+            range: {
+              startLineNumber: start.lineNumber,
+              startColumn: start.column,
+              endLineNumber: end.lineNumber,
+              endColumn: end.column,
+            },
+            text: after,
+          },
+        ]);
+        editor.pushUndoStop();
+      },
+      {offset, ...sourceEdit},
+    );
+  } else if (edit) {
     await page.evaluate(offset => {
       const editor = window.exampleApp.codeEditor.editor;
       editor.setPosition(editor.getModel()!.getPositionAt(offset));
@@ -359,7 +392,7 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
     await page.evaluate(() => window.exampleApp.previewState.diagnostic),
     undefined,
   );
-  if (edit || preferSketch)
+  if (edit || sourceEdit || preferSketch)
     assert.notEqual(
       await geometrySignature(page),
       geometry,
