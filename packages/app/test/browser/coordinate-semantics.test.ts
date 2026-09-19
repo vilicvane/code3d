@@ -2110,6 +2110,98 @@ async function assertMarkedSourceVisible(page: Page) {
   });
 }
 
+test(
+  'model toolbar inserts local transforms and Alt drags geometry around a fixed origin',
+  {timeout: 90_000},
+  async t => {
+    const {page, errors} = await openApp(t);
+    const source = `import {box} from '@code3d/core'; const part=box(24,16,14); part;`;
+    await setSource(page, source, 'box');
+    const toolbar = page.getByRole('toolbar', {name: 'Position tools'});
+    await toolbar.getByRole('button', {name: 'Origin Offset'}).click();
+    assert.equal((await state(page)).source, source);
+    const originPosition = () =>
+      page.evaluate(() => {
+        const viewport = window.coordinateApp.viewport;
+        const selected = viewport.getSelected()!;
+        const marker = viewport['decorationLayers']
+          .get('source-context:model-origin')
+          ?.find(instance => instance.occurrenceKey === selected.key)?.anchor;
+        if (!marker) return undefined;
+        marker.updateWorldMatrix(true, false);
+        return marker.getWorldPosition(marker.position.clone()).toArray();
+      });
+    const beforeOrigin = await originPosition();
+    assert.ok(beforeOrigin);
+    await page.keyboard.down('Alt');
+    const handle = await xHandle(page);
+    await page.mouse.move(handle.x, handle.y);
+    await page.mouse.down();
+    await page.mouse.move(
+      handle.x + handle.dx * 45,
+      handle.y + handle.dy * 45,
+      {steps: 5},
+    );
+    const preview = (await state(page)).preview;
+    assert.ok(preview?.originDelta);
+    assert.ok(Math.abs(preview.transform.position[0]) > 0);
+    assert.ok(
+      Math.abs(preview.transform.position[0] + preview.originDelta[0]) < 1e-8,
+    );
+    assert.deepEqual(preview.spatial.origin, [0, 0, 0]);
+    const movingOrigin = await originPosition();
+    assert.ok(movingOrigin);
+    movingOrigin.forEach((value, axis) =>
+      assert.ok(Math.abs(value - beforeOrigin[axis]) < 1e-5),
+    );
+    await page.mouse.up();
+    await page.keyboard.up('Alt');
+    await page.getByText('Ready', {exact: true}).waitFor();
+    const offsetSource = (await state(page)).source;
+    assert.match(offsetSource, /box\(24,16,14\)\.originOffset\(/);
+    const handlePosition = () =>
+      page.evaluate(() => {
+        const control = window.coordinateApp.viewport['transformGizmo'][
+          'axes'
+        ].find(control => control.binding?.axis === 'x')!;
+        return control.proxy.position.toArray();
+      });
+    const normalHandle = await handlePosition();
+    await page.keyboard.down('Alt');
+    const centeredHandle = await handlePosition();
+    for (let axis = 0; axis < 3; axis++)
+      assert.ok(
+        Math.abs(
+          centeredHandle[axis] -
+            normalHandle[axis] -
+            preview.transform.position[axis],
+        ) < 1e-4,
+      );
+    await xHandle(page);
+    await page.keyboard.up('Alt');
+    const restoredHandle = await handlePosition();
+    for (let axis = 0; axis < 3; axis++)
+      assert.ok(Math.abs(restoredHandle[axis] - normalHandle[axis]) < 1e-5);
+    await toolbar.getByRole('button', {name: 'Rotate model'}).click();
+    assert.equal((await state(page)).source, offsetSource);
+    const rotation = await rotationHandle(page, 2);
+    await page.mouse.move(rotation.x, rotation.y);
+    await page.mouse.down();
+    await page.mouse.move(
+      rotation.x + rotation.dx * 35,
+      rotation.y + rotation.dy * 35,
+      {steps: 5},
+    );
+    await page.mouse.up();
+    await page.getByText('Ready', {exact: true}).waitFor();
+    assert.match(
+      (await state(page)).source,
+      /\.originOffset\([^)]*\)\.rotate\(/,
+    );
+    assert.deepEqual(errors, []);
+  },
+);
+
 async function setSource(page: Page, source: string, method: string) {
   await page.evaluate(() => window.coordinateApp.codeEditor.editor.focus());
   await page.keyboard.press('Control+a');

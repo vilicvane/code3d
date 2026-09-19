@@ -13,6 +13,10 @@ const names: Record<SpatialTool, string> = {
   'rotate-point': 'Rotate about point',
   'rotate-axis': 'Rotate about axis',
 };
+const modelNames = {
+  translate: 'Origin Offset',
+  'rotate-point': 'Rotate model',
+} as const;
 
 const translateIcon: IconNode = [
   ['path', {d: 'M5 3v16h16 M2 6l3-3 3 3 M18 16l3 3-3 3'}],
@@ -54,12 +58,14 @@ export class SpatialToolbar {
     private readonly options: {
       visible(): boolean;
       availableTools(): readonly SpatialTool[];
+      context(): 'model' | 'relation';
       cancel(): void;
       activateSource(tool: SpatialTool): Promise<boolean>;
     },
   ) {
     this.root.className = 'spatial-toolbar';
     const group = this.toolbar.group('Transform');
+    const modelGroup = this.toolbar.group('Model transform');
     const choose = async (tool: SpatialTool) => {
       const activation = ++this.activation;
       this.options.cancel();
@@ -88,18 +94,44 @@ export class SpatialToolbar {
         run: () => choose('rotate-axis'),
       },
     ]);
+    this.toolbar.add(modelGroup, {
+      name: modelNames.translate,
+      title: 'Edit originOffset (Alt drags the model)',
+      icon: translateIcon,
+      run: () => choose('translate'),
+    });
+    this.toolbar.add(modelGroup, {
+      name: modelNames['rotate-point'],
+      title: 'Edit model rotate',
+      icon: rotatePointIcon,
+      run: () => choose('rotate-point'),
+    });
     this.root.append(this.toolbar.root);
     container.append(this.root);
     makeObservable(this, {selection: observableRef, setSelection: action});
     this.stop = autorun(() => {
       const tool = tools.tool;
       const available = options.availableTools();
+      const context = options.context();
+      group.style.display = context === 'relation' ? '' : 'none';
+      modelGroup.style.display = context === 'model' ? '' : 'none';
       this.root.hidden = !options.visible() || !available.length;
       if (this.root.hidden) this.toolbar.close();
-      if (tool && tool !== 'translate') this.toolbar.selectVariant(names[tool]);
+      if (context === 'relation' && tool && tool !== 'translate')
+        this.toolbar.selectVariant(names[tool]);
       this.toolbar.update(name => ({
-        pressed: !!tool && name === names[tool],
-        disabled: !available.some(tool => names[tool] === name),
+        pressed:
+          !!tool &&
+          name ===
+            (context === 'model' && tool !== 'rotate-axis'
+              ? modelNames[tool]
+              : names[tool]),
+        disabled: !available.some(
+          tool =>
+            (context === 'model' && tool !== 'rotate-axis'
+              ? modelNames[tool]
+              : names[tool]) === name,
+        ),
       }));
     });
   }

@@ -29,6 +29,7 @@ import {
   type TransformationInsertion,
 } from './source-expression';
 import type {SpatialObjectPreview} from './spatial-edit';
+import {modelSpatialSourceRef} from './contextual-tool-context';
 import type {ToolIntent} from './tool-system';
 import {
   bindingTool,
@@ -63,6 +64,11 @@ export type SpatialBindingSource =
   | Readonly<{
       kind: 'origin-offset';
       sourceRef: SourceRef;
+    }>
+  | Readonly<{
+      kind: 'model-insert';
+      sourceRef: SourceRef;
+      method: 'originOffset' | 'rotate';
     }>
   | Readonly<{
       kind: 'reference-offset';
@@ -304,6 +310,58 @@ export function spatialBindings(
       },
     ];
   });
+}
+
+/** Offer local origin and rotation edits before either method is authored. */
+export function modelInsertionBindings(
+  module: ModelModule,
+  scope: Readonly<{target: SourceTarget; evaluation: SourceTargetEvaluation}>,
+  occurrence: SpatialToolOccurrence,
+  occurrences: readonly SpatialToolOccurrence[],
+): Extract<TransformGizmoBinding, {kind: 'spatial'}>[] {
+  const sourceRef = modelSpatialSourceRef(module, scope);
+  if (!sourceRef || !scope.evaluation.nodeIds.includes(occurrence.node.nodeId))
+    return [];
+  const nodeIds = new Set(
+    scope.target.evaluations.flatMap(evaluation => evaluation.nodeIds),
+  );
+  const objects = occurrences
+    .filter(candidate => nodeIds.has(candidate.node.nodeId))
+    .map(candidate => ({
+      key: candidate.key,
+      nodeId: candidate.node.nodeId,
+      sensitivity: 1,
+      spatial: {
+        origin: [0, 0, 0] as Vec3,
+        vector: [0, 0, 0] as Vec3,
+        frame: identityRigidTransform,
+      },
+    }));
+  return (['originOffset', 'rotate'] as const).flatMap(method =>
+    (['x', 'y', 'z'] as const).map(axis => ({
+      kind: 'spatial' as const,
+      placement:
+        occurrence.placement === 'composition'
+          ? occurrence.node.compositionTransform
+          : occurrence.node.transform,
+      mode: method === 'rotate' ? ('rotate' as const) : ('translate' as const),
+      axis,
+      label: `${method === 'rotate' ? 'Rotate' : 'Origin'} ${axis.toUpperCase()}`,
+      value: 0,
+      sensitivity: 1,
+      parameterKind:
+        method === 'rotate' ? ('angle' as const) : ('length' as const),
+      frame: {...identityRigidTransform, scale: [1, 1, 1] as Vec3},
+      anchor: 'frame' as const,
+      spatial: {
+        operation: method,
+        source: {kind: 'model-insert' as const, sourceRef, method},
+        operationRef: sourceRef,
+        ownerNodeId: occurrence.node.nodeId,
+        objects,
+      },
+    })),
+  );
 }
 
 /** Derive reference movement from the same authored rotation and instance frames. */
@@ -625,6 +683,7 @@ export function transformationBindings(
 export function spatialIntent(
   binding: Extract<TransformGizmoBinding, {kind: 'spatial'}>,
   value: number,
+  moveObject = false,
 ): Extract<ToolIntent, {kind: 'model.spatial'}> {
   const delta = value - binding.value;
   const index = axisIndex(binding.axis);
@@ -783,11 +842,27 @@ export function spatialIntent(
           return {
             key: object.key,
             nodeId: object.nodeId,
-            // Hold the gesture-start geometry fixed while showing its candidate origin.
-            // Committing re-expresses it in the result frame through originDelta.
-            transform: identityRigidTransform,
+            // Preview the candidate in the gesture-start frame. Alt moves geometry
+            // instead of the origin marker; both commit the same result frame.
+            transform:
+              moveObject && binding.spatial.operation === 'originOffset'
+                ? {
+                    ...identityRigidTransform,
+                    position: [
+                      -origin[0] || 0,
+                      -origin[1] || 0,
+                      -origin[2] || 0,
+                    ] as Vec3,
+                  }
+                : identityRigidTransform,
             originDelta: origin,
-            spatial: {origin, vector},
+            spatial: {
+              origin:
+                moveObject && binding.spatial.operation === 'originOffset'
+                  ? [0, 0, 0]
+                  : origin,
+              vector,
+            },
           };
         }
         const angles = spatial.vector.map(

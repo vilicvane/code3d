@@ -1,6 +1,7 @@
 import {insertTransformationSource} from './source-expression';
 import type {TransformGizmoBinding} from './transform-gizmo';
 import {
+  appendModelSpatialSource,
   offsetExpression,
   callIdentifierOffset,
   offsetCallSource,
@@ -68,6 +69,12 @@ export type SpatialSourceChange =
       delta: Vec3;
     }>
   | Readonly<{
+      kind: 'model-insert';
+      sourceRef: SourceRef;
+      method: 'originOffset' | 'rotate';
+      delta: Vec3;
+    }>
+  | Readonly<{
       kind: 'reference-offset';
       sourceRef: SourceRef;
       method: 'pivot' | 'pivotOffset' | 'axisOffset';
@@ -98,7 +105,11 @@ export function committedSpatialObject(
     ...result,
     transform: {
       ...identityRigidTransform,
-      position: [-originDelta[0], -originDelta[1], -originDelta[2]],
+      position: [
+        -originDelta[0] || 0,
+        -originDelta[1] || 0,
+        -originDelta[2] || 0,
+      ] as Vec3,
     },
     spatial: {...preview.spatial, origin: [0, 0, 0]},
   };
@@ -177,11 +188,17 @@ export class SpatialTransformResolver implements ToolIntentResolver {
                             `${change.name}(${change.delta.map(formatSourceNumber).join(', ')})`,
                             change.container,
                           )
-                      : offsetCallSource(
-                          expectedText,
-                          'originOffset',
-                          change.delta,
-                        );
+                      : change.kind === 'model-insert'
+                        ? appendModelSpatialSource(
+                            expectedText,
+                            change.method,
+                            change.delta,
+                          )
+                        : offsetCallSource(
+                            expectedText,
+                            'originOffset',
+                            change.delta,
+                          );
     const importEdits = [];
     const addition =
       change.kind === 'rotation-reference' && referenceEdit?.usesConstructor
@@ -247,17 +264,19 @@ export class SpatialTransformResolver implements ToolIntentResolver {
                         : change.selector
                       : change.kind === 'transformation-insert'
                         ? change.name
-                        : change.kind === 'reference-offset'
-                          ? referenceEdit?.usesConstructor &&
-                            change.method === 'pivot'
-                            ? (change.constructor?.name ?? change.method)
-                            : change.method
-                          : // An origin drag commits by writing originOffset; focus
-                            // the written call so the presented scene shows the
-                            // committed coordinates, not the pre-offset value.
-                            change.kind === 'origin-offset'
-                            ? 'originOffset'
-                            : intent.operation,
+                        : change.kind === 'model-insert'
+                          ? change.method
+                          : change.kind === 'reference-offset'
+                            ? referenceEdit?.usesConstructor &&
+                              change.method === 'pivot'
+                              ? (change.constructor?.name ?? change.method)
+                              : change.method
+                            : // An origin drag commits by writing originOffset; focus
+                              // the written call so the presented scene shows the
+                              // committed coordinates, not the pre-offset value.
+                              change.kind === 'origin-offset'
+                              ? 'originOffset'
+                              : intent.operation,
                   ),
                 },
               ],

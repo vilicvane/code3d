@@ -938,6 +938,7 @@ const spatialToolbar = new SpatialToolbar(
   {
     visible: () => !sketchEditor.hasTarget && viewport.renderMode !== 'render',
     availableTools: () => viewport.availablePositionTools,
+    context: () => viewport.positionToolContext,
     cancel: cancelRotationReferenceSelection,
     activateSource: async tool => {
       const scope = viewport.sourceContext;
@@ -3541,7 +3542,9 @@ function handlePositionTool(event: TransformGizmoEvent): void {
   }
 
   if (event.kind === 'preview') {
-    session.preview(positionIntent(event.binding, event.value));
+    session.preview(
+      positionIntent(event.binding, event.value, event.moveObject),
+    );
     return;
   }
 
@@ -3552,7 +3555,7 @@ function handlePositionTool(event: TransformGizmoEvent): void {
   } else {
     const committed = commitToolSession(
       session,
-      positionIntent(event.binding, event.value),
+      positionIntent(event.binding, event.value, event.moveObject),
     );
     if (!committed) resumeCompileAfterTool(positionToolInterruptedCompile);
   }
@@ -3563,8 +3566,10 @@ function handlePositionTool(event: TransformGizmoEvent): void {
 function positionIntent(
   binding: TransformGizmoBinding,
   value: number,
+  moveObject = false,
 ): ToolIntent {
-  if (binding.kind === 'spatial') return spatialIntent(binding, value);
+  if (binding.kind === 'spatial')
+    return spatialIntent(binding, value, moveObject);
   return {
     ...parameterIntent(binding.target, value),
     completeArguments: binding.completeArguments,

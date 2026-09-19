@@ -72,11 +72,13 @@ import {sourceParameterAt} from './model/tool-arguments';
 import {
   contextualToolCallId,
   contextualToolScope,
+  modelSpatialSourceRef,
 } from './tools/contextual-tool-context';
 import type {ToolParameterSchema} from './model/tool-schema';
 import {representativeDimensionEdge} from './rendering/parameter-dimension';
 import {
   continuedSpatialBindings,
+  modelInsertionBindings,
   spatialBindings,
   transformationBindings,
   rotationReferenceBindings,
@@ -457,6 +459,7 @@ export class ModelViewport {
       renderedViewTarget: observableRef,
       selectedKey: observableRef,
       sourceContext: computed,
+      positionToolContext: computed,
       availablePositionTools: computed,
       selectSourceTarget: action,
       selectKey: action,
@@ -1095,7 +1098,23 @@ export class ModelViewport {
       contextualToolScope(this.module, source).evaluation.relationOwnerNodeId
     )
       return ['translate', 'rotate-point', 'rotate-axis'];
+    if (this.positionToolContext === 'model')
+      return ['translate', 'rotate-point'];
     return this.transformGizmo.availableTools;
+  }
+
+  get positionToolContext(): 'model' | 'relation' {
+    const source = this.sourceContext;
+    const occurrence = this.getSelected();
+    if (
+      source &&
+      occurrence &&
+      this.module &&
+      modelSpatialSourceRef(this.module, source) &&
+      source.evaluation.nodeIds.includes(occurrence.node.nodeId)
+    )
+      return 'model';
+    return 'relation';
   }
 
   /** Resolve a replacement snapshot with the same context choice as rendering. */
@@ -2122,8 +2141,23 @@ export class ModelViewport {
         this.committedSpatialPreviews,
         this.spatialParameterValues,
       );
-      if (bindings.length > 0) {
-        attach([...bindings, ...rotationReferenceBindings(bindings)]);
+      const modelBindings = modelInsertionBindings(
+        this.module,
+        scope,
+        occurrence,
+        this.renderedOccurrences(),
+      ).filter(
+        binding =>
+          !bindings.some(
+            existing => bindingTool(existing) === bindingTool(binding),
+          ),
+      );
+      if (bindings.length > 0 || modelBindings.length > 0) {
+        attach([
+          ...bindings,
+          ...modelBindings,
+          ...rotationReferenceBindings(bindings),
+        ]);
         return;
       }
       if (scope.evaluation.relationSpatial) {
