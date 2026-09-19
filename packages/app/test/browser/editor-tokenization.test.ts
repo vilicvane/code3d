@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {after, before, test, type TestContext} from 'node:test';
-import {chromium, type Browser, type Page} from 'playwright-core';
+import {chromium, type Browser, type Page} from './browser-connection.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import {code3dCodeColors} from '../../src/code-theme.ts';
 

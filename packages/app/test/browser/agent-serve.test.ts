@@ -4,10 +4,10 @@ import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join, extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 import {runCli, startServe} from '../../../cli/test/process.ts';
 import {type AgentConfig} from '@code3d/agent';
-import {createLocalBridge} from '../../../cli/bld/bridge.js';
+import {createLocalBridge} from '../../../cli/src/bridge.ts';
 import {reserveLocalPort} from './local-port.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 
@@ -182,7 +182,7 @@ test(
       [137, 80, 78, 71, 13, 10, 26, 10],
     );
     assert.ok(png.length > 1000);
-    // The production bundle must also export the SVG sketch scene under HTTPS.
+    // The production bundle must also render a sketch observation under HTTPS.
     const sketch = await call({
       operation: 'apply',
       input: {
@@ -200,7 +200,11 @@ test(
       },
     });
     assert.equal(sketch.data.observation.topology.kind, 'sketch');
-    assert.equal(sketch.data.observation.render.projection, 'orthographic');
+    assert.equal(sketch.data.observation.render.projection, 'perspective');
+    assert.equal(
+      sketch.data.observation.render.coordinates,
+      'observation-scene',
+    );
     assert.equal(sketch.data.observation.topology.items[1].radius, 8);
     const sketchPng = await readFile(sketch.artifacts[0].path);
     assert.equal(sketchPng.readUInt32BE(16), 960);

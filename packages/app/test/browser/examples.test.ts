@@ -6,13 +6,14 @@ import {
   type Page,
   type BrowserContext,
   type Browser,
-} from 'playwright-core';
+} from './browser-connection.ts';
 import {sourceTokenOffset} from '../../render-samples/source-focus.ts';
 import {
   exampleEntries,
   renderSamples,
   sourceContextSets,
 } from '../../render-samples/catalog.ts';
+import {assignExampleShards} from './example-shards.ts';
 
 declare const window: Window & {
   exampleExport?: number[];
@@ -57,9 +58,21 @@ const exampleBudget = (file: string): number =>
 const [shardIndex, shardCount] = (process.env.CODE3D_EXAMPLE_SHARD ?? '1/1')
   .split('/')
   .map(Number);
+assert.ok(
+  Number.isSafeInteger(shardCount) &&
+    shardCount > 0 &&
+    Number.isSafeInteger(shardIndex) &&
+    shardIndex > 0 &&
+    shardIndex <= shardCount,
+  'CODE3D_EXAMPLE_SHARD must be an index/count pair with 1 <= index <= count',
+);
 const runsStandaloneTests = shardIndex === shardCount;
+const assignment = assignExampleShards(
+  exampleEntries.map(({file}) => file),
+  shardCount,
+);
 for (const {file} of exampleEntries.filter(
-  (_, index) => index % shardCount === shardIndex - 1,
+  (_, index) => assignment[index] === shardIndex - 1,
 )) {
   test(`App example link: ${file}`, {timeout: exampleBudget(file)}, async t => {
     const context = await browser.newContext();

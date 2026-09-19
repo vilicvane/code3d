@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
 import {after, before, type TestContext} from 'node:test';
-import {chromium, type Browser, type Locator, type Page} from 'playwright-core';
+import {
+  chromium,
+  type Browser,
+  type Locator,
+  type Page,
+} from './browser-connection.ts';
 
 declare global {
   interface Window {
     sketchTestEditor: import('monaco-editor').editor.IStandaloneCodeEditor;
+    sketchTestRuntime: {
+      codeEditor: import('../../src/editor.ts').CodeEditor;
+      previewState: import('../../src/model/preview-state.ts').ModelPreviewState;
+      sketchEditor: import('../../src/tools/sketch-editor-controller.ts').SketchEditorController;
+    };
   }
 }
 
@@ -37,7 +47,7 @@ export async function openPage(t: TestContext): Promise<Page> {
       response,
       body:
         (await response.text()) +
-        '\nwindow.sketchTestEditor = codeEditor.editor;',
+        '\nwindow.sketchTestEditor = codeEditor.editor; window.sketchTestRuntime = {codeEditor, previewState, sketchEditor};',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL!, {timeout: 30_000});

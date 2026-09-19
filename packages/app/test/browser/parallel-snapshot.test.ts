@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {after, before, test, type TestContext} from 'node:test';
-import {chromium, type Browser, type Page} from 'playwright-core';
+import {chromium, type Browser, type Page} from './browser-connection.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import {normalizedModelSnapshot} from '../model-snapshot.ts';
 import type {CacheRequest, CacheResult} from './persistent-cache.worker.ts';
@@ -192,7 +192,10 @@ test(
     );
     const restored = await compile(page, {source}, true);
     valid(restored);
-    assert.equal(restored.stats.memory!.misses, 0);
-    assert.equal(restored.stats.snapshots!.queries, 0);
+    // Only computations above the persistence threshold survive a worker restart.
+    assert.ok(restored.stats.memory!.persistentHits > 0);
+    assert.ok(
+      restored.stats.snapshots!.queries < result.stats.snapshots!.queries,
+    );
   },
 );

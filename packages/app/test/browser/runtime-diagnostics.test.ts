@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 import type {ModelPreviewState} from '../../src/model/preview-state.ts';
 import type {CodeEditor} from '../../src/editor.ts';
 

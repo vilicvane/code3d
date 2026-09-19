@@ -1,9 +1,9 @@
 import {appIsolationHeaders} from '../../build/response-headers.ts';
-import type {Browser} from 'playwright-core';
+import type {Browser} from './browser-connection.ts';
 import type {TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 declare const files: Map<string, string>;
 declare const compile: (source: string) => ReturnType<typeof client.compile>;
 declare const client: import('../../src/model/compiler-client.ts').ModelCompilerClient;

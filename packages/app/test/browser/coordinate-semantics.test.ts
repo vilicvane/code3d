@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
-import {test, type TestContext} from 'node:test';
-import {chromium, type Page} from 'playwright-core';
+import {after, before, test, type TestContext} from 'node:test';
+import {chromium, type Browser, type Page} from './browser-connection.ts';
+
+let browser: Browser;
+before(async () => {
+  assert.ok(process.env.CODE3D_TEST_URL);
+  browser = await chromium.connectOverCDP(
+    process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+  );
+});
+after(async () => browser?.close());
 
 declare const window: Window & {
   coordinateApp: {
@@ -1577,8 +1586,16 @@ for (const grouped of [false, true])
             .filter(control => control.controls.getHelper().visible)
             .map(control => control.binding?.mode),
         );
+      const waitVisibleModes = async (modes: string[]) =>
+        page.waitForFunction(expected => {
+          const actual = window.coordinateApp.viewport['transformGizmo']['axes']
+            .filter(control => control.controls.getHelper().visible)
+            .map(control => control.binding?.mode);
+          return JSON.stringify(actual) === JSON.stringify(expected);
+        }, modes);
       assert.deepEqual(await visibleModes(), []);
       await page.getByRole('button', {name: 'Translate', exact: true}).click();
+      await waitVisibleModes(['translate', 'translate', 'translate']);
       assert.deepEqual(await visibleModes(), [
         'translate',
         'translate',
@@ -1600,6 +1617,7 @@ for (const grouped of [false, true])
         await page
           .getByRole('button', {name: 'Rotate about point', exact: true})
           .click();
+        await waitVisibleModes(['rotate', 'rotate', 'rotate']);
         const handle = await rotationHandle(page, 2);
         await page.mouse.move(handle.x, handle.y);
         await page.mouse.down();
@@ -1630,6 +1648,7 @@ for (const grouped of [false, true])
 
       await page.keyboard.press('Escape');
       await page.mouse.up();
+      await waitVisibleModes(['rotate', 'rotate', 'rotate']);
       assert.deepEqual(await visibleModes(), ['rotate', 'rotate', 'rotate']);
       assert.equal(
         await page.evaluate(() =>
@@ -1748,6 +1767,15 @@ export const booleanOperationsExample = group([joined, lens], 'Boolean operation
     await page
       .getByRole('button', {name: 'Rotate about point', exact: true})
       .click();
+    await page.waitForFunction(() => {
+      const visible = window.coordinateApp.viewport['transformGizmo'][
+        'axes'
+      ].filter(axis => axis.controls.getHelper().visible);
+      return (
+        visible.length === 3 &&
+        visible.every(axis => axis.binding?.mode === 'rotate')
+      );
+    });
     assert.deepEqual(
       await page.evaluate(() =>
         window.coordinateApp.viewport['transformGizmo']['axes']
@@ -2362,11 +2390,6 @@ async function xHandle(page: Page) {
 }
 
 async function openApp(t: TestContext) {
-  assert.ok(process.env.CODE3D_TEST_URL);
-  const browser = await chromium.connectOverCDP(
-    process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
-  );
-  t.after(() => browser.close());
   const context = await browser.newContext({
     viewport: {width: 1440, height: 1000},
   });
@@ -2374,9 +2397,13 @@ async function openApp(t: TestContext) {
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
   const errors: string[] = [];
+  const failedRequests: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => {
     if (/\[MobX\]/i.test(message.text())) errors.push(message.text());
+  });
+  page.on('requestfailed', request => {
+    failedRequests.push(`${request.url()}: ${request.failure()?.errorText}`);
   });
   await page.route('**/src/main.ts*', async route => {
     const response = await route.fetch();
@@ -2395,7 +2422,14 @@ async function openApp(t: TestContext) {
     .getByText('Ready', {exact: true})
     .waitFor({timeout: 60_000})
     .catch(async error => {
-      console.error(await page.locator('body').innerText(), errors);
+      console.error(
+        await page.locator('body').innerText(),
+        await page.evaluate(
+          () => window.coordinateApp?.previewState.diagnostic,
+        ),
+        errors,
+        failedRequests,
+      );
       throw error;
     });
   return {page, errors};
@@ -2953,7 +2987,14 @@ for (const [name, expression, method, reference, rotationAxis] of [
       const fine = await dragState();
       assert.ok(Math.abs(fine.delta) > 0);
       assert.equal(fine.preview, fine.value);
-      const coarseStep = rotationAxis === undefined ? grid * 5 : 15;
+      const frozenGrid = fine.grid;
+      // The camera can settle onto a new live grid before pointer-down. Use
+      // the step frozen for this drag, not the earlier toolbar readout.
+      let coarseStep = 15;
+      if (rotationAxis === undefined) {
+        assert.ok(frozenGrid);
+        coarseStep = frozenGrid * 5;
+      }
       let coarse = fine;
       for (let i = 0; i < 2; i++) {
         await page.keyboard.down('Shift');
@@ -2971,7 +3012,7 @@ for (const [name, expression, method, reference, rotationAxis] of [
           JSON.stringify({fine, coarse, coarseStep, expected}),
         );
         assert.equal(coarse.preview, coarse.value);
-        if (rotationAxis === undefined) assert.equal(coarse.grid, grid);
+        if (rotationAxis === undefined) assert.equal(coarse.grid, fine.grid);
         await page.keyboard.up('Shift');
         assert.equal((await dragState()).value, fine.value);
       }
@@ -4703,6 +4744,25 @@ test(
       await page
         .getByRole('button', {name: 'Rotate about point', exact: true})
         .click();
+      await page.waitForFunction(expected => {
+        const editor = window.coordinateApp.codeEditor.editor;
+        const model = editor.getModel()!;
+        const marks = model.getAllDecorations();
+        return (
+          !editor.hasTextFocus() &&
+          !marks.some(
+            mark =>
+              mark.options.inlineClassName === 'code3d-context-word' ||
+              mark.options.inlineClassName ===
+                'code3d-active-tool-source-inline',
+          ) &&
+          marks.some(
+            mark =>
+              mark.options.beforeContentClassName === 'code3d-context-caret' &&
+              model.getOffsetAt(mark.range.getStartPosition()) === expected,
+          )
+        );
+      }, original.indexOf(']'));
       const marks = await sourceMarks(page);
       assert.equal(marks.focused, false);
       assert.deepEqual(marks.word, [], JSON.stringify({array, marks}));

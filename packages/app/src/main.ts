@@ -1925,7 +1925,18 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     runInAction(() => {
       previewState.accept(request, nextModule);
       codeEditor.setDesignArguments(nextModule.designArguments);
-      sketchEditor.retain(codeEditor.cursorSource(), nextModule.sketches);
+      const retainsSketch = sketchEditor.retain(cursor, nextModule.sketches);
+      const currentSketch =
+        cursor &&
+        viewport.sourceEvaluationAt(
+          nextModule,
+          cursor.file,
+          cursor.offset,
+          preferredEvaluationContextId,
+        )?.evaluation.sketchIds?.length;
+      // A retained sketch belongs to the previous file until the new source
+      // focus selects its replacement. Do not count it as this file's target.
+      if (!retainsSketch && !currentSketch) sketchEditor.hide();
       codeEditor.trackSourceRefs([
         ...toolSourceRefs(nextModule),
         ...sketchEditor.sourceRefs(),

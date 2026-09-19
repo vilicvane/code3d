@@ -1,7 +1,7 @@
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 test(
   'on renders one exact source bounds annotation and both contact planes',

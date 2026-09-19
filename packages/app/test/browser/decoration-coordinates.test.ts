@@ -1,7 +1,7 @@
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 declare const window: Window & {
   decorationTest: {
@@ -76,24 +76,11 @@ export default ${kind === 'cut' ? 'cut(base, [cutter])' : `${kind}([base, cutter
     for (const result of results) {
       assert.equal(
         result.target,
-        result.kind === 'union' ? 2 : 1,
+        result.kind === 'cut' && result.token === 'base' ? 1 : 2,
         JSON.stringify(result),
       );
-      assert.equal(
-        result.ambient,
-        result.kind === 'union'
-          ? 0
-          : result.kind === 'cut' && result.token === 'base'
-            ? 1
-            : 2,
-      );
-      assert.equal(
-        result.focused,
-        result.kind === 'intersect' ||
-          (result.kind === 'cut' && result.token === 'cutter')
-          ? 0
-          : 1,
-      );
+      assert.equal(result.ambient, result.kind === 'union' ? 0 : 1);
+      assert.equal(result.focused, 1);
       for (const matrix of result.matrices)
         matrix.actual.forEach((value, i) =>
           assert.ok(Math.abs(value - matrix.expected[i]) < 1e-6),

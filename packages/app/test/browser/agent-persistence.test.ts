@@ -1,17 +1,21 @@
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 import {createAgentConfig} from '@code3d/agent';
 
 test(
   'project storage retains receipts, isolates projects and cannot revive revoked grants',
-  {timeout: 30_000},
+  {
+    timeout: 30_000,
+    skip:
+      (process.env.CODE3D_ISOLATED_BROWSER !== '1' ||
+        !process.env.CODE3D_PLAYWRIGHT_WS) &&
+      'OPFS directory identity requires an isolated browser process',
+  },
   async t => {
     assert.ok(process.env.CODE3D_TEST_URL);
-    const browser = await chromium.connectOverCDP(
-      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
-    );
+    const browser = await chromium.connect(process.env.CODE3D_PLAYWRIGHT_WS!);
     t.after(() => browser.close());
     const context = await browser.newContext();
     t.after(() => context.close());

@@ -122,6 +122,11 @@ test('each opened file has its own complete latest artifact, including entries w
     assert.equal(restoredA.model.rootPath, '/a.ts');
     assert.equal(restoredB.model.rootPath, '/b.ts');
     assert.deepEqual(restoredA.model.files, a.model.files);
+    assert.deepEqual(
+      restoredA.model.inspectCallSites,
+      a.model.inspectCallSites,
+    );
+    assert.ok(restoredA.model.inspectCallSites instanceof Map);
     assert.deepEqual(restoredA.model.sketches, a.model.sketches);
     assert.equal(records.has('dependency:' + a.dependencies.id), true);
     assert.equal(

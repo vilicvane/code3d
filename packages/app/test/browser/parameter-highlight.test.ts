@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium, type Page} from 'playwright-core';
+import {chromium, type Page} from './browser-connection.ts';
 
 declare const window: Window & {
   parameterHighlightApp: {

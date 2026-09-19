@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium, type Page} from 'playwright-core';
+import {chromium, type Page} from './browser-connection.ts';
 
 declare const window: Window & {
   extrusionApp: {
@@ -73,8 +73,9 @@ export const body = ${call};`;
       await distance.fill('0');
       await page.keyboard.press('Enter');
       await page.getByText('Model error', {exact: true}).waitFor();
-      // An error retains the last successful geometry and closes its stale tool.
-      assert.equal(await distance.isVisible(), false);
+      // The failed call keeps its parameter input available for correction.
+      assert.equal(await distance.isVisible(), true);
+      assert.equal(await distance.inputValue(), '0');
       await page.evaluate(() => window.extrusionApp.codeEditor.editor.focus());
       await page.keyboard.press('Control+z');
       await page.getByText('Ready', {exact: true}).waitFor();

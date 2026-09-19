@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 test(
   'large models retain their color through close zooms and image exports',
@@ -27,7 +27,7 @@ test(
         body: `
     <style>html,body,#view{width:100%;height:100%;margin:0}</style><div id="view"></div>
     <script type="module">
-    import {BoxGeometry, Mesh, MeshBasicMaterial, Vector3} from '/@id/three';
+    import {BoxGeometry, Mesh, MeshBasicMaterial, Vector3} from '/test/browser/browser-dependencies.ts';
     import {ModelRenderer} from '/src/rendering/model-renderer.ts';
     import {createViewCamera} from '/src/rendering/view-camera.ts';
     const r = new ModelRenderer(document.querySelector('#view'));

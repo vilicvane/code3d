@@ -1,7 +1,7 @@
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import type {Page} from 'playwright-core';
+import type {Page} from './browser-connection.ts';
 import {open, openPage, point, text, waitForSource} from './sketch-test.ts';
 
 const summary = (page: Page) => page.locator('.source-edit-popover-summary');

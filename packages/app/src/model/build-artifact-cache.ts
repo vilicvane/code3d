@@ -22,6 +22,7 @@ type StoredModel = Omit<
   | 'edgeSelectionSites'
   | 'toolCallSites'
   | 'relationCallSites'
+  | 'inspectCallSites'
   | 'sketches'
 > & {
   files: [string, string][];
@@ -46,6 +47,12 @@ type StoredModel = Omit<
       string,
       infer V
     >
+      ? V
+      : never,
+  ][];
+  inspectCallSites: [
+    string,
+    CompiledModelSource['inspectCallSites'] extends ReadonlyMap<string, infer V>
       ? V
       : never,
   ][];
@@ -98,6 +105,9 @@ function storedModel(model: CompiledModelSource): StoredModel {
       a.localeCompare(b),
     ),
     relationCallSites: [...model.relationCallSites].sort(([a], [b]) =>
+      a.localeCompare(b),
+    ),
+    inspectCallSites: [...model.inspectCallSites].sort(([a], [b]) =>
       a.localeCompare(b),
     ),
     sketches: [...model.sketches].sort(([a], [b]) => a.localeCompare(b)),
@@ -271,6 +281,7 @@ export class BuildArtifactCache {
           edgeSelectionSites: new Map(value.model.edgeSelectionSites),
           toolCallSites: new Map(value.model.toolCallSites),
           relationCallSites: new Map(value.model.relationCallSites),
+          inspectCallSites: new Map(value.model.inspectCallSites),
           sketches: new Map(value.model.sketches),
         },
         dependencies: dependency,

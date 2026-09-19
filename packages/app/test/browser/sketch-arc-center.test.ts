@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import type {Page} from 'playwright-core';
+import type {Page} from './browser-connection.ts';
 import {open, point, text, waitForSource} from './sketch-test.ts';
 
 async function center(page: Page, id: number) {

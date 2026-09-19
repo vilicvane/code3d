@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 
 declare const window: Window & {
   presenceEditor: import('../../src/editor.ts').CodeEditor;
@@ -8,7 +8,7 @@ declare const window: Window & {
 };
 
 test(
-  'agent carets match user geometry and tree locations follow visible ancestors',
+  'agent carets match user geometry and tree locations mark ancestor folders',
   {timeout: 90_000},
   async t => {
     assert.ok(process.env.CODE3D_TEST_URL);
@@ -99,7 +99,6 @@ test(
 
     const row = (name: string) =>
       page.getByRole('treeitem', {name, exact: true});
-    const marker = (name: string) => page.getByTitle(new RegExp(`${name}:`));
     await row('body.ts')
       .getByTitle(/Alice:/)
       .waitFor();
@@ -110,9 +109,9 @@ test(
       1,
     );
     assert.equal(
-      await marker('Alice').evaluate(
-        node => getComputedStyle(node.firstElementChild!).color,
-      ),
+      await row('body.ts')
+        .getByTitle(/Alice:/)
+        .evaluate(node => getComputedStyle(node.firstElementChild!).color),
       await alice.evaluate(node => getComputedStyle(node).backgroundColor),
     );
     await page.screenshot({path: '/tmp/code3d-agent-presence.png'});
@@ -158,7 +157,7 @@ test(
       await row('housing')
         .locator('[data-item-section="decoration"] [title] > span')
         .count(),
-      0,
+      1,
     );
     assert.equal(
       await row('body.ts')
@@ -176,7 +175,9 @@ test(
         end: 1,
       });
     });
-    await marker('Alice renamed').waitFor();
+    await row('parts')
+      .getByTitle(/Alice renamed:/)
+      .waitFor();
     assert.equal(await row('parts').getAttribute('aria-expanded'), 'false');
     assert.equal(
       await page.evaluate(() => window.presenceEditor.currentFile()),
@@ -190,7 +191,7 @@ test(
       2,
     );
     await page.evaluate(() => window.presenceEditor.removeAgentCursor('bob'));
-    await marker('Bob').waitFor({state: 'detached'});
+    await row('rib.ts').getByTitle(/Bob:/).waitFor({state: 'detached'});
     assert.equal(
       await row('rib.ts')
         .locator('[data-item-section="decoration"] [title] > span')
@@ -200,7 +201,9 @@ test(
     await page.evaluate(() =>
       window.presenceEditor.deleteFile('/parts/rib.ts'),
     );
-    await marker('Alice renamed').waitFor({state: 'detached'});
+    await row('parts')
+      .getByTitle(/Alice renamed:/)
+      .waitFor({state: 'detached'});
     assert.equal(
       await page
         .locator('[data-item-section="decoration"] [title] > span')
@@ -320,7 +323,11 @@ test(
       formatted.cursors.caret.ref!.start,
       formatted.source.indexOf('box(10'),
     );
-    assert.equal(formatted.user!.offset, formatted.source.indexOf('box(12'));
+    // Tool edits focus the call identifier's end; formatting preserves it.
+    assert.equal(
+      formatted.user!.offset,
+      formatted.source.indexOf('box(12') + 'box'.length,
+    );
     await page.evaluate(() => window.presenceEditor.runHistoryAction('undo'));
     const undone = await state();
     assert.equal(undone.source, source);

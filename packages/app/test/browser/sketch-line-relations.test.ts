@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import type {Page} from 'playwright-core';
+import type {Page} from './browser-connection.ts';
 import {open, point, text, waitForSource} from './sketch-test.ts';
 
 const source = `import {sketch} from '@code3d/core';
@@ -96,6 +96,10 @@ test('disjoint line angle markers share editing and highlighting without replaci
   await waitForSource(page, /'angle',\s*\[5,\s*6\],\s*120/);
   await page.getByText('Ready', {exact: true}).waitFor();
   await page.getByRole('button', {name: 'Fit', exact: true}).click();
+  await page.waitForFunction(
+    () =>
+      window.sketchTestRuntime.sketchEditor.navigation['frame'] === undefined,
+  );
   const marker = page.locator('.constraint-badge[data-tool="angle"]');
   assert.equal(await marker.count(), 2);
   assert.equal(

@@ -4,7 +4,7 @@ import {test} from 'node:test';
 import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {chromium, type Locator} from 'playwright-core';
+import {chromium, type Locator} from './browser-connection.ts';
 import {runCli, startServe} from '../../../cli/test/process.ts';
 import {reserveLocalPort} from './local-port.ts';
 
@@ -178,6 +178,9 @@ test(
       await preview.locator('time').getAttribute('datetime'),
       first.data.observation.render.capturedAt,
     );
+    await page
+      .locator('#viewport-host > .viewport-coordinate-reference')
+      .waitFor({state: 'visible', timeout: 30_000});
     const coordinate = (await page
       .locator('#viewport-host > .viewport-coordinate-reference')
       .boundingBox())!;
@@ -587,8 +590,8 @@ test(
     await page.evaluate(async () => {
       const {AgentRenderHistory} = await import('/src/agent/render-history.ts');
       const {AgentRenderView} = await import('/src/ui/agent-renders.ts');
-      const mobxUrl = '/@id/mobx';
-      const {observable}: typeof import('mobx') = await import(mobxUrl);
+      const {observable} =
+        await import('/test/browser/browser-dependencies.ts');
       window.agentTestConnections = observable({
         activeAgentIds: new Set<string>(),
       });
@@ -644,8 +647,8 @@ test(
     assert.equal(await preview.isVisible(), false);
     const connect = async (active: boolean) =>
       page.evaluate(async active => {
-        const mobxUrl = '/@id/mobx';
-        const {runInAction}: typeof import('mobx') = await import(mobxUrl);
+        const {runInAction} =
+          await import('/test/browser/browser-dependencies.ts');
         runInAction(() => {
           window.agentTestConnections.activeAgentIds = new Set(
             active ? ['Euler'] : [],

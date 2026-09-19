@@ -8,7 +8,6 @@ type HeadMeasurement = {
   size: number[];
 };
 type MarkerMeasurement = {
-  role: string;
   heads: HeadMeasurement[];
   curve: boolean;
   shafts: number;
@@ -46,7 +45,6 @@ export function inspectDirectionMarkers(root: Object3D) {
         }
       });
       markers.push({
-        role: decoration.id.includes(':target:') ? 'target' : 'source',
         heads,
         curve: !!decoration.headOnly,
         shafts,

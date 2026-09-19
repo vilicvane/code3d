@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test, type TestContext} from 'node:test';
-import {chromium, type Page} from 'playwright-core';
+import {chromium, type Page} from './browser-connection.ts';
 
 declare const window: Window & {
   parameterTabApp: {
@@ -210,6 +210,13 @@ test(
     for (const state of ['disabled', 'readOnly', 'hidden', 'render'] as const) {
       await setSource(page);
       await focus(page, '30)', 1);
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('input.source-active')
+            ?.getAttribute('data-parameter') === 'z',
+      );
+      const before = await sourceValue(page);
       await page.evaluate(state => {
         const {viewport, contextualToolPanel} = window.parameterTabApp;
         const input = contextualToolPanel.root.querySelector<HTMLInputElement>(
@@ -220,7 +227,6 @@ test(
         if (state === 'hidden') contextualToolPanel.root.hidden = true;
         if (state === 'render') viewport.setRenderMode('render');
       }, state);
-      const before = await sourceValue(page);
       await page.keyboard.press('Tab');
       assert.equal(await focusedInput(page), undefined, state);
       assert.notEqual(await sourceValue(page), before, state);
@@ -402,7 +408,7 @@ test(
       ['shell(1, [1])', 'removedSurfaceIds'],
       [
         'relate(self => [self.on(point([0,0,0]).up), pivotVertex(1).rotate(0,0,20)])',
-        'id',
+        'pivotVertex.id',
       ],
       ['edge()', 'id'],
     ];
@@ -423,9 +429,7 @@ test(
           const scope = viewport.sourceContext;
           return (
             scope?.target.tool?.signature.name ===
-              (call.includes('pivotVertex')
-                ? 'pivotVertex'
-                : call.split('(')[0]) &&
+              (call.includes('pivotVertex') ? 'rotate' : call.split('(')[0]) &&
             document
               .querySelector('output.source-active')
               ?.getAttribute('data-parameter') === parameter

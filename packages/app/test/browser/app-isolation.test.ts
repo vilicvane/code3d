@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {preview as previewApp} from 'vite';
 import {preview as previewWebsite} from 'astro';
-import {chromium} from 'playwright-core';
+import {chromium} from './browser-connection.ts';
 import {
   appHeaderRules,
   appIsolationHeaders,

@@ -96,6 +96,7 @@ const compiler = new ProjectCompiler(
 );
 
 let activeRequest: number | undefined;
+const restoring = new Map<number, Promise<void>>();
 
 // The client coalesces pending revisions while esbuild cancels its current work.
 // Cancellation retains the compiler's contexts for the next revision.
@@ -153,12 +154,17 @@ async function compile(request: CompileRequest): Promise<void> {
         dependencyKey,
       );
     }
+    // Compilation and disk restoration run concurrently, but the client must
+    // receive the previous successful view before a newer result replaces it.
+    await restoring.get(request.id);
+    checkCancelled();
     send({
       kind: 'compiled',
       id: request.id,
       ...artifactChannel.encode(artifact),
     });
   } catch (error) {
+    await restoring.get(request.id);
     if (Atomics.load(request.cancellation, 0)) {
       send({kind: 'cancelled', id: request.id});
       return;
@@ -187,7 +193,7 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
   } else if (data.kind === 'restore') {
     const checkCancelled = () =>
       checkCompilationCancellation(data.cancellation);
-    void (async () => {
+    const pending = (async () => {
       await clearing;
       await storage.ready;
       const key = await buildEntryKey(
@@ -227,7 +233,10 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
           ...artifactChannel.encode(restored),
         });
       }
-    })().catch(() => {});
+    })()
+      .catch(() => {})
+      .finally(() => restoring.delete(data.id));
+    restoring.set(data.id, pending);
   } else if (data.kind === 'compile') {
     void compile(data);
   } else if (data.kind === 'cancel-compile' && activeRequest === data.id) {

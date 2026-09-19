@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import type {Page} from 'playwright-core';
+import type {Page} from './browser-connection.ts';
 import {open, text, waitForSource} from './sketch-test.ts';
 
 async function cursor(page: Page, line: number, column: number) {
