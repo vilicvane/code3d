@@ -127,6 +127,12 @@ const corners = boundary[0].vertices();
 const center = face.center;
 ```
 
+Edges expose readonly `.length` for actual arc length; surfaces expose `.area`
+for their trimmed finite area. Exposed solids provide total boundary `.area` and
+material `.volume`, excluding holes and cavities. These measurements include the
+scale of the selected geometry. See [length and area](api.md#length-and-area)
+and [volume](api.md#volume).
+
 Queries use the original model's IDs and stay within the selected element.
 `face.edge(id)` reports an error if that edge is outside the face. The viewport
 picker offers only the eligible edges or vertices, including when the geometry

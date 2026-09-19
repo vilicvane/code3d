@@ -79,7 +79,7 @@ shows the selected inputs and ambient operands without inventing a result.
 These region inspectors use ordinary unlit materials with depth testing disabled,
 so their colors remain visible through the translucent inputs.
 
-Core uses this mechanism for distance measurements, relate calls and their
+Core uses this mechanism for length/area/volume properties, distance measurements, relate calls and their
 closures, on/align references, relative transformation stages, group children,
 expose sources, Boolean operands, loft sections/spines and sweep profiles/spines, plus box and extrusion
 dimensions. Selecting a normal constructor or Boolean function name
@@ -107,6 +107,46 @@ ordinary anchor preview when they return references. Their inspector returns
 the owner as `ambient` when the call fails or the reference collection is empty.
 The owner therefore has the same background appearance before and after a
 selection; missing or invalid IDs still produce their normal modeling errors.
+
+### Getter inspection
+
+A getter can declare `@code3d.inspect callback` in its JSDoc. A package can put
+the same annotation on its public `readonly` property declaration when the
+implementation getter is not present in its declarations. The callback receives
+`[]`, with the actual receiver in `context.receiver`, the recorded property value
+in `context.return`, and any `captureInspectData` payload in `context.data`.
+
+```ts
+import {
+  captureInspectData,
+  type InspectContext,
+  type Model,
+} from '@code3d/core';
+
+function inspectSize(_args: readonly [], context: InspectContext<number>) {
+  return {target: [context.data as Model]};
+}
+class Part {
+  constructor(readonly body: Model) {}
+  /** @code3d.inspect inspectSize */
+  get size() {
+    captureInspectData(this.body);
+    return 42;
+  }
+}
+```
+
+Read `part.size` normally to record it. Selecting the property runs only its
+inspector; it never runs the getter again. Each reached read keeps its own
+receiver, return and data, even if several reads return the same number. Local
+getters retain their declaration's lexical inspector binding; published callbacks
+must be runtime exports of the package. Optional reads that short-circuit do not
+invoke an inspector. A failed getter can still inspect its captured data, with
+`context.return` undefined. Merely enumerating an object never invokes its getters.
+
+Core's `.length`, `.area` and `.volume` use this mechanism. Passive `dimension` annotations
+accept either `start`/`end`, alternative `candidates`, or `at: [x, y, z]` to show
+only a value at an owner's local position. Labels do not add CAD geometry.
 
 ### Call data
 

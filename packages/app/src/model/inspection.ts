@@ -49,6 +49,8 @@ export type InspectExecution = {
   parent?: InspectExecution;
   closure?: ClosureRecord;
   callee?: Function;
+  invoked: boolean;
+  bindings?: CallbackGetters;
   receiver: unknown;
   arguments: readonly unknown[];
   argumentRanges: Array<{start: number; count: number}>;
@@ -123,6 +125,7 @@ export class InspectionSession {
       contextId,
       parent: this.frames.at(-1),
       closure: this.activeClosure,
+      invoked: false,
       receiver: undefined,
       arguments: [],
       argumentRanges: [],
@@ -147,7 +150,7 @@ export class InspectionSession {
   }
 
   fail(execution: InspectExecution | undefined, order: number): void {
-    if (execution?.callee) this.recordCall(execution, order);
+    if (execution?.invoked) this.recordCall(execution, order);
   }
 
   complete(
@@ -218,15 +221,17 @@ export class InspectionSession {
 
   method(id: string, getters: CallbackGetters): void {
     const frame = this.frames.at(-1);
-    if (frame?.callee && this.sites.get(frame.siteId)?.signature.id === id)
-      this.definition(id, getters, frame.callee);
+    if (frame?.invoked && this.sites.get(frame.siteId)?.signature.id === id) {
+      frame.bindings = getters;
+      if (frame.callee) this.definition(id, getters, frame.callee);
+    }
   }
 
   capture(data: unknown): void {
     if (this.inspecting || this.disposed) return;
     for (let index = this.frames.length - 1; index >= 0; index--) {
       const call = this.frames[index];
-      if (call.callee && this.sites.has(call.siteId)) {
+      if (call.invoked && this.sites.has(call.siteId)) {
         call.data = data;
         return;
       }
@@ -270,7 +275,8 @@ export class InspectionSession {
     const call = this.current(siteId);
     if (!call) return Reflect.apply(callee, receiver, args);
     call.callee = typeof callee === 'function' ? callee : undefined;
-    if (call.callee) this.invokedCalls.add(call.id);
+    call.invoked = !!call.callee;
+    if (call.invoked) this.invokedCalls.add(call.id);
     call.receiver = receiver;
     call.arguments = args;
     const site = this.sites.get(siteId)!;
@@ -305,6 +311,16 @@ export class InspectionSession {
       supplied = replaceAt(supplied, parameter.path, wrapped) as unknown[];
     }
     return Reflect.apply(callee, receiver, supplied);
+  }
+
+  read<T>(siteId: string, receiver: unknown, get: () => T): T {
+    const call = this.current(siteId);
+    if (call && receiver != null) {
+      call.receiver = receiver;
+      call.invoked = true;
+      this.invokedCalls.add(call.id);
+    }
+    return get();
   }
 
   async inspect(
@@ -346,7 +362,8 @@ export class InspectionSession {
         const site = this.sites.get(call.siteId);
         if (
           !site ||
-          (!call.callee && !call.completed) ||
+          (!call.invoked &&
+            (!call.completed || site.signature.annotations.length > 0)) ||
           !within(site.callRef, selection)
         )
           continue;
@@ -660,10 +677,10 @@ export class InspectionSession {
       const index = this.sites
         .get(call.siteId)!
         .signature.annotations.indexOf(annotation);
-      value = this.definitions
-        .get(call.callee!)
-        ?.get(binding.definition)
-        ?.[index]?.();
+      const getters =
+        call.bindings ??
+        this.definitions.get(call.callee!)?.get(binding.definition);
+      value = getters?.[index]?.();
     } else {
       value = valueAt(
         binding.kind === 'callee'

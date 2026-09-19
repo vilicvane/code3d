@@ -780,3 +780,150 @@ export default show();`;
     assert.deepEqual(errors, []);
   },
 );
+
+test(
+  'read-only length, area and volume display geometry, screen-sized labels and annotated exports',
+  {timeout: 120_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext({
+      viewport: {width: 1440, height: 1000},
+      deviceScaleFactor: 2,
+    });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/\[mobx\]/i.test(message.text())) errors.push(message.text());
+    });
+    await page.route('**/src/main.ts*', async route => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        body:
+          (await response.text()) +
+          '\nwindow.inspectionApp = {viewport, codeEditor, compiler, previewState};',
+      });
+    });
+    await page.goto(process.env.CODE3D_TEST_URL, {
+      waitUntil: 'domcontentloaded',
+    });
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    await page.evaluate(() => {
+      const editor = window.inspectionApp.codeEditor.editor;
+      editor.setValue(`import {line, arc, rectangle, tube, group} from '@code3d/core';
+const straight = line([30, 40, 0]);
+const curve = arc([20, 0, 0], [0, 20, 0], [-20, 0, 0]);
+const sheet = rectangle(30, 20);
+const pipe = tube(15, 10, 40);
+const a = straight.length;
+const b = curve.length;
+const c = sheet.area;
+const d = pipe.area;
+const e = pipe.surfaces()[0].area;
+const f = pipe.volume;
+export default group([straight, curve, sheet, pipe]);`);
+    });
+    for (const [token, value, line] of [
+      ['straight.length', 50, true],
+      ['curve.length', 20 * Math.PI, false],
+      ['sheet.area', 600, false],
+      ['pipe.area', 2250 * Math.PI, false],
+      ['pipe.volume', 5000 * Math.PI, false],
+    ] as const) {
+      await page.evaluate(token => {
+        const editor = window.inspectionApp.codeEditor.editor;
+        editor.setPosition(
+          editor
+            .getModel()!
+            .getPositionAt(
+              editor.getValue().indexOf(token) + token.lastIndexOf('.') + 2,
+            ),
+        );
+      }, token);
+      await page.waitForFunction(value => {
+        const {viewport, previewState} = window.inspectionApp;
+        const measurement = viewport['inspectionScene']?.target.find(
+          item => item.kind === 'dimension',
+        );
+        return (
+          !previewState.inspecting &&
+          measurement?.kind === 'dimension' &&
+          Math.abs(measurement.value - value) < 1e-5
+        );
+      }, value);
+      const rendered = await page.evaluate(async () => {
+        const {viewport, previewState} = window.inspectionApp;
+        const layers = viewport['decorationLayers'].get('inspection')!;
+        const measurement = layers.find(item => item.measurement)!.measurement!;
+        const label = measurement.getObjectByName('distance-label')!;
+        const camera = viewport['camera'];
+        const height = viewport['renderer'].domElement.clientHeight;
+        const pixels = () => {
+          const a = label.position
+            .clone()
+            .set(0, -0.5, 0)
+            .applyMatrix4(label.matrixWorld)
+            .project(camera);
+          const b = label.position
+            .clone()
+            .set(0, 0.5, 0)
+            .applyMatrix4(label.matrixWorld)
+            .project(camera);
+          return (Math.hypot(a.x - b.x, a.y - b.y) * height) / 2;
+        };
+        const before = pixels();
+        camera.zoom *= 1.5;
+        camera.updateProjectionMatrix();
+        await new Promise<void>(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        );
+        const zoomed = pixels();
+        const png = await viewport.captureImage(1200, 800);
+        camera.zoom /= 1.5;
+        camera.updateProjectionMatrix();
+        viewport['rendering'].renderFrame();
+        return {
+          text: label.userData.text,
+          line: !!measurement.getObjectByName('distance-line'),
+          ticks: measurement['ticks'].geometry.instanceCount,
+          before,
+          zoomed,
+          pngBytes: png.size,
+          diagnostic: previewState.inspectionDiagnostic,
+          tools: viewport.sourceContext?.target.tool,
+          targets: viewport['inspectionScene']!.target.map(item => item.kind),
+        };
+      });
+      assert.equal(rendered.line, line);
+      assert.equal(rendered.ticks, line ? 2 : 0);
+      assert.ok(Math.abs(rendered.before - 24) < 0.01);
+      assert.ok(Math.abs(rendered.zoomed - 24) < 0.01);
+      assert.ok(rendered.pngBytes > 1000);
+      assert.equal(rendered.diagnostic, undefined);
+      assert.equal(rendered.tools, undefined);
+      assert.ok(
+        rendered.targets.includes(
+          token.startsWith('pipe.') ? 'model' : 'anchor',
+        ),
+      );
+      assert.match(
+        rendered.text,
+        token.includes('volume')
+          ? /volume$/
+          : token.includes('area')
+            ? /area$/
+            : token.startsWith('curve')
+              ? /arc length$/
+              : /^50$/,
+      );
+      await page.screenshot({path: `/tmp/code3d-207-${token}.png`});
+    }
+    assert.deepEqual(errors, []);
+  },
+);

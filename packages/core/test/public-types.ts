@@ -216,3 +216,35 @@ const candidateDimension: PreviewValue = dimension({
   candidates: [{start: [-6, -7, -8], end: [6, -7, -8]}],
 });
 void candidateDimension;
+
+export function readonlyMeasurements() {
+  const body = box(2, 3, 4);
+  const edge = line([3, 4, 0]);
+  const values: number[] = [
+    edge.length,
+    body.edge(1).length,
+    body.area,
+    body.volume,
+    group([body]).expose({body}).body.volume,
+    body.surface(1).area,
+  ];
+  // @ts-expect-error Measurements are read-only.
+  edge.length = 7;
+  // @ts-expect-error Measurements are read-only.
+  body.area = 7;
+  // @ts-expect-error Measurements are read-only.
+  body.volume = 7;
+  // @ts-expect-error Finite faces have no volume.
+  body.surface(1).volume;
+  // @ts-expect-error Finite edges have no volume.
+  edge.volume;
+  // @ts-expect-error Groups have no aggregate volume.
+  group([body]).volume;
+  // @ts-expect-error Infinite reference axes have no length.
+  body.axis.length;
+  // @ts-expect-error Infinite reference planes have no area.
+  body.up.area;
+  // @ts-expect-error Groups have no aggregate area.
+  group([body]).area;
+  return values;
+}

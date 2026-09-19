@@ -130,6 +130,36 @@ export const renderSamples = [
     tags: ['inspect', 'edit', 'reuse'],
   },
   {
+    id: 'length',
+    title: 'Read edge length',
+    description:
+      'Inspect straight lengths, arc lengths and closed-edge circumferences as read-only properties.',
+    category: 'Practical models',
+    file: 'operations/length.ts',
+    focus: {context: 'const arcLength = curved.length;', token: 'length'},
+    tags: ['length', 'measurement', 'inspect'],
+  },
+  {
+    id: 'area',
+    title: 'Read surface area',
+    description:
+      'Measure finite faces and the total boundary surface area of solids.',
+    category: 'Practical models',
+    file: 'operations/area.ts',
+    focus: {context: 'const pipeSurfaceArea = pipe.area;', token: 'area'},
+    tags: ['area', 'measurement', 'inspect'],
+  },
+  {
+    id: 'volume',
+    title: 'Read solid volume',
+    description:
+      'Measure the volume occupied by solid material, excluding holes and cavities.',
+    category: 'Practical models',
+    file: 'operations/volume.ts',
+    focus: {context: 'const pipeVolume = pipe.volume;', token: 'volume'},
+    tags: ['volume', 'measurement', 'inspect'],
+  },
+  {
     id: 'distance',
     title: 'Fit a beam to a measured opening',
     description:
@@ -458,6 +488,9 @@ export const exampleEntries = [
     file: 'operations/group.ts',
   },
   {file: 'operations/distance.ts'},
+  {file: 'operations/length.ts'},
+  {file: 'operations/area.ts'},
+  {file: 'operations/volume.ts'},
   {
     file: 'materials.ts',
   },

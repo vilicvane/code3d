@@ -105,6 +105,39 @@ export function resolveProjectInspection(
           );
         }
       }
+      if (
+        ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)
+      ) {
+        const selector = ts.isPropertyAccessExpression(node)
+          ? node.name
+          : node.argumentExpression;
+        const keyType = ts.isElementAccessExpression(node)
+          ? checker.getTypeAtLocation(selector)
+          : undefined;
+        const symbol = ts.isPropertyAccessExpression(node)
+          ? checker.getSymbolAtLocation(selector)
+          : keyType && (keyType.isStringLiteral() || keyType.isNumberLiteral())
+            ? checker
+                .getTypeAtLocation(node.expression)
+                .getNonNullableType()
+                .getProperty(String(keyType.value))
+            : undefined;
+        const owner = symbol?.declarations?.find(
+          declaration =>
+            (ts.isGetAccessorDeclaration(declaration) ||
+              ts.isPropertySignature(declaration) ||
+              ts.isPropertyDeclaration(declaration)) &&
+            declarationAnnotations(declaration).some(annotation =>
+              inspectNames.some(name => name === annotation.name),
+            ),
+        );
+        if (owner)
+          fileCalls.set(
+            sourceNodeKey(node.getStart(file), node.end),
+            readSignature(undefined, owner, node),
+          );
+      }
       ts.forEachChild(node, visit);
     };
     visit(file);
@@ -113,13 +146,16 @@ export function resolveProjectInspection(
   return {calls, definitions};
 
   function readSignature(
-    signature: ts.Signature,
+    signature: ts.Signature | undefined,
     owner: ts.Node,
-    call: ts.CallExpression,
+    call:
+      | ts.CallExpression
+      | ts.PropertyAccessExpression
+      | ts.ElementAccessExpression,
   ): InspectSignature {
     const file = owner.getSourceFile();
     const id = `${file.fileName}:${owner.getStart(file)}:${owner.end}`;
-    const parameters = inspectParameters(signature, checker);
+    const parameters = signature ? inspectParameters(signature, checker) : [];
     const annotations: InspectAnnotation[] = [];
     const seen = new Set<string>();
     const implementation = implementationOf(owner, checker);
@@ -177,6 +213,7 @@ export function resolveProjectInspection(
           : undefined;
       const ownerSymbol = ownerName && checker.getSymbolAtLocation(ownerName);
       if (
+        signature &&
         reference.root &&
         reference.root === ownerSymbol &&
         reference.path.length > 1
@@ -308,7 +345,10 @@ function inspectParameters(
 /** Prefer the public entry actually used by the caller, including a barrel re-export. */
 function publishedModule(
   owner: ts.Node,
-  call: ts.CallExpression,
+  call:
+    | ts.CallExpression
+    | ts.PropertyAccessExpression
+    | ts.ElementAccessExpression,
   checker: ts.TypeChecker,
 ): string | undefined {
   const visited = new Set<ts.Symbol>();

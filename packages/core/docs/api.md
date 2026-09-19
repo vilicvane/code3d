@@ -154,6 +154,58 @@ the profile, path and result.
 
 ## Measurements
 
+### Length and area
+
+Read `edge.length` or `line(...).length` for a finite edge's actual arc length.
+A straight edge uses its endpoint distance; a closed edge uses its circumference.
+Read `surface.area` or `faceModel.area` for a finite face's area, including curved
+surfaces and trimming holes. `solid.area` / `solidModel.area` includes every
+boundary face, including inner walls and cavity faces.
+
+These properties return ordinary numbers in model units (area in square model
+units). They are read-only. Rotation, origin changes, placement and reversing an
+edge or flipping a face preserve the result. `scaled(s)` multiplies lengths by
+`s` and areas by `s²`; exposed references use the scale of their actual geometry.
+`LineAnchor` and `FaceAnchor` can describe infinite references and have no length
+or area. Groups have no aggregate area.
+
+```ts
+import {line, rectangle, box} from '@code3d/core';
+const length = line([3, 4, 0]).length; // 5
+const area = rectangle(4, 6).area; // 24
+const surfaceArea = box(2, 3, 4).area; // 52
+```
+
+Select `.length` or `.area` in App to inspect the measured geometry and value.
+Straight lengths use a dimension line; curves highlight their actual path with an
+arc-length label. Area highlights the finite face or whole solid with an area
+label. The read-only display does not create editable size constraints.
+Try the [length example](../../app/examples/operations/length.ts) and
+[area example](../../app/examples/operations/area.ts).
+
+### Volume
+
+Read `solid.volume` or `solidModel.volume` for the space occupied by the solid's
+material. Holes and enclosed cavities are excluded. The result is a read-only
+number in cubic model units. Rotation, origin changes and placement preserve it;
+`scaled(s)` multiplies it by `s³`. Exposed solid references include the scale of
+their actual geometry. Faces, edges, infinite references and groups have no volume
+property.
+
+```ts
+import {box, tube} from '@code3d/core';
+const blockVolume = box(2, 3, 4).volume; // 24
+const pipeVolume = tube(5, 3, 7).volume; // 112 * Math.PI
+const enlargedVolume = box(2, 3, 4).scaled(2).volume; // 192
+```
+
+Select `.volume` in App to inspect the whole solid with a volume label at its
+volume centroid. This read-only display uses the getter's recorded result and
+does not create an editable size constraint.
+Try the [volume example](../../app/examples/operations/volume.ts).
+
+### Distance between references
+
 `distance(a, b, axis?)` returns a non-negative `number` from the models and
 relations available at the call. It accepts vertex, edge, face and solid models,
 non-empty groups, finite topology references, directional bounds, and point

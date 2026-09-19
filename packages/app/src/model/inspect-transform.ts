@@ -19,6 +19,12 @@ export class InspectTransform {
     index: ProjectInspectionIndex,
     private readonly factory: ts.NodeFactory,
     private readonly sites: Map<string, InspectCallSite>,
+    private readonly propertyId: (node: ts.Node) => string,
+    private readonly traceProperty: (
+      node: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+      read: ts.Expression,
+      id: string,
+    ) => ts.Expression,
   ) {
     this.definitions = index.definitions.get(file.fileName) ?? [];
     this.calls = index.calls.get(file.fileName) ?? new Map();
@@ -98,6 +104,22 @@ export class InspectTransform {
           visited.type,
           this.runtime('inspectDefinition', [...args, visited.initializer]),
         );
+      } else if (ts.isGetAccessorDeclaration(visited) && visited.body) {
+        visited = factory.updateGetAccessorDeclaration(
+          visited,
+          visited.modifiers,
+          visited.name,
+          visited.parameters,
+          visited.type,
+          factory.updateBlock(
+            visited.body,
+            withPrefix(visited.body.statements, [
+              factory.createExpressionStatement(
+                this.runtime('inspectMethod', args),
+              ),
+            ]),
+          ),
+        );
       } else if (ts.isMethodDeclaration(visited) && visited.body) {
         const statement = factory.createExpressionStatement(
           this.runtime('inspectMethod', args),
@@ -162,9 +184,123 @@ export class InspectTransform {
 
     // Ordinary calls only need their source scope and traced return for default
     // parameter preview. Capture the invocation itself only for annotated calls.
-    if (!signature.annotations.length && !signature.diagnostic)
+    if (
+      !signature.annotations.length &&
+      !signature.diagnostic &&
+      !this.hasInspectedProperty(visited.expression)
+    )
       return undefined;
 
+    const {reference, statements, capture} = this.lowerReference(
+      visited.expression,
+    );
+    const callable = capture(reference.value);
+    if (visited.questionDotToken) {
+      statements.push(
+        factory.createIfStatement(
+          factory.createBinaryExpression(
+            callable,
+            ts.SyntaxKind.EqualsEqualsToken,
+            factory.createNull(),
+          ),
+          factory.createReturnStatement(factory.createVoidZero()),
+        ),
+      );
+    }
+    const args = visited.arguments.map((argument, index) => {
+      const value = this.runtime(
+        ts.isSpreadElement(argument) ? 'inspectSpread' : 'inspectArgument',
+        [
+          factory.createStringLiteral(siteId),
+          factory.createNumericLiteral(index),
+          ts.isSpreadElement(argument) ? argument.expression : argument,
+        ],
+      );
+      return ts.isSpreadElement(argument)
+        ? factory.createSpreadElement(value)
+        : value;
+    });
+    statements.push(
+      factory.createReturnStatement(
+        this.runtime('inspectCall', [
+          factory.createStringLiteral(siteId),
+          callable,
+          reference.receiver,
+          factory.createArrayLiteralExpression(args),
+        ]),
+      ),
+    );
+    return iife(statements, factory);
+  }
+
+  property(
+    original: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    visited: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+    siteId: string,
+  ): ts.Expression | undefined {
+    const signature = this.calls.get(
+      sourceNodeKey(original.getStart(this.file), original.end),
+    );
+    const {factory, file} = this;
+    if (!signature) {
+      if (!this.hasInspectedProperty(visited.expression)) return;
+      const {reference, statements} = this.lowerReference(visited);
+      statements.push(factory.createReturnStatement(reference.value));
+      return iife(statements, factory);
+    }
+    const selector = ts.isPropertyAccessExpression(original)
+      ? original.name
+      : original.argumentExpression;
+    this.sites.set(siteId, {
+      siteId,
+      sourceRef: location(selector, file),
+      callRef: location(original, file),
+      receiverRef: location(original.expression, file),
+      arguments: [],
+      signature,
+    });
+    const {reference, statements} = this.lowerReference(visited);
+    statements.push(
+      factory.createReturnStatement(
+        this.runtime('inspectRead', [
+          factory.createStringLiteral(siteId),
+          this.runtime('elementReceiver', [
+            factory.createStringLiteral(file.fileName),
+            factory.createNumericLiteral(original.expression.getStart(file)),
+            factory.createNumericLiteral(original.expression.end),
+            factory.createStringLiteral(`${siteId}:receiver`),
+            reference.receiver,
+          ]),
+          factory.createArrowFunction(
+            undefined,
+            undefined,
+            [],
+            undefined,
+            factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+            reference.value,
+          ),
+        ]),
+      ),
+    );
+    return iife(statements, factory);
+  }
+
+  private hasInspectedProperty(node: ts.Expression): boolean {
+    if (!ts.isOptionalChain(node)) return false;
+    const original = ts.getOriginalNode(node);
+    return (
+      ((ts.isPropertyAccessExpression(node) ||
+        ts.isElementAccessExpression(node)) &&
+        this.calls.has(
+          sourceNodeKey(original.getStart(this.file), original.end),
+        )) ||
+      ('expression' in node &&
+        this.hasInspectedProperty(node.expression as ts.Expression))
+    );
+  }
+
+  private lowerReference(expression: ts.Expression) {
+    const {factory, file} = this;
     // An arrow preserves lexical this, arguments, super and new.target. The
     // existing traceability boundary already excludes await/yield expressions.
     const statements: ts.Statement[] = [];
@@ -236,15 +372,29 @@ export class InspectTransform {
           into,
         );
         if (node.questionDotToken) guard(receiver);
-        return {
-          value: ts.isPropertyAccessExpression(node)
-            ? factory.createPropertyAccessExpression(receiver, node.name)
-            : factory.createElementAccessExpression(
-                receiver,
-                node.argumentExpression,
-              ),
-          receiver,
-        };
+        let value: ts.Expression = ts.isPropertyAccessExpression(node)
+          ? factory.createPropertyAccessExpression(receiver, node.name)
+          : factory.createElementAccessExpression(
+              receiver,
+              node.argumentExpression,
+            );
+        // Continued optional chains are lowered together; inspect a reached
+        // intermediate read only after its nullish guard, keeping its own scope.
+        const original = ts.getOriginalNode(node) as typeof node;
+        if (
+          node !== expression &&
+          this.calls.has(sourceNodeKey(original.getStart(file), original.end))
+        ) {
+          const id = this.propertyId(original);
+          const read = this.property(original, value as typeof node, id)!;
+          value = this.traceProperty(original, read, id);
+        } else if (ts.isElementAccessExpression(node)) {
+          value = factory.createElementAccessExpression(
+            receiver,
+            capture(node.argumentExpression, into),
+          );
+        }
+        return {value, receiver};
       }
       if (ts.isCallExpression(node) && ts.isOptionalChain(node)) {
         const reference = lower(node.expression, into, shortCircuit);
@@ -261,48 +411,8 @@ export class InspectTransform {
       }
       return {value: node, receiver: nothing};
     };
-    const reference = lower(
-      visited.expression,
-      statements,
-      factory.createVoidZero(),
-    );
-    const callable = capture(reference.value);
-    if (visited.questionDotToken) {
-      statements.push(
-        factory.createIfStatement(
-          factory.createBinaryExpression(
-            callable,
-            ts.SyntaxKind.EqualsEqualsToken,
-            factory.createNull(),
-          ),
-          factory.createReturnStatement(factory.createVoidZero()),
-        ),
-      );
-    }
-    const args = visited.arguments.map((argument, index) => {
-      const value = this.runtime(
-        ts.isSpreadElement(argument) ? 'inspectSpread' : 'inspectArgument',
-        [
-          factory.createStringLiteral(siteId),
-          factory.createNumericLiteral(index),
-          ts.isSpreadElement(argument) ? argument.expression : argument,
-        ],
-      );
-      return ts.isSpreadElement(argument)
-        ? factory.createSpreadElement(value)
-        : value;
-    });
-    statements.push(
-      factory.createReturnStatement(
-        this.runtime('inspectCall', [
-          factory.createStringLiteral(siteId),
-          callable,
-          reference.receiver,
-          factory.createArrayLiteralExpression(args),
-        ]),
-      ),
-    );
-    return iife(statements, factory);
+    const reference = lower(expression, statements, factory.createVoidZero());
+    return {reference, statements, capture};
   }
 
   private runtime(

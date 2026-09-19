@@ -913,7 +913,9 @@ export class ModelViewport {
           nodeId: item.model.nodeId,
           ...('candidates' in item
             ? {candidates: item.candidates}
-            : {start: item.start, end: item.end}),
+            : 'at' in item
+              ? {at: item.at}
+              : {start: item.start, end: item.end}),
           value: item.value,
           axisLabel: item.axisLabel,
           appearance: {

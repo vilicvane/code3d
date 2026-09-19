@@ -49,14 +49,16 @@ export function recordInspectionCalls(
 export type DimensionSegment = Readonly<{start: Vec3; end: Vec3}>;
 
 type DimensionLines =
-  DimensionSegment | Readonly<{candidates: readonly DimensionSegment[]}>;
+  | DimensionSegment
+  | Readonly<{candidates: readonly DimensionSegment[]}>
+  | Readonly<{at: Vec3}>;
 type DimensionOptions = Readonly<{
   owner: Model;
   value: number;
   axisLabel?: string;
 }>;
 
-/** A passive dimension; a candidate is selected on entry and retained while inspecting it. */
+/** A passive measurement. `at` labels a point without a dimension line. */
 export type Dimension = Readonly<{kind: 'dimension'}> &
   DimensionOptions &
   DimensionLines;

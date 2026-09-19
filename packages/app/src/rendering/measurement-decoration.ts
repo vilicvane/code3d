@@ -1,4 +1,4 @@
-import type {DimensionSegment} from '@code3d/core';
+import type {DimensionSegment, Vec3} from '@code3d/core';
 import * as THREE from 'three';
 import {spatialAxisColors} from '../spatial-axis-colors';
 import type {ViewportMeasurementDecoration} from '../viewport-decoration';
@@ -32,17 +32,24 @@ export class MeasurementDecorationObject extends THREE.Group {
   private readonly texture: THREE.CanvasTexture;
   private readonly labelWidth: number;
 
-  constructor(decoration: ViewportMeasurementDecoration & DimensionSegment) {
+  constructor(
+    decoration: ViewportMeasurementDecoration &
+      (DimensionSegment | Readonly<{at: Vec3}>),
+  ) {
     super();
     this.name = decoration.id;
     this.userData.decoration = decoration;
-    this.start = new THREE.Vector3(...decoration.start);
-    this.end = new THREE.Vector3(...decoration.end);
+    this.start = new THREE.Vector3(
+      ...('at' in decoration ? decoration.at : decoration.start),
+    );
+    this.end = new THREE.Vector3(
+      ...('at' in decoration ? decoration.at : decoration.end),
+    );
     this.midpoint = this.start.clone().add(this.end).multiplyScalar(0.5);
     const {color, opacity} = decoration.appearance;
     if (this.start.distanceToSquared(this.end) > 0) {
       const line = createScreenSpaceEdgeLines(
-        new Float32Array([...decoration.start, ...decoration.end]),
+        new Float32Array([...this.start.toArray(), ...this.end.toArray()]),
         color,
         lineStyle.width,
         opacity,
@@ -78,7 +85,8 @@ export class MeasurementDecorationObject extends THREE.Group {
     );
     this.ticks.name = 'distance-ticks';
     this.ticks.frustumCulled = false;
-    this.ticks.geometry.instanceCount = this.start.equals(this.end) ? 1 : 2;
+    this.ticks.geometry.instanceCount =
+      'at' in decoration ? 0 : this.start.equals(this.end) ? 1 : 2;
     this.add(this.ticks);
     const prefix = `${Number(decoration.value.toPrecision(8))}${decoration.axisLabel ? ' · ' : ''}`;
     const text = prefix + (decoration.axisLabel ?? '');

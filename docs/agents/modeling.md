@@ -138,6 +138,15 @@ view/mode requests also synchronize while following; observation defaults do not
 force those settings onto the user's viewport. The user remains free to navigate
 and edit. Use [file versions](files.md) to handle concurrent changes.
 
+Finite edges / edge models expose readonly `.length` (arc length, including
+closed circumferences); finite surfaces / face models expose `.area`, and solids
+expose total boundary `.area`, including inner walls, and material `.volume`,
+excluding holes and cavities. Values use model units, square model units and
+cubic model units respectively, with scaling applied. Reference axes/planes and
+groups do not have these measurements. Select the property for its read-only
+inspection; see [length and area](../../packages/core/docs/api.md#length-and-area)
+and [volume](../../packages/core/docs/api.md#volume).
+
 Selecting a `distance(...)` source call emphasizes both measured objects against the
 dimmed call-time relation context, plus a gray dashed measurement line, endpoint ticks and numeric value.
 Whole solids and groups retain their model appearance without a face-selection overlay;

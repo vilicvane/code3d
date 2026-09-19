@@ -259,7 +259,9 @@ other targets and ambient context.
 
 For example, `group` inputs show their assembled positions, `intersect` inputs
 show the operands around the shared result, and `distance` returns a number but
-inspects its original references and measurement. A `relate` call includes its
+inspects its original references and measurement. Readonly `.length`, `.area` and `.volume`
+properties show the finite edge, face or solid and its measured value when selected.
+These displays do not edit the measured geometry. A `relate` call includes its
 actual participants; its declared closure supplies context to inner inspectors.
 Unrelated expressions do not inherit that scene.
 

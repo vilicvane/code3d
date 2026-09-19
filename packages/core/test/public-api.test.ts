@@ -59,6 +59,9 @@ const inspectorEntries = [
   'align',
   'expose',
   'inspectTopologyReference',
+  'inspectLength',
+  'inspectArea',
+  'inspectVolume',
 ];
 
 test('exports authored values and runtime inspector entry points without leaking internal declarations', async () => {

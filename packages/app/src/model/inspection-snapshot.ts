@@ -175,6 +175,11 @@ function validateAnnotation(
     value.length === size &&
     value.every(Number.isFinite);
   if (value.kind === 'dimension') {
+    if ('at' in value) {
+      if (!Number.isFinite(value.value) || !vector(value.at, 3))
+        throw new Error('A dimension requires a finite value and position.');
+      return;
+    }
     const segments = 'candidates' in value ? value.candidates : [value];
     if (
       !Number.isFinite(value.value) ||

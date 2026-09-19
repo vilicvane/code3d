@@ -259,6 +259,8 @@ export function createModelExecutor(
       receiver: unknown,
       args: unknown[],
     ) => inspection!.invoke(id, callee, receiver, args),
+    inspectRead: <T>(id: string, receiver: unknown, get: () => T) =>
+      inspection!.read(id, receiver, get),
     trace<T>(
       file: string,
       start: number,
