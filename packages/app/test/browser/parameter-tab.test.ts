@@ -17,6 +17,11 @@ const reference = point([1, 2, 3]);
 const rounded = body.fillet(2, [1]);
 `;
 
+const revolveSource = `import {circle, line, revolve} from '@code3d/core';
+const axis = line([0, -20, 0], [0, 20, 0]);
+const profile = circle(1).rotate(90, 0, 0).originOffset(-8, 0, 0);
+export default revolve(profile, axis, {angle: 360, advance: 25});`;
+
 async function openApp(t: TestContext) {
   assert.ok(process.env.CODE3D_TEST_URL);
   const browser = await chromium.connectOverCDP(
@@ -209,17 +214,30 @@ test(
     const page = await openApp(t);
     for (const state of ['disabled', 'readOnly', 'hidden', 'render'] as const) {
       await setSource(page);
-      await focus(page, '30)', 1);
-      await page.evaluate(state => {
-        const {viewport, contextualToolPanel} = window.parameterTabApp;
-        const input = contextualToolPanel.root.querySelector<HTMLInputElement>(
-          'input[data-parameter="z"]',
-        )!;
-        if (state === 'disabled') input.disabled = true;
-        if (state === 'readOnly') input.readOnly = true;
-        if (state === 'hidden') contextualToolPanel.root.hidden = true;
-        if (state === 'render') viewport.setRenderMode('render');
-      }, state);
+      if (state === 'hidden') {
+        await focus(page, 'import {box');
+        await page.waitForFunction(
+          () => window.parameterTabApp.contextualToolPanel.root.hidden,
+        );
+      } else {
+        await focus(page, '30)', 1);
+        await page.waitForFunction(
+          () =>
+            document
+              .querySelector('input.source-active')
+              ?.getAttribute('data-parameter') === 'z',
+        );
+        await page.evaluate(state => {
+          const {viewport, contextualToolPanel} = window.parameterTabApp;
+          const input =
+            contextualToolPanel.root.querySelector<HTMLInputElement>(
+              'input[data-parameter="z"]',
+            )!;
+          if (state === 'disabled') input.disabled = true;
+          if (state === 'readOnly') input.readOnly = true;
+          if (state === 'render') viewport.setRenderMode('render');
+        }, state);
+      }
       const before = await sourceValue(page);
       await page.keyboard.press('Tab');
       assert.equal(await focusedInput(page), undefined, state);
@@ -329,6 +347,71 @@ test(
 );
 
 test(
+  'revolve without config opens editable fields and config keys support Tab',
+  {timeout: 120_000},
+  async t => {
+    const page = await openApp(t);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const incomplete = revolveSource.replace(', {angle: 360, advance: 25}', '');
+    await page.evaluate(value => {
+      const editor = window.parameterTabApp.codeEditor.editor;
+      editor.getModel()!.setValue(value);
+      editor.setPosition(
+        editor.getModel()!.getPositionAt(value.lastIndexOf(')')),
+      );
+      editor.focus();
+    }, incomplete);
+    await page.waitForFunction(() => {
+      const {viewport, contextualToolPanel} = window.parameterTabApp;
+      return (
+        viewport.sourceContext?.target.tool?.signature.name === 'revolve' &&
+        !contextualToolPanel.root.hidden &&
+        document.querySelector<HTMLInputElement>(
+          'input[data-parameter="config.angle"]',
+        )?.placeholder === '360'
+      );
+    });
+    assert.equal(
+      await page.locator('input[data-parameter="config.angle"]').isDisabled(),
+      false,
+    );
+    assert.equal(
+      await page.locator('input[data-parameter="config.advance"]').isDisabled(),
+      false,
+    );
+    await page.keyboard.press('Tab');
+    assert.equal(await focusedInput(page), 'config.angle');
+    await page.keyboard.insertText('540');
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() =>
+      window.parameterTabApp.codeEditor.editor
+        .getValue()
+        .includes('revolve(profile, axis, {angle: 540})'),
+    );
+
+    await page.evaluate(value => {
+      const editor = window.parameterTabApp.codeEditor.editor;
+      editor.getModel()!.setValue(value);
+      editor.focus();
+    }, revolveSource);
+    for (const key of ['angle', 'advance']) {
+      await focus(page, `${key}:`, 2);
+      await page.waitForFunction(
+        parameter =>
+          document
+            .querySelector('input.source-active')
+            ?.getAttribute('data-parameter') === parameter,
+        `config.${key}`,
+      );
+      await page.keyboard.press('Tab');
+      assert.equal(await focusedInput(page), `config.${key}`);
+    }
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'Tab can enter an omitted writable parameter and preserves snippet tab stops',
   {timeout: 120_000},
   async t => {
@@ -421,14 +504,14 @@ test(
         ({call, parameter}) => {
           const {viewport} = window.parameterTabApp;
           const scope = viewport.sourceContext;
+          const rotation = call.includes('pivotVertex');
           return (
             scope?.target.tool?.signature.name ===
-              (call.includes('pivotVertex')
-                ? 'pivotVertex'
-                : call.split('(')[0]) &&
+              (rotation ? 'rotate' : call.split('(')[0]) &&
             document
               .querySelector('output.source-active')
-              ?.getAttribute('data-parameter') === parameter
+              ?.getAttribute('data-parameter') ===
+              (rotation ? 'pivotVertex.id' : parameter)
           );
         },
         {call, parameter},

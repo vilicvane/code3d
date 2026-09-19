@@ -47,6 +47,7 @@ Only an explicit origin operation chooses a different local zero.
 | `text`                                            | All returned faces share the text layout's baseline origin, including its glyph advances and offsets. Individual letters are not centered. |
 | `definePrimitive`                                 | Retain the frame used by the returned geometry; no automatic recentering.                                                                  |
 | `extrude`                                         | Inherit the input face's frame, without centering the extrusion.                                                                           |
+| `revolve`                                         | Inherit the input profile's frame; the axis's solved placement is converted into that frame.                                               |
 | `union`, `intersect`                              | Inherit the first operand's frame.                                                                                                         |
 | `cut`                                             | Inherit the stock's frame.                                                                                                                 |
 | `loft`                                            | Inherit the first section's frame.                                                                                                         |

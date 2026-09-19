@@ -24,24 +24,31 @@ task benefits from several forms of evidence.
 
 ## Find the right modeling tools
 
-| Need                                                               | Read                                                                                                                                                                      |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Primitives, Boolean operations, profiles, extrusion or loft        | [Core README](../../packages/core/README.md) and [modeling reference](../../packages/core/docs/api.md)                                                                    |
-| Measure geometry and derive another part's dimensions              | [Measurements](../../packages/core/docs/api.md#measurements) and [fitted beam](../../packages/app/examples/operations/distance.ts)                                        |
-| Place parts against each other or align geometric elements         | [Relations](../../packages/core/docs/relations.mdx)                                                                                                                       |
-| Understand local geometry, composition placement or origin changes | [Coordinate concepts](../../packages/core/docs/local-coordinates.md) and [origin operations](../../packages/core/docs/origins-and-rotation.mdx)                           |
-| Select or expose edges, vertices and surfaces                      | [Topology](../../packages/core/docs/topology.md) and [agent observations](observation.md)                                                                                 |
-| Create editable profiles and inspect their constraints             | [Sketch workflow](sketches.md)                                                                                                                                            |
-| Arrange collections with Flex/Grid or fill target bounds           | [Layout README](../../packages/layout/README.md)                                                                                                                          |
-| Add realistic material presets                                     | [Materials README](../../packages/materials/README.md)                                                                                                                    |
-| Add standard fasteners or matching holes                           | [Screws README](../../packages/screws/README.md)                                                                                                                          |
-| Reuse a parametric design or expose editing controls               | [Reusable models](../../packages/web/src/content/docs/docs/guides/reusable-models.mdx) and [model tools](../../packages/web/src/content/docs/docs/guides/model-tools.mdx) |
-| Extend the modeling runtime                                        | [Custom primitives](../../packages/core/docs/custom-primitives.mdx)                                                                                                       |
+| Need                                                                    | Read                                                                                                                                                                      |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Primitives, Boolean operations, profiles, extrusion, revolution or loft | [Core README](../../packages/core/README.md) and [modeling reference](../../packages/core/docs/api.md)                                                                    |
+| Measure geometry and derive another part's dimensions                   | [Measurements](../../packages/core/docs/api.md#measurements) and [fitted beam](../../packages/app/examples/operations/distance.ts)                                        |
+| Place parts against each other or align geometric elements              | [Relations](../../packages/core/docs/relations.mdx)                                                                                                                       |
+| Understand local geometry, composition placement or origin changes      | [Coordinate concepts](../../packages/core/docs/local-coordinates.md) and [origin operations](../../packages/core/docs/origins-and-rotation.mdx)                           |
+| Select or expose edges, vertices and surfaces                           | [Topology](../../packages/core/docs/topology.md) and [agent observations](observation.md)                                                                                 |
+| Create editable profiles and inspect their constraints                  | [Sketch workflow](sketches.md)                                                                                                                                            |
+| Arrange collections with Flex/Grid or fill target bounds                | [Layout README](../../packages/layout/README.md)                                                                                                                          |
+| Add realistic material presets                                          | [Materials README](../../packages/materials/README.md)                                                                                                                    |
+| Add standard fasteners or matching holes                                | [Screws README](../../packages/screws/README.md)                                                                                                                          |
+| Reuse a parametric design or expose editing controls                    | [Reusable models](../../packages/web/src/content/docs/docs/guides/reusable-models.mdx) and [model tools](../../packages/web/src/content/docs/docs/guides/model-tools.mdx) |
+| Extend the modeling runtime                                             | [Custom primitives](../../packages/core/docs/custom-primitives.mdx)                                                                                                       |
 
 Layout configuration is required: specify `axis` for Linear/Radial/Flex and `axes`
 for Grid. Filling also needs explicit spacing (`gap: 0` for touching copies).
 Flex cross alignment or wrapping requires `crossAxis`; see the Layout reference
 for directional grid gaps and other controls.
+
+For a rotational solid or simple helical form, use
+`revolve(profile, straightAxis, {angle, advance?})`. `angle` is the total
+degrees of rotation; `advance` is the total signed distance along the directed
+axis. Pass `line(...)` directly as the axis, or use an existing straight edge
+reference. Without advance, use at most 360 degrees. See the
+[rotational solid reference](../../packages/core/docs/api.md#rotational-solids).
 
 Check the [current limitations](../../packages/web/src/content/docs/docs/getting-started/limitations.md)
 before promising a feature.

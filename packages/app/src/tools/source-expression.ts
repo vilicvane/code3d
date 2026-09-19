@@ -397,12 +397,24 @@ export function argumentInsertionSource(
   expression: string,
   target: Extract<ToolArgumentEditTarget, {kind: 'omitted'}>,
 ): string {
+  const object = target.object;
+  const member = object
+    ? `{${[
+        ...object.defaults.map(
+          default_ =>
+            `${default_.property}: ${formatSourceNumber(default_.value)}`,
+        ),
+        `${object.property}: ${expression}`,
+      ].join(', ')}}`
+    : target.property
+      ? `${target.property}: ${expression}`
+      : expression;
   const value = (target.prefixes ?? [[]]).reduceRight(
     (value, prefix, index) => {
       const contents = [...prefix.map(formatSourceNumber), value].join(', ');
       return index === 0 ? contents : `[${contents}]`;
     },
-    expression,
+    member,
   );
   return target.needsComma ? `, ${value}` : value;
 }

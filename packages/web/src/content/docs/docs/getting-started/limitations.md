@@ -8,7 +8,7 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 ## What works
 
 - TypeScript model functions and relative imports across project files.
-- B-Rep primitives, curves, profiles, lofts, boolean operations, fillets,
+- B-Rep primitives, curves, profiles, rotation and helical revolution, lofts, boolean operations, fillets,
   chamfers, uniform-wall shells, and threaded geometry.
 - Source-context inspection, topology selection, supported parameter editing,
   and relative-position tools.

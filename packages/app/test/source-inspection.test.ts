@@ -886,6 +886,23 @@ test('loft inspectors distinguish section and destructured spine parameters in t
   assert.equal(result.ambient.length, 0);
 });
 
+test('revolve inspection keeps profile, axis and solid in the solved frame', async () => {
+  const inspect =
+    await compile(`import {rectangle, line, revolve} from '@code3d/core';
+    const profile = rectangle(4, 6).rotate(90, 0, 0).originOffset(-8, 0, 0);
+    const axis = line([0, -20, 0], [0, 20, 0]).edge(1);
+    export default revolve(profile, axis, {angle: 180});`);
+  const profile = defined(await inspect('profile, axis'));
+  assert.equal(profile.target.length, 1);
+  assert.equal(profile.ambient.length, 2);
+  const axis = defined(await inspect('axis, {angle'));
+  assert.equal(axis.target.length, 1);
+  assert.equal(axis.ambient.length, 2);
+  const output = defined(await inspect('revolve(profile'));
+  assert.equal(output.target.length, 1);
+  assert.equal(output.ambient.length, 0);
+});
+
 test('relate call and closure inspectors use actual consumed participants and relation stages', async () => {
   const inspect =
     await compile(`import {box, group, offset} from '@code3d/core';

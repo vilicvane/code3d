@@ -49,7 +49,7 @@ const toolParameterKinds = new Set<ToolParameterKind>([
 ]);
 
 export type SignatureParameter = Readonly<{
-  path?: readonly number[];
+  path?: readonly (number | string)[];
   name: string;
   optional: boolean;
   numeric: boolean;
@@ -127,19 +127,38 @@ export function signatureParameters(
           ];
         });
       }
+      const name = parameter.getName();
+      const optional = Boolean(
+        parameter.flags & ts.SymbolFlags.Optional ||
+        (declaration &&
+          ts.isParameter(declaration) &&
+          (declaration.questionToken || declaration.initializer)),
+      );
+      const fields = checker.getNonNullableType(type);
+      const properties =
+        !acceptsArray(fields) && fields.getCallSignatures().length === 0
+          ? checker.getPropertiesOfType(fields)
+          : [];
       return [
         {
-          name: parameter.getName(),
+          name,
           path: [argumentIndex],
-          optional: Boolean(
-            parameter.flags & ts.SymbolFlags.Optional ||
-            (declaration &&
-              ts.isParameter(declaration) &&
-              (declaration.questionToken || declaration.initializer)),
-          ),
+          optional,
           numeric: isNumeric(type),
           multiple: acceptsArray(type),
         },
+        ...properties
+          .filter(property =>
+            isNumeric(checker.getTypeOfSymbolAtLocation(property, location)),
+          )
+          .map(property => ({
+            name: `${name}.${property.getName()}`,
+            path: [argumentIndex, property.getName()],
+            optional:
+              optional || Boolean(property.flags & ts.SymbolFlags.Optional),
+            numeric: true,
+            multiple: false,
+          })),
       ];
     })
     .map((parameter, index) => {
@@ -253,7 +272,9 @@ function validateParameterAnnotation(
       '@code3d.param requires a callable declaration.',
     );
   }
-  const match = /^([A-Za-z_$][\w$]*)\s+([\s\S]+)$/.exec(annotation.value);
+  const match = /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s+([\s\S]+)$/.exec(
+    annotation.value,
+  );
   if (!match) {
     throw annotationError(
       annotation,

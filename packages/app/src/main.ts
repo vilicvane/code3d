@@ -3669,7 +3669,12 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
                   ? [
                       argument.target.sourceRef,
                       ...(argument.target.kind === 'present'
-                        ? [argument.target.removalSourceRef]
+                        ? [
+                            argument.target.removalSourceRef,
+                            ...(argument.target.focusSourceRef
+                              ? [argument.target.focusSourceRef]
+                              : []),
+                          ]
                         : []),
                     ]
                   : [],
@@ -3695,7 +3700,12 @@ function toolSourceRefs(module: ModelModule): SourceRef[] {
         target
           ? [
               target.sourceRef,
-              ...(target.kind === 'present' ? [target.removalSourceRef] : []),
+              ...(target.kind === 'present'
+                ? [
+                    target.removalSourceRef,
+                    ...(target.focusSourceRef ? [target.focusSourceRef] : []),
+                  ]
+                : []),
             ]
           : [],
       ) ?? []),

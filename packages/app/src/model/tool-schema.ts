@@ -35,7 +35,7 @@ export type {ParameterDefinitionMap, SourceParameterTarget};
 
 type ToolParameterSchemaBase = Readonly<{
   index: number;
-  path?: readonly number[];
+  path?: readonly (number | string)[];
   name: string;
   optional: boolean;
   label: string;
@@ -68,12 +68,21 @@ export type ToolArgumentEditTarget = Readonly<
   | {
       kind: 'present';
       sourceRef: SourceRef;
+      /** The authored property, including its key, may focus this value. */
+      focusSourceRef?: SourceRef;
       removalSourceRef: SourceRef;
     }
   | {
       kind: 'omitted';
       sourceRef: SourceRef;
       needsComma: boolean;
+      /** Property name when inserting into an existing object literal. */
+      property?: string;
+      /** A missing object argument is created around the edited property. */
+      object?: Readonly<{
+        property: string;
+        defaults: readonly Readonly<{property: string; value: number}>[];
+      }>;
       /** Defaults preceding the value at each missing container, outermost first. */
       prefixes?: readonly (readonly number[])[];
     }

@@ -6,7 +6,8 @@ in the App or a supported Node.js runtime.
 
 Model constructors define the initial origin; derived operations inherit their main
 input frame. `group`, `union`, and `intersect` use the first member or operand,
-`cut` uses the stock, and `loft` uses the first section. See the
+`cut` uses the stock, `loft` uses the first section, and `revolve` uses the
+profile. See the
 [default origin rules](docs/local-coordinates.md#default-origin-rules)
 for all constructors and explicit origin operations.
 
@@ -40,7 +41,7 @@ and the [agent file workflow](../../docs/agents/files.md).
 
 | Task                                                                            | Start here                                                                         |
 | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Solids, planar profiles, curves, points, Boolean operations, extrusion and loft | [Modeling reference](docs/api.md)                                                  |
+| Solids, planar profiles, curves, points, Boolean operations, extrusion, revolution and loft | [Modeling reference](docs/api.md)                                                  |
 | Place parts with bounds, align geometry or match coordinate frames              | [Relations](docs/relations.mdx)                                                    |
 | Change origins and rotate parts                                                 | [Origins and rotation](docs/origins-and-rotation.mdx)                              |
 | Hollow a solid or choose openings                                               | [Shells](docs/shells.mdx)                                                          |

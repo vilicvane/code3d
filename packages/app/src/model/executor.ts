@@ -2771,9 +2771,18 @@ export function createModelExecutor(
     const values: Record<number, number> = {};
     for (const parameter of signature.parameters) {
       const [index, ...components] = parameter.path ?? [parameter.index];
+      if (typeof index !== 'number') continue;
       let value = arguments_.get(index);
       for (const component of components)
-        value = Array.isArray(value) ? value[component] : undefined;
+        value =
+          typeof component === 'number' && Array.isArray(value)
+            ? value[component]
+            : typeof component === 'string' &&
+                value !== null &&
+                typeof value === 'object' &&
+                Object.hasOwn(value, component)
+              ? (value as Record<string, unknown>)[component]
+              : undefined;
       if (typeof value === 'number') values[parameter.index] = value;
     }
     return Object.keys(values).length > 0 ? values : undefined;

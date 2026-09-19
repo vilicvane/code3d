@@ -35,7 +35,7 @@ import {
   type AlignmentGeometry,
 } from './alignment-geometry.js';
 import {cache, cachedArtifact} from './cached.js';
-import {extrudeWithTopology} from './extrude.js';
+import {extrudeWithTopology, revolveWithTopology} from './extrude.js';
 import {font, googleFont, type Font} from './font.js';
 import {
   anchorAnnotation,
@@ -277,6 +277,7 @@ export type ModelOperationKind =
   | 'sketchFace'
   | 'text'
   | 'extrude'
+  | 'revolve'
   | 'primitive'
   | 'material'
   | 'scaled'
@@ -1113,7 +1114,21 @@ export type FaceModel<Elements extends NamedElements = PlanarElements> =
        * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
        */
       extrude(distance: number): SolidModel;
+      /**
+       * Rotate this face about a straight directed axis.
+       * @code3d.inspect axis revolve.inspectMethodAxis
+       * @code3d.inspect config revolve.inspectMethodProfile
+       * @code3d.param config.angle {kind: 'angle', default: 360, label: 'Revolution angle'}
+       * @code3d.param config.advance {kind: 'length', default: 0, label: 'Axial advance'}
+       */
+      revolve(axis: LineAnchor, config: RevolveConfig): SolidModel;
     } & Elements;
+
+/** Core parameters for rotational and screw-motion solids. */
+export type RevolveConfig = Readonly<{
+  angle: number;
+  advance?: number;
+}>;
 
 export type SolidModel<Elements extends NamedElements = CanonicalElements> =
   ModelCapabilities<Elements, 'solid'> &
@@ -3584,6 +3599,79 @@ export class ModelObject<
     return result as unknown as SolidModel;
   }
 
+  revolve(
+    this: ModelObject<Elements, 'face'>,
+    axis: LineAnchor,
+    config: RevolveConfig = {angle: 360},
+  ): SolidModel {
+    if (this.kind !== 'face')
+      throw new Error('revolve requires a single face model.');
+    const {angle = 360, advance = 0} = config;
+    if (!Number.isFinite(angle) || angle === 0)
+      throw new Error('Revolution angle must be finite and non-zero.');
+    if (!Number.isFinite(advance))
+      throw new Error('Revolution advance must be finite.');
+    if (advance === 0 && Math.abs(angle) > 360)
+      throw new Error('A revolution without advance cannot exceed one turn.');
+    const axisReference = straightAxisReference(axis, 'revolve() axis');
+    const context = ModelObject.createSolveContext([this, axisReference.model]);
+    const facePose = this.solvePose(context);
+    const axisFrame = relativeTransform(
+      composeTransforms(
+        axisReference.model.solvePose(context),
+        axisReference.transform,
+      ),
+      facePose,
+    );
+    const direction = rotateVector(
+      [0, axisReference.direction ?? 1, 0],
+      axisFrame.quaternion,
+    );
+    const source = this.requireGeometry();
+    const axisModel = isModelObject(axisReference.model)
+      ? axisReference.model
+      : undefined;
+    ModelObject.recordCompositionInspection(context, []);
+    const geometry = evaluateSolidGeometry(
+      'revolve',
+      [axisFrame.position, direction, angle, advance],
+      [source],
+      () =>
+        revolveWithTopology(
+          {
+            shape: source.value.shape,
+            topology: source.value.topology,
+            namespace: 1,
+          },
+          axisFrame.position,
+          direction,
+          angle,
+          advance,
+        ),
+    );
+    const result = ModelObject.create<CanonicalElements, 'solid'>({
+      kind: 'solid',
+      name: 'Revolve',
+      geometry,
+      material: this.materialSnapshot,
+      placements: this.placements,
+      sourceRefs: [...this.sourceRefs, ...(axisModel?.sourceRefs ?? [])],
+      parameters: uniqueParameters([
+        ...this.allParameters(),
+        ...(axisModel?.allParameters() ?? []),
+      ]),
+      meshTolerance: this.meshTolerance,
+      operation: storedOperation('revolve', [
+        {model: this, role: 'receiver', index: 0},
+        ...(axisModel
+          ? [{model: axisModel, role: 'reference' as const, index: 1}]
+          : []),
+      ]),
+    });
+    ModelObject.recordCompositionInspection(context, [[result, this]]);
+    return result as unknown as SolidModel;
+  }
+
   cut(
     this: ModelObject<Elements, 'solid'>,
     tools: readonly SolidModel<{}>[],
@@ -4530,6 +4618,46 @@ export class ModelObject<
       ambient: ambient.map(value => frame.positioned(value)!),
       target: target.map(value => frame.positioned(value)!),
     };
+  }
+
+  /** @internal */
+  static recordRevolve(
+    profile: ModelObject,
+    axis: LineAnchor,
+    result?: ModelObject,
+  ): void {
+    if (!isRecordingInspection()) return;
+    const reference = straightAxisReference(axis, 'revolve() axis');
+    const context = this.createSolveContext([profile, reference.model]);
+    this.recordCompositionInspection(
+      context,
+      result ? [[result, profile]] : [],
+    );
+  }
+
+  /** @internal */
+  static inspectRevolve(
+    profile: FaceModel<{}>,
+    axis: LineAnchor,
+    result: SolidModel | undefined,
+    data: CompositionInspectData,
+    focus: 'profile' | 'axis',
+  ): InspectResult {
+    const frame = this.inspectionFrame(data.poses);
+    const shownProfile = frame.positioned(profile)!;
+    const shownAxis = anchorAnnotation(frame.positioned(axis)! as LineAnchor, {
+      direction: 'forward',
+    });
+    const shownResult = result ? frame.positioned(result)! : undefined;
+    return focus === 'axis'
+      ? {
+          ambient: [shownProfile, ...(shownResult ? [shownResult] : [])],
+          target: [shownAxis],
+        }
+      : {
+          ambient: [shownAxis, ...(shownResult ? [shownResult] : [])],
+          target: [shownProfile],
+        };
   }
 
   /** @internal Derive the focused cut volume using the original solved operands. */
@@ -5923,6 +6051,41 @@ export function extrude(
     ModelObject.recordExtrusions(
       faces,
       solids as unknown as readonly ModelObject[],
+    );
+  }
+}
+
+/**
+ * @code3d.inspect profile revolve.inspectProfile
+ * @code3d.inspect axis revolve.inspectAxis
+ * @code3d.inspect config revolve.inspectProfile
+ * @code3d.param config.angle {kind: 'angle', default: 360, label: 'Revolution angle'}
+ * @code3d.param config.advance {kind: 'length', default: 0, label: 'Axial advance'}
+ */
+export function revolve(
+  profile: FaceModel<{}>,
+  axis: LineAnchor,
+  config: RevolveConfig,
+): SolidModel;
+export function revolve(
+  profile: FaceModel<{}>,
+  axis: LineAnchor,
+  config: RevolveConfig = {angle: 360},
+): SolidModel {
+  const runtimeProfile = requireModelKind(
+    profile,
+    'face',
+    'revolve requires a face model.',
+  );
+  let result: SolidModel | undefined;
+  try {
+    result = runtimeProfile.revolve(axis, config);
+    return result;
+  } finally {
+    ModelObject.recordRevolve(
+      runtimeProfile,
+      axis,
+      result as ModelObject | undefined,
     );
   }
 }
@@ -7499,6 +7662,89 @@ export namespace extrude {
         distance,
         context.focused.parameter,
         context.data,
+      )
+    );
+  }
+}
+
+/** @internal */
+export namespace revolve {
+  export function inspectProfile(
+    [profile, axis]: [FaceModel<{}>, LineAnchor, RevolveConfig],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return (
+      context.data &&
+      ModelObject.inspectRevolve(
+        profile,
+        axis,
+        context.return,
+        context.data,
+        'profile',
+      )
+    );
+  }
+
+  export function inspectAxis(
+    [profile, axis]: [FaceModel<{}>, LineAnchor, RevolveConfig],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return (
+      context.data &&
+      ModelObject.inspectRevolve(
+        profile,
+        axis,
+        context.return,
+        context.data,
+        'axis',
+      )
+    );
+  }
+
+  export function inspectMethodProfile(
+    [axis]: [LineAnchor, RevolveConfig],
+    context: InspectContext<
+      SolidModel,
+      FaceModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return (
+      context.data &&
+      ModelObject.inspectRevolve(
+        context.receiver,
+        axis,
+        context.return,
+        context.data,
+        'profile',
+      )
+    );
+  }
+
+  export function inspectMethodAxis(
+    [axis]: [LineAnchor, RevolveConfig],
+    context: InspectContext<
+      SolidModel,
+      FaceModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return (
+      context.data &&
+      ModelObject.inspectRevolve(
+        context.receiver,
+        axis,
+        context.return,
+        context.data,
+        'axis',
       )
     );
   }
