@@ -5,6 +5,7 @@ import {
   type ModelSpatialOperation,
 } from '@code3d/core/tooling';
 import type {SpatialObjectPreview} from '../tools/spatial-edit';
+import {modelSpatialSourceRef} from '../tools/contextual-tool-context';
 import {namedElementDecorations} from './element-decorations';
 import type {
   SourceDecorationProvider,
@@ -42,11 +43,13 @@ export const originSourceDecoration: SourceDecorationProvider = {
       evaluation.relationPreview ??
       module.objects.get(evaluation.relationOwnerNodeId ?? '');
     if (spatialTool === 'translate') {
-      const editsOrigin = (
-        target.operation?.kind ??
-        target.tool?.signature.name ??
-        ''
-      ).startsWith('origin');
+      const editsOrigin =
+        (
+          target.operation?.kind ??
+          target.tool?.signature.name ??
+          ''
+        ).startsWith('origin') ||
+        !!modelSpatialSourceRef(module, {target, evaluation});
       const nodeIds = owner
         ? [owner.nodeId]
         : (evaluation.focusNodeIds ?? evaluation.nodeIds);

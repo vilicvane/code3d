@@ -108,6 +108,37 @@ export function contextualToolActivation(
 ): SourceRef | undefined {
   const {target, evaluation} = contextualToolScope(module, scope);
   if (!tool) return;
+  if (!evaluation.relationOwnerNodeId) {
+    const modelSource = modelSpatialSourceRef(module, {target, evaluation});
+    if (modelSource && tool !== 'rotate-axis') {
+      const method = tool === 'translate' ? 'originOffset' : 'rotate';
+      const calls = module.sourceTargets
+        .filter(candidate => {
+          if (
+            candidate.kind !== 'operation-output' ||
+            candidate.tool?.signature.name !== method ||
+            candidate.sourceRef.file !== modelSource.file ||
+            !candidate.evaluations.some(
+              e => e.contextId === evaluation.contextId,
+            )
+          )
+            return false;
+          const operation = candidate.evaluations
+            .filter(e => e.contextId === evaluation.contextId)
+            .map(e =>
+              e.operationId ? module.operations.get(e.operationId) : undefined,
+            )
+            .find(Boolean);
+          return operation?.sourceRef?.start === modelSource.start;
+        })
+        .sort((a, b) => a.sourceRef.start - b.sourceRef.start);
+      const next = calls.find(call => call.sourceRef.start >= modelSource.end);
+      const previous = calls
+        .filter(call => call.sourceRef.end <= modelSource.end)
+        .at(-1);
+      return (next ?? previous)?.sourceRef ?? modelSource;
+    }
+  }
   const sources = (target: SourceTarget) =>
     authoredToolSources(module, target).at(-1);
   if (targetSpatialTool(target) === tool) return sources(target);
@@ -220,6 +251,24 @@ export function contextualToolActivation(
       candidate.sourceRef.start === ref.end,
   );
   return after?.sourceRef ?? sources(anchor) ?? ref;
+}
+
+/** The expression represented by this model value, including its fluent receiver. */
+export function modelSpatialSourceRef(
+  module: ModelModule,
+  scope: Readonly<{target: SourceTarget; evaluation: SourceTargetEvaluation}>,
+): SourceRef | undefined {
+  const {target, evaluation} = scope;
+  if (
+    evaluation.relationOwnerNodeId ||
+    !['value', 'operation-input', 'operation-output'].includes(target.kind) ||
+    !evaluation.nodeIds.some(id => module.objects.has(id))
+  )
+    return;
+  return target.kind === 'operation-output' && evaluation.operationId
+    ? (module.operations.get(evaluation.operationId)?.sourceRef ??
+        target.sourceRef)
+    : target.sourceRef;
 }
 
 function authoredToolSources(

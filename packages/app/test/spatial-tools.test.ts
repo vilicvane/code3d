@@ -903,6 +903,131 @@ test('origin offset editing reuses the outer call and retains authored comments'
   );
 });
 
+test('model toolbar searches the same fluent chain forward, then backward', async () => {
+  const {contextualToolActivation} = await server.ssrLoadModule<
+    typeof import('../src/tools/contextual-tool-context.ts')
+  >('/src/tools/contextual-tool-context.ts');
+  const source = `import {box} from '@code3d/core';
+const first = box(4,6,8).originOffset(1,0,0).rotate(0,0,20).originOffset(2,0,0);
+const other = box(2,2,2).rotate(0,0,30);`;
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const at = (name: string, index = 0) =>
+    defined(
+      module.sourceTargets.filter(
+        target =>
+          target.kind === 'operation-output' &&
+          target.tool?.signature.name === name,
+      )[index],
+    );
+  const activate = (
+    target: ReturnType<typeof at>,
+    tool: 'translate' | 'rotate-point',
+  ) =>
+    defined(
+      contextualToolActivation(
+        module,
+        {target, evaluation: target.evaluations[0]},
+        tool,
+      ),
+    );
+  const box = at('box');
+  const firstOrigin = at('originOffset');
+  const secondOrigin = at('originOffset', 1);
+  const rotation = at('rotate');
+  assert.deepEqual(activate(box, 'translate'), firstOrigin.sourceRef);
+  assert.deepEqual(activate(firstOrigin, 'translate'), secondOrigin.sourceRef);
+  assert.deepEqual(activate(rotation, 'translate'), secondOrigin.sourceRef);
+  assert.deepEqual(activate(secondOrigin, 'rotate-point'), rotation.sourceRef);
+  assert.deepEqual(
+    activate(at('box', 1), 'translate'),
+    at('box', 1).sourceRef,
+    'An unrelated object cannot supply the missing operation',
+  );
+});
+
+test('model toolbar inserts local operations and Alt previews object motion', async () => {
+  const {modelInsertionBindings} = await server.ssrLoadModule<
+    typeof import('../src/tools/model-spatial-tool.ts')
+  >('/src/tools/model-spatial-tool.ts');
+  const source = `import {box} from '@code3d/core'; const part=box(4,6,8);`;
+  const module = await compiler.compile(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const target = defined(
+    module.sourceTargets.find(
+      target =>
+        target.kind === 'operation-output' &&
+        target.tool?.signature.name === 'box',
+    ),
+  );
+  const evaluation = target.evaluations[0];
+  const occurrence = {
+    key: 'part',
+    node: defined(module.objects.get(evaluation.nodeIds[0])),
+    placement: 'standalone' as const,
+  };
+  const bindings = modelInsertionBindings(
+    module,
+    {target, evaluation},
+    occurrence,
+    [occurrence],
+  );
+  assert.equal(bindings.length, 6);
+  const x = defined(bindings.find(binding => binding.axis === 'x'));
+  const z = defined(
+    bindings.find(binding => binding.mode === 'rotate' && binding.axis === 'z'),
+  );
+  const origin = spatialIntent(x, -5, true);
+  assert.deepEqual(origin.preview.objects[0].transform.position, [5, 0, 0]);
+  assert.deepEqual(origin.preview.objects[0].spatial.origin, [0, 0, 0]);
+  assert.deepEqual(origin.preview.objects[0].originDelta, [-5, 0, 0]);
+  const host = hostFor(source);
+  assert.equal(
+    new ToolEngine(host.host).begin('model-origin').commit(origin).status,
+    'committed',
+  );
+  assert.match(host.source(), /box\(4,6,8\)\.originOffset\(-5, 0, 0\)/);
+  const edited = await compiler.compile(
+    {files: [{path: '/model.ts', source: host.source()}]},
+    '/model.ts',
+  );
+  const editedBox = defined(
+    edited.sourceTargets.find(
+      target =>
+        target.kind === 'operation-output' &&
+        target.tool?.signature.name === 'box',
+    ),
+  );
+  const {contextualToolActivation} = await server.ssrLoadModule<
+    typeof import('../src/tools/contextual-tool-context.ts')
+  >('/src/tools/contextual-tool-context.ts');
+  const reused = defined(
+    contextualToolActivation(
+      edited,
+      {target: editedBox, evaluation: editedBox.evaluations[0]},
+      'translate',
+    ),
+  );
+  assert.equal(
+    host.source().slice(reused.start, reused.end),
+    'originOffset(-5, 0, 0)',
+  );
+  const rotated = hostFor(source);
+  assert.equal(
+    new ToolEngine(rotated.host)
+      .begin('model-rotate')
+      .commit(spatialIntent(z, 30)).status,
+    'committed',
+  );
+  assert.match(rotated.source(), /box\(4,6,8\)\.rotate\(0, 0, 30\)/);
+});
+
 async function relationTool(source: string, name: string, index = 0) {
   const module = await compiler.compile(
     {files: [{path: '/model.ts', source}]},

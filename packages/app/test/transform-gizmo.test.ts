@@ -530,6 +530,88 @@ test('Alt leaves spatial snapping and numeric steps unchanged', t => {
   assert.equal(alt('keydown'), false);
 });
 
+test('Alt locks originOffset to object movement for the full gesture', t => {
+  const {gizmo, send, events} = pointerFixture(t);
+  gizmo.attach(
+    gizmo['attachedObject']!,
+    gizmo.currentBindings.map(binding => ({
+      ...binding,
+      kind: 'spatial' as const,
+      placement: binding.frame,
+      spatial: {
+        operation: 'originOffset' as const,
+        source: {
+          kind: 'model-insert' as const,
+          sourceRef: {file: '/model.ts', start: 0, end: 4},
+          method: 'originOffset' as const,
+        },
+        ownerNodeId: 'part',
+        objects: [],
+      },
+    })),
+  );
+  gizmo.selectTool('translate');
+  send('pointerdown', {altKey: true});
+  send('pointermove', {clientX: 459, altKey: true});
+  const active = gizmo['active']!;
+  assert.equal(active.moveObject, true);
+  assert.equal(active.value, -Math.round(active.delta));
+  const preview = defined(events.at(-1));
+  assert.equal(preview.kind, 'preview');
+  if (preview.kind === 'preview') assert.equal(preview.moveObject, true);
+  send('pointermove', {clientX: 480, altKey: false});
+  assert.equal(gizmo['active']!.moveObject, true);
+  send('pointerup', {altKey: false});
+  const commit = defined(events.at(-1));
+  assert.equal(commit.kind, 'commit');
+  if (commit.kind === 'commit') assert.equal(commit.moveObject, true);
+});
+
+test('Alt places the originOffset gizmo at the object bounds center', t => {
+  const {gizmo, element} = pointerFixture(t);
+  const object = gizmo['attachedObject']!;
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(4, 2, 6));
+  mesh.position.set(7, 2, -3);
+  object.add(mesh);
+  const parent = new THREE.Group();
+  object.parent!.add(parent);
+  parent.add(object);
+  parent.position.set(2, 1, 3);
+  parent.rotation.y = Math.PI / 6;
+  gizmo.attach(
+    object,
+    gizmo.currentBindings.map(binding => ({
+      ...binding,
+      kind: 'spatial' as const,
+      placement: binding.frame,
+      spatial: {
+        operation: 'originOffset' as const,
+        source: {
+          kind: 'model-insert' as const,
+          sourceRef: {file: '/model.ts', start: 0, end: 4},
+          method: 'originOffset' as const,
+        },
+        ownerNodeId: 'part',
+        objects: [],
+      },
+    })),
+  );
+  const origin = gizmo['axes'][0].proxy.position.clone();
+  const orientation = gizmo['axes'][0].proxy.quaternion.clone();
+  assert.equal(modifier(element, 'Alt', true), true);
+  const center = new THREE.Box3()
+    .setFromObject(object)
+    .getCenter(new THREE.Vector3());
+  assert.ok(center.distanceTo(origin) > 1);
+  for (const {proxy} of gizmo['axes']) {
+    assert.ok(proxy.position.distanceTo(center) < 1e-9);
+    assert.ok(proxy.quaternion.angleTo(orientation) < 1e-9);
+  }
+  modifier(element, 'Alt', false);
+  for (const {proxy} of gizmo['axes'])
+    assert.ok(proxy.position.distanceTo(origin) < 1e-9);
+});
+
 test('starting a drag with Alt still snaps and cancellation releases the grid', t => {
   const {gizmo, send, grid} = pointerFixture(t);
   grid.step = 10;

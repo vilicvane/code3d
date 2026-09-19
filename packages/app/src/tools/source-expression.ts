@@ -497,6 +497,18 @@ export function offsetCallSource(
   return `${target}.${method}(${delta.map(formatSourceNumber).join(', ')})`;
 }
 
+/** Add one model-local operation to the selected expression. */
+export function appendModelSpatialSource(
+  source: string,
+  method: 'originOffset' | 'rotate',
+  values: Vec3,
+): string {
+  if (values.every(value => value === 0)) return source;
+  const {expression} = parseExpression(source);
+  const receiver = isMemberReceiver(expression) ? source : `(${source})`;
+  return `${receiver}.${method}(${values.map(formatSourceNumber).join(', ')})`;
+}
+
 /** Change a scalar expression without dropping comments or repeating evaluation. */
 export function offsetExpression(source: string, delta: number): string {
   if (delta === 0) return source;

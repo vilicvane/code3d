@@ -278,11 +278,22 @@ the transformation.
 Origin operations offer an origin marker
 and arrows, while `rotate` offers angle inputs and rotation rings. Try the
 [origin and rotation guide](../../../../../../core/docs/origins-and-rotation.mdx).
+On an ordinary model expression, the toolbar offers **Origin Offset** and
+**Rotate model**. Choosing a tool only moves the source focus. It reuses the
+nearest matching call after the caret in the same method chain, then the
+nearest one before it; the first drag adds the call if none exists. Origin
+Offset normally drags the origin while leaving the shape in place. Hold Alt
+to move its gizmo to the shape’s bounding-box center, then drag to move the
+shape while the origin marker stays in place. Release Alt before dragging to
+return the gizmo to the origin;
+both gestures edit `originOffset(...)`. Shift uses the larger grid step in
+either mode.
+
 In a composition preview, selecting a member or subgroup positioned with
 `relate()` shows translation arrows by default. The toolbar above the parameter
 panel provides **Translate**, **Rotate about point**, and **Rotate about axis**;
-the rotation button remembers its selected variant. Translation does not change
-when Alt is held. Translate shows the part’s origin at the current placement;
+the rotation button remembers its selected variant. Relation translation does
+not change when Alt is held. Translate shows the part’s origin at the current placement;
 pivot and axis markers belong to the corresponding rotation tool. Axis rotation
 rings use orange for any selected axis; reference translation arrows keep XYZ colors.
 Within `relate`, tools act on the current self. Selecting an `align` or `on`

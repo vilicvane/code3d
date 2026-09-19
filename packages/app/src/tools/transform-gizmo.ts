@@ -67,6 +67,7 @@ export type TransformGizmoEvent =
       kind: 'preview' | 'commit';
       binding: TransformGizmoBinding;
       value: number;
+      moveObject: boolean;
     }>;
 
 type AxisControl = {
@@ -85,6 +86,7 @@ type ActiveDrag = {
   value: number;
   delta: number;
   gridStep?: number;
+  moveObject: boolean;
 };
 
 /** One control per axis also represents the non-orthogonal axes of Euler editing. */
@@ -123,7 +125,9 @@ export class TransformGizmo {
                 ? 'Axis'
                 : binding.spatial.operation === 'offset'
                   ? 'Move'
-                  : 'Origin'
+                  : this.active.moveObject
+                    ? 'Move model'
+                    : 'Origin'
             : 'Offset',
       values: [
         {
@@ -457,6 +461,7 @@ export class TransformGizmo {
     const object = this.attachedObject;
     if (!object || this.active) return;
     object.updateWorldMatrix(true, false);
+    let objectCenter: THREE.Vector3 | undefined;
     for (const {binding, proxy} of this.axes) {
       if (!binding) continue;
       if (binding.anchor === 'bounds') {
@@ -480,6 +485,19 @@ export class TransformGizmo {
           proxy.quaternion,
           new THREE.Vector3(),
         );
+        if (
+          this.altHeld &&
+          binding.kind === 'spatial' &&
+          binding.spatial.operation === 'originOffset'
+        ) {
+          if (!objectCenter) {
+            const bounds = new THREE.Box3().setFromObject(object);
+            objectCenter = bounds.isEmpty()
+              ? object.getWorldPosition(new THREE.Vector3())
+              : bounds.getCenter(new THREE.Vector3());
+          }
+          proxy.position.copy(objectCenter);
+        }
       }
       proxy.quaternion.multiply(
         new THREE.Quaternion(...binding.frame.quaternion),
@@ -553,6 +571,10 @@ export class TransformGizmo {
       quaternion: control.proxy.quaternion.clone(),
       value: control.binding.value,
       delta: 0,
+      moveObject:
+        this.altHeld &&
+        control.binding.kind === 'spatial' &&
+        control.binding.spatial.operation === 'originOffset',
       gridStep:
         control.binding.mode === 'translate'
           ? this.translationGrid.lock()
@@ -603,7 +625,9 @@ export class TransformGizmo {
       step === undefined
         ? active.delta
         : Math.round(active.delta / step) * step;
-    const candidate = binding.value + delta / binding.sensitivity;
+    const candidate =
+      binding.value +
+      (active.moveObject ? -delta : delta) / binding.sensitivity;
     const value =
       step === undefined
         ? snapNumericValue(
@@ -615,7 +639,10 @@ export class TransformGizmo {
             candidate,
           )
         : Number(candidate.toPrecision(12));
-    const displacement = (value - binding.value) * binding.sensitivity;
+    const displacement =
+      (value - binding.value) *
+      binding.sensitivity *
+      (active.moveObject ? -1 : 1);
     if (binding.mode === 'rotate') {
       control.proxy.quaternion
         .copy(quaternion)
@@ -632,7 +659,12 @@ export class TransformGizmo {
       this.moveOrigin(control.proxy.position);
     }
     active.value = value;
-    this.onEvent({kind: 'preview', binding, value});
+    this.onEvent({
+      kind: 'preview',
+      binding,
+      value,
+      moveObject: active.moveObject,
+    });
   }
 
   private moveOrigin(position: THREE.Vector3): void {
@@ -655,6 +687,7 @@ export class TransformGizmo {
       kind: 'commit',
       binding: active.binding,
       value: active.value,
+      moveObject: active.moveObject,
     });
   }
 
@@ -673,7 +706,9 @@ export class TransformGizmo {
   }
 
   private setAltHeld(value: boolean): void {
+    if (this.altHeld === value) return;
     this.altHeld = value;
+    this.updateAnchor();
   }
 
   private setShiftHeld(value: boolean): boolean {
@@ -697,8 +732,12 @@ export class TransformGizmo {
     this.setAltHeld(event.type === 'keydown');
     if (
       this.tool &&
-      this.tool !== 'translate' &&
-      (this.reference || this.sourceTool)
+      ((this.tool !== 'translate' && (this.reference || this.sourceTool)) ||
+        this.bindings.some(
+          binding =>
+            binding.kind === 'spatial' &&
+            binding.spatial.operation === 'originOffset',
+        ))
     )
       event.preventDefault();
   };
