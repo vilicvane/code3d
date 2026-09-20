@@ -6,6 +6,7 @@ import {
   contextualToolActivation,
 } from './tools/contextual-tool-context';
 import {SpatialToolbar} from './ui/spatial-toolbar';
+import {AnimationControls} from './ui/animation-controls';
 import {relationSelfExpression} from './tools/source-expression';
 import {ToolDragPreviewView} from './ui/tool-drag-preview';
 import {movedExamplePaths} from '../render-samples/catalog';
@@ -27,9 +28,6 @@ import {
   FolderPlus,
   PanelLeftClose,
   PanelLeftOpen,
-  Play,
-  Pause,
-  RotateCcw,
   RefreshCw,
   X,
 } from 'lucide';
@@ -330,11 +328,6 @@ app.innerHTML = `
               <span class="viewport-preview-word"><span class="viewport-preview-text"></span><span class="viewport-preview-caret"></span></span>
             </span>
             <strong>Select to preview</strong>
-          </div>
-          <div class="viewport-animation" id="viewport-animation" role="group" aria-label="Animation playback" hidden>
-            <button id="animation-play" type="button" aria-label="Play animation" title="Play animation"></button>
-            <button id="animation-reset" type="button" aria-label="Reset animation" title="Reset to 0 seconds"></button>
-            <output id="animation-time" aria-label="Time offset">0.00 s</output>
           </div>
           <div class="viewport-tool-stack" id="viewport-tool-stack"></div>
           <div class="viewport-feedback-stack" id="viewport-feedback-stack">
@@ -1152,77 +1145,19 @@ const stopViewportModes = reaction(
   },
   {fireImmediately: true},
 );
-const animationControls = requiredElement('viewport-animation');
-const animationPlay = requiredElement<HTMLButtonElement>('animation-play');
-const animationReset = requiredElement<HTMLButtonElement>('animation-reset');
-const animationTime = requiredElement('animation-time');
-animationReset.append(createIcon(RotateCcw));
-animationPlay.addEventListener('click', () => {
-  if (animation.playing) animation.pause();
-  else animation.play();
+const animationControls = new AnimationControls(viewportHost, animation, {
+  visible: () =>
+    previewState.module?.timeOffset !== undefined && !sketchEditor.hasTarget,
+  canPlay: () =>
+    !previewState.busy &&
+    previewState.status !== 'error' &&
+    previewState.sourceVersion === codeEditor.sourceVersion() &&
+    compiler.canExecute(),
+  canReset: () => !previewState.busy && compiler.canExecute(),
 });
-animationReset.addEventListener('click', () => animation.reset());
-const stopAnimationControls = [
-  reaction(
-    () => animation.playing,
-    playing => {
-      animationPlay.replaceChildren(createIcon(playing ? Pause : Play));
-      const label = playing ? 'Pause animation' : 'Play animation';
-      animationPlay.setAttribute('aria-label', label);
-      animationPlay.title = label;
-      animationPlay.setAttribute('aria-pressed', String(playing));
-    },
-    {fireImmediately: true},
-  ),
-  reaction(
-    () =>
-      previewState.module?.timeOffset === undefined || sketchEditor.hasTarget,
-    hidden => {
-      animationControls.hidden = hidden;
-    },
-    {fireImmediately: true},
-  ),
-  reaction(
-    () =>
-      !animation.playing &&
-      (animation.pending ||
-        previewState.busy ||
-        previewState.status === 'error' ||
-        previewState.sourceVersion !== codeEditor.sourceVersion() ||
-        !compiler.canExecute()),
-    disabled => {
-      animationPlay.disabled = disabled;
-    },
-    {fireImmediately: true},
-  ),
-  reaction(
-    () => !animation.pending && (previewState.busy || !compiler.canExecute()),
-    disabled => {
-      animationReset.disabled = disabled;
-    },
-    {fireImmediately: true},
-  ),
-  reaction(
-    () => `${animation.time.toFixed(2)} s`,
-    time => {
-      animationTime.textContent = time;
-    },
-    {fireImmediately: true},
-  ),
-];
-const pauseHiddenAnimation = () => {
-  if (document.hidden) animation.pause();
-};
-document.addEventListener('visibilitychange', pauseHiddenAnimation);
-window.addEventListener(
-  'pagehide',
-  () => {
-    animation.stop();
-    stopAnimationControls.forEach(stop => stop());
-    document.removeEventListener('visibilitychange', pauseHiddenAnimation);
-  },
-  {once: true},
-);
+window.addEventListener('pagehide', () => animationControls.dispose(), {
+  once: true,
+});
 let statusRevealTimer: ReturnType<typeof setTimeout> | undefined;
 const stopViewportStatus = reaction(
   () => {
