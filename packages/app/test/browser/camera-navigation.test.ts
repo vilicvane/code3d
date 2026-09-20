@@ -11,6 +11,105 @@ declare const window: Window & {
 };
 
 test(
+  'idle viewports stop drawing and redraw after edits, navigation, resize and image export',
+  {timeout: 120_000},
+  async t => {
+    const {page, errors} = await openNavigationPage(t);
+    const source =
+      "import {box} from '@code3d/core'; export default box(24, 6, 14).material('#8ed5d1');";
+    await setSource(page, source);
+    const frames = () =>
+      page.evaluate(
+        () => window.navigationApp.viewport['renderer'].info.render.frame,
+      );
+    const assertIdle = async () => {
+      await page.waitForFunction(
+        () => !window.navigationApp.viewport['controls'].transitioning,
+      );
+      // Let already scheduled presentation and grid reactions finish, then observe
+      // a real idle interval. A perpetual RAF loop keeps increasing the draw count.
+      await page.evaluate(
+        () =>
+          new Promise<void>(resolve =>
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => resolve()),
+              ),
+            ),
+          ),
+      );
+      const before = await frames();
+      await page.waitForTimeout(250);
+      assert.equal(await frames(), before, 'A static viewport must not redraw');
+      return before;
+    };
+    const assertRedrawn = async (before: number) => {
+      await page.waitForFunction(
+        before =>
+          window.navigationApp.viewport['renderer'].info.render.frame > before,
+        before,
+      );
+      return assertIdle();
+    };
+
+    let before = await assertIdle();
+    await setSource(page, source.replace('box(24', 'box(32'));
+    before = await assertRedrawn(before);
+    await page.evaluate(() => {
+      const v = window.navigationApp.viewport;
+      const direction = v['camera'].position.clone().set(1, 0, 0);
+      v['controls'].setViewDirection(direction, direction.clone().set(0, 1, 0));
+    });
+    before = await assertRedrawn(before);
+    assert.equal(
+      await page.evaluate(() => window.navigationApp.viewport['camera'].type),
+      'OrthographicCamera',
+    );
+    await rotate(page);
+    before = await assertRedrawn(before);
+    assert.equal(
+      await page.evaluate(() => window.navigationApp.viewport['camera'].type),
+      'PerspectiveCamera',
+    );
+
+    await page.setViewportSize({width: 1280, height: 900});
+    before = await assertRedrawn(before);
+    const modeling = await page
+      .locator('.viewport-canvas')
+      .first()
+      .screenshot();
+    await page.evaluate(() =>
+      window.navigationApp.viewport.setRenderMode('render'),
+    );
+    before = await assertRedrawn(before);
+    const rendered = await page
+      .locator('.viewport-canvas')
+      .first()
+      .screenshot();
+    assert.notDeepEqual(
+      rendered,
+      modeling,
+      'Mode changes must reach the canvas',
+    );
+    const image = await page.evaluate(async () => {
+      const blob = await window.navigationApp.viewport.captureImage(320, 240);
+      const bitmap = await createImageBitmap(blob);
+      const result = {
+        width: bitmap.width,
+        height: bitmap.height,
+        size: blob.size,
+      };
+      bitmap.close();
+      return result;
+    });
+    assert.deepEqual([image.width, image.height], [320, 240]);
+    assert.ok(image.size > 1000);
+    await assertRedrawn(before);
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'camera freely crosses poles, pans, restores orientation and zooms beyond the old distance limits',
   {timeout: 120_000},
   async t => {

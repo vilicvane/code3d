@@ -264,6 +264,7 @@ export class TransformGizmo {
       binding: TransformGizmoBinding,
     ) => boolean = () => true,
     private readonly context: () => string | undefined = () => undefined,
+    private readonly onChange: () => void = () => {},
   ) {
     makeObservable<
       this,
@@ -347,6 +348,7 @@ export class TransformGizmo {
       controls.addEventListener('mouseDown', () => this.beginDrag(control));
       controls.addEventListener('objectChange', () => this.updateDrag(control));
       controls.addEventListener('mouseUp', () => this.finishDrag(control));
+      controls.addEventListener('change', onChange);
       return control;
     };
     this.axes = [];
@@ -359,6 +361,7 @@ export class TransformGizmo {
         control.controls.enabled = visible;
         if (!visible && this.hovered === control) this.setHovered(undefined);
       }
+      onChange();
     });
     domElement.style.touchAction = 'none';
     const options = {signal: this.pointerListeners.signal};
@@ -505,6 +508,7 @@ export class TransformGizmo {
       proxy.updateMatrixWorld(true);
     }
     this.updateScreenSize();
+    this.onChange();
   }
 
   updateScreenSize(viewportHeight = this.domElement.clientHeight): void {
