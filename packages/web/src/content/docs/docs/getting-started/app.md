@@ -228,6 +228,29 @@ transparency. You can still rotate, pan, and zoom; PNG export follows this
 mode. Switch back to **Modeling** to select geometry and use its tools.
 This switch applies to the 3D viewport; sketch editing keeps its 2D tools.
 
+In **Render**, use the **Render scene** menu in the viewport's upper-right corner to
+choose **Studio** (the default neutral lighting), **Side light** (stronger
+directional contrast), or **Soft light** (broad, soft lighting).
+The choice updates lighting and environment reflections while keeping the same
+dark background; image exports from the viewport use the same scene. Modeling
+keeps its original lighting and background. Returning to Render restores your selection.
+
+Render uses directional lighting, soft shadows, and ambient occlusion to make
+side faces, recesses, and contact areas easier to distinguish while preserving
+the authored materials. These effects also appear in exported PNGs. Transparent
+parts keep their transparency and do not cast solid shadows. Ambient occlusion
+uses the surfaces visible from the current view; it is an approximation, not a
+path-traced render. Modeling keeps its existing lighting and edge guides.
+
+The scene choice is saved in this browser and restored when you reload or reopen
+the App. It applies across the models and projects you preview. Open the menu with
+Enter, Space, or an arrow key; use Up/Down and Home/End to move through scenes,
+Enter to select, and Escape to close. The current scene has a checkmark.
+This selector provides built-in
+presets; custom environment uploads and individual light controls are not available.
+Materials with their own `envMap` retain that reflection map. Agent-requested
+renders use Studio independently of this viewport selection.
+
 During the session, each displayed model or collection remembers its view and
 Modeling/Render mode. Returning to it restores your rotation, pan, zoom and
 perspective or orthographic projection;

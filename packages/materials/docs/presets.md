@@ -78,9 +78,16 @@ renderer, so the same preset responds to the environment in which it is shown.
 The package does not load textures or require a browser/WebGL context to create
 materials.
 
-The App uses neutral white studio lighting and a shared reflection environment.
-The viewport and PNG output use the same environment. Switch to **Render** to
-compare surface finishes without modeling overlays.
+The App defaults to neutral white studio lighting and a shared reflection environment.
+Switch to **Render** to compare surface finishes without modeling overlays, then
+use **Render scene** in the viewport's upper-right corner to choose Studio,
+Side light, or Soft light. Viewport PNG
+exports use the selected scene; Modeling keeps its original environment.
+The selection is saved in this browser and restored after reloading. A material's own `envMap`
+overrides the scene reflection environment for that material.
+Render lighting includes shadows and ambient occlusion to make recesses and
+contact areas readable. Transparent materials keep their authored blending and
+do not contribute solid occlusion or opaque shadows.
 
 Complete example: [material palette](../../app/examples/packages/materials.ts).
 For package setup, see [installation](../README.md#installation).

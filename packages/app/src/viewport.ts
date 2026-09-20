@@ -56,6 +56,10 @@ import {
   type ModelRenderMode,
 } from './rendering/model-renderer';
 import {
+  RenderScenePreference,
+  type RenderScenePreset,
+} from './rendering/render-scene';
+import {
   TransformGizmo,
   bindingTool,
   type SpatialTool,
@@ -190,6 +194,7 @@ export type ModelViewportOptions = Readonly<{
   showCoordinateReference?: boolean;
   animateViewChanges?: boolean;
   isViewVisible?: () => boolean;
+  renderScene?: RenderScenePreference;
 }>;
 
 export type TopologySelectionEvent =
@@ -414,6 +419,7 @@ export class ModelViewport {
       showCoordinateReference = true,
       animateViewChanges = true,
       isViewVisible = () => true,
+      renderScene = new RenderScenePreference(),
     }: ModelViewportOptions,
   ) {
     this.onSelect = onSelect;
@@ -424,7 +430,12 @@ export class ModelViewport {
     this.onNavigateSource = onNavigateSource;
     this.onTopologySelection = onTopologySelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
-    this.rendering = new ModelRenderer(this.container, this.requestRender);
+    this.rendering = new ModelRenderer(
+      this.container,
+      this.requestRender,
+      undefined,
+      renderScene,
+    );
     makeObservable<
       this,
       | 'module'
@@ -481,6 +492,8 @@ export class ModelViewport {
       gridStep: computed,
       renderMode: computed,
       setRenderMode: action,
+      renderScenePreset: computed,
+      setRenderScenePreset: action,
     });
     this.scene = this.rendering.scene;
     this.renderer = this.rendering.renderer;
@@ -609,6 +622,20 @@ export class ModelViewport {
       this.updateTopologyHover(undefined);
     });
 
+    const stopRenderMode = reaction(
+      () => this.renderMode,
+      mode => {
+        this.container.dataset.renderMode = mode;
+        this.selectionGesture = undefined;
+        this.selectionClick = undefined;
+        this.topologyPointer = undefined;
+        this.updateTopologyHover(undefined);
+        this.coordinateReference?.setVisible(mode === 'modeling');
+        this.updateTransformGizmo();
+        this.requestRender();
+      },
+      {fireImmediately: true},
+    );
     const resizeObserver = new ResizeObserver(() => this.resize());
     resizeObserver.observe(this.container);
     window.addEventListener(
@@ -619,6 +646,7 @@ export class ModelViewport {
           cancelAnimationFrame(this.pendingFrame);
         resizeObserver.disconnect();
         stopSourceDecorations();
+        stopRenderMode();
         this.transformGizmo.dispose();
         this.controls.dispose();
       },
@@ -641,16 +669,15 @@ export class ModelViewport {
   }
 
   setRenderMode(mode: ModelRenderMode): void {
-    if (this.rendering.mode === mode) return;
     this.rendering.setMode(mode);
-    this.container.dataset.renderMode = mode;
-    this.selectionGesture = undefined;
-    this.selectionClick = undefined;
-    this.topologyPointer = undefined;
-    this.updateTopologyHover(undefined);
-    this.coordinateReference?.setVisible(mode === 'modeling');
-    this.updateTransformGizmo();
-    this.requestRender();
+  }
+
+  get renderScenePreset(): RenderScenePreset {
+    return this.rendering.scenePreset;
+  }
+
+  setRenderScenePreset(preset: RenderScenePreset): void {
+    this.rendering.setScenePreset(preset);
   }
 
   /** Keep stale handles unavailable until a replacement model is rendered. */

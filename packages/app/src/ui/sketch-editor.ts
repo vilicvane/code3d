@@ -483,6 +483,8 @@ export class SketchEditor {
   dispose(): void {
     this.cancel();
     this.stopDrawing();
+    this.toolbar.dispose();
+    this.constraintTools.dispose();
     this.navigation.reset();
     this.abort.abort();
     this.resize.disconnect();
