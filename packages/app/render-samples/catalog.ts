@@ -9,7 +9,7 @@ export const renderSamples = [
     description:
       'Compare ten equal-size spheres in a grid: plastic, rubber, four metals, glass, acrylic, ceramic and paint.',
     category: 'Materials',
-    file: 'packages/material-presets.ts',
+    file: 'packages/materials.ts',
     focus: {context: 'export default palette;', token: 'palette'},
     mode: 'render',
     view: {direction: [0, 2, 1], up: [0, 1, 0]},
@@ -60,7 +60,7 @@ export const renderSamples = [
     description:
       'Build five complete nominal gear parts with the Gears API: a plain bore, keyed hub, integral shaft, helical hub, and bolted internal ring.',
     category: 'Practical models',
-    file: 'packages/gears.ts',
+    file: 'packages/gears/parts.ts',
     focus: {context: 'export default group(', token: 'group'},
     view: {direction: [0.7, 1.7, 1.2], up: [0, 1, 0]},
     tags: ['gears', 'bore', 'hub', 'shaft', 'helical', 'internal'],
@@ -71,7 +71,7 @@ export const renderSamples = [
     description:
       'Mesh three spur gears around a 120° center angle, then constrain the assembled group to a mounting plate.',
     category: 'Practical models',
-    file: 'packages/gear-assembly.ts',
+    file: 'packages/gears/assembly.ts',
     focus: {
       context:
         "export default group([mountingPlate, train], 'Mounted gear train')",
@@ -546,8 +546,8 @@ export const sourceContextSets: Readonly<
 
 // Every runnable source, including reusable project parts, is checked by the example tests.
 export const exampleEntries = [
-  {file: 'packages/gears.ts'},
-  {file: 'packages/gear-assembly.ts'},
+  {file: 'packages/gears/parts.ts'},
+  {file: 'packages/gears/assembly.ts'},
   {file: 'packages/screws.ts'},
   {
     file: 'projects/desktop-controller/enclosure.ts',
@@ -584,7 +584,7 @@ export const exampleEntries = [
   {
     file: 'materials.ts',
   },
-  {file: 'packages/material-presets.ts'},
+  {file: 'packages/materials.ts'},
   {
     file: 'text.ts',
   },
@@ -647,6 +647,9 @@ export const exampleEntries = [
 
 // Existing user files take precedence over relocated public example links.
 export const movedExamplePaths: Readonly<Record<string, string>> = {
+  '/examples/packages/gears.ts': '/examples/packages/gears/parts.ts',
+  '/examples/packages/gear-assembly.ts': '/examples/packages/gears/assembly.ts',
+  '/examples/packages/material-presets.ts': '/examples/packages/materials.ts',
   '/examples/materials/materials.ts': '/examples/materials.ts',
   '/examples/text/text.ts': '/examples/text.ts',
   '/examples/expose/expose.ts': '/examples/expose.ts',

@@ -70,7 +70,7 @@ restores the source and its resulting geometry.
 - [Desktop stand](https://www.code3d.org/app/#/file/examples/projects/phone-stand.ts): change the width and lean of a one-piece phone stand.
 - [Mounting plate](https://www.code3d.org/app/#/file/examples/sketches/mounting-plate.ts): edit a slot on a rotated part's plane.
 - [Text](https://www.code3d.org/app/#/file/examples/text.ts): raised and engraved text using Google Fonts.
-- [Complete gear parts](https://www.code3d.org/app/#/file/examples/packages/gears.ts): compare spur, helical and internal gears with different mounting structures.
+- [Complete gear parts](https://www.code3d.org/app/#/file/examples/packages/gears/parts.ts): compare spur, helical and internal gears with different mounting structures.
 - [Third-party npm packages](https://www.code3d.org/app/#/file/examples/npm/model.ts): install and use a browser-compatible npm dependency.
 - [Desktop controller](https://www.code3d.org/app/#/file/examples/projects/desktop-controller/model.ts): explore a multi-file assembly and export STEP, STL or 3MF.
 - [Modeling with an agent](docs/agents.md): connect an agent and continue editing the same project.

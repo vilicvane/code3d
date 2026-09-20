@@ -44,7 +44,7 @@ test(
     );
     await page.goto(url);
     const source = await readFile(
-      new URL('../../examples/packages/gear-assembly.ts', import.meta.url),
+      new URL('../../examples/packages/gears/assembly.ts', import.meta.url),
       'utf8',
     );
     const samples = await page.evaluate(async source => {

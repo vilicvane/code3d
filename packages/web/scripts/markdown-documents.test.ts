@@ -204,7 +204,7 @@ test('package screenshots follow code and canonical overview examples stay in sy
   for (const [document, example] of [
     ['core/README.md', 'constraints/relate.ts'],
     ['layout/README.md', 'packages/layout/linear.ts'],
-    ['materials/README.md', 'packages/material-presets.ts'],
+    ['materials/README.md', 'packages/materials.ts'],
     ['layout/docs/layouts.md', 'packages/layout/grid.ts'],
     ['layout/docs/layouts.md', 'packages/layout/radial.ts'],
   ]) {
@@ -234,7 +234,7 @@ test('Gears pairs a short related snippet with the colored multi-gear overview',
     'utf8',
   );
   const gallery = await readFile(
-    path.join(repository, 'packages/app/examples/packages/gears.ts'),
+    path.join(repository, 'packages/app/examples/packages/gears/parts.ts'),
     'utf8',
   );
   const snippet = fromMarkdown(markdown).children.find(
