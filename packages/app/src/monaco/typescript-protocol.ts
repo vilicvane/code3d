@@ -31,6 +31,18 @@ export interface ProjectTypeScriptWorker
     data: TypeScriptCompletionEntryData | undefined,
   ): Promise<TypeScriptCompletionEntryDetails | undefined>;
 
+  getProjectCodeFixes(
+    fileName: string,
+    start: number,
+    end: number,
+    errorCodes: readonly number[],
+  ): Promise<readonly typeScript.CodeFixAction[]>;
+
+  getProjectCombinedCodeFix(
+    fileName: string,
+    fixId: string,
+  ): Promise<typeScript.CombinedCodeActions>;
+
   getProjectSelectionRanges(
     fileName: string,
     positions: readonly number[],

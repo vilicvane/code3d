@@ -77,7 +77,22 @@ export class ProjectPackages implements ProjectFileReader {
     this.metadata = source;
     this.source = ownsCore ? 'project' : 'builtin';
     // A loose model defaults to ESM without writing a package.json to disk.
-    this.effectiveMetadata = JSON.stringify({type: 'module', ...metadata});
+    this.effectiveMetadata = JSON.stringify({
+      type: 'module',
+      ...metadata,
+      // Language services filter auto-imports against visible dependencies.
+      // Built-ins are available in this virtual filesystem even in loose files.
+      ...(ownsCore
+        ? {}
+        : {
+            dependencies: {
+              ...Object.fromEntries(
+                builtinPackageNames.map(name => [name, '*']),
+              ),
+              ...metadata.dependencies,
+            },
+          }),
+    });
     return changed;
   }
 

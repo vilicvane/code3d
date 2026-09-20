@@ -33,6 +33,8 @@ export type ProjectLanguage = Readonly<{
   navigationFiles: readonly ProjectSourceFile[];
   /** Compiler-injected imports, kept out of user files and navigation snapshots. */
   toolingFile?: ProjectSourceFile;
+  /** Package exports indexed separately, without adding globals to the model program. */
+  autoImportFile?: ProjectSourceFile;
   compilerOptions: ts.CompilerOptions;
   packageSpecifiers: readonly string[];
   realPaths?: Readonly<Record<string, string>>;
@@ -56,6 +58,7 @@ export class ProjectLanguageLoader {
   private metadataOverlays = new Map<string, string>();
   private readonly navigation = new Map<string, Set<string>>();
   private program?: ts.Program;
+  private autoImportProgram?: ts.Program;
   private options?: ts.CompilerOptions;
   private directory?: string;
 
@@ -74,6 +77,7 @@ export class ProjectLanguageLoader {
     this.metadataOverlays.clear();
     this.navigation.clear();
     this.program = undefined;
+    this.autoImportProgram = undefined;
     this.options = undefined;
     this.directory = undefined;
   }
@@ -100,6 +104,7 @@ export class ProjectLanguageLoader {
       if (path.endsWith('.json')) this.sourceFiles.clear();
       // Previously failed resolutions must also notice newly created files.
       this.program = undefined;
+      this.autoImportProgram = undefined;
       this.options = undefined;
       this.navigation.clear();
     }
@@ -159,6 +164,9 @@ export class ProjectLanguageLoader {
     const toolingPath = normalizeProjectPath(
       directory + '/.__code3d-tooling.ts',
     );
+    const autoImportPath = normalizeProjectPath(
+      directory + '/.__code3d-auto-imports.ts',
+    );
     const metadataPath = normalizeProjectPath(directory + '/package.json');
     const configPath = normalizeProjectPath(directory + '/tsconfig.json');
     const localPaths = new Set(
@@ -170,6 +178,7 @@ export class ProjectLanguageLoader {
         this.filePresence.delete(path);
         sourceFiles.delete(path);
         this.program = undefined;
+        this.autoImportProgram = undefined;
       }
     }
     for (const file of localFiles) {
@@ -223,6 +232,8 @@ export class ProjectLanguageLoader {
     read(configPath);
     let options = this.options ?? projectCompilerOptions;
     let program: ts.Program;
+    let autoImportProgram: ts.Program;
+    let packageSpecifiers: string[];
     for (;;) {
       if (pending.size || pendingPresence.size) {
         prepare();
@@ -234,6 +245,7 @@ export class ProjectLanguageLoader {
         pendingPresence.clear();
         // Discovery may have resolved a prior miss; do not reuse its resolution.
         this.program = undefined;
+        this.autoImportProgram = undefined;
         await readAll([
           statProjectFiles(reader, presenceRequests).then(infos => {
             for (const [index, path] of presenceRequests.entries())
@@ -282,6 +294,34 @@ export class ProjectLanguageLoader {
           noEmit: true,
         };
       }
+      const metadata = sources.get(metadataPath);
+      const packageJson = metadata
+        ? ts.parseConfigFileTextToJson(metadataPath, metadata).config
+        : {};
+      packageSpecifiers = [
+        ...new Set([
+          ...availablePackages,
+          ...Object.keys({
+            ...packageJson?.dependencies,
+            ...packageJson?.devDependencies,
+            ...packageJson?.peerDependencies,
+            ...packageJson?.optionalDependencies,
+          }),
+        ]),
+      ];
+      const autoImports = packageSpecifiers
+        .map(name => `import type {} from ${JSON.stringify(name)};`)
+        .join('\n');
+      if (sources.get(autoImportPath) !== autoImports) {
+        sources.set(autoImportPath, autoImports);
+        sourceFiles.delete(autoImportPath);
+      }
+      autoImportProgram = ts.createProgram({
+        rootNames: [autoImportPath, '/lib.es5.d.ts'],
+        options,
+        host,
+        oldProgram: this.autoImportProgram,
+      });
       program = ts.createProgram({
         rootNames: roots,
         options,
@@ -292,10 +332,7 @@ export class ProjectLanguageLoader {
     }
     this.options = options;
     this.program = program;
-    const metadata = sources.get(metadataPath);
-    const packageJson = metadata
-      ? ts.parseConfigFileTextToJson(metadataPath, metadata).config
-      : {};
+    this.autoImportProgram = autoImportProgram;
     const projectPaths = new Set(
       project.files
         .filter(file => isSourceFile(file.path))
@@ -363,8 +400,18 @@ export class ProjectLanguageLoader {
         navigation.forEach(path => navigationFiles.add(path));
       }),
     );
+    // Keep unreferenced package declarations available to the export index and
+    // navigation, without making them roots or globals in the model program.
+    for (const file of autoImportProgram.getSourceFiles()) {
+      if (file.fileName !== autoImportPath && file.fileName !== '/lib.es5.d.ts')
+        navigationFiles.add(file.fileName);
+    }
     return {
       rootPaths: [...localPaths],
+      autoImportFile: {
+        path: autoImportPath,
+        source: sources.get(autoImportPath)!,
+      },
       toolingFile: {path: toolingPath, source: sources.get(toolingPath)!},
       realPaths: Object.fromEntries(realPaths),
       navigationFiles: [...navigationFiles].flatMap(path => {
@@ -379,6 +426,7 @@ export class ProjectLanguageLoader {
         source !== undefined &&
         path !== '/lib.es5.d.ts' &&
         path !== toolingPath &&
+        path !== autoImportPath &&
         (reachable.has(path) ||
           reachable.has(realPaths.get(path) ?? '') ||
           path.endsWith('.json')) &&
@@ -387,17 +435,7 @@ export class ProjectLanguageLoader {
           : [],
       ),
       compilerOptions: options,
-      packageSpecifiers: [
-        ...new Set([
-          ...availablePackages,
-          ...Object.keys({
-            ...packageJson?.dependencies,
-            ...packageJson?.devDependencies,
-            ...packageJson?.peerDependencies,
-            ...packageJson?.optionalDependencies,
-          }),
-        ]),
-      ],
+      packageSpecifiers,
     };
   }
 }

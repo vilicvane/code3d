@@ -367,6 +367,22 @@ Monaco 诊断适配器的补丁在每个异步边界核对文档版本、extra l
 销毁前发出的旧请求不能回写标记。验证见
 [语言就绪与迟到诊断](../../../packages/app/test/browser/language-readiness.test.ts)。
 
+[快速修复适配](../../../packages/app/src/monaco/typescript-code-actions.ts)替代 Monaco
+内置 code-action provider，按各条诊断的实际范围查询 Worker。补全和快速修复共用
+导入偏好及格式；单符号修复与 TypeScript 的文件级 import fix 都通过带文档版本的
+Monaco WorkspaceEdit 应用，批量导入由语言服务合并为一次可撤销事务。每个异步
+边界核对取消、文档版本、语言及 extra libs/编译配置身份；不应用陈旧修复，也不把
+涉及文件创建、其他文件或额外命令的修复误写入当前文件。
+
+可见依赖的导出通过独立 auto-import Program 提供。ProjectLanguageLoader 复用
+文件缓存加载内置及项目声明依赖，以单独的生成入口索引导出；未被模型引用的声明
+只进入导航快照，不能改变模型 Program 的全局类型。Worker 经 TypeScript 的
+`getPackageJsonAutoImportProvider` 复用该入口，extra libs 更新同时同步索引服务。
+内置包模式的虚拟 package.json 显式包含可用内置依赖，使 TypeScript 的导入过滤与
+实际包解析一致，不改写磁盘清单。验证见
+[语言缓存](../../../packages/app/test/project-language.test.ts)与
+[补全及导入修复](../../../packages/app/test/browser/completion-language.test.ts)。
+
 语法着色由 Monaco 的 tokenizer 和可见行调度负责，与 TypeScript Worker 诊断、
 未使用变量淡化和括号配色分别运行。Monaco 0.56 的初次渲染没有登记可见行，
 空闲任务延迟时新文件会一直使用空 token；Sticky Scroll 又可能读取视口外的

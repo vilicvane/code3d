@@ -322,3 +322,58 @@ test('declaration-map sources remain outside the dependency graph until directly
       .some(diagnostic => diagnostic.code === 2322),
   );
 });
+
+test('indexes declared dependencies separately and refreshes exports when the manifest changes', async () => {
+  const state = fixture({
+    '/package.json': '{"type":"module","dependencies":{"one":"1"}}',
+    '/node_modules/one/index.d.ts':
+      'export declare const part: number; declare global { interface String { packageGlobal: number; } }',
+  });
+  const source = 'export const result = "".packageGlobal;';
+  const first = await state.load(source);
+  assert.ok(first.language.autoImportFile?.source.includes('"one"'));
+  assert.ok(
+    first.language.navigationFiles.some(
+      file => file.path === '/node_modules/one/index.d.ts',
+    ),
+  );
+  assert.ok(
+    !first.language.files.some(
+      file => file.path === '/node_modules/one/index.d.ts',
+    ),
+  );
+  const program = state.loader.typeScriptProgram;
+  assert.equal(
+    program.getSourceFile('/node_modules/one/index.d.ts'),
+    undefined,
+  );
+  assert.ok(
+    program
+      .getSemanticDiagnostics(program.getSourceFile('/model.ts'))
+      .some(d => d.code === 2339),
+  );
+  const reads = state.reads.length;
+  assert.equal((await state.load(source)).preparations, 0);
+  assert.equal(
+    state.reads.length,
+    reads,
+    'warm edits reuse package export declarations',
+  );
+
+  state.files.set(
+    '/package.json',
+    '{"type":"module","dependencies":{"two":"1"}}',
+  );
+  const changed = await state.load(source);
+  assert.ok(!changed.language.autoImportFile?.source.includes('"one"'));
+  assert.ok(
+    changed.language.navigationFiles.some(
+      file => file.path === '/node_modules/two/index.d.ts',
+    ),
+  );
+  assert.ok(
+    !changed.language.navigationFiles.some(
+      file => file.path === '/node_modules/one/index.d.ts',
+    ),
+  );
+});

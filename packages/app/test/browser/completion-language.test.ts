@@ -17,9 +17,20 @@ interface CompletionHarness {
   setDeclaration?: (source: string | undefined) => void;
 }
 declare const harness: CompletionHarness;
-declare const window: Window & {harness: CompletionHarness};
+declare const window: Window & {
+  harness: CompletionHarness;
+  markers(): import('monaco-editor/editor').editor.IMarker[];
+};
 
-async function createEditor(t: TestContext) {
+async function createEditor(
+  t: TestContext,
+  files = [
+    {
+      path: '/model.ts',
+      source: "import {box} from '@code3d/core';\nbox(100, 100, 100).up;",
+    },
+  ],
+) {
   assert.ok(
     process.env.CODE3D_TEST_URL,
     'Set CODE3D_TEST_URL to the task server',
@@ -32,6 +43,13 @@ async function createEditor(t: TestContext) {
   const context = await browser.newContext();
   t.after(() => context.close());
   const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error' && /mobx|reaction/i.test(message.text()))
+      errors.push(message.text());
+  });
+  t.after(() => assert.deepEqual(errors, []));
   const url = new URL(
     '/__completion-language-test__',
     process.env.CODE3D_TEST_URL,
@@ -43,30 +61,32 @@ async function createEditor(t: TestContext) {
       body: '<main style="height:600px"></main>',
     }),
   );
+  await page.route('**/src/editor.ts*', async route => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body:
+        (await response.text()) +
+        '\nwindow.markers = () => monaco.editor.getModelMarkers({});',
+    });
+  });
   await page.goto(url);
-  await page.evaluate(async () => {
+  await page.evaluate(async files => {
     const {CodeEditor} = await import('/src/editor.ts');
     const {ModelCompilerClient} = await import('/src/model/compiler-client.ts');
     const {browserPackageFiles} =
       await import('/src/project/browser-packages.ts');
     const {projectTypeScriptWorker} =
       await import('/src/monaco/typescript-worker-client.ts');
-    const project = {
-      files: [
-        {
-          path: '/model.ts',
-          source: "import {box} from '@code3d/core';\nbox(100, 100, 100).up;",
-        },
-      ],
-    };
+    const project = {files};
     const editor = new CodeEditor(
       document.querySelector('main')!,
       project,
-      '/model.ts',
+      files[0].path,
     );
     const compiler = new ModelCompilerClient(browserPackageFiles);
     try {
-      await compiler.compile(project, '/model.ts');
+      await compiler.compile(project, files[0].path);
       editor.setProjectLanguage(compiler.language!);
     } finally {
       compiler.dispose();
@@ -76,14 +96,14 @@ async function createEditor(t: TestContext) {
       editor,
       model,
       language: compiler.language!,
-      worker: () => projectTypeScriptWorker('typescript', model!.uri),
+      worker: () => projectTypeScriptWorker(model.getLanguageId(), model.uri),
       complete: worker =>
         worker.getProjectCompletions(
           model!.uri.toString(),
           model!.getValueLength(),
         ),
     };
-  });
+  }, files);
   return page;
 }
 
@@ -355,6 +375,211 @@ test(
     assert.deepEqual(result.removed, []);
     await page.waitForFunction(
       () => !window.harness.editor.diagnosticCounts.has('/reference.ts'),
+    );
+  },
+);
+
+async function quickFix(
+  page: Awaited<ReturnType<typeof createEditor>>,
+  symbol: string,
+  title: string,
+) {
+  await page.waitForFunction(symbol => {
+    const offset = harness.model.getValue().lastIndexOf(symbol);
+    return window
+      .markers()
+      .filter(
+        marker => marker.resource.toString() === harness.model.uri.toString(),
+      )
+      .some(
+        marker =>
+          Number(marker.code) === 2304 &&
+          harness.model.getOffsetAt({
+            lineNumber: marker.startLineNumber,
+            column: marker.startColumn,
+          }) === offset,
+      );
+  }, symbol);
+  await page.evaluate(symbol => {
+    const {model, editor} = harness;
+    editor.editor.setPosition(
+      model.getPositionAt(model.getValue().lastIndexOf(symbol) + 1),
+    );
+    editor.editor.focus();
+  }, symbol);
+  await page.keyboard.press('Control+.');
+  const option = page.locator('.action-widget').getByText(title, {exact: true});
+  await option.waitFor({state: 'visible', timeout: 5000});
+  const bounds = (await option.boundingBox())!;
+  // Monaco blocks menu clicks until the pointer moves after opening the menu.
+  await page.mouse.move(
+    bounds.x + bounds.width / 2,
+    bounds.y + bounds.height / 2,
+  );
+  await option.click();
+}
+
+test(
+  'quick fixes add and merge built-in imports, support undo, and fix all in one edit',
+  {timeout: 60_000},
+  async t => {
+    const page = await createEditor(t);
+    const source =
+      'export const model = box(10, 20, 30);\nexport const hole = cylinder(4, 5);';
+    await page.evaluate(source => harness.model.setValue(source), source);
+    await quickFix(page, 'box', 'Add import from "@code3d/core"');
+    const single = await page.evaluate(() => harness.model.getValue());
+    assert.match(single, /^import \{box\} from '@code3d\/core';/);
+    assert.ok(!single.includes('{box, cylinder}'));
+    await page.evaluate(() => harness.model.undo());
+    assert.equal(await page.evaluate(() => harness.model.getValue()), source);
+
+    await quickFix(page, 'box', 'Add all missing imports');
+    const combined = await page.evaluate(async () => ({
+      source: harness.model.getValue(),
+      diagnostics: await (
+        await harness.worker()
+      ).getSemanticDiagnostics(harness.model.uri.toString()),
+    }));
+    assert.match(
+      combined.source,
+      /^import \{box, cylinder\} from '@code3d\/core';/,
+    );
+    assert.deepEqual(combined.diagnostics, []);
+    await page.evaluate(() => harness.model.undo());
+    assert.equal(await page.evaluate(() => harness.model.getValue()), source);
+
+    const existing = "import {group} from '@code3d/core';\n" + source;
+    await page.evaluate(source => harness.model.setValue(source), existing);
+    await quickFix(page, 'box', 'Update import from "@code3d/core"');
+    const merged = await page.evaluate(() => harness.model.getValue());
+    assert.match(merged, /^import \{box, group\} from '@code3d\/core';/);
+    assert.equal(merged.match(/from '@code3d\/core'/g)?.length, 1);
+  },
+);
+
+test(
+  'quick fixes discover local modules and unimported packages without leaking globals',
+  {timeout: 60_000},
+  async t => {
+    const page = await createEditor(t, [
+      {
+        path: '/model.ts',
+        source: 'export const result = [bracket, assembleGears];',
+      },
+      {path: '/parts/bracket.ts', source: 'export const bracket = 42;'},
+    ]);
+    const completionEdits = await page.evaluate(async () => {
+      const worker = await harness.worker();
+      const file = harness.model.uri.toString();
+      const offset =
+        harness.model.getValue().indexOf('bracket') + 'bracket'.length;
+      const info = await worker.getProjectCompletions(file, offset);
+      const entry = info!.entries.find(
+        entry => entry.name === 'bracket' && entry.source,
+      )!;
+      return (
+        await worker.getProjectCompletionDetails(
+          file,
+          offset,
+          entry.name,
+          entry.source,
+          entry.data,
+        )
+      )?.codeActions;
+    });
+    assert.ok(JSON.stringify(completionEdits).includes('./parts/bracket.ts'));
+    await quickFix(page, 'bracket', 'Add import from "./parts/bracket.ts"');
+    assert.match(
+      await page.evaluate(() => harness.model.getValue()),
+      /^import \{bracket\} from '\.\/parts\/bracket.ts';/,
+    );
+    await page.evaluate(() => harness.model.undo());
+    assert.equal(
+      await page.evaluate(() => harness.model.getValue()),
+      'export const result = [bracket, assembleGears];',
+    );
+    await quickFix(page, 'assembleGears', 'Add all missing imports');
+    const all = await page.evaluate(() => harness.model.getValue());
+    assert.match(all, /import \{assembleGears\} from '@code3d\/gears';/);
+    assert.match(all, /import \{bracket\} from '\.\/parts\/bracket.ts';/);
+
+    await page.evaluate(() => {
+      const h = harness;
+      h.language = {
+        ...h.language,
+        autoImportFile: {
+          path: '/.__code3d-auto-imports.ts',
+          source: 'import type {} from "fixture-parts";',
+        },
+        navigationFiles: [
+          ...h.language.navigationFiles,
+          {
+            path: '/node_modules/fixture-parts/index.d.ts',
+            source:
+              'export declare const fixturePart: number;\ndeclare global { interface String { unwantedPackageGlobal: number; } }',
+          },
+        ],
+        files: [
+          ...h.language.files.filter(file => file.path !== '/package.json'),
+          {
+            path: '/package.json',
+            source:
+              '{"type":"module","dependencies":{"fixture-parts":"1.0.0"}}',
+          },
+          {
+            path: '/node_modules/fixture-parts/package.json',
+            source: '{"name":"fixture-parts","types":"index.d.ts"}',
+          },
+        ],
+      };
+      h.editor.setProjectLanguage(h.language);
+      h.model.setValue(
+        'export const part = fixturePart;\n"".unwantedPackageGlobal;',
+      );
+    });
+    const before = await page.evaluate(async () =>
+      (
+        await (
+          await harness.worker()
+        ).getSemanticDiagnostics(harness.model.uri.toString())
+      ).map(d => d.code),
+    );
+    assert.deepEqual(before.sort(), [2304, 2339]);
+    await quickFix(page, 'fixturePart', 'Add import from "fixture-parts"');
+    assert.match(
+      await page.evaluate(() => harness.model.getValue()),
+      /^import \{fixturePart\} from 'fixture-parts';/,
+    );
+    const after = await page.evaluate(async () =>
+      (
+        await (
+          await harness.worker()
+        ).getSemanticDiagnostics(harness.model.uri.toString())
+      ).map(d => d.code),
+    );
+    assert.deepEqual(
+      after,
+      [],
+      'an explicit import enables the package global augmentation',
+    );
+  },
+);
+
+test(
+  'JavaScript quick fixes use the same package import rules',
+  {timeout: 60_000},
+  async t => {
+    const page = await createEditor(t, [
+      {
+        path: '/model.js',
+        source: '// @ts-check\nexport const part = box(10, 20, 30);',
+      },
+    ]);
+    await quickFix(page, 'box', 'Add import from "@code3d/core"');
+    assert.match(
+      await page.evaluate(() => harness.model.getValue()),
+      /import \{box\} from '@code3d\/core';/,
     );
   },
 );

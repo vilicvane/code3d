@@ -181,6 +181,21 @@ Deleting every file leaves an empty project. You can create a new file there;
 refreshing does not restore files you deleted. Closing every tab also leaves
 the editor empty, while preserving the project's files.
 
+### Fix missing imports
+
+In TypeScript or JavaScript with type checking enabled, place the cursor on an
+unresolved name and press **Ctrl+.** (**Cmd+.** on macOS), or open its light bulb.
+Choose **Add import from …** to import that symbol, or **Update import from …**
+to extend an existing import. When multiple imports are missing, **Add all
+missing imports** applies TypeScript's suggested imports throughout the file.
+Use an individual fix to choose a source when several modules export the same name.
+
+Imports can come from project modules, built-in Code3D packages, and installed
+project dependencies, including packages not yet imported in the file. Project
+paths are relative, with extensions chosen by the TypeScript configuration;
+packages use their package names, matching completion suggestions. The repair is
+one edit, so **Undo** restores the previous source. Quick fixes do not install missing packages.
+
 ## Move through a model
 
 When you load a file without a preview, the viewport shows **Select to preview**.
