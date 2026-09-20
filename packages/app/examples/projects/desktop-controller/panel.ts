@@ -1,5 +1,7 @@
 import {box, cylinder, extrude, googleFont, group, text} from '@code3d/core';
 
+const sans = await googleFont('Play');
+
 export function makePanel() {
   const blank = box(100, 3, 70);
   const shaft = cylinder(3.2, 6).originOffset(20, 0, 0);
@@ -19,7 +21,6 @@ export function makePanel() {
 export default makePanel();
 
 function makeLabel() {
-  const sans = googleFont('Play');
-  // Local alternative: font(new URL('./my-font.ttf', import.meta.url)).
+  // Local alternative: await font(new URL('./my-font.ttf', import.meta.url)).
   return group(extrude(text('GAIN', sans, 5), 0.5)).material('#e8b45d');
 }

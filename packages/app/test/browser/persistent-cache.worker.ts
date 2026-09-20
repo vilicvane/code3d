@@ -6,6 +6,7 @@ import type {ArtifactStoreInitialization} from '../../src/model/artifact-store-p
 import {ArtifactStoreConnection} from '../../src/model/artifact-store';
 import {browserPackageFiles} from '../../src/project/browser-packages';
 import {TestModelPipeline} from '../model-pipeline';
+import {BuildArtifactCache} from '../../src/model/build-artifact-cache';
 
 export type CacheRequest = {
   source: string;
@@ -18,7 +19,9 @@ export type CacheRequest = {
   cancellation?: Int32Array<SharedArrayBuffer>;
   inspect?: boolean;
   summary?: boolean;
-  refresh?: {fonts?: boolean};
+  refresh?: boolean;
+  buildOnly?: boolean;
+  restoreBuild?: boolean;
 };
 export type CacheResult = {
   probe?: {
@@ -32,6 +35,8 @@ export type CacheResult = {
   milliseconds: number;
   stats: TestModelPipeline['kernelCacheStats'];
   objects?: string;
+  resources?: string[];
+  buildId?: string;
   topology?: string;
   stepBytes?: number;
   diagnostic?: unknown;
@@ -67,7 +72,13 @@ scope.onmessage = async ({
         },
         async stat(path) {
           const asset = assets[path];
-          return asset ? {kind: 'file', version: asset.version} : undefined;
+          return asset
+            ? {kind: 'file', version: asset.version}
+            : Object.keys(assets).some(key =>
+                  key.startsWith(path.replace(/\/$/, '') + '/'),
+                )
+              ? {kind: 'directory', version: '1'}
+              : undefined;
         },
       },
       {
@@ -120,20 +131,53 @@ scope.onmessage = async ({
   const start = performance.now();
   const phases: {phase: string; milliseconds: number}[] = [];
   try {
-    if (data.refresh) compiler.compiler.refreshProject(data.refresh);
-    const module = await compiler.compile(
-      {files: [{path: '/model.ts', source: data.source}]},
-      '/model.ts',
-      undefined,
-      undefined,
-      phase => {
-        phases.push({phase, milliseconds: performance.now() - start});
-        scope.postMessage({phase});
-      },
-      () => {
-        if (data.cancellation && Atomics.load(data.cancellation, 0))
-          throw new Error('Cancelled');
-      },
+    if (data.refresh) compiler.compiler.refreshProject();
+    const progress = (
+      phase: Parameters<
+        import('../../src/model/compilation-progress').CompilationProgress
+      >[0],
+    ) => {
+      phases.push({phase, milliseconds: performance.now() - start});
+      scope.postMessage({phase});
+    };
+    const checkCancelled = () => {
+      if (data.cancellation && Atomics.load(data.cancellation, 0))
+        throw new Error('Cancelled');
+    };
+    await storage.ready;
+    const namespace = 'font-build-fixture';
+    const cache = new BuildArtifactCache(
+      storage.scope(namespace),
+      (key, value, required) =>
+        storage.publish(namespace, key, value, required),
+    );
+    const artifact = data.restoreBuild
+      ? cache.restore('model')
+      : await compiler.compiler.compile(
+          {files: [{path: '/model.ts', source: data.source}]},
+          '/model.ts',
+          undefined,
+          undefined,
+          progress,
+          checkCancelled,
+        );
+    if (!artifact) throw new Error('Saved build is missing');
+    compiler.artifact = artifact;
+    if (data.buildOnly) {
+      await cache.save('model', artifact, Date.now(), checkCancelled);
+      storage.drain();
+      scope.postMessage({
+        milliseconds: performance.now() - start,
+        stats: compiler.kernelCacheStats,
+        resources: [...artifact.resources.keys()],
+        buildId: artifact.id,
+      } satisfies CacheResult);
+      return;
+    }
+    const module = await compiler.executor.execute(
+      structuredClone(artifact),
+      progress,
+      checkCancelled,
     );
     const objects = [...module.objects.values()];
     const topology: unknown[] = [];

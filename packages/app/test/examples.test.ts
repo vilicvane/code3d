@@ -3,12 +3,9 @@ import {replicad} from '@code3d/core/replicad';
 import {modelGeometry} from '../../core/test/model-test.ts';
 import assert from 'node:assert/strict';
 import {readFile, readdir} from 'node:fs/promises';
-import {after, before, test} from 'node:test';
+import {after, test} from 'node:test';
 import {
-  installModelResourceReader,
   modelElementReference,
-  googleFontUrl,
-  googleFontSources,
   isSketch,
   snapshotSketch,
   isModelObject,
@@ -439,23 +436,3 @@ for (const entry of exampleEntries) {
     }
   });
 }
-
-// Node author imports are synchronous; load the same public font before execution.
-before(async () => {
-  const resources = new Map<string, Uint8Array>();
-  async function load(url: string) {
-    const response = await fetch(url, {signal: AbortSignal.timeout(30_000)});
-    assert.equal(response.ok, true, `Font resource is reachable: ${url}`);
-    let bytes = new Uint8Array(await response.arrayBuffer());
-    if (new DataView(bytes.buffer).getUint32(0) === 0x774f4632) {
-      const {default: decompress} = await import('woff2-encoder/decompress');
-      bytes = Uint8Array.from(await decompress(bytes));
-    }
-    resources.set(url, bytes);
-    return bytes;
-  }
-  const url = googleFontUrl('Play').href;
-  const css = await load(url);
-  await Promise.all(googleFontSources(css).map(source => load(source.url)));
-  installModelResourceReader(url => resources.get(url.href));
-});

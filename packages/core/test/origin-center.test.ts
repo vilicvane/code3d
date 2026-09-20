@@ -64,9 +64,13 @@ test('single values and singleton arrays match the instance operation, including
   }
 });
 
-test('batch centering preserves text islands, spacing, topology and downstream face operations', () => {
+test('batch centering preserves text islands, spacing, topology and downstream face operations', async () => {
   const profiles = keepAll(
-    text('B8i', font(new URL('./fonts/DejaVuSans.ttf', import.meta.url)), 10),
+    text(
+      'B8i',
+      await font(new URL('./fonts/DejaVuSans.ttf', import.meta.url)),
+      10,
+    ),
   );
   const layout = keep(group(profiles));
   const original = profiles.map(p => p.bounds());

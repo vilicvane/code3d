@@ -184,8 +184,8 @@ import {
 } from '@code3d/core';
 
 const ball = sphere(20);
-const profiles = originCenter(text('Code3D', googleFont('Play'), 9)).map(face =>
-  face.originOffset(0, -26, 0),
+const profiles = originCenter(text('Code3D', await googleFont('Play'), 9)).map(
+  face => face.originOffset(0, -26, 0),
 );
 const lettering = wrap(profiles, ball.surface(1));
 export default cut(ball, thicken(lettering, -1));
@@ -710,7 +710,7 @@ method; an empty array returns `[]`. Inputs must be geometric models, not groups
 or references.
 
 ```ts
-const profiles = originCenter(text('Hello', googleFont('Play'), 10));
+const profiles = originCenter(text('Hello', await googleFont('Play'), 10));
 const lettering = extrude(profiles, 1);
 ```
 
@@ -889,47 +889,45 @@ Cancellation and exceptions retain completed entries and editing history.
 ```ts
 import {font, text, extrude, group} from '@code3d/core';
 
-const sans = font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
+const sans = await font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
 const profiles = text('Code3D', sans, 10);
 export const lettering = group(extrude(profiles, 1));
 ```
 
-`font()` synchronously returns an immutable font resource. The App prepares literal
-`new URL('./font.ttf', import.meta.url)` assets before evaluating model code, including
-assets in imported modules. Changing the font file invalidates the resource; equal
-file contents reuse parsed fonts and geometry. Node reads file URLs directly.
-`font()` also accepts `ArrayBuffer` or `Uint8Array` bytes, captured at the call.
-The engine also prepares static HTTP(S) font URLs before model execution:
+`font(source)` returns a `Promise<Font>`; await it before constructing text.
+It accepts TTF, OTF or WOFF2 bytes (`ArrayBuffer` or `Uint8Array`) and URLs.
+Input bytes are captured when called. The App bundles static local references
+such as `new URL('./font.ttf', import.meta.url)` with the importing module;
+changing a local file invalidates that asset. Remote URLs are fetched at runtime
+and can be computed dynamically. Node also reads file URLs asynchronously.
 
 ```ts
-const remote = font(new URL('https://example.com/fonts/SomeFont.ttf'));
+const remote = await font(new URL('https://example.com/fonts/SomeFont.ttf'));
 const label = text('AV', remote, 10, {letterSpacing: 0.5, kerning: true});
 ```
 
-Use a direct font-file URL whose server permits CORS access from the App. The URL
-must be a literal in `new URL(...)`, including when declared in an imported module;
-no `await` is needed in model code. The engine decodes remote WOFF2 files to SFNT
-before synchronous font parsing.
+Use a direct font-file URL whose server permits CORS access from the App.
+The font loader decodes WOFF2 before parsing; once the font is available,
+`text()` and subsequent modeling operations are synchronous.
 
 Google Fonts can instead be selected by name:
 
 ```ts
 import {googleFont, text, extrude, group} from '@code3d/core';
 
-const play = googleFont('Play');
-const medium = googleFont('Roboto', {weight: 450, italic: true});
+const play = await googleFont('Play');
+const medium = await googleFont('Roboto', {weight: 450, italic: true});
 export default group(extrude(text('Hello', play, 10), 1));
 ```
 
-`googleFont(family, options?)` synchronously returns a `Font`. Both `weight` and
+`googleFont(family, options?)` returns a `Promise<Font>`. Both `weight` and
 `italic` are optional. Omitted axes are omitted from the Google request, leaving
 the defaults to Google; explicit weights apply to variable fonts as well as static
-faces. The App prepares the CSS and all of its Unicode subsets before execution,
-then selects the appropriate subset for each character. No stylesheet is installed.
-The family and options must be literals or static `const` values, including imports,
-aliases, object properties and spreads. Computed calls are reported at their source.
+faces. Family and options may be calculated at runtime, including inside imported
+modules. CSS and all its Unicode subsets load when the call runs, then text selects
+the appropriate subset for each character. No stylesheet is installed.
 Large families such as Chinese fonts require downloading all returned subsets on
-the first use; changing the text subsequently reuses those font resources.
+first use; changing the text subsequently reuses those font resources.
 
 The App saves each Google Font selection (family, weight and italic) as a
 complete bundle of CSS and decoded font subsets. It reuses that bundle across
@@ -937,11 +935,9 @@ edits, project refreshes and Worker/page restarts without requesting Google CSS,
 even after the original HTTP expiry. Character ranges and subset precedence
 remain those of the saved CSS. The bundle is published only after every subset
 loads successfully and remains subject to the cache budget.
-To fetch updated fonts for the active model, choose **Refresh fonts** from the
-explorer's empty-space menu. This rechecks CSS and font files and can change
-geometry. A failed refresh reports the error and keeps the previous complete
-bundle for ordinary builds. First use and evicted bundles still need network
-access.
+First use and evicted bundles still need network access. A saved compiled module
+need not have loaded any fonts: evaluating it later uses the same runtime loader
+and resource cache. Compilation itself does not request Google CSS or font files.
 
 Network resources use an engine-owned 64 MiB memory LRU and the shared OPFS disk
 journal, then the network. CSS, compressed font bytes and content-addressed decoded
@@ -950,9 +946,9 @@ origin quota, including compaction space, shared with geometry. Fresh resources
 need no request across edits or Worker/page restarts. Outside resolved Google
 Font bundles, expired resources revalidate
 through the browser HTTP cache; `no-store` resources are not retained. Concurrent
-requests share one download. Failed or cancelled builds preserve completed resources;
+requests share one download. Failed or cancelled executions preserve completed resources;
 partial downloads are discarded and can retry. Without OPFS, memory caching remains.
-The active build's resource references are outside the historical memory limit.
+The active execution's resource references are outside the historical memory limit.
 
 Parsed fonts are memory-only entries in the existing 2 GiB kernel cache budget.
 CSS interpretation, normalized glyph contours, B-Rep, bounds and meshes reuse the
@@ -960,14 +956,9 @@ existing memory/disk artifact cache. Font contents and requested variations iden
 these artifacts; changing text position or spacing can reuse unchanged glyphs.
 HTTP resource records remain reusable when the geometry runtime changes.
 
-For computed URLs or Node execution outside the App engine, download TTF/OTF bytes
-first (decode WOFF2 before passing its bytes):
-
-```ts
-const response = await fetch(fontUrl);
-if (!response.ok) throw new Error(`Font download failed: ${response.status}`);
-const remote = font(await response.arrayBuffer());
-```
+Outside the App, the same async APIs fetch remote resources directly. Hosts can
+install a resource loader through `@code3d/core/tooling` to supply their own cache
+and cancellation policy. Node's default loader also supports local file URLs.
 
 TTF and OTF fonts are supported, including variable fonts and Chinese characters
 when present in the font. HarfBuzz supplies glyph outlines, advances, kerning and

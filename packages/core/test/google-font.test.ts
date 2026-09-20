@@ -2,7 +2,7 @@ import {mockComputationTime} from '../../../test/computation-clock.ts';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {afterEach, test} from 'node:test';
-import {installModelResourceReader} from '../bld/library/font.js';
+import {installModelResourceLoader} from '../bld/library/resources.js';
 import {googleFontSources, googleFontUrl} from '../bld/library/google-font.js';
 import {
   clearKernelOperationCache,
@@ -23,16 +23,20 @@ afterEach(() => {
   disposeModelObjects(models.splice(0));
   clearKernelOperationCache();
   setKernelArtifactStore(undefined);
-  installModelResourceReader(url =>
-    url.protocol === 'file:' ? readFileSync(url) : undefined,
-  );
+  installModelResourceLoader({
+    load: async url => ({
+      bytes: readFileSync(url),
+      expires: 0,
+      cacheable: true,
+    }),
+  });
 });
 const keep = <T extends Model>(value: T): T => {
   models.push(value);
   return value;
 };
-const shape = (content: string, family: string, weight?: number) =>
-  text(content, googleFont(family, {weight}), 10).map(keep);
+const shape = async (content: string, family: string, weight?: number) =>
+  text(content, await googleFont(family, {weight}), 10).map(keep);
 
 test('Google requests omit unspecified axes and preserve explicit weight/style', () => {
   const family = (options?: Parameters<typeof googleFontUrl>[1]) =>
@@ -82,7 +86,7 @@ test('font-face parsing retains all subsets, Unicode ranges and CSS precedence',
   );
 });
 
-test('a font composed of subsets lays out mixed characters on one baseline', () => {
+test('a font composed of subsets lays out mixed characters on one baseline', async () => {
   const latin = readFileSync(
     new URL('./fonts/DejaVuSans.ttf', import.meta.url),
   );
@@ -92,15 +96,20 @@ test('a font composed of subsets lays out mixed characters on one baseline', () 
   const css =
     encoder.encode(`@font-face {src:url(https://fonts.example/latin.ttf);unicode-range:U+0000-00FF;}
 @font-face {src:url(https://fonts.example/chinese.otf);unicode-range:U+4E00-9FFF;}`);
-  installModelResourceReader(url =>
-    url.hostname === 'fonts.googleapis.com'
-      ? css
-      : url.pathname === '/latin.ttf'
-        ? latin
-        : chinese,
-  );
-  const mixed = shape('B中8', 'Fixture');
-  const latinOnly = shape('B8', 'Fixture');
+  installModelResourceLoader({
+    load: async url => ({
+      bytes:
+        url.hostname === 'fonts.googleapis.com'
+          ? css
+          : url.pathname === '/latin.ttf'
+            ? latin
+            : chinese,
+      expires: 0,
+      cacheable: true,
+    }),
+  });
+  const mixed = await shape('B中8', 'Fixture');
+  const latinOnly = await shape('B8', 'Fixture');
   assert.equal(mixed.length, 3);
   const left = (model: Model) => modelGeometry(model).value.localBounds[0][0];
   assert.ok(left(mixed[0]) < left(mixed[1]));
@@ -114,7 +123,7 @@ test('a font composed of subsets lays out mixed characters on one baseline', () 
     );
 });
 
-test('variable weights change contours and advances and restore independently from disk', t => {
+test('variable weights change contours and advances and restore independently from disk', async t => {
   mockComputationTime(t);
   const bytes = readFileSync(
     new URL('./fonts/Roboto-variable-subset.ttf', import.meta.url),
@@ -122,9 +131,13 @@ test('variable weights change contours and advances and restore independently fr
   const css = encoder.encode(
     '@font-face {src:url(https://fonts.example/variable.ttf);}',
   );
-  installModelResourceReader(url =>
-    url.hostname === 'fonts.googleapis.com' ? css : bytes,
-  );
+  installModelResourceLoader({
+    load: async url => ({
+      bytes: url.hostname === 'fonts.googleapis.com' ? css : bytes,
+      expires: 0,
+      cacheable: true,
+    }),
+  });
   const disk = new Map<string, Uint8Array>();
   setKernelArtifactStore({
     get: key => disk.get(key),
@@ -143,7 +156,7 @@ test('variable weights change contours and advances and restore independently fr
   });
   const signatures = new Map<number, string>();
   for (const weight of [400, 450, 700]) {
-    const faces = shape('AVB8i', 'Roboto', weight);
+    const faces = await shape('AVB8i', 'Roboto', weight);
     for (const face of faces) {
       const solid = keep(face.extrude(1));
       const mesh = createModelSnapshotter()(solid).mesh!;
@@ -156,9 +169,21 @@ test('variable weights change contours and advances and restore independently fr
     );
   }
   assert.equal(new Set(signatures.values()).size, 3);
+  const options = {weight: 400};
+  const loading = googleFont('Roboto', options);
+  options.weight = 700;
+  assert.equal(
+    JSON.stringify(
+      text('AVB8i', await loading, 10)
+        .map(keep)
+        .map(face => modelGeometry(face).value.localBounds),
+    ),
+    signatures.get(400),
+    'font options are captured before asynchronous loading',
+  );
   clearKernelOperationCache();
   for (const weight of [700, 450, 400]) {
-    const faces = shape('AVB8i', 'Roboto', weight);
+    const faces = await shape('AVB8i', 'Roboto', weight);
     assert.equal(
       JSON.stringify(faces.map(face => modelGeometry(face).value.localBounds)),
       signatures.get(weight),

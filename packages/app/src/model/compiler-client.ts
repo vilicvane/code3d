@@ -200,10 +200,10 @@ export class ModelCompilerClient {
     return this.pending?.kind === 'compile';
   }
 
-  refreshProject(options: {fonts?: boolean} = {}): void {
+  refreshProject(): void {
     this.cancel();
     this.language = undefined;
-    this.compiler.postMessage({kind: 'refresh-project', ...options});
+    this.compiler.postMessage({kind: 'refresh-project'});
   }
 
   clearBuildCache(): Promise<void> {

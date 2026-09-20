@@ -1,28 +1,23 @@
-import {
-  googleFontSources,
-  googleFontUrl,
-  type KernelArtifactStore,
-} from '@code3d/core/tooling';
-import ts from '@typescript/typescript6';
+import {googleFontUrl, type KernelArtifactStore} from '@code3d/core/tooling';
 import assert from 'node:assert/strict';
-import {posix} from 'node:path';
+import {readFileSync} from 'node:fs';
+import * as fontEngine from 'harfbuzzjs';
+import {googleFont, installFontEngine} from '../../core/src/library/font.ts';
+import {installModelResourceLoader} from '../../core/src/library/resources.ts';
 import {after, before, test} from 'node:test';
 import {createAppTestServer} from './vite-test-server.ts';
 let server: Awaited<ReturnType<typeof createAppTestServer>>;
-let ResourceCache: (typeof import('../src/project/resource-cache.ts'))['ResourceCache'];
-let ProjectAssets: (typeof import('../src/project/project-assets.ts'))['ProjectAssets'];
-let fontResourceRequests: (typeof import('../src/project/font-resources.ts'))['fontResourceRequests'];
+let ResourceCache: (typeof import('../src/model/resource-cache.ts'))['ResourceCache'];
+let ModelResources: (typeof import('../src/model/model-resources.ts'))['ModelResources'];
 before(async () => {
   server = await createAppTestServer();
   ({ResourceCache} = await server.ssrLoadModule<
-    typeof import('../src/project/resource-cache.ts')
-  >('/src/project/resource-cache.ts'));
-  ({fontResourceRequests} = await server.ssrLoadModule<
-    typeof import('../src/project/font-resources.ts')
-  >('/src/project/font-resources.ts'));
-  ({ProjectAssets} = await server.ssrLoadModule<
-    typeof import('../src/project/project-assets.ts')
-  >('/src/project/project-assets.ts'));
+    typeof import('../src/model/resource-cache.ts')
+  >('/src/model/resource-cache.ts'));
+  installFontEngine(fontEngine);
+  ({ModelResources} = await server.ssrLoadModule<
+    typeof import('../src/model/model-resources.ts')
+  >('/src/model/model-resources.ts'));
 });
 after(async () => server?.close());
 
@@ -88,31 +83,19 @@ test('complete bundles survive expired HTTP entries and bounded memory eviction'
   await assert.rejects(next.bundle('font:400', offline), /Offline/);
 });
 
-test('bundle refresh replaces only complete results and honors no-store', async () => {
+test('complete bundles honor no-store on any member', async () => {
   const store = disk();
   const cache = new ResourceCache();
   cache.setStore(store);
-  const original = await cache.bundle('font', async () => bundleResources());
-  const failed = async (): Promise<never> => {
-    throw new Error('Partial download');
-  };
-  await assert.rejects(cache.bundle('font', failed, true), /Partial download/);
-  assert.deepEqual(await cache.bundle('font', failed), original);
-  const changed = await cache.bundle(
-    'font',
-    async () => bundleResources('new'),
-    true,
-  );
-  assert.notDeepEqual(changed, original);
-  assert.deepEqual(await cache.bundle('font', failed), changed);
-  await cache.bundle(
-    'font',
-    async () => bundleResources('private', false),
-    true,
-  );
+  await cache.bundle('font', async () => bundleResources('private', false));
   assert.equal(store.entries.size, 0);
   assert.equal(cache.stats.memoryBytes, 0);
-  await assert.rejects(cache.bundle('font', failed), /Partial download/);
+  await assert.rejects(
+    cache.bundle('font', async () => {
+      throw new Error('Offline');
+    }),
+    /Offline/,
+  );
 });
 
 test('corrupt bundle payloads are discarded and retried as a full resolution', async () => {
@@ -134,24 +117,6 @@ test('corrupt bundle payloads are discarded and retried as a full resolution', a
     original,
   );
   assert.equal(loads, 1);
-});
-
-test('explicit HTTP refresh bypasses fresh records and keeps old content on failure', async () => {
-  let requests = 0;
-  const cache = new ResourceCache(async () => {
-    requests++;
-    if (requests === 3) throw new Error('Offline');
-    return new Response(String(requests), {
-      headers: {'cache-control': 'max-age=3600'},
-    });
-  });
-  const url = 'https://fonts.example/css';
-  await cache.load(url, signal());
-  const changed = await cache.load(url, signal(), true);
-  assert.equal(new TextDecoder().decode(changed.bytes), '2');
-  await assert.rejects(cache.load(url, signal(), true), /Offline/);
-  assert.deepEqual(await cache.load(url, signal()), changed);
-  assert.equal(requests, 3);
 });
 
 test('fresh resources reuse memory and disk, expired URLs revalidate and replace content', async () => {
@@ -365,37 +330,6 @@ test('memory resources populate newly available storage without downloading agai
   );
 });
 
-function fontProgram(source: string, extra: Record<string, string> = {}) {
-  const files: Record<string, string> = {
-    '/api.d.ts':
-      '/** @modelResource google-font */\nexport declare function googleFont(family: string, options?: {weight?: number; italic?: boolean}): unknown;',
-    '/model.ts': source,
-    ...extra,
-  };
-  const host = ts.createCompilerHost({noLib: true});
-  host.getSourceFile = path =>
-    files[path] === undefined
-      ? undefined
-      : ts.createSourceFile(path, files[path], ts.ScriptTarget.Latest, true);
-  host.fileExists = path => files[path] !== undefined;
-  host.readFile = path => files[path];
-  host.resolveModuleNames = (names, containing) =>
-    names.map(name => ({
-      resolvedFileName: posix.resolve(posix.dirname(containing), name),
-    }));
-  return ts.createProgram(
-    Object.keys(files),
-    {noLib: true, strict: true},
-    host,
-  );
-}
-
-function requests(source: string, extra: Record<string, string> = {}) {
-  return fontResourceRequests(fontProgram(source, extra), '/model.ts').map(
-    ({family, options}) => ({family, options}),
-  );
-}
-
 for (const interruption of ['failure', 'cancellation'] as const) {
   test(`Google font ${interruption} never publishes a partial subset bundle`, async () => {
     const cssUrl = googleFontUrl('Test Font').href;
@@ -403,6 +337,9 @@ for (const interruption of ['failure', 'cancellation'] as const) {
     const extended = 'https://fonts.example/extended.ttf';
     const css = `@font-face {src: url(${latin}); unicode-range: U+0000-00FF;}
 @font-face {src: url(${extended}); unicode-range: U+0100-017F;}`;
+    const bytes = readFileSync(
+      new URL('../../core/test/fonts/DejaVuSans.ttf', import.meta.url),
+    );
     const counts = new Map<string, number>();
     let interrupted = true;
     let cancelled = false;
@@ -424,51 +361,33 @@ for (const interruption of ['failure', 'cancellation'] as const) {
           );
         });
       }
-      return new Response(url === cssUrl ? css : url, {
+      return new Response(url === cssUrl ? css : bytes, {
         headers: {
           'cache-control': url === cssUrl ? 'max-age=0' : 'max-age=3600',
         },
       });
     };
     const store = disk();
-    const files = {
-      async readFile() {
-        return undefined;
-      },
-      async stat() {
-        return undefined;
-      },
-    };
-    const source =
-      "import {googleFont} from './api.d.ts'; googleFont('Test Font');";
-    const prepare = async (assets: InstanceType<typeof ProjectAssets>) => {
-      assets.beginCompilation(() => {
+    const prepare = async (resources: InstanceType<typeof ModelResources>) => {
+      resources.begin(store, () => {
         if (cancelled) throw new Error('Cancelled');
       });
-      assets.setStore(store);
-      assets.setGoogleContext(fontProgram(source), {
-        googleFontUrl,
-        googleFontSources,
+      installModelResourceLoader({
+        load: resources.load,
+        bundle: resources.bundle,
+        decoded: resources.decoded,
       });
       try {
-        await assets.rewrite('/model.ts', source);
-        return assets.snapshot();
+        return await googleFont(String('Test Font'));
       } finally {
-        await assets.finishCompilation();
+        await resources.finish();
       }
     };
-    const assets = new ProjectAssets(files, request);
-    const pending = assert.rejects(prepare(assets), error => {
-      const diagnostic = (
-        error as import('../src/model/diagnostic.ts').ModelDiagnosticError
-      ).diagnostic;
-      assert.equal(diagnostic.sourceRef?.file, '/model.ts');
-      assert.match(
-        diagnostic.summary,
-        interruption === 'failure' ? /Missing subset/ : /Cancelled/,
-      );
-      return true;
-    });
+    const resources = new ModelResources(new Map(), request);
+    const pending = assert.rejects(
+      prepare(resources),
+      interruption === 'failure' ? /Missing subset/ : /Cancelled/,
+    );
     if (interruption === 'cancellation') {
       await slowStarted;
       cancelled = true;
@@ -479,7 +398,7 @@ for (const interruption of ['failure', 'cancellation'] as const) {
       false,
     );
     interrupted = cancelled = false;
-    const restored = await prepare(new ProjectAssets(files, request));
+    const restored = await prepare(new ModelResources(new Map(), request));
     assert.equal(counts.get(cssUrl), 2);
     assert.equal(
       counts.get(latin),
@@ -487,51 +406,10 @@ for (const interruption of ['failure', 'cancellation'] as const) {
       'the completed subset survives the interrupted build',
     );
     assert.equal(counts.get(extended), 2);
-    assert.equal(restored.size, 3);
-    assert.deepEqual(googleFontSources(restored.get(cssUrl)!), [
-      {url: extended, ranges: [[0x100, 0x17f]]},
-      {url: latin, ranges: [[0, 0xff]]},
-    ]);
-    const offline = new ProjectAssets(files, async () => {
+    assert.equal(restored.family, 'DejaVu Sans');
+    const offline = new ModelResources(new Map(), async () => {
       throw new Error('Offline');
     });
-    assert.deepEqual(await prepare(offline), restored);
+    assert.equal((await prepare(offline)).family, restored.family);
   });
 }
-
-test('Google font discovery follows aliases, re-exports and static imported options', () => {
-  assert.deepEqual(
-    requests(
-      `import {gf} from './exports.ts';
-import {family, weight} from './values.ts';
-import * as constants from './values.ts';
-const options = {italic: true} as const;
-gf(family, {...options, weight});
-gf(constants.family, {weight: undefined});
-gf('Play');
-function googleFont(value: string) {} googleFont('unrelated');`,
-      {
-        '/exports.ts': "export {googleFont as gf} from './api.d.ts';",
-        '/values.ts':
-          "export const family = 'Roboto'; export const weight = 450;",
-      },
-    ),
-    [
-      {family: 'Roboto', options: {italic: true, weight: 450}},
-      {family: 'Roboto', options: {weight: undefined}},
-      {family: 'Play', options: undefined},
-    ],
-  );
-});
-
-test('Google font discovery rejects dynamic values with an actionable diagnostic', () => {
-  for (const source of [
-    "let family = 'Roboto'; googleFont(family);",
-    "const family = String('Roboto'); googleFont(family);",
-    'const a = b; const b = a; googleFont(a);',
-  ])
-    assert.throws(
-      () => requests("import {googleFont} from './api.d.ts';\n" + source),
-      /requires a static family name and options/,
-    );
-});

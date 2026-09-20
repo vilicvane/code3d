@@ -108,15 +108,11 @@ test('each opened file has its own complete latest artifact, including entries w
     assert.equal(
       await projectArtifactIdentity(restoredA),
       a.id,
-      'restoring an artifact does not hash its stored identity or resource statistics',
+      'restoring an artifact does not hash its stored identity',
     );
     const changedMetadata = {
       ...restoredA,
       id: 'old identity',
-      resourceStats: {
-        ...restoredA.resourceStats,
-        networkRequests: restoredA.resourceStats.networkRequests + 1,
-      },
     };
     assert.equal(await projectArtifactIdentity(changedMetadata), a.id);
     assert.equal(restoredA.model.rootPath, '/a.ts');

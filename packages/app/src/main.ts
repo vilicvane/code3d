@@ -591,10 +591,6 @@ const projectDirectory = new ProjectTree(projectTree, {
     await compiler.clearBuildCache();
     await runModel();
   },
-  async onRefreshFonts() {
-    compiler.refreshProject({fonts: true});
-    await runModel();
-  },
   onBusy: busy => {
     if (busy) fileOpenVersion++;
     codeEditor.setReadOnly(busy);

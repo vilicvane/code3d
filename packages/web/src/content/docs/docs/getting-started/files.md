@@ -352,10 +352,10 @@ Build caches belonging to other workspaces are also kept.
 Google Fonts are cached with all their character subsets after a successful
 download. Edits, project refreshes and page reloads can reuse the same fonts
 without requesting Google CSS, while those caches remain available.
-Choose **Refresh fonts** from the explorer's empty-space menu to download current
-fonts for the active model. This may change text geometry. If refreshing fails,
-the previous complete font cache remains available for ordinary builds.
-First use, font refresh and fonts removed by cache eviction require network access.
+Models await `googleFont(...)` or `font(...)` when they need a font. Fonts load
+while running the model, including the first execution of a saved module.
+Compiling and saving a module does not download its fonts. First use and fonts
+removed by cache eviction require network access.
 
 ## The examples directory
 

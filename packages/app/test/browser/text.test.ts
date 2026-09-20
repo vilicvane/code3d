@@ -54,7 +54,7 @@ test(
       [...fontBytes],
     );
     const source = `import {font, text, extrude, group} from '@code3d/core';
-const sans = font(new URL('./text-test.ttf', import.meta.url));
+const sans = await font(new URL('./text-test.ttf', import.meta.url));
 const profiles = text('B8i', sans, 20);
 export const lettering = group(extrude(profiles, 3));`;
     await page.evaluate(() => window.textApp.codeEditor.editor.focus());

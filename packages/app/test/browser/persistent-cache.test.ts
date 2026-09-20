@@ -520,7 +520,7 @@ test(
       ),
     );
     const source = `import {font,text,extrude,group} from '@code3d/core';
-const sans = font(new URL('./font.ttf',import.meta.url));
+const sans = await font(new URL('./font.ttf',import.meta.url));
 export default group(extrude(text('B8i', sans, 10),2));`;
     const assets = {'/font.ttf': {bytes: latin, version: '1'}};
     const cold = await compile(page, {
@@ -561,7 +561,7 @@ export default group(extrude(text('B8i', sans, 10),2));`;
 );
 
 test(
-  'engine prepares cross-origin font URLs, refreshes content and recovers from denied CORS',
+  'runtime loads cross-origin font URLs, revalidates content and recovers from denied CORS',
   {timeout: 180_000},
   async t => {
     const {createServer} = await import('node:http');
@@ -607,13 +607,13 @@ test(
     assert.notEqual(new URL(page.url()).origin, new URL(fontUrl).origin);
     const source = `import {font, text, extrude, group} from '@code3d/core';
 import {sans} from './font.ts';
-const second = font(new URL('${fontUrl}'));
+const second = await font(new URL('${fontUrl}'));
 export default group([...extrude(text('B', sans, 10, {letterSpacing: 0.5, kerning: false}), 2), ...extrude(text('8i', second, 10), 2)]);`;
     const assets = {
       '/font.ts': {
         version: '1',
         bytes: new TextEncoder().encode(
-          `import {font} from '@code3d/core'; export const sans = font(new URL('${fontUrl}', import.meta.url));`,
+          `import {font} from '@code3d/core'; export const sans = await font(new URL('${fontUrl}', import.meta.url));`,
         ),
       },
     };
@@ -671,11 +671,11 @@ export default group([...extrude(text('B', sans, 10, {letterSpacing: 0.5, kernin
 );
 
 test(
-  'Google fonts restore complete resolutions offline and update only on explicit font refresh',
+  'Google fonts load at runtime and restore complete resolutions offline',
   {timeout: 180_000},
   async t => {
     const {compress} = await import('woff2-encoder');
-    let bytes = await compress(
+    const bytes = await compress(
       await readFile(
         new URL(
           '../../../core/test/fonts/Roboto-variable-subset.ttf',
@@ -714,7 +714,7 @@ test(
     });
     // Routes disable the browser HTTP cache: reuse must come from the engine.
     const source = `import {googleFont, text, extrude, group} from '@code3d/core';
-const sans = googleFont('Roboto');
+const sans = await googleFont('Roboto');
 export default group(extrude(text('B8i', sans, 10), 1));`;
     const geometry = (result: CacheResult) =>
       createHash('sha256')
@@ -740,7 +740,7 @@ export default group(extrude(text('B8i', sans, 10), 1));`;
     assert.ok(edit.stats.resources!.memoryHits > 0);
     assert.equal(cssRequests, 1);
     assert.equal(fontRequests, 1);
-    const refreshedProject = await compile(page, {source, refresh: {}});
+    const refreshedProject = await compile(page, {source, refresh: true});
     valid(refreshedProject);
     assert.equal(geometry(refreshedProject), geometry(cold));
     await page.reload();
@@ -754,8 +754,8 @@ export default group(extrude(text('B8i', sans, 10), 1));`;
     assert.equal(cssRequests, 1);
     assert.equal(fontRequests, 1);
     const changedSource = source.replace(
-      "googleFont('Roboto')",
-      "googleFont('Roboto', {weight: 450})",
+      "await googleFont('Roboto')",
+      "await googleFont('Roboto', {weight: 450})",
     );
     offline = false;
     const failed = await compile(page, {
@@ -784,38 +784,6 @@ export default group(extrude(text('B8i', sans, 10), 1));`;
     assert.equal(geometry(undo), geometry(cold));
     assert.equal(cssRequests, 2);
     assert.equal(fontRequests, 1);
-    offline = true;
-    const denied = await compile(page, {source, refresh: {fonts: true}});
-    assert.match(
-      JSON.stringify(denied.diagnostic ?? denied.error),
-      /Cannot load network asset.*CORS/,
-    );
-    assert.equal(cssRequests, 3);
-    const retained = await compile(page, {source});
-    valid(retained);
-    assert.equal(geometry(retained), geometry(cold));
-    assert.equal(cssRequests, 3);
-    offline = false;
-    bytes = await compress(
-      await readFile(
-        new URL('../../../core/test/fonts/DejaVuSans.ttf', import.meta.url),
-      ),
-    );
-    const updated = await compile(page, {source, refresh: {fonts: true}});
-    valid(updated);
-    assert.notEqual(geometry(updated), geometry(cold));
-    assert.equal(cssRequests, 4);
-    assert.equal(
-      fontRequests,
-      2,
-      'refresh also bypasses fresh font HTTP records',
-    );
-    offline = true;
-    const savedUpdate = await compile(page, {source}, 'compiler', true);
-    valid(savedUpdate);
-    assert.equal(geometry(savedUpdate), geometry(updated));
-    assert.equal(cssRequests, 4);
-    assert.equal(fontRequests, 2);
     t.diagnostic(
       JSON.stringify({
         coldMs: cold.milliseconds,
@@ -824,5 +792,100 @@ export default group(extrude(text('B8i', sans, 10), 1));`;
         resources: recovered.stats.resources,
       }),
     );
+  },
+);
+
+test(
+  'saved builds lazily load dynamic fonts in dependency modules and retry failed initialization',
+  {timeout: 120_000},
+  async t => {
+    const page = await fixture(t);
+    const bytes = await readFile(
+      new URL('../../../core/test/fonts/DejaVuSans.ttf', import.meta.url),
+    );
+    let requests = 0;
+    let offline = true;
+    const fontUrl = 'https://fonts.gstatic.com/code3d-test/runtime.ttf';
+    const headers = {
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'max-age=0',
+    };
+    await page.context().route('https://fonts.googleapis.com/css2?*', route => {
+      requests++;
+      if (offline) return route.abort('failed');
+      return route.fulfill({
+        contentType: 'text/css',
+        headers,
+        body: `@font-face {src:url(${fontUrl});}`,
+      });
+    });
+    await page.context().route(fontUrl, route => {
+      requests++;
+      if (offline) return route.abort('failed');
+      return route.fulfill({contentType: 'font/ttf', headers, body: bytes});
+    });
+    const source = `import {sans} from 'runtime-font';
+import {text, extrude, group} from '@code3d/core';
+export default group(extrude(text('B8i', sans, 10), 1));`;
+    const assets = Object.fromEntries(
+      Object.entries({
+        '/node_modules/runtime-font/package.json': JSON.stringify({
+          name: 'runtime-font',
+          version: '1.0.0',
+          type: 'module',
+          exports: './index.ts',
+        }),
+        '/node_modules/runtime-font/index.ts': `import {googleFont} from '@code3d/core';
+export const sans = await googleFont(['Runtime', 'Font'].join(' '));`,
+      }).map(([path, source]) => [
+        path,
+        {bytes: new TextEncoder().encode(source), version: '1'},
+      ]),
+    );
+    const saved = await compile(page, {source, assets, buildOnly: true});
+    assert.equal(saved.error, undefined);
+    assert.ok(saved.buildId);
+    assert.equal(requests, 0, 'compilation and saving never load fonts');
+    assert.ok(
+      saved.resources!.every(path => !path.startsWith('http')),
+      'remote resources are absent from compiled artifacts',
+    );
+    const failed = await compile(
+      page,
+      {source, restoreBuild: true},
+      'compiler',
+      true,
+    );
+    assert.match(
+      JSON.stringify(failed.error ?? failed.diagnostic),
+      /Cannot load network asset/,
+    );
+    assert.equal(requests, 1);
+    offline = false;
+    const restored = await compile(page, {source, restoreBuild: true});
+    valid(restored);
+    assert.equal(
+      requests,
+      3,
+      'retry reinitializes the failed dependency and loads its font',
+    );
+    offline = true;
+    const warm = await compile(page, {source, assets});
+    valid(warm);
+    assert.equal(requests, 3);
+    const fresh = await compile(
+      page,
+      {source, restoreBuild: true},
+      'compiler',
+      true,
+    );
+    valid(fresh);
+    assert.equal(
+      requests,
+      3,
+      'a fresh runtime restores the saved font independently of the saved build',
+    );
+    assert.ok(fresh.stats.resources!.diskHits > 0);
+    assert.equal(digest(fresh.objects!), digest(restored.objects!));
   },
 );

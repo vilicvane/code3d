@@ -119,7 +119,8 @@ custom Replicad solids. Both reuse repeated calls, so pass changing captured sta
 as arguments; treat cached data as immutable and keep native shapes behind the
 primitive builder. Read the [cache contract](../../packages/core/docs/api.md#cached-computations)
 when introducing either API. For lettering, the [text reference](../../packages/core/docs/api.md#text)
-covers synchronous font resources, Google Fonts and batch extrusion.
+covers asynchronous font loading, Google Fonts and batch extrusion. Await `font()` or
+`googleFont()` before passing the resulting font to synchronous `text()` calls.
 
 ## Explore dependencies
 

@@ -44,8 +44,8 @@ afterEach(() => {
   setKernelArtifactStore(undefined);
 });
 
-test('real TTF text keeps holes, independent regions, baseline and signed extrusion', () => {
-  const sans = font(latinUrl);
+test('real TTF text keeps holes, independent regions, baseline and signed extrusion', async () => {
+  const sans = await font(latinUrl);
   const faces = keepAll(text('B8i', sans, 10));
   assert.equal(faces.length, 4);
   const snapshot = createModelSnapshotter();
@@ -86,8 +86,8 @@ test('real TTF text keeps holes, independent regions, baseline and signed extrus
   assert.deepEqual(extrude([], 1), []);
 });
 
-test('real OTF/CFF Chinese and Latin glyphs produce valid extrudable faces', () => {
-  const chinese = font(chineseUrl);
+test('real OTF/CFF Chinese and Latin glyphs produce valid extrudable faces', async () => {
+  const chinese = await font(chineseUrl);
   for (const content of ['B8i', '中文文字测试']) {
     const faces = keepAll(text(content, chinese, 10));
     assert.ok(faces.length >= content.length);
@@ -96,9 +96,9 @@ test('real OTF/CFF Chinese and Latin glyphs produce valid extrudable faces', () 
   }
 });
 
-test('font metrics retain spaces, scaling and immutable bytes; invalid input is diagnosed', () => {
+test('font metrics retain spaces, scaling and immutable bytes; invalid input is diagnosed', async () => {
   const bytes = new Uint8Array(readFileSync(latinUrl));
-  const sans = font(bytes);
+  const sans = await font(bytes);
   bytes.fill(0);
   assert.equal(text('', sans, 10).length, 0);
   assert.equal(text('   ', sans, 10).length, 0);
@@ -116,11 +116,7 @@ test('font metrics retain spaces, scaling and immutable bytes; invalid input is 
   assert.throws(() => text('B\n8', sans, 10), /one line/);
   for (const size of [0, -1, NaN, Infinity])
     assert.throws(() => text('B', sans, size), /greater than zero/);
-  assert.throws(() => font(bytes), /Cannot parse font/);
-  assert.throws(
-    () => font(new URL('https://example.com/font.ttf')),
-    /prepared by the model engine/,
-  );
+  await assert.rejects(font(bytes), /Cannot parse font/);
 });
 
 function square(x: number, y: number, size: number): PathCommand[] {
@@ -142,8 +138,8 @@ function permutations<T>(values: T[]): T[][] {
       )
     : [[]];
 }
-test('text options apply font kerning and model-unit spacing to whole glyphs', () => {
-  const sans = font(latinUrl);
+test('text options apply font kerning and model-unit spacing to whole glyphs', async () => {
+  const sans = await font(latinUrl);
   const left = (model: Model) => modelGeometry(model).value.localBounds[0][0];
   const kerned = keepAll(text('AV', sans, 10));
   const unkerned = keepAll(text('AV', sans, 10, {kerning: false}));
@@ -216,8 +212,8 @@ test('multi-hole workaround handles every contour order and nested islands', () 
   }
 });
 
-test('text solids work as embossing and engraving boolean operands', () => {
-  const profiles = keepAll(text('B8i', font(latinUrl), 10));
+test('text solids work as embossing and engraving boolean operands', async () => {
+  const profiles = keepAll(text('B8i', await font(latinUrl), 10));
   const stock = keep(keep(box(30, 2, 16)).originOffset(-12, 1, 4));
   const raisedTools = keepAll(extrude(profiles, 1));
   const raised = keep(union([stock, ...raisedTools]));
@@ -234,7 +230,7 @@ test('text solids work as embossing and engraving boolean operands', () => {
   );
 });
 
-test('content identities reuse fonts and restore text geometry from persistent artifacts', t => {
+test('content identities reuse fonts and restore text geometry from persistent artifacts', async t => {
   mockComputationTime(t);
   const entries = new Map<string, Uint8Array>();
   setKernelArtifactStore({
@@ -252,21 +248,21 @@ test('content identities reuse fonts and restore text geometry from persistent a
     },
     flush() {},
   });
-  const build = () =>
-    keepAll(extrude(keepAll(text('B8i', font(latinUrl), 10)), 1));
-  const first = build();
+  const build = async () =>
+    keepAll(extrude(keepAll(text('B8i', await font(latinUrl), 10)), 1));
+  const first = await build();
   const ids = first.map(model => modelGeometry(model).id);
   const before = kernelOperationCacheStats();
   assert.ok(before.persistentWrites > 0);
   assert.equal(before.persistenceErrors, 0);
   assert.deepEqual(
-    build().map(model => modelGeometry(model).id),
+    (await build()).map(model => modelGeometry(model).id),
     ids,
   );
   assert.ok(kernelOperationCacheStats().hits > before.hits);
   disposeModelObjects(models.splice(0));
   clearKernelOperationCache();
-  const restored = build();
+  const restored = await build();
   assert.deepEqual(
     restored.map(model => modelGeometry(model).id),
     ids,
@@ -278,7 +274,7 @@ test('content identities reuse fonts and restore text geometry from persistent a
 test('repeated text construction releases native temporaries after cache disposal', async () => {
   const {getOC} = await import('replicad');
   const kernel = getOC() as import('@code3d/opencascade').OpenCascadeInstance;
-  const sans = font(latinUrl);
+  const sans = await font(latinUrl);
   const batch = () => {
     for (let i = 0; i < 10; i++) {
       const faces = text('B8i', sans, 10);

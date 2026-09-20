@@ -1,5 +1,6 @@
 /// <reference types="emscripten" preserve="true" />
 import {cachedArtifact} from './cached.js';
+import {modelResources, type ModelResource} from './resources.js';
 import type * as HarfBuzz from 'harfbuzzjs';
 import {
   googleFontSources,
@@ -52,56 +53,88 @@ export type FontPart = Readonly<{
   ranges: readonly (readonly [number, number])[];
 }>;
 const fonts = new WeakMap<Font, readonly FontPart[]>();
-let readResource: ((url: URL) => Uint8Array | undefined) | undefined;
 
-/** The model engine prepares resources before synchronous author code runs. */
-export function installModelResourceReader(reader: typeof readResource): void {
-  readResource = reader;
+/** Asynchronously loads and decodes a font URL or bytes; Node also reads file URLs. */
+export async function font(
+  source: URL | ArrayBuffer | Uint8Array,
+): Promise<Font> {
+  const resource =
+    source instanceof URL
+      ? await modelResources.load(source)
+      : {
+          bytes: Uint8Array.from(
+            source instanceof ArrayBuffer ? new Uint8Array(source) : source,
+          ),
+          expires: 0,
+          cacheable: false,
+        };
+  return fontValue([
+    {artifact: parseFont(await decodeFont(resource)), ranges: []},
+  ]);
 }
 
-/** Reads font bytes or a prepared project/HTTP(S) URL; Node also reads file URLs. */
-export function font(source: URL | ArrayBuffer | Uint8Array): Font {
-  return fontValue([{artifact: parseFont(source), ranges: []}]);
-}
-
-/**
- * A Google Fonts family/style prepared by the model engine before execution.
- * @modelResource google-font
- */
-export function googleFont(
+/** Asynchronously resolves a Google Fonts family/style using the runtime resource cache. */
+export async function googleFont(
   family: string,
   options: GoogleFontOptions = {},
-): Font {
+): Promise<Font> {
+  options = {weight: options.weight, italic: options.italic};
   const url = googleFontUrl(family, options);
-  const css = readResource?.(url);
-  if (!css)
-    throw new Error(
-      'googleFont() requires resources prepared by the model engine. Use a static family name and options.',
-    );
+  const resources = await modelResources.bundle(
+    'google-font:' + url.href,
+    async () => {
+      const css = await modelResources.load(url);
+      const resources = new Map([[url.href, css]]);
+      const urls = [
+        ...new Set(googleFontSources(css.bytes).map(source => source.url)),
+      ];
+      let next = 0;
+      await Promise.all(
+        Array.from({length: Math.min(8, urls.length)}, async () => {
+          while (next < urls.length) {
+            const source = urls[next++];
+            const resource = await modelResources.load(new URL(source));
+            const bytes = await decodeFont(resource);
+            parseFont(bytes, options);
+            resources.set(source, {...resource, bytes});
+          }
+        }),
+      );
+      return resources;
+    },
+  );
   return fontValue(
-    googleFontSources(css).map(({url, ranges}) => ({
-      artifact: parseFont(new URL(url), options),
+    googleFontSources(resources.get(url.href)!).map(({url, ranges}) => ({
+      artifact: parseFont(resources.get(url)!, options),
       ranges,
     })),
   );
 }
 
+async function decodeFont(resource: ModelResource): Promise<Uint8Array> {
+  const {bytes} = resource;
+  if (
+    bytes.length < 4 ||
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(
+      0,
+    ) !== 0x774f4632
+  )
+    return bytes;
+  return modelResources.decoded(
+    resource,
+    'woff2-encoder@2.0.0',
+    async bytes => {
+      const {default: decompress} = await import('woff2-encoder/decompress');
+      return decompress(bytes);
+    },
+  );
+}
+
 function parseFont(
-  source: URL | ArrayBuffer | Uint8Array,
+  bytes: Uint8Array,
   options: GoogleFontOptions = {},
 ): KernelArtifact<ParsedFont> {
   if (!fontEngine) throw new Error('The font engine has not been initialized.');
-  const bytes =
-    source instanceof URL
-      ? readResource?.(source)
-      : source instanceof ArrayBuffer
-        ? new Uint8Array(source)
-        : source;
-  if (!(bytes instanceof Uint8Array)) {
-    throw new Error(
-      'font() requires font bytes or a URL prepared by the model engine. Use a static new URL("./font.ttf", import.meta.url) or new URL("https://…/font.ttf"); outside the engine, fetch the font first and pass its bytes.',
-    );
-  }
   return parsedFont(bytes, options);
 }
 
@@ -137,7 +170,7 @@ const parsedFont = cachedArtifact(
       return {face, font, numGlyphs, sourceBytes: bytes.byteLength};
     } catch (error) {
       throw new Error(
-        'Cannot parse font. Expected a TTF or OTF font (font collections and WOFF2 are not supported).',
+        'Cannot parse font. Expected a TTF or OTF font (font collections are not supported).',
         {cause: error},
       );
     }

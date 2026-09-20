@@ -174,142 +174,25 @@ test('prepared assets deduplicate concurrent reads and preserve immutable resour
   }
 });
 
-test('HTTP assets deduplicate per compilation, refresh bytes and retain their public URLs', async () => {
+test('compilation preserves remote and computed URLs without loading them', async () => {
   const {ProjectAssets} = await server.ssrLoadModule<
     typeof import('../src/project/project-assets.ts')
   >('/src/project/project-assets.ts');
-  let reads = 0,
-    revision = 1;
-  const assets = new ProjectAssets(
-    {
-      async stat() {
-        throw new Error('Remote URLs must not access the project filesystem');
-      },
-      async readFile() {
-        throw new Error('Remote URLs must not access the project filesystem');
-      },
-    },
-    async (input, options) => {
-      assert.equal(String(input), 'https://fonts.example/test.ttf');
-      assert.equal(options?.mode, 'cors');
-      assert.equal(options?.credentials, 'omit');
-      reads++;
-      await new Promise(resolve => setTimeout(resolve, 5));
-      return new Response(new Uint8Array([revision]));
-    },
-  );
-  const url = new URL('https://fonts.example/test.ttf');
-  const source = `const resource = new URL('${url}');`;
-  try {
-    const results = await Promise.all([
-      assets.rewrite('/model.ts', source),
-      assets.rewrite(
-        '/font.ts',
-        `const resource = new URL('${url}', import.meta.url);`,
-      ),
-    ]);
-    assert.equal(reads, 1);
-    assert.equal(results[0], results[1]);
-    assert.match(results[0], /https:\/\/fonts.example\/test.ttf/);
-    assert.deepEqual(assets.read(url), new Uint8Array([1]));
-    await assets.rewrite('/other.ts', source);
-    assert.equal(reads, 1);
-    revision++;
-    assets.beginCompilation();
-    assert.equal(assets.read(url), undefined);
-    await assets.rewrite('/model.ts', source);
-    assert.equal(reads, 2);
-    assert.deepEqual(assets.read(url), new Uint8Array([2]));
-    assets.dispose();
-    assert.equal(assets.read(url), undefined);
-  } finally {
-    assets.dispose();
-  }
-});
-
-test('HTTP asset failures are located and retryable; cancellation aborts the download', async () => {
-  const {ProjectAssets} = await server.ssrLoadModule<
-    typeof import('../src/project/project-assets.ts')
-  >('/src/project/project-assets.ts');
-  let fail = true,
-    cancelled = false,
-    aborted = false,
-    hold = true;
-  const source = 'const resource = new URL("https://fonts.example/test.ttf");';
-  const files = {
+  const assets = new ProjectAssets({
     async stat() {
-      return undefined;
+      throw new Error('Remote URLs must not access project files');
     },
     async readFile() {
-      return undefined;
+      throw new Error('Remote URLs must not access project files');
     },
-  };
-  const assets = new ProjectAssets(files, async () =>
-    fail ? new Response('', {status: 404}) : new Response(new Uint8Array([1])),
-  );
-  try {
-    await assert.rejects(assets.rewrite('/model.ts', source), error => {
-      assertModelDiagnosticError(error);
-      assert.match(
-        error.diagnostic.summary,
-        /https:\/\/fonts.example\/test.ttf.*HTTP 404/,
-      );
-      assert.deepEqual(error.diagnostic.sourceRef, {
-        file: '/model.ts',
-        start: 17,
-        end: source.length - 1,
-      });
-      return true;
-    });
-    fail = false;
-    await assets.rewrite('/model.ts', source);
-    assert.deepEqual(
-      assets.read(new URL('https://fonts.example/test.ttf')),
-      new Uint8Array([1]),
-    );
-  } finally {
-    assets.dispose();
-  }
-
-  let downloadStarted!: () => void;
-  const started = new Promise<void>(resolve => {
-    downloadStarted = resolve;
   });
-  const pending = new ProjectAssets(files, async (_input, options) => {
-    downloadStarted();
-    if (!hold) return new Response(new Uint8Array([2]));
-    return new Promise<Response>((_resolve, reject) => {
-      options!.signal!.addEventListener(
-        'abort',
-        () => {
-          aborted = true;
-          reject(options!.signal!.reason);
-        },
-        {once: true},
-      );
-    });
-  });
-  pending.beginCompilation(() => {
-    if (cancelled) throw new Error('Cancelled');
-  });
-  try {
-    const loading = pending.rewrite('/model.ts', source);
-    await started;
-    cancelled = true;
-    await assert.rejects(loading, /Cancelled/);
-    assert.equal(aborted, true);
-    assert.equal(
-      pending.read(new URL('https://fonts.example/test.ttf')),
-      undefined,
-    );
-    hold = cancelled = false;
-    pending.beginCompilation();
-    await pending.rewrite('/model.ts', source);
-    assert.deepEqual(
-      pending.read(new URL('https://fonts.example/test.ttf')),
-      new Uint8Array([2]),
-    );
-  } finally {
-    pending.dispose();
+  for (const source of [
+    'const resource = new URL("https://fonts.example/test.ttf");',
+    'const resource = new URL("https://fonts.example/test.ttf", import.meta.url);',
+    'const resource = new URL(getUrl());',
+    'const face = await googleFont(getFamily(), {weight: getWeight()});',
+  ]) {
+    assert.equal(await assets.rewrite('/model.ts', source), source);
+    assert.equal(assets.snapshot().size, 0);
   }
 });

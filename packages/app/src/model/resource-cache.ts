@@ -1,10 +1,7 @@
 import type {KernelArtifactStore} from '@code3d/core/tooling';
 
-export type Resource = Readonly<{
-  bytes: Uint8Array;
-  expires: number;
-  cacheable: boolean;
-}>;
+import type {ModelResource as Resource} from '@code3d/core/tooling';
+export type {ModelResource as Resource} from '@code3d/core/tooling';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', {fatal: true});
 
@@ -40,12 +37,8 @@ export class ResourceCache {
     };
   }
 
-  async load(
-    url: string,
-    signal: AbortSignal,
-    refresh = false,
-  ): Promise<Resource> {
-    // Google selects its font format using the browser's capabilities.
+  async load(url: string, signal: AbortSignal): Promise<Resource> {
+    // Representations may depend on client capabilities and language.
     const variant =
       typeof navigator === 'undefined'
         ? ''
@@ -54,7 +47,7 @@ export class ResourceCache {
       'http:' + (await digest(encoder.encode(JSON.stringify([url, variant]))));
     return this.once(key, async () => {
       signal.throwIfAborted();
-      const cached = !refresh && this.read(key);
+      const cached = this.read(key);
       if (cached && cached.expires > this.now()) return cached;
       this.networkRequests++;
       const response = await this.request(url, {
@@ -69,7 +62,7 @@ export class ResourceCache {
       }
       const bytes = new Uint8Array(await response.arrayBuffer());
       const resource = {bytes, ...freshness(response.headers, this.now())};
-      // Completed resources survive cancellation of the surrounding build.
+      // Completed resources survive cancellation of the surrounding execution.
       if (resource.cacheable) this.write(key, resource);
       else this.remove(key);
       return resource;
@@ -80,11 +73,10 @@ export class ResourceCache {
   async bundle(
     identity: string,
     load: () => Promise<ReadonlyMap<string, Resource>>,
-    refresh = false,
   ): Promise<ReadonlyMap<string, Uint8Array>> {
     const key = 'bundle:' + (await digest(encoder.encode(identity)));
     const resource = await this.once(key, async () => {
-      const cached = !refresh && this.read(key);
+      const cached = this.read(key);
       if (cached) {
         try {
           unpackBundle(cached.bytes);
@@ -93,7 +85,7 @@ export class ResourceCache {
           this.remove(key);
         }
       }
-      // A failed resolution leaves the previous complete bundle intact.
+      // Only a complete resolution is published.
       const resources = await load();
       const bundle = {
         bytes: packBundle(resources),
@@ -319,7 +311,7 @@ function freshness(headers: Headers, now: number): Omit<Resource, 'bytes'> {
       expires: Number.isFinite(expires) ? Math.min(expiry, expires) : expiry,
     };
   }
-  // Responses without an explicit lifetime are revalidated next build.
+  // Responses without an explicit lifetime are revalidated next execution.
   return {cacheable, expires: Number.isFinite(expires) ? expires : 0};
 }
 

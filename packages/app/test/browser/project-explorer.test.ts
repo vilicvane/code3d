@@ -354,7 +354,7 @@ test(
 );
 
 test(
-  'Refresh fonts reloads Google resources while Clear build cache keeps the saved fonts',
+  'Clear build cache preserves runtime fonts and no dedicated refresh is exposed',
   {timeout: 90_000},
   async t => {
     const page = await open(t);
@@ -381,7 +381,7 @@ test(
       return route.fulfill({contentType: 'font/ttf', headers, body: font});
     });
     const source =
-      "import {googleFont, text, extrude, group} from '@code3d/core';\nexport default group(extrude(text('Code3D', googleFont('Play'), 10), 1));";
+      "import {googleFont, text, extrude, group} from '@code3d/core';\nexport default group(extrude(text('Code3D', await googleFont('Play'), 10), 1));";
     const downloaded = page.waitForResponse(fontUrl);
     await page.evaluate(
       source =>
@@ -405,9 +405,16 @@ test(
     await command('Clear build cache');
     assert.equal(cssRequests, 1);
     assert.equal(fontRequests, 1);
-    await command('Refresh fonts');
-    assert.equal(cssRequests, 2);
-    assert.equal(fontRequests, 2);
+    await page
+      .locator('#project-tree')
+      .dispatchEvent('contextmenu', {clientX: 50, clientY: 240, button: 2});
+    assert.equal(
+      await page
+        .getByRole('menuitem', {name: 'Refresh fonts', exact: true})
+        .count(),
+      0,
+    );
+    await page.keyboard.press('Escape');
     assert.equal(
       await page.evaluate(() => window.explorerApp.codeEditor.currentFile()),
       '/model.ts',

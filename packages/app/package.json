@@ -47,7 +47,6 @@
     "replicad": "^1.0.1",
     "sver": "2.0.1",
     "three": "^0.185.1",
-    "woff2-encoder": "2.0.0",
     "@code3d/layout": "*"
   },
   "devDependencies": {

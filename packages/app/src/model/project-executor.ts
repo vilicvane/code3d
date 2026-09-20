@@ -34,7 +34,6 @@ export class ProjectExecutor {
   private geometry?: ModelGeometrySnapshot;
   private inspectionGeometry?: ModelGeometrySnapshot;
   private snapshotPool?: SnapshotWorkerPool;
-  private resourceStats?: ProjectBuildArtifact['resourceStats'];
   constructor(
     private readonly evaluator = new ModuleEvaluator(),
     private readonly snapshotOptions?: SnapshotPoolOptions,
@@ -51,7 +50,10 @@ export class ProjectExecutor {
       await this.storage?.ready;
       checkCancelled();
       this.disposeGeometry();
-      if (this.identity !== artifact.dependencies.id) {
+      if (
+        this.identity !== artifact.dependencies.id ||
+        this.runtime?.failedImport
+      ) {
         this.disposeRuntime();
         onProgress?.('initializing-runtime');
         this.runtime = await ProjectRuntime.create(
@@ -78,7 +80,7 @@ export class ProjectExecutor {
         this.snapshotPool!.setConcurrency(settings.snapshotConcurrency);
       }
       runtime.resources.install(artifact.resources);
-      this.resourceStats = artifact.resourceStats;
+      runtime.resources.begin(this.storage?.scope('resources'), checkCancelled);
       runtime.tooling.setKernelArtifactStore(
         this.storage?.scope(runtime.artifactIdentity),
       );
@@ -113,6 +115,7 @@ export class ProjectExecutor {
           ),
       );
     } finally {
+      await runtime.resources.finish();
       runtime.tooling.setKernelArtifactStore(undefined);
     }
   }
@@ -168,6 +171,10 @@ export class ProjectExecutor {
     checkCancelled: () => void = () => {},
   ) {
     if (!this.runtime || !this.executor) return;
+    this.runtime.resources.begin(
+      this.storage?.scope('resources'),
+      checkCancelled,
+    );
     this.runtime.tooling.setKernelArtifactStore(
       this.storage?.scope(this.runtime.artifactIdentity),
     );
@@ -208,6 +215,7 @@ export class ProjectExecutor {
         },
       });
     } finally {
+      await this.runtime.resources.finish();
       nextGeometry?.dispose();
       this.runtime.tooling.setKernelArtifactStore(undefined);
     }
@@ -226,7 +234,7 @@ export class ProjectExecutor {
       disk: persistence?.disk,
       persistence,
       snapshots: this.snapshotPool?.stats,
-      resources: this.resourceStats,
+      resources: this.runtime?.resources.cacheStats,
     };
   }
   private disposeRuntime(): void {

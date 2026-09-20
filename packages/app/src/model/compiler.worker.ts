@@ -92,7 +92,6 @@ const compiler = new ProjectCompiler(
       }),
   },
   esbuild,
-  storage.scope('resources'),
 );
 
 let activeRequest: number | undefined;
@@ -242,7 +241,7 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
   } else if (data.kind === 'cancel-compile' && activeRequest === data.id) {
     void compiler.cancel();
   } else if (data.kind === 'refresh-project') {
-    compiler.refreshProject({fonts: data.fonts});
+    compiler.refreshProject();
   } else if (data.kind === 'clear-build-cache') {
     // The client starts this command in a fresh compiler Worker. Any new source
     // or restore request waits until the old project's disk records are gone.

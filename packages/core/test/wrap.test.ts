@@ -100,10 +100,14 @@ test('B-spline ellipsoid supports the same public API', () => {
   );
 });
 
-test('text keeps holes and spacing, and unchanged wrap calls reuse geometry', () => {
+test('text keeps holes and spacing, and unchanged wrap calls reuse geometry', async () => {
   const body = keep(keep(cylinder(25, 35)).rotate(90, 0, 0));
   const profiles = keepAll(
-    text('B8i', font(new URL('./fonts/DejaVuSans.ttf', import.meta.url)), 8),
+    text(
+      'B8i',
+      await font(new URL('./fonts/DejaVuSans.ttf', import.meta.url)),
+      8,
+    ),
   ).map(p => keep(p.originOffset(7, -30, 0)));
   const wrapped = keepAll(wrap(profiles, body.surface(1)));
   near(

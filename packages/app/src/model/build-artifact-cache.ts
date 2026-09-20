@@ -116,7 +116,7 @@ function storedModel(model: CompiledModelSource): StoredModel {
 
 /** Source tools and diagnostics are part of the executable snapshot's identity. */
 export async function projectArtifactIdentity(
-  artifact: Omit<ProjectBuildArtifact, 'id' | 'resourceStats'>,
+  artifact: Omit<ProjectBuildArtifact, 'id'>,
 ): Promise<string> {
   const resources = await Promise.all(
     [...artifact.resources]

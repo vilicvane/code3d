@@ -12,7 +12,7 @@ import {
   wrap,
 } from '@code3d/core';
 
-const sans = googleFont('Play');
+const sans = await googleFont('Play');
 // Center the complete text layout, then move its plane outside the target.
 // Its finite bounding rectangle selects the closest surface region.
 const profiles = originCenter(text('Code3D', sans, 9)).map(face =>

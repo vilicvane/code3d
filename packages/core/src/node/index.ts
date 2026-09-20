@@ -1,18 +1,22 @@
 import initOpenCascade from '@code3d/opencascade';
 import {init_planegcs_module as initializeSketchSolver} from '@salusoft89/planegcs';
 import * as fontEngine from 'harfbuzzjs';
-import {readFileSync} from 'node:fs';
+import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
+import {installFontEngine} from '../library/font.js';
 import {
-  installFontEngine,
-  installModelResourceReader,
-} from '../library/font.js';
+  installModelResourceLoader,
+  fetchModelResource,
+} from '../library/resources.js';
 import {installOpenCascade} from '../library/open-cascade.js';
 import {installSketchSolver} from '../library/sketch-solver.js';
 
-installModelResourceReader(url =>
-  url.protocol === 'file:' ? readFileSync(url) : undefined,
-);
+installModelResourceLoader({
+  load: async url =>
+    url.protocol === 'file:'
+      ? {bytes: await readFile(url), expires: 0, cacheable: true}
+      : fetchModelResource(url),
+});
 installFontEngine(fontEngine);
 
 const wasmPath = fileURLToPath(import.meta.resolve('@code3d/opencascade/wasm'));

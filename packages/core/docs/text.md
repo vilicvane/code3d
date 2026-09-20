@@ -10,26 +10,26 @@ sidebar:
 ```ts
 import {googleFont, text, originCenter, extrude, group} from '@code3d/core';
 
-const face = googleFont('Play');
+const face = await googleFont('Play');
 export default group(extrude(originCenter(text('Hello', face, 10)), 1));
 ```
 
-In the App, `googleFont()` uses a static family name and optional weight/italic
-settings; `font()` accepts a static font-file URL or TTF/OTF bytes. The engine
-prepares remote resources before synchronous model execution. Text returns
-ordinary planar faces with a common baseline. `originCenter(faces)` puts the
-complete visible text bounds around zero, keeping glyph spacing, holes and
-disconnected parts together. `extrude(faces, distance)` preserves
-their order and placement. Node can read local file URLs or use downloaded,
-decoded font bytes. See the [text reference](api.md#text),
+Await `googleFont(family, options?)` or `font(urlOrBytes)` to get a font, then
+use `text()` synchronously. Family, weight, italic and remote URLs can be computed
+at runtime. `font()` accepts local/remote URLs and TTF, OTF or WOFF2 bytes; Node
+also reads local file URLs asynchronously.
+
+Text returns ordinary planar faces with a common baseline. `originCenter(faces)`
+puts the complete visible text bounds around zero, keeping glyph spacing, holes
+and disconnected parts together. `extrude(faces, distance)` preserves their order
+and placement. See the [text reference](api.md#text),
 [runnable example](../../app/examples/text.ts) and [font notices](../THIRD_PARTY.md).
 
-After a successful first download, the App caches each Google Font selection
-with its complete character subsets. Edits and page reloads reuse that font
-without requesting Google CSS again, while the cache is available. To fetch a
-new version for the active model, right-click empty space in the file explorer
-and choose **Refresh fonts**. This can change the text geometry.
-First use, evicted caches and explicit font refresh still require network access.
+The App loads fonts when the model calls the async API. Compilation does not
+fetch fonts, and saved modules can load them on their first execution. After a
+successful download, each Google Font selection is cached with all its character
+subsets. Edits and page reloads reuse it without requesting Google CSS again,
+while the cache is available. First use and evicted caches require network access.
 
 ## Lettering on a curved surface
 

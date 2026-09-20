@@ -6,6 +6,10 @@ import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
 
 /** One immutable dependency artifact owns the executor's module and kernel identities. */
 export class ProjectRuntime {
+  private importFailure = false;
+  get failedImport(): boolean {
+    return this.importFailure;
+  }
   private constructor(
     readonly artifactIdentity: string,
     readonly snapshotRuntime: {
@@ -19,7 +23,18 @@ export class ProjectRuntime {
     readonly modules: Map<string, ModuleExports>,
     readonly importModule: (path: string) => Promise<ModuleExports>,
     readonly resources: ModelResources,
-  ) {}
+  ) {
+    this.importModule = async path => {
+      try {
+        return await importModule(path);
+      } catch (error) {
+        // Module initializers can retain rejected promises. Recreate this
+        // dependency instance before retrying a failed/cancelled import.
+        this.importFailure = true;
+        throw error;
+      }
+    };
+  }
 
   static async create(
     artifact: DependencyArtifact,
@@ -38,7 +53,11 @@ export class ProjectRuntime {
       });
       const initialized = await runtime.initialize();
       tooling = initialized.tooling;
-      tooling!.installModelResourceReader(resources.read);
+      tooling!.installModelResourceLoader({
+        load: resources.load,
+        bundle: resources.bundle,
+        decoded: resources.decoded,
+      });
       const url = URL.createObjectURL(
         new Blob([artifact.source], {type: 'text/javascript'}),
       );
