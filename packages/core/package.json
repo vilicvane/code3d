@@ -52,7 +52,8 @@
     "manifold-3d": "3.0.1",
     "replicad": "^1.0.1",
     "replicad-opencascadejs": "1.0.0",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "woff2-encoder": "2.0.0"
   },
   "devDependencies": {
     "@ctrl/tinycolor": "^4.2.0",

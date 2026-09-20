@@ -11,35 +11,31 @@ before(async () => {
 });
 after(async () => server?.close());
 
-test('execution resources replace obsolete fonts while dependency URLs remain valid', async () => {
+test('execution resources replace obsolete local assets while dependency URLs remain valid', async () => {
   const wasm = new Uint8Array([0, 1, 2]);
   const font = new Uint8Array([3, 4]);
   const resources = new ModelResources(new Map([['/kernel.wasm', wasm]]));
   try {
     const wasmUrl = resources.url('/kernel.wasm');
-    resources.install(new Map([['https://fonts.example/a.ttf', font]]));
-    const first = resources.url('https://fonts.example/a.ttf');
-    resources.install(new Map([['https://fonts.example/a.ttf', font.slice()]]));
-    assert.equal(resources.url('https://fonts.example/a.ttf'), first);
-    resources.install(new Map([['https://fonts.example/b.ttf', font]]));
-    assert.equal(resources.read(new URL(first)), undefined);
-    assert.throws(
-      () => resources.url('https://fonts.example/a.ttf'),
-      /missing/,
-    );
+    resources.install(new Map([['/fonts/a.ttf', font]]));
+    const first = resources.url('/fonts/a.ttf');
+    resources.install(new Map([['/fonts/a.ttf', font.slice()]]));
+    assert.equal(resources.url('/fonts/a.ttf'), first);
+    resources.install(new Map([['/fonts/b.ttf', font]]));
+    await assert.rejects(resources.load(new URL(first)));
+    assert.throws(() => resources.url('/fonts/a.ttf'), /missing/);
     await assert.rejects(fetch(first));
     assert.equal(resources.url('/kernel.wasm'), wasmUrl);
-    assert.equal(resources.read(new URL(wasmUrl)), wasm);
-    const second = resources.url('https://fonts.example/b.ttf');
-    resources.install(
-      new Map([['https://fonts.example/b.ttf', new Uint8Array([5, 6])]]),
-    );
-    assert.equal(resources.read(new URL(second)), undefined);
-    assert.notEqual(resources.url('https://fonts.example/b.ttf'), second);
+    assert.equal((await resources.load(new URL(wasmUrl))).bytes, wasm);
+    const second = resources.url('/fonts/b.ttf');
+    resources.install(new Map([['/fonts/b.ttf', new Uint8Array([5, 6])]]));
+    await assert.rejects(resources.load(new URL(second)));
+    assert.notEqual(resources.url('/fonts/b.ttf'), second);
     resources.dispose();
-    assert.equal(resources.read(new URL(wasmUrl)), undefined);
+    await assert.rejects(resources.load(new URL(wasmUrl)));
     await assert.rejects(fetch(wasmUrl));
   } finally {
+    await resources.finish();
     resources.dispose();
   }
 });

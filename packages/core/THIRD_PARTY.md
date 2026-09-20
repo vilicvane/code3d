@@ -36,7 +36,7 @@ do not depend on or initialize that package.
 Font parsing, shaping and variable-font outlines use `harfbuzzjs` 1.6.1 (MIT).
 The Node entry and App model engine initialize its WebAssembly runtime; Code3D
 owns immutable font values instead of Replicad's global font registry. Google CSS
-subsets are resolved by the App, which uses `woff2-encoder` 2.0.0 (MIT), its
+subsets are resolved asynchronously by Core, which uses `woff2-encoder` 2.0.0 (MIT), its
 decompress-only entry and bundled WASM to decode downloaded WOFF2 files.
 
 Overlapping glyph contours use `flo-boolean` 5.0.8 (MIT), preserving Bezier curves

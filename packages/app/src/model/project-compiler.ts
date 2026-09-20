@@ -25,11 +25,6 @@ import type {CompilationProgress} from './compilation-progress';
 import {createModelCompiler, type DesignContext} from './compiler';
 import {ModelDiagnosticError, diagnosticFromError} from './diagnostic';
 
-import {
-  googleFontSources,
-  googleFontUrl,
-  type KernelArtifactStore,
-} from '@code3d/core/tooling';
 import {projectArtifactIdentity} from './build-artifact-cache';
 import type {CompiledModelSource} from './compiler';
 import {DependencyBuilder, type DependencyArtifact} from './dependency-builder';
@@ -40,7 +35,6 @@ export type ProjectBuildArtifact = Readonly<{
   dependencies: DependencyArtifact;
   staticPackages: readonly string[];
   resources: ReadonlyMap<string, Uint8Array>;
-  resourceStats: ProjectAssets['cacheStats'];
   runtimeSourceRef?: SourceRef;
 }>;
 
@@ -55,13 +49,12 @@ export class ProjectCompiler {
   private readonly builder: ProjectBuilder;
   private dependencies: DependencyBuilder;
   private restoredDependencies?: DependencyArtifact;
-  private projectRefreshRequested = false;
+  private refreshRequested?: symbol;
 
   constructor(
     files: ProjectFileReader,
     builtinFiles: ProjectFileReader,
     engine: Pick<typeof esbuild, 'build' | 'context'>,
-    private readonly resourceStore?: KernelArtifactStore,
   ) {
     this.files = new ProjectFileCache(patchModelPackages(files));
     this.builtinFiles = new ProjectFileCache(patchModelPackages(builtinFiles));
@@ -96,7 +89,8 @@ export class ProjectCompiler {
   ): Promise<ProjectBuildArtifact> {
     checkCancelled();
     onProgress?.('reading-files');
-    const refresh = this.projectRefreshRequested;
+    const refreshRequest = this.refreshRequested;
+    const refresh = !!refreshRequest;
     if (refresh) {
       // Manual refresh must see files whose timestamps and sizes were preserved.
       this.files.clear();
@@ -145,7 +139,6 @@ export class ProjectCompiler {
       this.language.reset();
     }
     if (refresh) this.restoredDependencies = undefined;
-    this.projectRefreshRequested = false;
     this.language.invalidate(changed);
     // Finish applying invalidation before cancellation can consume these changes.
     checkCancelled();
@@ -221,12 +214,9 @@ export class ProjectCompiler {
     onLanguage?.(language);
 
     try {
-      this.assets.beginCompilation(checkCancelled);
-      this.assets.setStore(this.resourceStore);
-      this.assets.setGoogleContext(this.language.typeScriptProgram, {
-        googleFontUrl,
-        googleFontSources,
-      });
+      if (this.refreshRequested === refreshRequest)
+        this.refreshRequested = undefined;
+      this.assets.beginCompilation();
       if (!this.dependencies.prepared) {
         const restored = refresh
           ? undefined
@@ -290,7 +280,6 @@ export class ProjectCompiler {
       return {
         ...artifact,
         id: await projectArtifactIdentity(artifact),
-        resourceStats: this.assets.cacheStats,
       };
     } catch (error) {
       checkCancelled();
@@ -299,8 +288,6 @@ export class ProjectCompiler {
         ...diagnostic,
         sourceRef: diagnostic.sourceRef ?? runtimeSourceRef,
       });
-    } finally {
-      await this.assets.finishCompilation();
     }
   }
 
@@ -319,6 +306,6 @@ export class ProjectCompiler {
   }
 
   refreshProject(): void {
-    this.projectRefreshRequested = true;
+    this.refreshRequested = Symbol('refresh');
   }
 }

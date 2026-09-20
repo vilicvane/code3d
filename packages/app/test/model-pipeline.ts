@@ -22,12 +22,7 @@ export class TestModelPipeline {
     snapshotOptions?: SnapshotPoolOptions,
     private readonly storage?: ArtifactStoreConnection,
   ) {
-    this.compiler = new ProjectCompiler(
-      files,
-      builtinFiles,
-      engine,
-      storage?.scope('resources'),
-    );
+    this.compiler = new ProjectCompiler(files, builtinFiles, engine);
     this.executor = new ProjectExecutor(evaluator(), snapshotOptions, storage);
   }
   async compile(...args: Parameters<ProjectCompiler['compile']>) {

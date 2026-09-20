@@ -143,11 +143,11 @@ sphere();
 frustum();
 // @ts-expect-error Prism dimensions remain required.
 regularPrism();
-const sans: Font = font(new URL('./font.ttf', import.meta.url));
-const play: Font = googleFont('Play');
-const playBold: Font = googleFont('Play', {weight: 700, italic: false});
+const sans: Font = await font(new URL('./font.ttf', import.meta.url));
+const play: Font = await googleFont('Play');
+const playBold: Font = await googleFont('Play', {weight: 700, italic: false});
 // @ts-expect-error Google Fonts weights are numeric.
-googleFont('Play', {weight: 'bold'});
+await googleFont('Play', {weight: 'bold'});
 const textFaces: readonly FaceModel[] = text('B8i', sans, 10);
 const textOptions: TextOptions = {letterSpacing: 0.5, kerning: false};
 text('AV', sans, 10, textOptions);
@@ -334,7 +334,7 @@ const centeredPair: readonly [SolidModel, FaceModel] = originCenter([
   circle(2),
 ]);
 const centeredProfiles: readonly FaceModel[] = originCenter(
-  text('Hi', googleFont('Play'), 10),
+  text('Hi', await googleFont('Play'), 10),
 );
 // @ts-expect-error A group has no geometric originCenter capability.
 originCenter(group([solid]));

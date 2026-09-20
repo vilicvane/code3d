@@ -10,8 +10,8 @@ import {
 } from '@code3d/core';
 
 // Google Fonts is downloaded on first use.
-const sans = googleFont('Play');
-// Local alternative: import font, then font(new URL('./my-font.ttf', import.meta.url)).
+const sans = await googleFont('Play');
+// Local alternative: import font, then await font(new URL('./my-font.ttf', import.meta.url)).
 const outlines = text('Code3D', sans, 10, {letterSpacing: 0.3, kerning: true});
 // Center the complete text while keeping its letter spacing and holes.
 const profiles = originCenter(outlines);

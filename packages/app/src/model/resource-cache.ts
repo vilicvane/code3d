@@ -1,14 +1,11 @@
 import type {KernelArtifactStore} from '@code3d/core/tooling';
 
-type Resource = Readonly<{
-  bytes: Uint8Array;
-  expires: number;
-  cacheable: boolean;
-}>;
+import type {ModelResource as Resource} from '@code3d/core/tooling';
+export type {ModelResource as Resource} from '@code3d/core/tooling';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', {fatal: true});
 
-/** Anonymous HTTP resources and content-addressed decoding, bounded across builds. */
+/** HTTP resources, resolved bundles and decoded bytes share one bounded cache. */
 export class ResourceCache {
   private readonly memory = new Map<string, Resource>();
   private memoryBytes = 0;
@@ -41,7 +38,7 @@ export class ResourceCache {
   }
 
   async load(url: string, signal: AbortSignal): Promise<Resource> {
-    // Google selects its font format using the browser's capabilities.
+    // Representations may depend on client capabilities and language.
     const variant =
       typeof navigator === 'undefined'
         ? ''
@@ -65,11 +62,41 @@ export class ResourceCache {
       }
       const bytes = new Uint8Array(await response.arrayBuffer());
       const resource = {bytes, ...freshness(response.headers, this.now())};
-      // Completed resources survive cancellation of the surrounding build.
+      // Completed resources survive cancellation of the surrounding execution.
       if (resource.cacheable) this.write(key, resource);
       else this.remove(key);
       return resource;
     });
+  }
+
+  /** Pin a complete resolution independently of its individual HTTP lifetimes. */
+  async bundle(
+    identity: string,
+    load: () => Promise<ReadonlyMap<string, Resource>>,
+  ): Promise<ReadonlyMap<string, Uint8Array>> {
+    const key = 'bundle:' + (await digest(encoder.encode(identity)));
+    const resource = await this.once(key, async () => {
+      const cached = this.read(key);
+      if (cached) {
+        try {
+          unpackBundle(cached.bytes);
+          return cached;
+        } catch {
+          this.remove(key);
+        }
+      }
+      // Only a complete resolution is published.
+      const resources = await load();
+      const bundle = {
+        bytes: packBundle(resources),
+        expires: Number.MAX_SAFE_INTEGER,
+        cacheable: [...resources.values()].every(value => value.cacheable),
+      };
+      if (bundle.cacheable) this.write(key, bundle);
+      else this.remove(key);
+      return bundle;
+    });
+    return unpackBundle(resource.bytes);
   }
 
   async decoded(
@@ -207,6 +234,58 @@ export class ResourceCache {
   }
 }
 
+function packBundle(resources: ReadonlyMap<string, Resource>): Uint8Array {
+  const metadata = encoder.encode(
+    JSON.stringify([...resources].map(([url, {bytes}]) => [url, bytes.length])),
+  );
+  const size = [...resources.values()].reduce(
+    (total, {bytes}) => total + bytes.length,
+    4 + metadata.length,
+  );
+  const packed = new Uint8Array(size);
+  new DataView(packed.buffer).setUint32(0, metadata.length);
+  packed.set(metadata, 4);
+  let offset = 4 + metadata.length;
+  for (const {bytes} of resources.values()) {
+    packed.set(bytes, offset);
+    offset += bytes.length;
+  }
+  return packed;
+}
+
+function unpackBundle(packed: Uint8Array): ReadonlyMap<string, Uint8Array> {
+  const length = new DataView(
+    packed.buffer,
+    packed.byteOffset,
+    packed.byteLength,
+  ).getUint32(0);
+  let offset = 4 + length;
+  if (offset > packed.length) throw new Error('Incomplete resource bundle.');
+  const entries: unknown = JSON.parse(
+    decoder.decode(packed.subarray(4, offset)),
+  );
+  if (!Array.isArray(entries)) throw new Error('Invalid resource bundle.');
+  const resources = new Map<string, Uint8Array>();
+  for (const entry of entries) {
+    if (
+      !Array.isArray(entry) ||
+      entry.length !== 2 ||
+      typeof entry[0] !== 'string' ||
+      !Number.isSafeInteger(entry[1]) ||
+      entry[1] < 0 ||
+      offset + entry[1] > packed.length ||
+      resources.has(entry[0])
+    )
+      throw new Error('Invalid resource bundle entry.');
+    const [url, size] = entry;
+    resources.set(url, packed.subarray(offset, offset + size));
+    offset += size;
+  }
+  if (offset !== packed.length)
+    throw new Error('Invalid resource bundle size.');
+  return resources;
+}
+
 function freshness(headers: Headers, now: number): Omit<Resource, 'bytes'> {
   const control = headers.get('cache-control') ?? '';
   const cacheable =
@@ -232,7 +311,7 @@ function freshness(headers: Headers, now: number): Omit<Resource, 'bytes'> {
       expires: Number.isFinite(expires) ? Math.min(expiry, expires) : expiry,
     };
   }
-  // Responses without an explicit lifetime are revalidated next build.
+  // Responses without an explicit lifetime are revalidated next execution.
   return {cacheable, expires: Number.isFinite(expires) ? expires : 0};
 }
 

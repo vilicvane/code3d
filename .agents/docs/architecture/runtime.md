@@ -161,7 +161,7 @@ CompilerClient 的当前语言快照是响应式状态，编译请求与语言�
 但不能把模块解析或导出条件改为 Node。相对导入支持省略源码扩展名；直接交给
 Node 执行源码时，仍须满足 Node 自身的导入规则。
 跨编译保留未变文件、SourceFile、Program 和导航映射；普通编辑增量更新输入。
-工具参数、字体与草图源码分析共用语言加载器拥有的 Program，不重新解析整套声明。
+工具参数与草图源码分析共用语言加载器拥有的 Program，不重新解析整套声明。
 新增导入扩展闭包，移除导入时撤下仅由它触达的语言库，再次导入可复用已读内容。
 
 阶段按实际工作发布：`reading-files` 覆盖入口源码与配置读取，语言加载器发现缺失
@@ -556,7 +556,7 @@ Web Lock 只覆盖日志打开、批量读写/发布及关闭，编译、执行�
 [snapshot-pool](../../../packages/app/src/model/snapshot-pool.ts)按几何 artifact
 归并 bounds/mesh，先查缓存，再分配未命中批次。主 Worker 拥有去重、预算和缓存；
 子 Worker 只保留当前批次的独立原生几何。全池共用预算，压力下减少在途任务，
-不能把每个 Worker 的预算分别相加。作者源码与动态关系求解仍同步执行。
+不能把每个 Worker 的预算分别相加。作者源码在主执行 Worker 中运行，可 await 异步资源；几何建模与动态关系求解保持同步。
 
 单 Worker 与并行查询使用同一二进制几何输入，避免序列化差异改变三角化或拓扑
 编号。取消保留已完成结果；失败只重试未完成查询，并释放未完成的等待记录。
@@ -566,16 +566,32 @@ Web Lock 只覆盖日志打开、批量读写/发布及关闭，编译、执行�
 
 ## 网络与字体资源
 
-[ProjectAssets](../../../packages/app/src/project/project-assets.ts) 准备静态 URL，
-并按真实声明的 `@modelResource google-font` 标记解析 Google 字体请求，支持别名、
-重导出及导入静态常量；动态参数在源码处诊断。Google CSS 的全部 Unicode 子集
-按至多 8 路并发准备，WOFF2 解码为 SFNT 后供同步字体 API 使用，不安装网页 CSS。
+[ProjectAssets](../../../packages/app/src/project/project-assets.ts) 只打包静态本地
+模块相对 URL。远程 URL 和字体调用保持运行时语义，不扫描 Google Fonts 声明，
+不在编译期间下载 CSS、字体文件或解码。编译缓存保存源码和普通本地打包资源，
+未执行过的模块也能保存；恢复后由该模块的异步调用加载实际资源。
 
-[ResourceCache](../../../packages/app/src/project/resource-cache.ts) 用独立 64 MiB
-历史内存 LRU 管理 HTTP 资源及内容寻址的解码结果，随后查询共享 OPFS，最后网络。
-活跃构建引用不受历史上限限制；请求合并并遵守显式新鲜度、Age、no-cache/no-store，
-过期通过浏览器 HTTP 缓存重验证。取消或抛错保留完整产物，丢弃未完成响应。磁盘
-不可用时继续内存缓存，恢复后补写。HTTP 身份独立于几何运行时，内核升级不用重下字体。
+Core 的 `font()` 与 `googleFont()` 返回 `Promise<Font>`；`text()` 保持同步。
+[通用资源接口](../../../packages/core/src/library/resources.ts) 提供 load、bundle、
+decoded 三个宿主入口。Core 负责字体 CSS 解析和 WOFF2 解码，Google 的全部 Unicode
+子集至多 8 路并发；Node 默认加载 HTTP 和本地文件，App 安装
+[ModelResources](../../../packages/app/src/model/model-resources.ts) 提供缓存与取消。
+资源服务在依赖模块执行前安装，模块顶层 await 和后续函数调用使用同一入口。
+模块初始化失败会使该依赖运行时失效，下次执行重建，避免复用已拒绝的初始化 Promise。
+
+[ResourceCache](../../../packages/app/src/model/resource-cache.ts) 用独立 64 MiB
+历史内存 LRU 管理 HTTP、完整资源组和内容寻址的解码结果，随后查询共享 OPFS，
+最后网络。执行期间相同 URL 共用结果；HTTP 遵守新鲜度、Age、no-cache/no-store。
+过期资源通过浏览器 HTTP 缓存重验证，完整 Google 字体组则独立于 HTTP 过期时间。
+组身份为规范化 CSS URL，保存原 CSS 与全部解码字体；所有成员完成后才原子发布，
+任何响应为 no-store 时不保留该组。Unicode 范围和优先级由 Core 唯一 CSS 解析器解释。
+资源组与 HTTP/解码记录共用预算，独立于编译缓存和几何内核身份。
+
+资源服务随执行运行时拥有；每次执行或 Inspect 建立取消作用域，结束时中止剩余
+下载、收齐异步任务并释放存储连接，保留完整缓存。资源统计来自执行器。跨进程
+取消继续使用既有协议，不引入 UI 状态镜像。普通项目刷新与 **Clear build cache**
+保留下载资源；不提供独立字体刷新命令。将来若需要编译期预加载，须提供类似
+Inspect 的显式 JSDoc 入口；当前没有预加载机制。
 回归见 [resource-cache](../../../packages/app/test/resource-cache.test.ts) 和
 [真实缓存测试](../../../packages/app/test/browser/persistent-cache.test.ts)。
 

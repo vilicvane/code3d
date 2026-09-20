@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {after, before, test, type TestContext} from 'node:test';
 import {chromium, type Browser, type Page} from './browser-connection.ts';
 
@@ -351,6 +352,76 @@ test(
     assert.match(result.source!, /box\(10, 6, 8\)/);
   },
 );
+
+test(
+  'Clear build cache preserves runtime fonts and no dedicated refresh is exposed',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    const font = await readFile(
+      new URL('../../../core/test/fonts/DejaVuSans.ttf', import.meta.url),
+    );
+    const fontUrl = 'https://fonts.gstatic.com/code3d-test/menu.ttf';
+    const headers = {
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'max-age=3600',
+    };
+    let cssRequests = 0,
+      fontRequests = 0;
+    await page.context().route('https://fonts.googleapis.com/css2?*', route => {
+      cssRequests++;
+      return route.fulfill({
+        contentType: 'text/css',
+        headers,
+        body: `@font-face {src: url(${fontUrl}); unicode-range: U+0000-00FF;}`,
+      });
+    });
+    await page.context().route(fontUrl, route => {
+      fontRequests++;
+      return route.fulfill({contentType: 'font/ttf', headers, body: font});
+    });
+    const source =
+      "import {googleFont, text, extrude, group} from '@code3d/core';\nexport default group(extrude(text('Code3D', await googleFont('Play'), 10), 1));";
+    const downloaded = page.waitForResponse(fontUrl);
+    await page.evaluate(
+      source =>
+        window.explorerApp.codeEditor.applyFiles([
+          {path: '/model.ts', content: source},
+        ]),
+      source,
+    );
+    await downloaded;
+    await page.getByText('Ready', {exact: true}).waitFor();
+    assert.equal(cssRequests, 1);
+    assert.equal(fontRequests, 1);
+    const command = async (name: string) => {
+      await page
+        .locator('#project-tree')
+        .dispatchEvent('contextmenu', {clientX: 50, clientY: 240, button: 2});
+      await page.getByRole('menuitem', {name, exact: true}).click();
+      await page.getByText('Ready', {exact: true}).waitFor({state: 'hidden'});
+      await page.getByText('Ready', {exact: true}).waitFor();
+    };
+    await command('Clear build cache');
+    assert.equal(cssRequests, 1);
+    assert.equal(fontRequests, 1);
+    await page
+      .locator('#project-tree')
+      .dispatchEvent('contextmenu', {clientX: 50, clientY: 240, button: 2});
+    assert.equal(
+      await page
+        .getByRole('menuitem', {name: 'Refresh fonts', exact: true})
+        .count(),
+      0,
+    );
+    await page.keyboard.press('Escape');
+    assert.equal(
+      await page.evaluate(() => window.explorerApp.codeEditor.currentFile()),
+      '/model.ts',
+    );
+  },
+);
+
 async function active(page: Page, path: string | undefined): Promise<void> {
   await page.waitForFunction(
     path =>

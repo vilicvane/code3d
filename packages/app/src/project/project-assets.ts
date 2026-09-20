@@ -1,57 +1,23 @@
-import type {KernelArtifactStore} from '@code3d/core/tooling';
 import ts from '@typescript/typescript6';
 import {locateModelError} from '../model/diagnostic';
 import type {ProjectFileReader} from './file-reader';
-import {fontResourceRequests} from './font-resources';
 import {normalizeProjectPath, projectDirectory} from './project';
-import {ResourceCache} from './resource-cache';
 
-/** Prepares static project and HTTP(S) assets before synchronous model execution. */
+/** Bundles local project assets referenced by static module-relative URLs. */
 export class ProjectAssets {
   private readonly urls = new Map<string, {version: string; url: string}>();
 
   private readonly pending = new Map<string, Promise<string>>();
   private readonly contents = new Map<string, Uint8Array>();
-  private readonly remote = new Map<string, Promise<string>>();
-  private downloads = new AbortController();
-  private readonly cache: ResourceCache;
-  private readonly googlePending = new Map<string, Promise<void>>();
-  private googleContext?: {
-    program: ts.Program;
-    tooling: Pick<
-      typeof import('@code3d/core/tooling'),
-      'googleFontUrl' | 'googleFontSources'
-    >;
-  };
-  private cancellationPoll?: ReturnType<typeof setInterval>;
-  private checkCancelled = () => {};
+  constructor(private readonly files: ProjectFileReader) {}
 
-  constructor(
-    private readonly files: ProjectFileReader,
-    request: typeof fetch = (...args) => fetch(...args),
-  ) {
-    this.cache = new ResourceCache(request);
-  }
-
-  /** Recheck remote resources once per compilation, respecting HTTP freshness. */
-  beginCompilation(checkCancelled: () => void = () => {}): void {
-    this.downloads.abort();
-    clearInterval(this.cancellationPoll);
-    this.cancellationPoll = undefined;
-    this.googlePending.clear();
-    this.downloads = new AbortController();
+  beginCompilation(): void {
     this.contents.clear();
     this.urls.clear();
-    this.remote.clear();
-    this.checkCancelled = checkCancelled;
   }
 
   snapshot(): ReadonlyMap<string, Uint8Array> {
     return new Map(this.contents);
-  }
-
-  read(url: URL): Uint8Array | undefined {
-    return this.contents.get(url.href);
   }
 
   async url(path: string): Promise<string> {
@@ -80,133 +46,11 @@ export class ProjectAssets {
     return url;
   }
 
-  private remoteUrl(url: string): Promise<string> {
-    const existing = this.remote.get(url);
-    if (existing) return existing;
-    const loading = this.loadRemoteUrl(url);
-    this.remote.set(url, loading);
-    loading.catch(() => {
-      if (this.remote.get(url) === loading) this.remote.delete(url);
-    });
-    return loading;
-  }
-
-  setStore(store: KernelArtifactStore | undefined): void {
-    this.cache.setStore(store);
-  }
-  setGoogleContext(
-    program: ts.Program,
-    tooling: NonNullable<ProjectAssets['googleContext']>['tooling'],
-  ): void {
-    this.googleContext = {program, tooling};
-  }
-  get cacheStats() {
-    return this.cache.stats;
-  }
-
-  async finishCompilation(): Promise<void> {
-    this.downloads.abort();
-    await Promise.allSettled([
-      ...this.remote.values(),
-      ...this.googlePending.values(),
-    ]);
-    await this.cache.settle();
-    clearInterval(this.cancellationPoll);
-    this.cancellationPoll = undefined;
-    this.cache.setStore(undefined);
-  }
-
-  private watchCancellation(): void {
-    if (this.cancellationPoll) return;
-    const controller = this.downloads;
-    const check = this.checkCancelled;
-    this.cancellationPoll = setInterval(() => {
-      try {
-        check();
-      } catch (error) {
-        controller.abort(error);
-      }
-    }, 50);
-  }
-
-  private async loadRemoteUrl(url: string): Promise<string> {
-    const downloads = this.downloads;
-    const checkCancelled = this.checkCancelled;
-    checkCancelled();
-    this.watchCancellation();
-    try {
-      const resource = await this.cache.load(url, downloads.signal);
-      let bytes = resource.bytes;
-      if (
-        bytes.length >= 4 &&
-        new DataView(
-          bytes.buffer,
-          bytes.byteOffset,
-          bytes.byteLength,
-        ).getUint32(0) === 0x774f4632
-      ) {
-        bytes = await this.cache.decoded(
-          resource,
-          'woff2-encoder@2.0.0',
-          async bytes => {
-            const {default: decompress} =
-              await import('woff2-encoder/decompress');
-            return decompress(bytes);
-          },
-        );
-      }
-      checkCancelled();
-      downloads.signal.throwIfAborted();
-      this.contents.set(url, bytes);
-      return url;
-    } catch (error) {
-      checkCancelled();
-      throw new Error(
-        `Cannot load network asset ${url}. Check the URL, network connection and the server's CORS permission. ${error instanceof Error ? error.message : String(error)}`,
-        {cause: error},
-      );
-    }
-  }
-
-  private prepareGoogleFonts(path: string): Promise<void> {
-    const context = this.googleContext;
-    if (!context) return Promise.resolve();
-    const existing = this.googlePending.get(path);
-    if (existing) return existing;
-    const loading = (async () => {
-      const requests = fontResourceRequests(context.program, path);
-      await Promise.all(
-        requests.map(async ({family, options, sourceRef}) => {
-          try {
-            const url = context.tooling.googleFontUrl(family, options);
-            await this.remoteUrl(url.href);
-            const sources = context.tooling.googleFontSources(this.read(url)!);
-            const urls = [...new Set(sources.map(source => source.url))];
-            let next = 0;
-            await Promise.all(
-              Array.from({length: Math.min(8, urls.length)}, async () => {
-                while (next < urls.length) {
-                  this.checkCancelled();
-                  await this.remoteUrl(urls[next++]);
-                }
-              }),
-            );
-          } catch (error) {
-            throw locateModelError(error, sourceRef, 'module');
-          }
-        }),
-      );
-    })();
-    this.googlePending.set(path, loading);
-    return loading;
-  }
-
   async rewrite(
     path: string,
     source: string,
     onResource?: (path: string) => void,
   ): Promise<string> {
-    await this.prepareGoogleFonts(path);
     if (!source.includes('URL')) return source;
     const parsed = ts.createSourceFile(
       path,
@@ -214,8 +58,7 @@ export class ProjectAssets {
       ts.ScriptTarget.Latest,
       true,
     );
-    const sites: {start: number; end: number; path: string; remote: boolean}[] =
-      [];
+    const sites: {start: number; end: number; path: string}[] = [];
     const visit = (node: ts.Node): void => {
       if (
         ts.isNewExpression(node) &&
@@ -224,31 +67,24 @@ export class ProjectAssets {
         node.arguments?.length
       ) {
         const [relative, base] = node.arguments;
-        const remote =
-          ts.isStringLiteralLike(relative) &&
-          /^https?:\/\//i.test(relative.text);
         if (
           ts.isStringLiteralLike(relative) &&
-          (remote ||
-            (base &&
-              ts.isPropertyAccessExpression(base) &&
-              base.name.text === 'url' &&
-              ts.isMetaProperty(base.expression) &&
-              base.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
-              !/^[a-z][a-z\d+.-]*:/i.test(relative.text)))
+          base &&
+          ts.isPropertyAccessExpression(base) &&
+          base.name.text === 'url' &&
+          ts.isMetaProperty(base.expression) &&
+          base.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
+          !/^[a-z][a-z\d+.-]*:/i.test(relative.text)
         ) {
-          const assetPath = remote
-            ? relative.text
-            : normalizeProjectPath(
-                relative.text.startsWith('/')
-                  ? relative.text
-                  : projectDirectory(path) + '/' + relative.text,
-              );
+          const assetPath = normalizeProjectPath(
+            relative.text.startsWith('/')
+              ? relative.text
+              : projectDirectory(path) + '/' + relative.text,
+          );
           sites.push({
             start: node.getStart(parsed),
             end: node.getEnd(),
             path: assetPath,
-            remote,
           });
         }
       }
@@ -259,15 +95,9 @@ export class ProjectAssets {
       sites.map(async site => {
         try {
           // Directory URLs establish a base for the evaluator, not a file asset.
-          if (
-            !site.remote &&
-            (await this.files.stat(site.path))?.kind === 'directory'
-          )
-            return;
+          if ((await this.files.stat(site.path))?.kind === 'directory') return;
           onResource?.(site.path);
-          const url = site.remote
-            ? await this.remoteUrl(new URL(site.path).href)
-            : await this.url(site.path);
+          const url = await this.url(site.path);
           return {...site, url};
         } catch (error) {
           throw locateModelError(
@@ -284,9 +114,7 @@ export class ProjectAssets {
       source =
         source.slice(0, site.start) +
         'new URL(' +
-        (site.remote
-          ? JSON.stringify(site.url)
-          : `__code3dAssetUrl(${JSON.stringify(site.url)})`) +
+        `__code3dAssetUrl(${JSON.stringify(site.url)})` +
         ')' +
         source.slice(site.end);
     }
@@ -295,9 +123,5 @@ export class ProjectAssets {
 
   dispose(): void {
     this.beginCompilation();
-    this.urls.clear();
-    this.contents.clear();
-    this.cache.clear();
-    this.googleContext = undefined;
   }
 }

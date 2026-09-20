@@ -879,7 +879,7 @@ test('locates a missing relative asset in the original author source', async () 
   }
 });
 
-test('synchronous font assets invalidate on file edits and batch text operations retain source tools', async () => {
+test('asynchronous font assets invalidate on file edits and batch text operations retain source tools', async () => {
   let path = '/packages/core/test/fonts/DejaVuSans.ttf';
   let revision = 1;
   const files: ProjectFileReader = {
@@ -902,7 +902,7 @@ test('synchronous font assets invalidate on file edits and batch text operations
       {
         path: '/font.ts',
         source:
-          'import {font} from "@code3d/core"; export const sans = font(new URL("./font.ttf", import.meta.url));',
+          'import {font} from "@code3d/core"; export const sans = await font(new URL("./font.ttf", import.meta.url));',
       },
       {
         path: '/model.ts',

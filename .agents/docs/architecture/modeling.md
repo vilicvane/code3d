@@ -160,9 +160,10 @@ CAD 导出使用当前选定运行时中对应 revision 的完成快照，保留
 
 ## 字体与文字
 
-`font()` 和 `googleFont()` 同步提供不可变资源，异步下载及 WOFF2 解码由 App
-资源准备负责；Node 入口初始化 HarfBuzz，普通 Node 调用使用本地文件或已解码字节。
-字体初始化在运行时就绪阶段完成，不以顶层 await 阻塞编辑器或 Worker 消息入口。
+`font()` 和 `googleFont()` 异步提供不可变 Font；模型显式 await，随后 `text()`
+同步建模。Core 负责 CSS 和 WOFF2 解码，宿主资源接口负责加载、缓存及取消。
+App 在执行依赖模块前安装资源服务，不依赖编译期下载；Node 异步加载 URL 或字节。
+HarfBuzz 引擎初始化仍由运行时就绪流程负责，与字体文件加载分开。
 
 HarfBuzz 排版提供真实二次/三次曲线，non-zero winding 布尔合并处理可变字体的
 重叠笔画，包含层级保留孔与岛。`text()` 返回普通 FaceModel 数组，使用共同基线

@@ -92,7 +92,6 @@ const compiler = new ProjectCompiler(
       }),
   },
   esbuild,
-  storage.scope('resources'),
 );
 
 let activeRequest: number | undefined;
