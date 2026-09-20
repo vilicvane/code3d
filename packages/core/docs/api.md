@@ -173,11 +173,19 @@ periodic seam can split a profile. `thicken(faceOrFaces, thickness)` and
 `face.thicken(thickness)` then create solids along the surface normals.
 
 ```ts
-import {googleFont, sphere, text, thicken, cut, wrap} from '@code3d/core';
+import {
+  googleFont,
+  originCenter,
+  sphere,
+  text,
+  thicken,
+  cut,
+  wrap,
+} from '@code3d/core';
 
 const ball = sphere(20);
-const profiles = text('B8i', googleFont('Play'), 9).map(face =>
-  face.originOffset(8, -26, -3),
+const profiles = originCenter(text('Code3D', googleFont('Play'), 9)).map(face =>
+  face.originOffset(0, -26, 0),
 );
 const lettering = wrap(profiles, ball.surface(1));
 export default cut(ball, thicken(lettering, -1));
@@ -187,8 +195,9 @@ export default cut(ball, thicken(lettering, -1));
 
 [Open the complete cylinder, sphere and freeform example](../../app/examples/operations/wrap.ts).
 
-Position the source profiles using the existing origin, rotation and relation
-operations. Their **shared planar bounding rectangle** chooses the target
+Use `originCenter(profiles)` to center the whole layout. Position its plane
+outside the target using origin, rotation and relation operations.
+The profiles' **shared planar bounding rectangle** chooses the target
 region; it includes glyph holes and the blank space between glyphs. Target
 geometry outside the rectangle's normal projection does not participate in
 localization or crossing checks. The closest target point corresponds to its
@@ -662,13 +671,13 @@ curves and points additionally provide vertex/center selection:
 | --------------------------- | ------------------------------------------------------------- |
 | `.originPoint(pointRef)`    | Set the origin to a point reference, including a group member |
 | `.originVertex(id)`         | Set the origin to an input-model vertex                       |
-| `.originCenter()`           | Set the origin to the model's center anchor                   |
+| `.originCenter()`           | Set the origin to the current local bounding-box center       |
 | `.originOffset(dx, dy, dz)` | Add a local-coordinate offset to the current origin           |
 | `.rotate(x, y, z)`          | Rotate about the origin, in degrees, fixed X then Y then Z    |
 
 The origin is always zero in model coordinates. `originOffset(dx, dy, dz)`
 re-expresses every local point as `p - [dx, dy, dz]`; offsets accumulate and can
-cancel. `originVertex` and `originCenter` make the selected point local zero.
+cancel. `originVertex` makes the selected vertex local zero. `originCenter` measures the current local geometry bounds and makes their center zero.
 Geometry, named anchors and topology positions use the resulting coordinates;
 directions and topology IDs are preserved. Old model values remain unchanged.
 Rotation and scaling act about current local zero.
@@ -676,7 +685,7 @@ Rotation and scaling act about current local zero.
 Every geometric model exposes `center`: its initial local bounding-box center,
 carried along by subsequent transforms. Rotation does not recalculate it from
 the rotated shape's axis-aligned bounds. Origin edits change its coordinates;
-`.originCenter().originOffset(1, 0, 0)` leaves it at `[-1, 0, 0]`.
+`originPoint(model.center)` selects that carried point explicitly. After a rotation, it can differ from the center used by `originCenter()`.
 A group inherits the first member's solved local coordinate frame, including
 its origin and axes, while preserving relative member placement. Nested groups
 keep their own frames; an empty group uses the default origin and axes. Member
@@ -691,6 +700,31 @@ See [group coordinates](local-coordinates.md#group-origins).
 For a runnable example and
 the vertex picker, origin arrows, and rotation rings, see
 [choosing an origin and rotating a part](origins-and-rotation.mdx).
+
+### Centering a collection
+
+`originCenter(model)` is equivalent to `model.originCenter()` and retains its type.
+`originCenter(models)` centers the complete layout and returns a readonly array
+with the same member types and order. A singleton is equivalent to the instance
+method; an empty array returns `[]`. Inputs must be geometric models, not groups
+or references.
+
+```ts
+const profiles = originCenter(text('Hello', googleFont('Play'), 10));
+const lettering = extrude(profiles, 1);
+```
+
+For multiple members, placement is first solved in the first member's coordinate
+frame. The combined geometric bounds choose the center, and all geometry and
+references are expressed in that shared frame with the center at zero. The
+result is a completed layout: input relations are already reflected in geometry,
+and subsequent local transforms operate on the returned values. Original models
+and references remain unchanged. Letter spacing, disconnected glyph parts and
+holes are preserved. The bounds measure visible geometry; trailing spaces and
+font line metrics are not part of these bounds.
+
+See the [text example](../../app/examples/text.ts). Select `originCenter(outlines)`
+to preview the centered faces, then pass them directly to `extrude` or `wrap`.
 
 ## Anchors and relations
 
@@ -856,7 +890,7 @@ Cancellation and exceptions retain completed entries and editing history.
 import {font, text, extrude, group} from '@code3d/core';
 
 const sans = font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
-const profiles = text('B8i', sans, 10);
+const profiles = text('Code3D', sans, 10);
 export const lettering = group(extrude(profiles, 1));
 ```
 

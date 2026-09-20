@@ -174,20 +174,20 @@ export const renderSamples = [
     id: 'text',
     title: 'Text as geometry',
     description:
-      'Google Fonts outlines become solid lettering, raised text and engraving.',
+      'Center a complete Google Fonts layout before making solid lettering, raised text and engraving.',
     category: 'Practical models',
     file: 'text.ts',
     focus: {
       context: ".material('#529dcb')",
       token: 'material',
     },
-    tags: ['googleFont', 'text', 'extrude', 'cut'],
+    tags: ['googleFont', 'text', 'originCenter', 'extrude', 'cut'],
   },
   {
     id: 'wrap',
     title: 'Text on curved surfaces',
     description:
-      'Wrap one text layout onto a cylinder, sphere and B-spline ellipsoid, then raise or engrave it along the surface normals.',
+      'Center text layouts and wrap them onto a cylinder, sphere and B-spline ellipsoid, then raise or engrave them along the surface normals.',
     category: 'Practical models',
     file: 'operations/wrap.ts',
     focus: {
@@ -195,7 +195,7 @@ export const renderSamples = [
       token: 'group',
     },
     view: {direction: [0.2, 1.8, -0.7], up: [0, 0, -1]},
-    tags: ['text', 'wrap', 'thicken', 'cut'],
+    tags: ['text', 'originCenter', 'wrap', 'thicken', 'cut'],
   },
   {
     id: 'annotations',

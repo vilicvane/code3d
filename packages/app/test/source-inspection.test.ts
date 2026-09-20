@@ -44,6 +44,28 @@ function width(value: unknown): number {
   return Math.max(...xs) - Math.min(...xs);
 }
 
+test('originCenter previews the complete centered layout and keeps input member focus', async () => {
+  const inspect =
+    await compile(`import {rectangle, originCenter, extrude} from '@code3d/core';
+    const first=rectangle(2,4).originOffset(-3,0,0);
+    const second=rectangle(6,2).originOffset(-12,0,0);
+    const centered=originCenter([first,second]);
+    export default extrude(centered,1);`);
+  const all = defined(await inspect('originCenter([first,second])'));
+  assert.equal(all.target.length, 2);
+  assert.equal(all.ambient.length, 0);
+  const member = defined(await inspect('first,second', 0));
+  assert.equal(member.target.length, 2);
+  assert.equal(member.target.filter(value => value.focused).length, 1);
+  member.target.forEach((item, index) => {
+    assert.ok(item.kind === 'model');
+    assert.equal(
+      width({kind: 'model', model: defined(item.model.children[0])}),
+      [2, 6][index],
+    );
+  });
+});
+
 test('parameter inspection falls through to call inspection and then the ordinary call result', async () => {
   const inspect = await compile(`import {box} from '@code3d/core';
     /**

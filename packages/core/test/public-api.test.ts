@@ -18,6 +18,7 @@ const authoringValues = [
   'axisEdge',
   'axisLine',
   'offset',
+  'originCenter',
   'rotate',
   'pivot',
   'pivotVertex',

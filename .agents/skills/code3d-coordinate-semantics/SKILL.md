@@ -41,7 +41,9 @@ p_new = p_old - d
 
 几何形状、点间相对关系和拓扑身份不变，点坐标改变。顶点、控制点、`center`、具名锚点及参考坐标架的位置遵守同一变换；方向、切向和法向不减去偏移。`center` 仍是原来的几何点，其坐标随变换更新。
 
-所有模型提供 `originOffset()` 和 `originPoint(pointRef)`；后者把所选点转换到 receiver 的局部坐标，再让它成为零点。几何模型的 `originVertex(id)` 等价于选择自身拓扑顶点，`originCenter()` 选择已有 `center` 点。group 不引入聚合顶点 ID 或几何 center。
+所有模型提供 `originOffset()` 和 `originPoint(pointRef)`；后者把所选点转换到 receiver 的局部坐标，再让它成为零点。几何模型的 `originVertex(id)` 等价于选择自身拓扑顶点，`originCenter()` 选择当前局部几何包围盒中心，旋转后重算。`center` 仍是随几何变换携带的稳定点，显式选择它使用 `originPoint(model.center)`。group 不引入聚合顶点 ID 或几何 center。
+
+同名自由函数 `originCenter(model)` 与实例方法等价；`originCenter(models)` 将整个数组作为一个布局居中，返回保留顺序与类型的数组。多成员先求解装配，按首成员坐标架求整组有限几何包围盒，再把已求解布局重表达到以该中心为零的共同坐标架；成员关系已体现在结果几何中，不再重复求解输入关系。空数组返回空数组，单元素数组与实例方法等价。文字各个连通面一起变换，不逐字或逐面居中。
 
 group 构造时先求解直接成员位姿，随后继承第一个成员的完整局部坐标系（原点及轴向），与 union/intersect 的首个操作数、cut 的被切零件、loft 的第一截面一致。成员间相对装配不变；顺序可以改变结果坐标系。嵌套 group 作为一个完整成员，不展开其子成员重新定原点；空 group 使用默认零点和轴向。成员原点重合时，group 原点就是该重合点，支持 originOffset + group 直接装配。
 

@@ -716,6 +716,46 @@ test('originCenter without parameters displays its center and drags by appending
   );
 });
 
+test('originCenter collections stay inspectable without appending model methods to arrays', async () => {
+  const {modelSpatialSourceRef} = await server.ssrLoadModule<
+    typeof import('../src/tools/contextual-tool-context.ts')
+  >('/src/tools/contextual-tool-context.ts');
+  for (const input of ['first', '[first]', '[first, second]']) {
+    const source = `import {box, originCenter} from '@code3d/core';
+const first = box(8, 6, 4).originOffset(-10, 0, 0);
+const second = box(2, 3, 4);
+const centered = originCenter(${input});
+export default centered;`;
+    const {module, target, evaluation, bindings} = await build(
+      source,
+      'originCenter',
+    );
+    const collection = input.startsWith('[');
+    assert.equal(!!evaluation.isCollection, collection);
+    assert.equal(bindings.length, collection ? 0 : 3);
+    assert.equal(
+      !!modelSpatialSourceRef(module, {target, evaluation}),
+      !collection,
+    );
+    if (!collection) {
+      const host = hostFor(source);
+      const result = new ToolEngine(host.host)
+        .begin('center-function')
+        .commit(spatialIntent(bindings[0], 2));
+      assert.equal(result.status, 'committed');
+      assert.match(
+        host.source(),
+        /originCenter\(first\)\.originOffset\(2, 0, 0\)/,
+      );
+    }
+  }
+  const source = `import {box, originCenter} from '@code3d/core';
+const centered = originCenter([box(8, 6, 4), box(2, 3, 4)]);
+export default centered[0].originOffset();`;
+  const {bindings} = await build(source, 'originOffset');
+  assert.equal(bindings.length, 3);
+});
+
 test('originVertex exposes the output origin and retains its input for vertex selection', async () => {
   const source =
     'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core"; const part = box(8, 6, 4).originVertex(3);';

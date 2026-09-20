@@ -4,6 +4,7 @@ import {
   ellipsoid,
   googleFont,
   group,
+  originCenter,
   sphere,
   text,
   thicken,
@@ -12,10 +13,10 @@ import {
 } from '@code3d/core';
 
 const sans = googleFont('Play');
-// Position the complete text layout outside the target. Its finite bounding
-// rectangle selects the closest surface region and preserves the text direction.
-const profiles = text('B8i', sans, 9).map(face =>
-  face.originOffset(8, -26, -3),
+// Center the complete text layout, then move its plane outside the target.
+// Its finite bounding rectangle selects the closest surface region.
+const profiles = originCenter(text('Code3D', sans, 9)).map(face =>
+  face.originOffset(0, -26, 0),
 );
 
 const drum = cylinder(20, 30).rotate(90, 0, 0);
@@ -32,8 +33,9 @@ export const engraved = cut(ball, thicken(sphericalText, -1)).material(
 
 // The same operation also accepts a general B-spline surface.
 const oval = ellipsoid(20, 26, 22);
-const smallProfiles = text('CAD', sans, 6).map(face =>
-  face.originOffset(6, -32, 3),
+// Surface 1 ends at the equator, so place the centered text on its -Z side.
+const smallProfiles = originCenter(text('Code3D', sans, 6)).map(face =>
+  face.originOffset(0, -32, 3),
 );
 const curvedText = wrap(smallProfiles, oval.surface(1));
 export const freeform = union([oval, ...thicken(curvedText, 0.8)])

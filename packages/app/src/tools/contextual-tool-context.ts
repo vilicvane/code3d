@@ -260,6 +260,7 @@ export function modelSpatialSourceRef(
 ): SourceRef | undefined {
   const {target, evaluation} = scope;
   if (
+    evaluation.isCollection ||
     evaluation.relationOwnerNodeId ||
     !['value', 'operation-input', 'operation-output'].includes(target.kind) ||
     !evaluation.nodeIds.some(id => module.objects.has(id))
