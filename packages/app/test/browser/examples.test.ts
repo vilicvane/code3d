@@ -66,15 +66,29 @@ assert.ok(
     shardIndex <= shardCount,
   'CODE3D_EXAMPLE_SHARD must be an index/count pair with 1 <= index <= count',
 );
-const runsStandaloneTests = shardIndex === shardCount;
+const examplePattern = process.env.CODE3D_EXAMPLE_PATTERN
+  ? new RegExp(process.env.CODE3D_EXAMPLE_PATTERN)
+  : undefined;
+const selectedExamples = exampleEntries.filter(
+  ({file}) => !examplePattern || examplePattern.test(file),
+);
+assert.ok(selectedExamples.length, 'The example pattern must match an example');
+const runsStandaloneTests = !examplePattern && shardIndex === shardCount;
 const assignment = assignExampleShards(
-  exampleEntries.map(({file}) => file),
+  selectedExamples.map(({file}) => file),
   shardCount,
 );
-for (const {file} of exampleEntries.filter(
+for (const {file} of selectedExamples.filter(
   (_, index) => assignment[index] === shardIndex - 1,
 )) {
   test(`App example link: ${file}`, {timeout: exampleBudget(file)}, async t => {
+    const started = performance.now();
+    const phases: {name: string; elapsedMs: number}[] = [];
+    const phase = (name: string) => {
+      phases.push({name, elapsedMs: Math.round(performance.now() - started)});
+    };
+    t.after(() => t.diagnostic(JSON.stringify({phases})));
+    phase('open');
     const context = await browser.newContext();
     t.after(() => context.close());
     context.setDefaultTimeout(defaultWait);
@@ -101,6 +115,7 @@ for (const {file} of exampleEntries.filter(
       });
     });
     await page.goto(process.env.CODE3D_TEST_URL + '#/file/examples/' + file);
+    phase('initial model');
     await page.waitForFunction(
       () => window.exampleApp && !window.exampleApp.previewState.busy,
       undefined,
@@ -132,6 +147,7 @@ for (const {file} of exampleEntries.filter(
         ...(sourceContextSets[sample.id] ?? []).map(context => context.focus),
       ]) {
         const offset = sourceTokenOffset(source, focus);
+        phase('inspect: ' + focus.context);
         assert.equal(
           await page.evaluate(
             async ({file, offset}) => {
@@ -198,10 +214,11 @@ for (const {file} of exampleEntries.filter(
         assert.equal(await input.getAttribute('placeholder'), value);
       }
     }
-    await editAndUndo(page, file, file === 'sketches/constraints.ts');
-    if (file === 'projects/phone-stand.ts') await editAndUndo(page, file, true);
+    await editAndUndo(page, file, file === 'sketches/constraints.ts', phase);
+    if (file === 'projects/phone-stand.ts')
+      await editAndUndo(page, file, true, phase);
     if (file === 'sketches/mounting-plate.ts') {
-      await editAndUndo(page, file, true);
+      await editAndUndo(page, file, true, phase);
       await verifySketchPresets(page);
     }
     if (file === 'npm/model.ts') await verifyPackageNavigation(page);
@@ -210,6 +227,7 @@ for (const {file} of exampleEntries.filter(
     if (file === 'operations/intersect.ts' || file === 'operations/loft.ts')
       await verifyOperationRecovery(page, file);
     assert.deepEqual(errors, []);
+    phase('complete');
   });
 }
 
@@ -248,7 +266,13 @@ async function geometrySignature(page: Page) {
   });
 }
 
-async function editAndUndo(page: Page, file: string, preferSketch = false) {
+async function editAndUndo(
+  page: Page,
+  file: string,
+  preferSketch: boolean,
+  phase: (name: string) => void,
+) {
+  phase('original geometry');
   const original = await page.evaluate(() =>
     window.exampleApp.codeEditor.editor.getValue(),
   );
@@ -300,6 +324,7 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
     file === 'packages/gears/parts.ts'
       ? {before: 'faceWidth: 10', after: 'faceWidth: 11'}
       : undefined;
+  phase('edit');
   if (sourceEdit) {
     const offset = original.indexOf(sourceEdit.before);
     assert.ok(offset >= 0, 'The representative gear configuration exists');
@@ -378,10 +403,12 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
     );
     await page.mouse.up();
   }
+  phase('edited source');
   await page.waitForFunction(
     source => window.exampleApp.codeEditor.editor.getValue() !== source,
     original,
   );
+  phase('edited model');
   await page.waitForFunction(
     () =>
       !window.exampleApp.previewState.busy &&
@@ -392,18 +419,42 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
     await page.evaluate(() => window.exampleApp.previewState.diagnostic),
     undefined,
   );
+  phase('edited geometry');
   if (edit || sourceEdit || preferSketch)
     assert.notEqual(
       await geometrySignature(page),
       geometry,
       'The parameter edit must change geometry',
     );
+  phase('undo');
   await page.evaluate(() => window.exampleApp.codeEditor.editor.focus());
   await page.keyboard.press('Control+z');
-  await page.waitForFunction(
-    source => window.exampleApp.codeEditor.editor.getValue() === source,
-    original,
-  );
+  phase('restored source');
+  await page
+    .waitForFunction(
+      source => window.exampleApp.codeEditor.editor.getValue() === source,
+      original,
+    )
+    .catch(async error => {
+      const state = await page.evaluate(() => {
+        const {codeEditor, previewState, compiler} = window.exampleApp;
+        const editor = codeEditor.editor;
+        return {
+          source: editor.getValue(),
+          canUndo: editor.getModel()!.canUndo(),
+          canRedo: editor.getModel()!.canRedo(),
+          editorFocused: editor.hasTextFocus(),
+          activeElement: document.activeElement?.outerHTML.slice(0, 300),
+          busy: previewState.busy,
+          phase: compiler.phase,
+          sourceVersion: codeEditor.sourceVersion(),
+          previewVersion: previewState.sourceVersion,
+        };
+      });
+      assert.equal(state.source, original, JSON.stringify(state));
+      throw error;
+    });
+  phase('restored model');
   await page.waitForFunction(
     () =>
       !window.exampleApp.previewState.busy &&
@@ -414,6 +465,7 @@ async function editAndUndo(page: Page, file: string, preferSketch = false) {
     await page.evaluate(() => window.exampleApp.previewState.diagnostic),
     undefined,
   );
+  phase('restored geometry');
   assert.equal(
     await geometrySignature(page),
     geometry,

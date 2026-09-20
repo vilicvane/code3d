@@ -5,6 +5,11 @@ on:
     branches: ['**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      example_pattern:
+        description: 'Example path regular expression; empty runs the complete CI'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -14,6 +19,7 @@ env:
 
 jobs:
   build:
+    if: ${{ !inputs.example_pattern }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -97,3 +103,4 @@ jobs:
         run: npm run test:examples:browser --workspace @code3d/app
         env:
           CODE3D_EXAMPLE_SHARD: ${{ matrix.shard }}/4
+          CODE3D_EXAMPLE_PATTERN: ${{ inputs.example_pattern }}
