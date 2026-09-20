@@ -1121,7 +1121,7 @@ test(
       await page.screenshot({path: process.env.CODE3D_ORIGIN_LAYER_SCREENSHOT});
     await assertOriginForeground(page);
     assert.deepEqual(before.origin, [0, 0, 0]);
-    assert.equal(before.bindings.length, 3);
+    assert.equal(before.visibleHandles, 3);
     const handle = await xHandle(page);
     await page.mouse.move(handle.x, handle.y);
     await page.mouse.down();
@@ -1340,7 +1340,7 @@ export const assembly = group([base, cap]).originPoint(cap.center);`;
     assert.equal(before.geometry.length, 16);
     near(before.origins[0], [0, -5, 0]);
     near(before.origins[1], [0, 0, 0]);
-    assert.equal(before.bindings, 3);
+    assert.equal(before.visibleHandles, 3);
     await assertOriginForeground(page);
     if (process.env.CODE3D_GROUP_ORIGIN_SCREENSHOT)
       await page.screenshot({path: process.env.CODE3D_GROUP_ORIGIN_SCREENSHOT});
@@ -1441,7 +1441,7 @@ export const assembly = group([base, cap]).originPoint(cap.center).rotate(0, 0, 
         );
       }
       const before = await groupState(page);
-      assert.equal(before.bindings, 3);
+      assert.equal(before.visibleHandles, 3);
       assert.equal(before.geometry.length, 16);
       const drag = async () => {
         const handle = await rotationHandle(page);
@@ -1966,8 +1966,9 @@ async function groupState(page: Page) {
       origin: selected.node.origin,
       origins: selected.node.children.map(child => child.transform.position),
       geometry,
-      bindings: viewport['transformGizmo']['axes'].filter(axis => axis.binding)
-        .length,
+      visibleHandles: viewport['transformGizmo']['axes'].filter(
+        axis => axis.controls.getHelper().visible,
+      ).length,
       active: Boolean(viewport['transformGizmo']['active']),
       delta: preview?.spatial.origin,
     };
@@ -2275,6 +2276,9 @@ async function state(page: Page) {
       bindings: viewport['transformGizmo']['axes'].flatMap(axis =>
         axis.binding ? [axis.binding] : [],
       ),
+      visibleHandles: viewport['transformGizmo']['axes'].filter(
+        axis => axis.controls.getHelper().visible,
+      ).length,
     };
   });
 }

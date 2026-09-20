@@ -398,6 +398,8 @@ export class ModelViewport {
   private transientPreviewRestore?: TransientPreviewRestore;
   private selectionGesture?: SelectionGesture;
   private selectionClick?: SelectionClick;
+  private pendingFrame?: number;
+  private disposed = false;
 
   constructor(
     private readonly container: HTMLElement,
@@ -423,7 +425,7 @@ export class ModelViewport {
     this.onNavigateSource = onNavigateSource;
     this.onTopologySelection = onTopologySelection;
     this.sourceDecorationProviders = sourceDecorationProviders;
-    this.rendering = new ModelRenderer(this.container);
+    this.rendering = new ModelRenderer(this.container, this.requestRender);
     makeObservable<
       this,
       | 'module'
@@ -500,6 +502,7 @@ export class ModelViewport {
         this.root,
       );
       this.refreshTopologyHover();
+      this.requestRender();
     });
     if (showCoordinateReference) {
       this.coordinateReference = new ViewportCoordinateReference(
@@ -542,6 +545,7 @@ export class ModelViewport {
           occurrence.key,
         ]);
       },
+      this.requestRender,
     );
     // Source context and in-flight previews own one decoration projection. A
     // committed preview remains authoritative until the model is replaced.
@@ -588,7 +592,6 @@ export class ModelViewport {
         }
       },
     );
-    window.addEventListener('pagehide', stopSourceDecorations, {once: true});
 
     this.renderer.domElement.addEventListener('pointerdown', event =>
       this.beginSelectionGesture(event),
@@ -607,9 +610,22 @@ export class ModelViewport {
       this.updateTopologyHover(undefined);
     });
 
-    new ResizeObserver(() => this.resize()).observe(this.container);
+    const resizeObserver = new ResizeObserver(() => this.resize());
+    resizeObserver.observe(this.container);
+    window.addEventListener(
+      'pagehide',
+      () => {
+        this.disposed = true;
+        if (this.pendingFrame !== undefined)
+          cancelAnimationFrame(this.pendingFrame);
+        resizeObserver.disconnect();
+        stopSourceDecorations();
+        this.transformGizmo.dispose();
+        this.controls.dispose();
+      },
+      {once: true},
+    );
     this.resize();
-    this.animate();
   }
 
   get renderMode(): ModelRenderMode {
@@ -635,7 +651,7 @@ export class ModelViewport {
     this.updateTopologyHover(undefined);
     this.coordinateReference?.setVisible(mode === 'modeling');
     this.updateTransformGizmo();
-    this.rendering.renderFrame();
+    this.requestRender();
   }
 
   /** Keep stale handles unavailable until a replacement model is rendered. */
@@ -1601,6 +1617,7 @@ export class ModelViewport {
     });
     if (instances.length > 0) this.decorationLayers.set(owner, instances);
     this.updateDecorationVisibilities();
+    this.requestRender();
   }
 
   clearDecorations(owner: string): void {
@@ -1615,6 +1632,7 @@ export class ModelViewport {
     });
     this.decorationLayers.delete(owner);
     this.updateDecorationVisibilities();
+    this.requestRender();
   }
 
   setSourceDecorationVisible(providerId: string, visible: boolean): void {
@@ -1648,19 +1666,32 @@ export class ModelViewport {
     this.hasFramedView = true;
   }
 
-  captureImage(width: number, height: number, view?: ImageView): Promise<Blob> {
+  async captureImage(
+    width: number,
+    height: number,
+    view?: ImageView,
+  ): Promise<Blob> {
     this.selectionHighlight?.update();
     this.impactHighlights.forEach(highlight => highlight.update());
     this.updateDecorationVisibilities();
-    return this.rendering.captureImage(
-      width,
-      height,
-      (camera, width, height) =>
-        this.updateDecorationSizes(camera, width, height),
-      view
-        ? {view, bounds: new THREE.Box3().setFromObject(this.root)}
-        : undefined,
-    );
+    try {
+      return await this.rendering.captureImage(
+        width,
+        height,
+        (camera, width, height) =>
+          this.updateDecorationSizes(camera, width, height),
+        view
+          ? {view, bounds: new THREE.Box3().setFromObject(this.root)}
+          : undefined,
+      );
+    } finally {
+      this.updateDecorationSizes(
+        this.camera,
+        this.renderer.domElement.clientWidth,
+        this.renderer.domElement.clientHeight,
+      );
+      this.requestRender();
+    }
   }
 
   private frameChangedView(target: THREE.Object3D = this.root): void {
@@ -1793,7 +1824,7 @@ export class ModelViewport {
     placement: ModelPlacement,
     operationRole?: ModelOperationInputRole,
   ): THREE.Object3D {
-    const object = createRenderedModelNode(node);
+    const object = createRenderedModelNode(node, this.requestRender);
     object.name = node.name;
     object.userData.selectionKey = key;
     applyNodeTransform(object, node, placement);
@@ -1922,7 +1953,7 @@ export class ModelViewport {
     placement: ModelPlacement,
     emphasis: Exclude<SourceEmphasis, 'primary'>,
   ): THREE.Object3D {
-    const object = createRenderedModelNode(node);
+    const object = createRenderedModelNode(node, this.requestRender);
     object.name = `${node.name} (context)`;
     object.userData.context = true;
     object.userData.sourceTargetId = targetId;
@@ -2026,6 +2057,7 @@ export class ModelViewport {
   }
 
   private rebuildSelectionHighlight(): void {
+    this.requestRender();
     if (this.selectionHighlight) {
       this.scene.remove(this.selectionHighlight);
       this.selectionHighlight.dispose();
@@ -2191,6 +2223,7 @@ export class ModelViewport {
   }
 
   private applyPreviewTransforms(): void {
+    this.requestRender();
     for (const occurrence of this.renderedOccurrences()) {
       applyNodeTransform(
         occurrence.object,
@@ -2414,6 +2447,7 @@ export class ModelViewport {
   }
 
   private rebuildTopologySelectionOverlay(): void {
+    this.requestRender();
     this.clearTopologySelectionOverlay();
     const selection = this.topologySelection;
     if (!selection) return;
@@ -2449,6 +2483,7 @@ export class ModelViewport {
   }
 
   private clearTopologySelection(): void {
+    this.requestRender();
     this.clearTopologySelectionOverlay();
     if (this.topologySelection) {
       this.topologySelection.guide.removeFromParent();
@@ -2587,9 +2622,14 @@ export class ModelViewport {
     this.refreshTopologyHover();
   }
 
-  private animate = (): void => {
-    requestAnimationFrame(this.animate);
-    this.controls.updateTransition(performance.now());
+  /** Coalesce native scene mutations into one frame; idle views do no GPU work. */
+  private requestRender = (): void => {
+    if (!this.disposed && this.pendingFrame === undefined)
+      this.pendingFrame = requestAnimationFrame(this.draw);
+  };
+
+  private draw = (time: number): void => {
+    this.controls.updateTransition(time);
     this.rendering.updateCameraRange(
       this.controls.focus,
       this.controls.object.position.distanceTo(this.controls.focus),
@@ -2606,6 +2646,10 @@ export class ModelViewport {
         this.renderer.domElement.clientHeight,
       );
     });
+    // Changes made while preparing this frame are already visible. Reactions to
+    // the published grid step may change scene resources and need another frame.
+    this.pendingFrame = undefined;
+    if (this.controls.transitioning) this.requestRender();
     const step = this.rendering.grid.step;
     runInAction(() => {
       this.liveGridStep = step;
@@ -2649,6 +2693,7 @@ export class ModelViewport {
   }
 
   private clearImpactHighlights(): void {
+    this.requestRender();
     for (const highlight of this.impactHighlights) {
       this.scene.remove(highlight);
       highlight.dispose();
@@ -2774,6 +2819,7 @@ export class ModelViewport {
   }
 
   private disposeRoot(): void {
+    this.requestRender();
     disposeObject(this.root);
   }
 }

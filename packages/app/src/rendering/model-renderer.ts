@@ -97,6 +97,7 @@ export class ModelRenderer {
 
   constructor(
     private readonly container: HTMLElement,
+    private readonly onChange: () => void = () => {},
     private readonly settings: AppSettings = appSettings,
   ) {
     makeObservable<this, 'renderMode'>(this, {
@@ -112,6 +113,7 @@ export class ModelRenderer {
     configureRenderer(this.renderer, this.pixelRatio());
     this.renderer.domElement.className = 'viewport-canvas';
     this.container.append(this.renderer.domElement);
+    this.renderer.domElement.addEventListener('webglcontextrestored', onChange);
 
     this.scene.background = new THREE.Color('#171815');
     this.scene.environment = studioEnvironment;
@@ -151,6 +153,10 @@ export class ModelRenderer {
   dispose = (): void => {
     this.stopSettings();
     window.removeEventListener('pagehide', this.dispose);
+    this.renderer.domElement.removeEventListener(
+      'webglcontextrestored',
+      this.onChange,
+    );
     this.renderer.dispose();
   };
 
@@ -169,6 +175,7 @@ export class ModelRenderer {
 
     this.renderer.setSize(width, height, false);
     resizeViewCamera(this.camera, width / height);
+    this.onChange();
   }
 
   framing(
@@ -437,6 +444,7 @@ export type ModelPlacement = 'standalone' | 'composition';
 
 export function createRenderedModelNode(
   node: ModelSnapshotObject,
+  onChange?: () => void,
 ): THREE.Object3D {
   if (node.kind === 'group' || node.kind === 'reference')
     return new THREE.Group();
@@ -444,7 +452,7 @@ export function createRenderedModelNode(
     throw new Error(`OpenCascade solid ${node.name} has no renderable mesh.`);
   }
 
-  const material = createModelMaterial(node.material, node.kind);
+  const material = createModelMaterial(node.material, node.kind, onChange);
   const alpha = material.transparent ? material.opacity : 1;
   const container = new THREE.Group();
   if (node.kind === 'vertex') {

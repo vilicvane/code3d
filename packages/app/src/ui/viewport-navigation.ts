@@ -99,6 +99,10 @@ export class ViewportNavigation extends ArcballControls {
     return this._gizmos.position;
   }
 
+  get transitioning(): boolean {
+    return this.transition !== undefined;
+  }
+
   override setCamera(camera: ViewCamera): void {
     super.setCamera(camera);
     // Arcball rotates _upState by the camera's absolute quaternion. Its default
@@ -244,6 +248,7 @@ export class ViewportNavigation extends ArcballControls {
       from,
       to,
     };
+    this.dispatchEvent({type: 'change'});
   }
 
   private applyPose(pose: CameraPose): void {
@@ -389,6 +394,7 @@ export class ViewportNavigation extends ArcballControls {
         from,
         to: {...from, projectionMix: 1},
       };
+      this.dispatchEvent({type: 'change'});
     }
   }
 

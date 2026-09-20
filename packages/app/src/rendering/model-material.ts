@@ -14,10 +14,11 @@ const texturesByMaterial = new WeakMap<
 export function createModelMaterial(
   snapshot: ModelMaterialSnapshot | undefined,
   kind: ModelKind,
+  onChange: () => void = () => {},
 ): THREE.Material {
   if (snapshot !== undefined && typeof snapshot !== 'string') {
     const loader = new THREE.ObjectLoader();
-    const images = loader.parseImages(snapshot.images ?? [], () => {});
+    const images = loader.parseImages(snapshot.images ?? [], onChange);
     const textures = loader.parseTextures(snapshot.textures ?? [], images);
     const material = new THREE.MaterialLoader()
       .setTextures(textures)
