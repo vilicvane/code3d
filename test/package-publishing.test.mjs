@@ -9,6 +9,9 @@ import {
   verifiedArtifacts,
 } from '../scripts/package-artifacts.mjs';
 import {releasePackages} from '../scripts/publish-packages.mjs';
+import {ArtifactRegistry} from '../scripts/artifact-registry.mjs';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 
 test('a shared release tag selects only matching versions in dependency order', () => {
   const packages = [
@@ -214,4 +217,72 @@ test('example consumers and publication require the exact verified archive ident
     verifiedArtifacts([manifest], directory),
     /artifact was modified/,
   );
+});
+
+test('current artifacts install through npm with transitive dependencies before publication', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'code3d-registry-test-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const artifacts = [];
+  for (const manifest of [
+    {name: '@code3d/unpublished-dependency', version: '0.0.0-ci.1'},
+    {
+      name: '@code3d/unpublished-consumer',
+      version: '0.0.0-ci.1',
+      dependencies: {'@code3d/unpublished-dependency': '^0.0.0-ci.1'},
+    },
+  ]) {
+    const source = path.join(directory, manifest.name.split('/')[1]);
+    await mkdir(path.join(source, 'package'), {recursive: true});
+    await writeFile(
+      path.join(source, 'package/package.json'),
+      JSON.stringify(manifest),
+    );
+    const filename = path.join(source, 'package.tgz');
+    run('tar', ['-czf', filename, 'package'], source);
+    artifacts.push({
+      ...manifest,
+      manifest,
+      filename,
+      integrity: integrity(await readFile(filename)),
+      tarball: `https://registry.npmjs.org/${manifest.name}/-/package.tgz`,
+    });
+  }
+  const registry = new ArtifactRegistry(artifacts);
+  const server = await registry.listen();
+  t.after(() => server.close());
+  const missing = await registry.response(
+    'https://registry.npmjs.org/@code3d/unpublished-consumer/9.9.9',
+  );
+  assert.equal(
+    missing.status,
+    404,
+    'unavailable Code3D versions never fall back to public npm',
+  );
+  await writeFile(
+    path.join(directory, 'package.json'),
+    JSON.stringify({
+      private: true,
+      dependencies: {'@code3d/unpublished-consumer': 'latest'},
+    }),
+  );
+  await promisify(execFile)(
+    'npm',
+    [
+      'install',
+      '--ignore-scripts',
+      '--no-audit',
+      '--no-fund',
+      '--@code3d:registry=' + server.url,
+    ],
+    {cwd: directory, timeout: 30_000, killSignal: 'SIGKILL'},
+  );
+  const installed = JSON.parse(
+    await readFile(path.join(directory, 'package-lock.json'), 'utf8'),
+  );
+  for (const artifact of artifacts) {
+    const pkg = installed.packages['node_modules/' + artifact.name];
+    assert.equal(pkg.version, artifact.version);
+    assert.equal(pkg.integrity, artifact.integrity);
+    assert.ok(pkg.resolved.startsWith(server.url + '/'));
+  }
 });

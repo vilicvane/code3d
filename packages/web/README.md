@@ -18,6 +18,7 @@ From the repository root:
 ```bash
 npm install
 npm run build:packages
+npm run pack:packages
 npm run build --workspace @code3d/app
 npm run render:web-images
 npm run dev --workspace @code3d/web
@@ -27,6 +28,14 @@ The image renderer uses Playwright Chromium. Install it with
 `npx playwright-core install chromium`, or set
 `CODE3D_CHROME_CDP_ENDPOINT=http://localhost:9222` to use an existing debugging
 browser. The renderer closes its own pages and leaves that browser running.
+
+Model images use the current commit’s packed public packages from `dist/packages`.
+The renderer resolves temporary example manifests and locks against those exact
+archives, then makes one separate production render build for the image batch.
+Browser installation still checks integrity and extracts real tarballs. This
+works before npm publication; checked-in examples and the deployable App build
+keep their normal package declarations. Run `npm run pack:packages` after
+rebuilding public packages. Temporary render output is removed when rendering ends.
 
 ## Agent documentation and local prompts
 
@@ -271,7 +280,8 @@ npm run deploy
 ```
 
 This uses the checked-in model images. To regenerate them, run
-`npm run render:web-images` after building App, then rebuild the website.
+`npm run pack:packages` and `npm run render:web-images` after building the public
+packages and App, then rebuild the website.
 
 The website workflow regenerates model images and builds the complete artifact
 before deploying. Full tests run asynchronously in the independent CI workflow

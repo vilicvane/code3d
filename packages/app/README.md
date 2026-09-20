@@ -163,3 +163,9 @@ Local tests only close their own browser connections and contexts; CI owns one
 headless browser for the command. The independent CI
 workflow runs every example asynchronously; website and npm publication workflows
 build and publish without waiting for that test run.
+
+Browser example tests and image rendering consume the current packed public
+packages. Run `npm run build:packages` and `npm run pack:packages` from the
+repository root first. Their temporary manifests and locks preserve real npm
+installation and integrity checks without requiring publication; see the
+[development and validation guide](../../.agents/docs/development.md#测试与格式).

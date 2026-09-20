@@ -95,7 +95,11 @@ try {
   );
   shapes.push(core.box(2, 3, 4), primitive());
   shapes.push(
-    ...core.text('B8i', core.font(new URL('./font.ttf', import.meta.url)), 10),
+    ...core.text(
+      'B8i',
+      await core.font(new URL('./font.ttf', import.meta.url)),
+      10,
+    ),
   );
   assert.equal(shapes.length, 6);
   const posts = layout.linear(layout.repeat(shapes[0], 3), {
