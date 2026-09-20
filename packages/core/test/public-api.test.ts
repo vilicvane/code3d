@@ -64,10 +64,12 @@ const inspectorEntries = [
   'inspectVolume',
 ];
 
-test('exports authored values and runtime inspector entry points without leaking internal declarations', async () => {
+const libraryHelpers = ['getModelData', 'setModelData', 'inspectGroupMembers'];
+
+test('exports authoring values, library helpers and runtime inspectors without leaking internal declarations', async () => {
   assert.deepEqual(
     Object.keys(authoring).sort(),
-    [...authoringValues, ...inspectorEntries].sort(),
+    [...authoringValues, ...libraryHelpers, ...inspectorEntries].sort(),
   );
   assert.deepEqual(Object.keys(authoringApi).sort(), authoringValues);
   for (const [name, value] of Object.entries(authoringApi))
@@ -86,6 +88,7 @@ test('exports authored values and runtime inspector entry points without leaking
     'boundsAnnotation',
     'anchorAnnotation',
     'captureInspectData',
+    ...libraryHelpers,
   ])
     assert.match(declaration, new RegExp('\\b' + name + '\\b'), name);
 });
