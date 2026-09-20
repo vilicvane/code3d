@@ -35,14 +35,23 @@ if (
     }
     if (selected.has('@code3d/screws'))
       models.push((await import('@code3d/screws')).ISO4762.screw('M3', 8));
-    if (selected.has('@code3d/gears'))
-      models.push(
-        (await import('@code3d/gears')).spurGear({
-          module: 1,
-          teeth: 18,
-          faceWidth: 5,
-        }),
+    if (selected.has('@code3d/gears')) {
+      const {assembleGears, nominalCenterDistance, spurGear} =
+        await import('@code3d/gears');
+      const gear = spurGear({module: 1, teeth: 18, faceWidth: 5}).material(
+        '#d3b46c',
       );
+      const arranged = assembleGears([gear, gear, gear], {
+        centerDistanceDelta: 0.2,
+        pairs: [{angle: 60}, {angle: 60}],
+      });
+      const train = core.group(arranged);
+      assert.equal(nominalCenterDistance(arranged[0], arranged[1]), 18);
+      const third = arranged[2].position(train);
+      assert.ok(Math.abs(third[0]) < 1e-6);
+      assert.ok(Math.abs(third[2] - 18.2 * Math.sqrt(3)) < 1e-6);
+      models.push(train);
+    }
     if (selected.has('@code3d/layout')) {
       const layout = await import('@code3d/layout');
       models.push(

@@ -47,8 +47,10 @@ export type {
 } from './sketch.js';
 
 export {
+  getModelData,
   offset,
   rotate,
+  setModelData,
   pivot,
   pivotVertex,
   pivotPoint,
@@ -67,6 +69,7 @@ export {
   text,
   frustum,
   group,
+  inspectGroupMembers,
   intersect,
   line,
   loft,

@@ -926,17 +926,19 @@ export class ModelViewport {
         });
       }
     }
-    // Every iteration of the focused target stays visible as context, each
-    // staged at the focused transformation by its own relation preview.
-    const presentedNodeIds = new Set(
-      [...bodies.values()].map(({model}) => authoredNodeId(model)),
-    );
+    // The current execution is fully represented by its inspection scene;
+    // its inputs may have been repositioned or replaced. Only other executions
+    // add loop context, staged by their own relation previews.
+    const handledNodeIds = new Set([
+      ...(scope?.evaluation.nodeIds ?? []),
+      ...[...bodies.values()].map(({model}) => authoredNodeId(model)),
+    ]);
     for (const evaluation of scope?.target.evaluations ?? []) {
       for (const nodeId of evaluation.nodeIds) {
-        if (presentedNodeIds.has(nodeId)) continue;
+        if (handledNodeIds.has(nodeId)) continue;
         const model = module.objects.get(nodeId);
         if (!model) continue;
-        presentedNodeIds.add(nodeId);
+        handledNodeIds.add(nodeId);
         const preview =
           evaluation.relationPreview?.nodeId === nodeId
             ? evaluation.relationPreview

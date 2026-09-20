@@ -2,7 +2,8 @@
 
 Build complete nominal spur, helical and internal cylindrical gear solids from
 tooth dimensions and mounting parameters. Results are regular Code3D solids
-with named gear-axis and face references.
+with named gear-axis and face references. `assembleGears()` positions compatible
+gear pairs and simple trains at their nominal shaft distances.
 
 ## Installation
 
@@ -50,10 +51,24 @@ Complete example: [gears and mounting options](../app/examples/packages/gears.ts
   involute chords and simplified root transitions, not production tooth surfaces.
 - A pair of generated gears is not a validated gear pair. Tolerances, load
   capacity and interference-free meshing require separate checks.
+- `assembleGears([first, second], {centerDistanceDelta: 0.2})` returns related
+  gear values and chooses their tooth angle automatically. Use `group(gears)`
+  to make one placeable assembly. The signed delta changes shaft distance; it
+  does not specify backlash.
+- `pairs[i].angle` turns from the preceding center-line direction, in degrees.
+  The default 0° continues straight. The first pair starts from +X; two 60°
+  turns give center-line directions of 60° and 120° from +X. Negative angles
+  turn the other way. The assembly example turns 60° at the middle gear,
+  leaving a 120° included angle, then positions the whole train with
+  a `group(...).relate(...)` constraint.
+
+Complete example: [a three-gear train](../app/examples/packages/gear-assembly.ts).
 
 ## Documentation
 
 - [Gear API](docs/api.md): constructors, dimensions, mounting and named references.
+- [Gear assembly](docs/api.md#assemble-compatible-gears): shaft distance, axial
+  offset, array-order engagement and per-pair angles.
 - [Standards and scope](docs/api.md#standards-and-scope): nominal profiles, validation and modeling limits.
 
 ## Source and development

@@ -70,6 +70,16 @@ Returning `undefined` declines the scope; returning `{}` intentionally displays
 an empty scene. Target values matching `context.focused.values` receive focus;
 generated geometry does not inherit focus from its inputs.
 
+For a function that returns related copies of input models,
+`inspectGroupMembers(result, inputs)` from `@code3d/core` renders each result
+in the solved group frame and keeps its corresponding input as the focus
+identity. This gives array member selection the same positioned, per-member
+highlighting as the `group()` parameter inspector. Use the input array when
+`context.focused.parameter` identifies that argument; when inspecting the
+returned collection itself, use `inspectGroupMembers(result, result)` so its
+members keep their result identities. The viewport does not add the current
+execution's original inputs to this scene.
+
 Selecting an array member focuses that value while keeping the other inspection
 targets visible at a weaker level; selecting the whole array focuses its members.
 For cut tools and intersect operands, selected inputs are targets and other inputs

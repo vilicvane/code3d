@@ -481,6 +481,48 @@ test('loads published inspectors whose declarations were stripped, through alias
   }
 });
 
+test('gear assembly parameters inspect the positioned train', async () => {
+  const inspect = await compile(`import {group} from '@code3d/core';
+    import {assembleGears, spurGear} from '@code3d/gears';
+    const first = spurGear({module: 2, teeth: 20, faceWidth: 10});
+    const second = spurGear({module: 2, teeth: 30, faceWidth: 10});
+    const placed = assembleGears([first, second], {centerDistanceDelta: 0.2});
+    export default group(placed);`);
+  for (const [token, delta] of [
+    ['assembleGears(', 0],
+    ['[first, second]', 0],
+    ['centerDistanceDelta: 0.2', 21],
+  ] as const) {
+    const scene = defined(await inspect(token, delta));
+    assert.equal(scene.kind, 'inspect');
+    assert.equal(scene.target.length, 2);
+    assert.deepEqual(
+      scene.target.map(target => {
+        assert.equal(target.kind, 'model');
+        return target.kind === 'model'
+          ? target.model.children[0].transform.position[0]
+          : undefined;
+      }),
+      [0, 50.2],
+    );
+  }
+  const all = defined(await inspect('[first, second]'));
+  assert.deepEqual(
+    all.target.map(target => target.focused),
+    [true, true],
+  );
+  const call = defined(await inspect('assembleGears('));
+  assert.deepEqual(
+    call.target.map(target => target.focused),
+    [true, true],
+  );
+  const focused = defined(await inspect('second],', 1));
+  assert.deepEqual(
+    focused.target.map(target => target.focused),
+    [false, true],
+  );
+});
+
 test('reports inspector errors separately from successful model evaluation and drops replaced contexts', async () => {
   const inspect = await compile(`import {box} from '@code3d/core';
     /** @code3d.inspect part.inspect */

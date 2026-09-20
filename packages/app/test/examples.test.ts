@@ -1,4 +1,4 @@
-import {distance} from '@code3d/core';
+import {distance, intersect} from '@code3d/core';
 import {replicad} from '@code3d/core/replicad';
 import {modelGeometry} from '../../core/test/model-test.ts';
 import assert from 'node:assert/strict';
@@ -27,6 +27,7 @@ import {sourceTokenOffset} from '../render-samples/source-focus.ts';
 
 const expectedSolids: Record<string, readonly [string, number]> = {
   'packages/gears.ts': ['default', 5],
+  'packages/gear-assembly.ts': ['default', 4],
   'packages/screws.ts': ['default', 10],
   'projects/phone-stand.ts': ['default', 1],
   'assemblies/screw-box/model.ts': ['default', 6],
@@ -221,6 +222,34 @@ for (const entry of exampleEntries) {
         validateGeometry(snapshot(exports[expected[0]])),
         expected[1],
       );
+      if (entry.file === 'packages/gear-assembly.ts') {
+        const [plate, train] = snapshot(exports.default).children;
+        assert.equal(plate.kind, 'solid');
+        assert.equal(train.kind, 'group');
+        assert.ok(Math.abs(train.transform.position[1] - 7) < 1e-6);
+        const centers = train.children.map(child => child.transform.position);
+        assert.equal(centers.length, 3);
+        assert.deepEqual(centers[0], [0, 0, 0]);
+        assert.ok(Math.abs(centers[1][0] - 50.2) < 1e-6);
+        const incoming = [
+          centers[0][0] - centers[1][0],
+          centers[0][2] - centers[1][2],
+        ];
+        const outgoing = [
+          centers[2][0] - centers[1][0],
+          centers[2][2] - centers[1][2],
+        ];
+        const cosine =
+          (incoming[0] * outgoing[0] + incoming[1] * outgoing[1]) /
+          (Math.hypot(...incoming) * Math.hypot(...outgoing));
+        assert.ok(Math.abs(cosine - Math.cos((120 * Math.PI) / 180)) < 1e-6);
+        for (const index of [0, 1])
+          assert.throws(
+            () => intersect([exports.gears[index], exports.gears[index + 1]]),
+            /no common solid volume/,
+            `Gears ${index} and ${index + 1} must not intersect`,
+          );
+      }
       if (entry.file === 'packages/layout/grille.ts') {
         const bounds = exports.default.bounds();
         assert.deepEqual(bounds.minimum, [0, -1, -18]);

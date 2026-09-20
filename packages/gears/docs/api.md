@@ -1,6 +1,6 @@
 ---
 title: Gear API and modeling limits
-description: Construct nominal spur, helical and internal gear parts with bores, hubs, integral shafts and bolt patterns.
+description: Construct nominal spur, helical and internal gears, then assemble compatible pairs and trains at their shaft distances.
 sidebar:
   order: 1
 ---
@@ -104,6 +104,99 @@ The shaft axis is local **+Y**. The tooth face spans `-faceWidth/2` to
 exposes `gearAxis`, `gearFaceUp` and `gearFaceDown` for relation placement. These
 refer to the toothed body's original faces, including when a hub or shaft
 extends past them. The canonical `axis`, `up` and `down` remain available.
+
+## Assemble compatible gears
+
+`nominalCenterDistance(first, second)` returns the parallel-shaft distance
+between pitch circles. External pairs use the sum of pitch radii; an internal
+ring and external pinion use the difference. The function checks matching
+normal module and helix angle. Parallel-shaft external helical pairs must have
+opposite hands. Internal-to-internal meshes are unsupported.
+
+`assembleGears(gears, config)` connects each adjacent pair in array order:
+`0→1→2…`. It returns related gear values, with the first gear unchanged.
+The helper calculates the static tooth angle needed for engagement from the
+tooth counts and contact direction; no tooth-phase argument is needed. By
+default, the centers form a straight chain along +X. Compose the returned
+values with Core's `group()` when the entire train should be one placeable
+model:
+
+```ts
+import {group} from '@code3d/core';
+import {assembleGears, spurGear} from '@code3d/gears';
+
+const pinion = spurGear({module: 2, teeth: 20, faceWidth: 10});
+const wheel = spurGear({module: 2, teeth: 24, faceWidth: 10});
+const gears = assembleGears([pinion, wheel], {
+  centerDistanceDelta: 0.2,
+});
+export default group(gears);
+```
+
+![Three spur gears meeting at a 120-degree center angle, assembled as a group on a mounting plate.](../../web/src/assets/models/gear-assembly.png)
+
+Complete example: [three-gear train](../../app/examples/packages/gear-assembly.ts).
+
+The two-gear snippet has a nominal shaft distance of 44 mm and requests
+44.2 mm. In the pictured three-gear example, both adjacent pairs are 50.2 mm
+apart and their center lines meet at 120° at the middle gear.
+`centerDistanceDelta` is a signed millimetre adjustment, **not** a backlash
+specification. `axialOffset` moves a driven gear along +Y, while keeping the
+toothed faces overlapping. For external pairs, a positive center-distance
+change increases radial separation; for an internal ring and pinion, a negative
+change increases radial clearance.
+
+Shared config values apply to each adjacent pair. When pairs need different
+settings, `pairs[0]` adjusts gears 0–1, `pairs[1]` adjusts gears 1–2, and so
+on. Provide one entry per adjacent pair. `pairs[i].angle` is the turn in degrees
+from the preceding center-line's forward extension to the next center line,
+in the assembly XZ plane. It defaults to 0°, continuing straight. The first
+pair starts from +X. Positive angles turn from +X toward +Z; negative angles
+turn the other way.
+
+Successive turns accumulate: `pairs: [{angle: 60}, {angle: 60}]` gives center-line
+directions of 60° and 120° from +X. A 60° turn at a middle gear leaves a 120°
+included angle between its neighboring centers. Any finite angle is accepted,
+with full turns repeating the same layout. The gear's tooth rotation is
+calculated automatically:
+
+```ts
+import {box, group} from '@code3d/core';
+import {assembleGears, spurGear} from '@code3d/gears';
+
+const first = spurGear({module: 2, teeth: 24, faceWidth: 10});
+const second = spurGear({module: 2, teeth: 20, faceWidth: 10});
+const third = spurGear({module: 2, teeth: 18, faceWidth: 10});
+const arranged = assembleGears([first, second, third], {
+  centerDistanceDelta: 0.2,
+  pairs: [{}, {angle: 60}],
+});
+const plate = box(160, 4, 120);
+const train = group(arranged).relate(self => self.on(plate.up));
+export default group([plate, train]);
+```
+
+The first pair lies along +X, and `angle: 60` turns the second segment by 60°,
+leaving a 120° included angle at the middle gear. The `group(...).relate(...)`
+constraint places the complete train on the plate; the gears keep their
+relative positions and tooth phases. Inspecting an input
+gear in `assembleGears()` highlights its positioned member within the full
+train. Selecting the whole input array or the `assembleGears` function name
+emphasizes all assembled gears.
+
+Input gears must come from this package's constructors. Only `.material()` and
+`.relate()` preserve the nominal tooth parameters used by this helper. Other
+operations, including `.originOffset()` and `.scaled()`, return ordinary models
+without those parameters. To follow an external
+anchor, relate the first gear before calling `assembleGears()`, or relate the
+completed `group()` afterward. A later replacement such as
+`first = first.relate(...)` does not retarget the already returned gears.
+
+This is nominal static placement for parallel shafts. The chosen tooth angle
+uses the gear profiles at their common face midplane; it is not a persistent
+rotation constraint. Later changes to other placement constraints do not
+recalculate gear phases. The helper does not guarantee interference-free teeth,
+manufactured clearance, load capacity, or kinematic motion.
 
 ## Standards and scope
 

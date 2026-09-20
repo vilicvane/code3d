@@ -615,6 +615,12 @@ the vertex picker, origin arrows, and rotation rings, see
 
 ## Anchors and relations
 
+Package authors can use `setModelData(model, key, value)` to associate
+package-specific data with a newly built model, and `getModelData(model, key)`
+to read it. Keys are symbols. Data is retained when `.relate()` or
+`.material()` creates a new value; other model operations do not retain it.
+This data stays in process and is not part of model geometry or snapshots.
+
 Solid primitives expose `center` and `axis`; every model provides directional
 bounds: `up` (+Y), `down` (−Y), `right` (+X), `left` (−X), `front` (+Z),
 and `back` (−Z), in that model's local frame.

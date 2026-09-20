@@ -14,6 +14,65 @@ function viewport() {
   });
 }
 
+export async function measureGearAssemblyFocus(source: string) {
+  const client = new ModelCompilerClient(browserPackageFiles);
+  const view = viewport();
+  try {
+    const module = await client.compile(
+      {files: [{path: '/main.ts', source}]},
+      '/main.ts',
+    );
+    if (module.diagnostic) throw new Error(module.diagnostic.summary);
+    const array = '[pinion, wheel, idler]';
+    const arrayStart = source.indexOf(array);
+    const samples = [];
+    for (const focus of [
+      'wheel',
+      'pinion',
+      'idler',
+      'array',
+      'call',
+      'wheel',
+    ]) {
+      const offset =
+        focus === 'call'
+          ? source.indexOf('assembleGears(')
+          : focus === 'array'
+            ? arrayStart
+            : arrayStart + array.indexOf(focus) + focus.length;
+      await inspectSource(client, view, module, '/main.ts', offset);
+      const drawn = new Map<string, {position: number[]; opacity: number}>();
+      view['root'].traverse(object => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.onBeforeRender = () => {
+          const material = Array.isArray(object.material)
+            ? object.material[0]
+            : object.material;
+          drawn.set(object.uuid, {
+            position: new THREE.Vector3()
+              .setFromMatrixPosition(object.matrixWorld)
+              .toArray(),
+            opacity: material.opacity,
+          });
+        };
+      });
+      view['rendering'].renderFrame();
+      const onscreen = [...drawn.values()];
+      drawn.clear();
+      await view.captureImage(640, 480, {
+        direction: [0.5, 1.8, 1.2],
+        up: [0, 1, 0],
+      });
+      samples.push({focus, onscreen, exported: [...drawn.values()]});
+    }
+    return samples;
+  } finally {
+    view['renderer'].dispose();
+    view['controls'].dispose();
+    client.dispose();
+  }
+}
+
 /** Ordinary values and explicit inspectors share transport, but not material emphasis. */
 export async function measurePreviewMaterials() {
   const client = new ModelCompilerClient(browserPackageFiles);

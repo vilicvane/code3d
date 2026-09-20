@@ -1946,6 +1946,35 @@ const referenceBounds = Symbol('referenceBounds');
 const referenceBoundsParts = Symbol('referenceBoundsParts');
 const modelSnapshotQueries = Symbol('modelSnapshotQueries');
 const previewRelation = Symbol('previewRelation');
+const modelData = new WeakMap<ModelObject, ReadonlyMap<symbol, unknown>>();
+
+/** Associate package data with a newly constructed model value. */
+export function setModelData<Value>(
+  model: Model,
+  key: symbol,
+  value: Value,
+): void {
+  const object = requireModelObject(
+    model,
+    'Model data requires a model value.',
+  );
+  modelData.set(
+    object,
+    new Map([...(modelData.get(object) ?? []), [key, value]]),
+  );
+}
+
+/** Read package data retained by relation and material copies. */
+export function getModelData<Value>(
+  model: Model,
+  key: symbol,
+): Value | undefined {
+  const object = requireModelObject(
+    model,
+    'Model data requires a model value.',
+  );
+  return modelData.get(object)?.get(key) as Value | undefined;
+}
 
 type RelationObjectInit = Readonly<{
   nodeId?: string;
@@ -5292,7 +5321,7 @@ export class ModelObject<
     overrides: Partial<ModelObjectInit<Kind>>,
     operation: StoredOperation,
   ): RuntimeModel<Elements, Kind> {
-    return ModelObject.create<Elements, Kind>({
+    const result = ModelObject.create<Elements, Kind>({
       kind: this.kind,
       geometry: this.geometry,
       geometryAnchor: this.geometryAnchor,
@@ -5308,6 +5337,11 @@ export class ModelObject<
       operation,
       ...overrides,
     }) as RuntimeModel<Elements, Kind>;
+    if (operation.kind === 'relate' || operation.kind === 'material') {
+      const data = modelData.get(this);
+      if (data) modelData.set(result, data);
+    }
+    return result;
   }
 }
 
@@ -5926,6 +5960,18 @@ export namespace group {
   ): InspectResult | undefined {
     return context.return && ModelObject.inspectGroup(context.return);
   }
+}
+
+/** Inspect derived group members at solved poses while preserving input focus. */
+export function inspectGroupMembers(
+  children: readonly Model[],
+  inputs: readonly Model[],
+): InspectResult {
+  const result = ModelObject.inspectGroup(group(children));
+  result.target?.forEach((member, index) => {
+    retainInspectionIdentity(member, inputs[index]);
+  });
+  return result;
 }
 
 /**
