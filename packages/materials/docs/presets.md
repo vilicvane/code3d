@@ -85,6 +85,9 @@ Side light, or Soft light. Viewport PNG
 exports use the selected scene; Modeling keeps its original environment.
 The selection is saved in this browser and restored after reloading. A material's own `envMap`
 overrides the scene reflection environment for that material.
+Render lighting includes shadows and ambient occlusion to make recesses and
+contact areas readable. Transparent materials keep their authored blending and
+do not contribute solid occlusion or opaque shadows.
 
 Complete example: [material palette](../../app/examples/packages/materials.ts).
 For package setup, see [installation](../README.md#installation).

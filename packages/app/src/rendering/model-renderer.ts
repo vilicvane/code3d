@@ -6,6 +6,7 @@ import {
   type ScenePreset,
 } from './render-scene';
 import {AdaptiveGrid} from './adaptive-grid';
+import {RenderLighting} from './render-lighting';
 import {action, computed, makeObservable, observableRef, reaction} from 'mobx';
 import {appSettings, type AppSettings} from '../app-settings';
 import * as THREE from 'three';
@@ -101,6 +102,7 @@ export class ModelRenderer {
   private readonly ambient = new THREE.AmbientLight('#ffffff');
   private readonly key = new THREE.DirectionalLight('#ffffff');
   private readonly rim = new THREE.DirectionalLight('#ffffff');
+  private readonly renderLighting = new RenderLighting(this.scene, this.key);
   private readonly environments = new Map<ScenePreset, THREE.DataTexture>();
   private readonly contentBounds = new THREE.Box3();
   private readonly contentSphere = new THREE.Sphere();
@@ -195,6 +197,8 @@ export class ModelRenderer {
       this.onChange,
     );
     this.renderer.dispose();
+    this.renderLighting.dispose();
+    this.key.shadow.dispose();
     for (const texture of this.environments.values()) texture.dispose();
     this.environments.clear();
   };
@@ -311,7 +315,7 @@ export class ModelRenderer {
         object.material = material;
         object.renderOrder = 0;
       });
-      renderer.render(this.scene, camera);
+      this.renderLighting.render(renderer, camera);
     } finally {
       for (const object of hidden) object.visible = true;
       for (const {object, material, renderOrder} of restored) {
@@ -380,6 +384,7 @@ function configureRenderer(
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
 }
 
 export function createRenderedModel(node: ModelSnapshotObject): THREE.Object3D {

@@ -128,6 +128,12 @@ export default result;`;
           if (!('material' in object)) return;
           const before = object.onBeforeRender;
           object.onBeforeRender = (...args) => {
+            // The depth/normal pass uses its own material; inspect authored
+            // materials only in the visible color pass.
+            if (args[1].overrideMaterial) {
+              before.apply(object, args);
+              return;
+            }
             const body = bodies.get(object.uuid);
             if (!body) sample.auxiliary++;
             else {

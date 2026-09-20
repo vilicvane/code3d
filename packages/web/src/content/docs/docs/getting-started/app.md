@@ -183,10 +183,17 @@ This switch applies to the 3D viewport; sketch editing keeps its 2D tools.
 
 In **Render**, use the **Render scene** menu in the viewport's upper-right corner to
 choose **Studio** (the default neutral lighting), **Side light** (stronger
-directional contrast), or **Soft light** (broad lighting on a light background).
-The choice updates lighting, environment reflections, and the background together;
-image exports from the viewport use the same scene. Modeling keeps its original
-lighting and background. Returning to Render restores your selection.
+directional contrast), or **Soft light** (broad, soft lighting).
+The choice updates lighting and environment reflections while keeping the same
+dark background; image exports from the viewport use the same scene. Modeling
+keeps its original lighting and background. Returning to Render restores your selection.
+
+Render uses directional lighting, soft shadows, and ambient occlusion to make
+side faces, recesses, and contact areas easier to distinguish while preserving
+the authored materials. These effects also appear in exported PNGs. Transparent
+parts keep their transparency and do not cast solid shadows. Ambient occlusion
+uses the surfaces visible from the current view; it is an approximation, not a
+path-traced render. Modeling keeps its existing lighting and edge guides.
 
 The scene choice is saved in this browser and restored when you reload or reopen
 the App. It applies across the models and projects you preview. Open the menu with

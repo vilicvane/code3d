@@ -34,15 +34,29 @@ export const modelingScenePreset: ScenePreset = {
 };
 
 export const renderScenePresets = {
-  studio: modelingScenePreset,
+  studio: {
+    label: 'Studio',
+    background: '#171815',
+    hemisphere: 0.12,
+    ambient: 0,
+    key: 3,
+    keyPosition: [-80, 100, 100],
+    rim: 1.2,
+    environment: {
+      ambient: 0.27,
+      sky: 0.15,
+      softboxes: [1.5, 1.5, 1.5],
+      sharpness: 12,
+    },
+  },
   side: {
     label: 'Side light',
     background: '#171815',
-    hemisphere: 0.35,
-    ambient: 0.1,
-    key: 3,
-    keyPosition: [100, 25, 45],
-    rim: 0.6,
+    hemisphere: 0.08,
+    ambient: 0.02,
+    key: 3.6,
+    keyPosition: [-100, 60, 30],
+    rim: 0.8,
     environment: {
       ambient: 0.08,
       sky: 0.05,
@@ -52,11 +66,11 @@ export const renderScenePresets = {
   },
   soft: {
     label: 'Soft light',
-    background: '#e6e7e4',
-    hemisphere: 0.5,
-    ambient: 0.15,
-    key: 1.4,
-    keyPosition: [70, 110, 80],
+    background: '#171815',
+    hemisphere: 0.2,
+    ambient: 0.05,
+    key: 2,
+    keyPosition: [-70, 110, 80],
     rim: 0.55,
     environment: {
       ambient: 0.12,

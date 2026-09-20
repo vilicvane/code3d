@@ -67,6 +67,19 @@ test(
       };
       const difference = (a: Uint8ClampedArray, b: Uint8ClampedArray) =>
         a.reduce((sum, value, i) => sum + Math.abs(value - b[i]), 0) / a.length;
+      const surfaceDifference = (
+        a: Uint8ClampedArray,
+        b: Uint8ClampedArray,
+      ) => {
+        let total = 0,
+          channels = 0;
+        for (let i = 0; i < a.length; i += 4) {
+          if (a[i] === a[0] && a[i + 1] === a[1] && a[i + 2] === a[2]) continue;
+          for (let c = 0; c < 3; c++) total += Math.abs(a[i + c] - b[i + c]);
+          channels += 3;
+        }
+        return total / channels;
+      };
       const modeling = await screen();
       view.setScenePreset('soft');
       const modelingUnaffected = difference(modeling, await screen());
@@ -106,9 +119,10 @@ test(
           modelingRestored,
           selected,
           softRestored,
+          backgrounds: frames.map(frame => Array.from(frame.slice(0, 4))),
           presetDifferences: [
-            difference(frames[0], frames[1]),
-            difference(frames[0], frames[2]),
+            surfaceDifference(frames[0], frames[1]),
+            surfaceDifference(frames[0], frames[2]),
           ],
           pngDifferences,
           textures,
@@ -127,6 +141,8 @@ test(
     assert.equal(result.modelingRestored, 0);
     assert.equal(result.selected, 'soft');
     assert.equal(result.softRestored, 0);
+    for (const background of result.backgrounds)
+      assert.deepEqual(background, result.backgrounds[0]);
     assert.ok(
       result.presetDifferences.every(value => value > 2),
       JSON.stringify(result),
