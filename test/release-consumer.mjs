@@ -28,7 +28,7 @@ if (
       models.push(core.box(2, 3, 4));
       const faces = core.text(
         'B8i',
-        core.font(new URL('./font.ttf', import.meta.url)),
+        await core.font(new URL('./font.ttf', import.meta.url)),
         10,
       );
       models.push(...faces, ...core.extrude(faces, 2));

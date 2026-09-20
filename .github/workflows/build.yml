@@ -29,8 +29,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build public packages
-        run: npm run build:packages
+      - name: Build and pack current public packages
+        run: |
+          npm run build:packages
+          npm run pack:packages
 
       - name: Build app and render-only entry
         run: npm run build --workspace @code3d/app

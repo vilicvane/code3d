@@ -10,9 +10,8 @@ import {
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {
-  artifactsDirectory,
   runNpm,
-  packPackages,
+  verifiedArtifacts,
   publicPackages,
   root,
   run,
@@ -25,7 +24,7 @@ import {
 const workspaceManifests = new Map(
   (await publicPackages()).map(pkg => [pkg.name, pkg]),
 );
-const artifacts = await packPackages();
+const artifacts = await verifiedArtifacts(await publicPackages());
 const consumer = await mkdtemp(path.join(tmpdir(), 'code3d-packages-'));
 try {
   const typeImports = [];
@@ -42,7 +41,7 @@ try {
         '--omit=dev',
         '--no-audit',
         '--no-fund',
-        ...artifacts.map(pkg => path.join(artifactsDirectory, pkg.filename)),
+        ...artifacts.map(pkg => pkg.filename),
       ],
       consumer,
     ),
@@ -201,7 +200,7 @@ try {
             '--omit=dev',
             '--no-audit',
             '--no-fund',
-            ...selected.map(pkg => path.join(artifactsDirectory, pkg.filename)),
+            ...selected.map(pkg => pkg.filename),
           ],
           releaseConsumer,
         ),

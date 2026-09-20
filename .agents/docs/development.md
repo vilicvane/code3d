@@ -49,7 +49,8 @@ Core 内联 `flo-boolean` 的计算依赖与 `@ctrl/tinycolor`，CLI 内联 `com
 无需改 npm 版本即可使本地构建缓存失效。构建分析信息保留在各包
 `.cache/bundle-metafile.json`，不随 npm 包发布。
 
-`npm run test:packages` 在已经构建后生成 `dist/packages` 中的真实 tarball，将全部公开包
+`npm run pack:packages` 在已经构建后生成 `dist/packages` 中的真实 tarball；
+`npm run test:packages` 校验并消费这批产物，将全部公开包
 安装到独立临时项目，验证公开入口、声明导航、内核/缓存身份、文字、Layout、Screws、WASM 和 CLI。
 声明检查使用 ESNext/DOM 标准库与 Bundler 解析且不跳过库检查；Core 显式携带 HarfBuzz 声明所需的
 Emscripten 全局类型和 Replicad 声明所需的 Manifold 类型依赖；后者不进入运行时 JS
@@ -97,9 +98,9 @@ App 与网站默认在本地构建并通过既有 Wrangler 授权部署；已验
    `npm run update:examples:locks --workspace @code3d/app`，由真实 tarball 清单与
    公共 npm 元数据生成示例锁；锁中只记录正式 registry URL 和 tarball 完整性，
    不记录 workspace 或本地文件。提交锁后不得再修改将上传的包内容。
-   同一 tag 下的 `test:examples:packages` 与 `test:examples:browser` 使用这些
-   tarball 代替本批尚未上传的包，其他依赖仍来自 npm；浏览器沿正常安装、校验、
-   解压和解析路径运行。清单与 tarball 不符时失败，不退回旧版包。
+   `test:examples:packages`、`test:examples:browser` 和图片生成始终消费当前全部
+   公共包的 tarball，不受发布 tag 控制。测试生成独立临时清单与锁，不重写检入的
+   公共示例锁；发布准备仍用上面的显式命令更新公开锁。
 4. 按[交付流程](../skills/worktree-development/references/delivery-subagent.md)完成已授权的
    提交与合并，在已验证的发布提交上创建并推送 `v<版本号>` tag。
    Publish 以 tag 对应的提交构建、打包与上传。示例锁引用本批新包时，先推送该 tag，
@@ -165,7 +166,8 @@ Trusted Publisher 必须允许 direct publishing；只允许 staged publishing �
 
 核对本批包的公开版本、目标 dist-tag、实际 tarball 的依赖/peer 最低版本和安装结果，
 不能只根据 workflow 成功判断 registry 已可用。发包后按本次改动选择必要的公开消费
-抽验，不设置 `CODE3D_RELEASE_TAG`，确保安装来自真实 registry。完整示例覆盖由独立
+抽验时在仓库外从真实 registry 安装；普通示例测试使用当前本地产物，不能作为
+公开 registry 已更新的证据。完整示例覆盖由独立
 CI 承担，不在上传前后重复运行，也不等待 CI 完成再声明上传结果。交付回报分别记录
 版本 tag、提交、包列表、本地验证、发布结果及独立 CI 状态，不把运行中写成已通过。
 部分成功时逐包记录状态，重试沿用同一个版本 tag；需要修改源码时使用新的版本与 tag。
@@ -195,7 +197,12 @@ npm run lint-prettier
 参数组、真实几何与用途断言；新增或迁移例子同时维护对应测试。
 
 `npm run test:examples:packages --workspace @code3d/app` 在仓库之外的干净临时目录
-安装锁定的公开包并检查类型与建模，避免开发 workspace 掩盖缺依赖。
+安装当前提交的真实 tarball 并检查类型与建模。Node 使用临时 scoped registry，
+浏览器使用相同 npm 元数据与 tarball 响应；Code3D 的直接和传递依赖都来自同一批
+产物，第三方依赖由正常 npm 解析。测试临时生成项目清单与完整性锁，包安装仍执行
+真实下载、完整性校验、解包和入口加载。普通 CI 与图片生成不依赖 npm 发包或
+`CODE3D_RELEASE_TAG`。运行前依次执行 `npm run build:packages`、`npm run pack:packages`；
+产物缺失、完整性错误或内部依赖不匹配时直接失败。
 `CODE3D_TEST_URL=http://127.0.0.1:<预留端口>/ npm run test:examples:browser --workspace @code3d/app`
 本地连接现有 host Chrome，逐例打开、参数写回、几何更新及 Undo，并验证操作失败恢复、完整
 工程导出和实际 agent 接续；不会启停宿主浏览器。独立 CI 自行启动受控服务及 headless 浏览器，完整运行这些检查；
@@ -234,6 +241,7 @@ systemd-run --user --wait --pipe --working-directory="$PWD" \
 浏览器测试连接已经运行的开发服务器；本地默认连接现有宿主 Chrome：
 
 ```bash
+npm run pack:packages
 npm run test:packages
 CODE3D_TEST_URL=http://localhost:3133 npm run test:browser --workspace @code3d/app
 CODE3D_TEST_URL=http://localhost:3133 npm run test:browser:exclusive --workspace @code3d/app

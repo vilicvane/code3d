@@ -2,7 +2,7 @@ import process from 'node:process';
 import {pathToFileURL} from 'node:url';
 import {chromium} from 'playwright-core';
 import {createServer} from 'vite';
-import {releaseArtifacts} from '../../../scripts/publish-packages.mjs';
+import {prepareExampleArtifacts} from './example-artifacts.mjs';
 import {
   appRoot,
   runBrowserTestGroup,
@@ -14,7 +14,7 @@ export async function runExampleBrowserTests({
   cdpEndpoint,
 } = {}) {
   let server, browser;
-  const artifacts = await releaseArtifacts();
+  const prepared = await prepareExampleArtifacts();
   try {
     let url = process.env.CODE3D_TEST_URL;
     let endpoint = webSocketEndpoint ?? process.env.CODE3D_PLAYWRIGHT_WS;
@@ -45,15 +45,7 @@ export async function runExampleBrowserTests({
       concurrency: 1,
       env: {
         CODE3D_TEST_URL: url,
-        CODE3D_EXAMPLE_ARTIFACTS: JSON.stringify(
-          artifacts.map(({name, version, tarball, filename, integrity}) => ({
-            name,
-            version,
-            tarball,
-            filename,
-            integrity,
-          })),
-        ),
+        CODE3D_EXAMPLE_ARTIFACTS: JSON.stringify(prepared),
         ...(endpoint ? {CODE3D_PLAYWRIGHT_WS: endpoint} : {}),
         ...(cdp ? {CODE3D_CDP_URL: cdp} : {}),
       },

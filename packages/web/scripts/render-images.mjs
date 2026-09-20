@@ -1,33 +1,20 @@
-import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {renderImages} from '../../app/scripts/render-image.mjs';
 import {
   renderSamples,
   sourceContextSets,
 } from '../../app/render-samples/catalog.ts';
 
-const appDirectory = fileURLToPath(new URL('../../app/', import.meta.url));
-function render(id, name, context) {
-  execFileSync(
-    process.execPath,
-    [
-      'scripts/render-image.mjs',
-      '--model',
-      id,
-      '--output',
-      `../web/src/assets/models/${name}.png`,
-      '--width',
-      '1440',
-      '--height',
-      '1080',
-      ...(context ? ['--context', context] : []),
-    ],
-    {cwd: appDirectory, stdio: 'inherit', timeout: 180_000},
-  );
-}
-
-for (const sample of renderSamples) render(sample.id, sample.id);
-for (const [id, contexts] of Object.entries(sourceContextSets)) {
-  for (const context of contexts.filter(context => context.image !== id)) {
-    render(id, context.image, context.id);
-  }
-}
+const output = name =>
+  fileURLToPath(new URL(`../src/assets/models/${name}.png`, import.meta.url));
+const requests = renderSamples.map(sample => ({
+  model: sample.id,
+  output: output(sample.id),
+}));
+for (const [model, contexts] of Object.entries(sourceContextSets))
+  for (const context of contexts.filter(context => context.image !== model))
+    requests.push({model, output: output(context.image), context: context.id});
+await renderImages(
+  requests.map(request => ({...request, width: 1440, height: 1080})),
+);
+if (process.env.CODE3D_CHROME_CDP_ENDPOINT) process.exit(0);

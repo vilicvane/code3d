@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
-import {readFile} from 'node:fs/promises';
+import {useExampleArtifacts} from '../../scripts/example-artifacts.mjs';
 import {
   chromium,
   type Page,
@@ -26,13 +26,7 @@ declare const window: Window & {
   };
 };
 let browser: Browser;
-const artifacts: {
-  name: string;
-  version: string;
-  tarball: string;
-  filename: string;
-  integrity: string;
-}[] = JSON.parse(process.env.CODE3D_EXAMPLE_ARTIFACTS ?? '[]');
+const prepared = JSON.parse(process.env.CODE3D_EXAMPLE_ARTIFACTS ?? 'null');
 before(async () => {
   assert.ok(process.env.CODE3D_TEST_URL, 'Set CODE3D_TEST_URL');
   browser = process.env.CODE3D_PLAYWRIGHT_WS
@@ -92,7 +86,10 @@ for (const {file} of selectedExamples.filter(
     const context = await browser.newContext();
     t.after(() => context.close());
     context.setDefaultTimeout(defaultWait);
-    if (usesRegistryPackages(file)) await useRegistryPackages(context);
+    if (usesRegistryPackages(file)) {
+      assert.ok(prepared, 'Run examples through test:examples:browser');
+      await useExampleArtifacts(context, prepared);
+    }
     const page = await context.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => {
@@ -601,37 +598,6 @@ test(
     );
   },
 );
-
-async function useRegistryPackages(context: BrowserContext) {
-  // A release run supplies the exact archives that passed package validation.
-  // URLs and locked integrity stay identical to their eventual public artifacts.
-  for (const artifact of artifacts) {
-    await context.route(artifact.tarball, async route => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/octet-stream',
-        headers: {'access-control-allow-origin': '*'},
-        body: await readFile(artifact.filename),
-      });
-    });
-  }
-  // Exercise production resolution while retaining the dev server's inspection
-  // hooks. Built-in files stay available; only local npm replacement metadata
-  // is removed, so declared packages follow the production registry installation path.
-  await context.route('**/*virtual*code3d-browser-packages*', async route => {
-    const response = await route.fetch();
-    const source = await response.text();
-    const offset = source.indexOf('export const workspaces =');
-    assert.ok(
-      offset >= 0,
-      'The package environment must expose workspace metadata',
-    );
-    await route.fulfill({
-      response,
-      body: source.slice(0, offset) + 'export const workspaces = {};',
-    });
-  });
-}
 
 async function verifyControllerExports(page: Page) {
   await page.evaluate(async () => {
