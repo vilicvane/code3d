@@ -32,6 +32,9 @@ import {
   sketch,
   spline,
   sweep,
+  wrap,
+  thicken,
+  type WrapOptions,
   sphere,
   text,
   tube,
@@ -734,3 +737,17 @@ measuredBounds.size[0] = 10;
 // @ts-expect-error Model position requires an explicit reference frame.
 box(1, 2, 3).position();
 void measuredPosition;
+
+const wrapOptions: WrapOptions = {tolerance: 0.001};
+const wrappedFaces: readonly FaceModel<{}>[] = wrap(
+  faceModel,
+  solid.surface(1),
+  wrapOptions,
+);
+const thickenedFaces: readonly SolidModel[] = thicken(wrappedFaces, 1);
+const thickenedFace: SolidModel = faceModel.thicken(-1);
+// @ts-expect-error Curved wrap results do not promise a plane reference.
+wrappedFaces[0].plane;
+// @ts-expect-error A target must be a finite surface.
+wrap(faceModel, faceModel.plane);
+void [thickenedFaces, thickenedFace];

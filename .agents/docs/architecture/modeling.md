@@ -166,6 +166,28 @@ HarfBuzz 排版提供真实二次/三次曲线，non-zero winding 布尔合并�
 [text](../../../packages/core/src/library/text.ts)、[text tests](../../../packages/core/test/text.test.ts)
 和 [third-party notices](../../../packages/core/THIRD_PARTY.md)。
 
+## 曲面包覆与增厚
+
+`wrap` 将共面的输入组转换到第一输入的平面架，以全部轮廓的二维包围矩形为有限
+区域。目标先与该矩形的法向柱体求交，原生最近距离返回候选锚点；目标跨越源面
+两侧时拒绝。比较候选在整个区域的局部映射，允许圆柱母线等价解，拒绝不同结果。
+映射按原生曲面的二阶导数积分测地线，源平面方向最小旋转至锚点切平面；误差按
+模型单位控制。自适应拟合的二维 B-spline 边界附在原生支撑曲面上，保留孔洞，
+在原目标裁剪域内求交并按周期接缝拆面。完整矩形（含空白）需被目标覆盖。
+
+包覆结果是没有具名 `plane` 的真实 FaceModel。沿平面法线的操作先验证实际支撑
+面，不能用默认参考架伪造曲面法向。`thicken` 用原生简单偏移封闭边界；此构造器
+不保证实体朝外，必须先 OrientClosedSolid，再检查形体与有符号体积，最后进入
+拓扑继承及布尔运算；构造前按曲面主曲率拒绝已检测到的过曲率中心偏移。平面图元
+从 Replicad XZ 草图进入 Core 时统一原生面朝向为 +Y，与作者平面架一致，避免
+extrude、sweep 与 thicken 使用两套相反法向。两种操作保持既有 Core 值语义与普通 inspect 数据，不引入
+App 状态副本。wrap 继承首输入坐标架，thicken 逐个继承源面。
+
+实现见 [wrap](../../../packages/core/src/library/wrap.ts)、
+[thicken](../../../packages/core/src/library/thicken.ts)，验证见
+[wrap tests](../../../packages/core/test/wrap.test.ts)。数值检查与原生有效性检查不构成
+任意复杂偏移全局不自交的证明；支持范围以[公开约定](../../../packages/core/docs/api.md#curved-surface-wrapping)为准。
+
 ## 排布与几何查询
 
 `@code3d/layout` 使用公开 Core `originOffset` 和模型 `rotate` 表达共享局部坐标中的

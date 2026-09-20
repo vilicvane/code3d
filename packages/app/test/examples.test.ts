@@ -48,6 +48,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/rotate.ts': ['default', 1],
   'operations/revolve.ts': ['default', 1],
   'operations/sweep.ts': ['default', 1],
+  'operations/wrap.ts': ['default', 3],
   'operations/origin.ts': ['centered', 1],
   'primitives/primitives.ts': ['cuboid', 1],
   'constraints/relate.ts': ['default', 2],
@@ -393,6 +394,11 @@ for (const entry of exampleEntries) {
             'A substantial supporting body remains',
           );
         }
+      }
+      if (entry.file === 'operations/wrap.ts') {
+        assert.ok(volume(exports.raised) > Math.PI * 20 ** 2 * 30);
+        assert.ok(volume(exports.engraved) < (4 / 3) * Math.PI * 20 ** 3);
+        assert.ok(volume(exports.freeform) > (4 / 3) * Math.PI * 20 * 26 * 22);
       }
       if (entry.file === 'text.ts') {
         assert.equal(

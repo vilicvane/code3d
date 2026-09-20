@@ -21,3 +21,13 @@ ordinary planar faces with a common baseline; `extrude(faces, distance)` preserv
 their order and placement. Node can read local file URLs or use downloaded,
 decoded font bytes. See the [text reference](api.md#text),
 [runnable example](../../app/examples/text.ts) and [font notices](../THIRD_PARTY.md).
+
+## Lettering on a curved surface
+
+Use `wrap(profiles, surface)` to carry the complete text layout onto a smooth
+surface, then `thicken(faces, thickness)` to raise or engrave it. Position the
+planar text first; the operation locates the target from that finite region.
+
+See [wrapping semantics and errors](api.md#curved-surface-wrapping) and the
+[complete curved lettering example](../../app/examples/operations/wrap.ts),
+which covers a cylinder, a sphere and a B-spline ellipsoid.

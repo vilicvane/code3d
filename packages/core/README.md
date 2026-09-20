@@ -59,7 +59,8 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Shells](docs/shells.mdx): hollow solids and choose openings.
 - [Topology](docs/topology.md): select vertices, edges and faces and expose named elements.
 - [Editable sketches](docs/sketches.md): draw and constrain planar geometry.
-- [Text and fonts](docs/text.md): build geometry from text.
+- [Text and fonts](docs/text.md): build planar or curved lettering.
+- [Curved surface wrapping](docs/api.md#curved-surface-wrapping): wrap profiles and thicken along surface normals.
 - [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx): compose model functions.
 - [Model tools](../web/src/content/docs/docs/guides/model-tools.mdx): add editing tools and argument presets.
 - [Custom primitives](docs/custom-primitives.mdx): extend modeling with Replicad geometry.

@@ -10,6 +10,8 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 - TypeScript model functions and relative imports across project files.
 - B-Rep primitives, curves, profiles, rotation and helical revolution, path sweeps, lofts, boolean operations, fillets,
   chamfers, uniform-wall shells, and threaded geometry.
+- Planar text and profile wrapping onto one smooth analytic or B-spline surface,
+  with normal thickness for raised or engraved lettering.
 - Source-context inspection, topology selection, supported parameter editing,
   and relative-position tools.
 - Editable model origins and geometric rotation, with vertex picking,
@@ -50,6 +52,13 @@ Closed cavities use a complete offset and subtraction; openings require
 additional boundary construction. Smaller thicknesses may still fail.
 Results without offset walls are rejected instead of returning the unchanged
 solid. Later operations must select topology from their own input model.
+
+**Curved wrapping is local to one face.** The finite source layout must map
+uniquely into the selected trimmed surface. Tangency is allowed; crossing,
+ambiguity, singularities and overlapping maps report errors. Double curvature
+can distort text. Periodic seams within a face work; crossing between separate
+faces is not supported. See
+[curved wrapping](../../../../../../core/docs/api.md#curved-surface-wrapping).
 
 **Bound relations only translate.** Multiple positional conditions solve together
 and conflicting positions report errors. Rotation must be explicit. Directional

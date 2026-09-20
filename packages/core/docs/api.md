@@ -59,6 +59,8 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | `extrude(faceOrFaces, distance)`           | Solid extruded along one face's local normal                              |
 | `revolve(profile, axis, config)`           | Solid rotated about a straight directed axis, with optional axial advance |
 | `sweep(profile, spine)`                    | Solid formed by carrying one face along an open curve                     |
+| `wrap(profiles, target, options?)`         | Curved faces mapped from one planar layout onto a finite surface          |
+| `thicken(faceOrFaces, thickness)`          | Solids offset along oriented surface normals                              |
 
 See [local coordinates and placement](local-coordinates.md) for
 the coordinate frame of a model, reference, or composition.
@@ -154,6 +156,67 @@ solid. One through hole in the profile is supported; profiles with multiple
 holes currently need explicit contour correspondence. Use the
 [App example](../../app/examples/operations/sweep.ts) to inspect
 the profile, path and result.
+
+### Curved surface wrapping
+
+`wrap(profiles, target, options?)` maps a planar face or a coplanar face array
+onto one finite `Surface` (or face model). It returns a face array because a
+periodic seam can split a profile. `thicken(faceOrFaces, thickness)` and
+`face.thicken(thickness)` then create solids along the surface normals.
+
+```ts
+import {googleFont, sphere, text, thicken, cut, wrap} from '@code3d/core';
+
+const ball = sphere(20);
+const profiles = text('B8i', googleFont('Play'), 9).map(face =>
+  face.originOffset(8, -26, -3),
+);
+const lettering = wrap(profiles, ball.surface(1));
+export default cut(ball, thicken(lettering, -1));
+```
+
+![Raised cylinder text, engraved sphere text and raised lettering on a B-spline ellipsoid.](../../web/src/assets/models/wrap.png)
+
+[Open the complete cylinder, sphere and freeform example](../../app/examples/operations/wrap.ts).
+
+Position the source profiles using the existing origin, rotation and relation
+operations. Their **shared planar bounding rectangle** chooses the target
+region; it includes glyph holes and the blank space between glyphs. Target
+geometry outside the rectangle's normal projection does not participate in
+localization or crossing checks. The closest target point corresponds to its
+normal projection back onto the source plane. Source directions are carried to
+the tangent plane by the smallest rotation, then distances from this anchor
+follow surface geodesics. Surface UV coordinates do not determine text size.
+
+All profiles share this mapping. Cylinder wrapping preserves developed lengths;
+a sphere or other surface with double curvature generally distorts distances
+between other points and changes area. This is a local mapping, not a promise
+of distortion-free wrapping around an entire surface.
+
+- Multiple closest points are accepted when their local maps agree within
+  tolerance, including a cylinder's tangent generator. Distinct maps raise an
+  error; competing anchors are not averaged.
+- The finite source region may touch the target. A region spanning both sides
+  of it raises a crossing error. Move or rotate the profiles outside the target.
+- The complete mapped rectangle must fit the selected trimmed face, including
+  its holes. Crossing to another topological face is not supported in this
+  version. Periodic seams within the selected face are supported.
+- Smooth analytic and B-spline surfaces are supported. Singular parameterizations,
+  a perpendicular source plane, folds, a full periodic overlap, or a failed boundary fit raise errors. Reduce
+  the region or reposition it when a regular local mapping cannot be found.
+- `options.tolerance` is a positive length in model units (default `0.001`), used
+  for numerical mapping and boundary fitting.
+- Wrap results are true curved faces and have no named `plane` reference.
+  Extrusion, revolution and path sweep require planar inputs.
+- Thickness is finite and non-zero. Its sign follows the selected face's
+  orientation: positive is outward for an ordinary solid face. Use positive
+  thickness with `union` for raised text and negative thickness with `cut` for
+  engraving. Surface offsets can fail on tight curvature or intersecting walls;
+  curvature-centre crossings detected by the offset check are rejected. Small
+  lettering and thicknesses are the intended use.
+- Wrap results inherit the first profile's coordinate frame and placement.
+  Thicken preserves each input face's frame and placement. Empty arrays return
+  empty arrays. Original profiles and targets remain unchanged.
 
 ## Measurements
 
@@ -323,16 +386,17 @@ execution and do not depend on the App.
 | `rectangle`      | `10, 10`                             |
 | `regularPolygon` | `5, 6, 0`                            |
 
-| Method or utility parameter                         | Runtime defaults |
-| --------------------------------------------------- | ---------------- |
-| Model/group `rotate` and independent/pivot `rotate` | `0, 0, 0`        |
-| Model/group `originOffset` and relation `offset`    | `0, 0, 0`        |
-| Relation `pivot`                                    | `[0, 0, 0]`      |
-| Selector `pivotOffset` and `axisOffset`             | `0, 0, 0`        |
-| `axisLine(axis).rotate`                             | `0`              |
-| Geometric model `scaled`                            | `1`              |
-| Face `extrude` and the `extrude` utility's distance | `10`             |
-| Solid `fillet`, `chamfer` and `shell`               | `1`              |
+| Method or utility parameter                          | Runtime defaults |
+| ---------------------------------------------------- | ---------------- |
+| Model/group `rotate` and independent/pivot `rotate`  | `0, 0, 0`        |
+| Model/group `originOffset` and relation `offset`     | `0, 0, 0`        |
+| Relation `pivot`                                     | `[0, 0, 0]`      |
+| Selector `pivotOffset` and `axisOffset`              | `0, 0, 0`        |
+| `axisLine(axis).rotate`                              | `0`              |
+| Geometric model `scaled`                             | `1`              |
+| Face `extrude` and the `extrude` utility's distance  | `10`             |
+| Face `thicken` and the `thicken` utility's thickness | `1`              |
+| Solid `fillet`, `chamfer` and `shell`                | `1`              |
 
 For example, `box(20, 30, 40).rotate()` previews the unchanged body, and
 `.rotate(30)` previews a 30-degree X rotation. Their missing-angle diagnostics
