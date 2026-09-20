@@ -270,6 +270,9 @@ test(
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     page.setDefaultTimeout(20_000);
+    page.on('console', message => {
+      if (/mobx/i.test(message.text())) errors.push(message.text());
+    });
     await page.route('**/src/main.ts*', async route => {
       const response = await route.fetch();
       await route.fulfill({
@@ -287,6 +290,9 @@ test(
     );
     const modeling = page.getByRole('button', {name: 'Modeling', exact: true});
     const render = page.getByRole('button', {name: 'Render', exact: true});
+    const scene = page.getByRole('button', {name: 'Render scene', exact: true});
+    const sceneMenu = page.getByRole('menu', {name: 'Render scene'});
+    assert.equal(await scene.isVisible(), false);
     assert.equal(await modeling.getAttribute('aria-pressed'), 'true');
     const modeBox = (await page.locator('.viewport-mode').boundingBox())!;
     const statusBox = (await page.locator('#viewport-status').boundingBox())!;
@@ -295,6 +301,24 @@ test(
     await page.keyboard.press('Enter');
     assert.equal(await render.getAttribute('aria-pressed'), 'true');
     assert.equal(await modeling.getAttribute('aria-pressed'), 'false');
+    assert.equal(await scene.isVisible(), true);
+    assert.equal(await scene.innerText(), 'Studio');
+    const sceneBox = (await scene.boundingBox())!;
+    const hostBox = (await page.locator('#viewport-host').boundingBox())!;
+    assert.equal(sceneBox.y, modeBox.y);
+    assert.ok(hostBox.x + hostBox.width - sceneBox.x - sceneBox.width < 20);
+    await scene.click();
+    await sceneMenu.getByRole('menuitemradio', {name: 'Side light'}).click();
+    assert.equal(
+      await page.evaluate(
+        () => window.renderModeApp.viewport.renderScenePreset,
+      ),
+      'side',
+    );
+    await page.evaluate(() =>
+      window.renderModeApp.viewport.setRenderScenePreset('soft'),
+    );
+    assert.equal(await scene.innerText(), 'Soft light');
     assert.equal(
       await page.locator('.viewport-coordinate-reference').isVisible(),
       false,
@@ -327,35 +351,86 @@ test(
       "import {box} from '@code3d/core';\nconst body = box(30, 20, 15).material('#f008');\nbody;",
     );
     assert.equal(await render.getAttribute('aria-pressed'), 'true');
+    assert.equal(await scene.innerText(), 'Soft light');
     assert.equal(
       await page.locator('.viewport-coordinate-reference').isVisible(),
       false,
     );
-    await page.setViewportSize({width: 960, height: 720});
-    const layout = await page.evaluate(() => {
-      const host = document
-        .querySelector('#viewport-host')!
-        .getBoundingClientRect();
-      const header = document
-        .querySelector('.viewport-header')!
-        .getBoundingClientRect();
-      return {
-        hostRight: host.right,
-        headerRight: header.right,
-        scroll: document.documentElement.scrollWidth,
-        width: innerWidth,
-      };
-    });
-    assert.ok(layout.headerRight <= layout.hostRight);
-    assert.ok(layout.scroll <= layout.width);
+    for (const width of [960, 375, 320]) {
+      await page.setViewportSize({width, height: 720});
+      const layout = await page.evaluate(() => {
+        const host = document
+          .querySelector('#viewport-host')!
+          .getBoundingClientRect();
+        const header = document
+          .querySelector('.viewport-header')!
+          .getBoundingClientRect();
+        const scene = document
+          .querySelector('.viewport-scene-selector')!
+          .getBoundingClientRect();
+        return {
+          hostLeft: host.left,
+          hostRight: host.right,
+          headerRight: header.right,
+          sceneLeft: scene.left,
+          sceneRight: scene.right,
+          scroll: document.documentElement.scrollWidth,
+          width: innerWidth,
+        };
+      });
+      assert.ok(layout.hostLeft >= 0);
+      assert.ok(layout.hostRight <= layout.width);
+      assert.ok(layout.headerRight <= layout.hostRight);
+      assert.ok(layout.headerRight <= layout.sceneLeft);
+      assert.ok(layout.sceneRight <= layout.hostRight);
+      assert.ok(layout.scroll <= layout.width);
+      await scene.click();
+      const menuBox = (await sceneMenu.boundingBox())!;
+      assert.ok(menuBox.x >= 0 && menuBox.x + menuBox.width <= width);
+      await page.keyboard.press('Escape');
+      assert.equal(
+        await scene.evaluate(node => node === document.activeElement),
+        true,
+      );
+    }
     await modeling.focus();
     await page.keyboard.press('Space');
     assert.equal(await modeling.getAttribute('aria-pressed'), 'true');
+    assert.equal(await scene.isVisible(), false);
     assert.equal(
       await page.locator('.viewport-coordinate-reference').isVisible(),
       true,
     );
     assert.equal(await page.locator('.viewport-dock-panels').isVisible(), true);
+    await render.click();
+    assert.equal(await scene.innerText(), 'Soft light');
+    await scene.focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Home');
+    await page.keyboard.press('Enter');
+    assert.equal(await scene.innerText(), 'Studio');
+    await scene.click();
+    await sceneMenu.getByRole('menuitemradio', {name: 'Side light'}).click();
+    await page.reload();
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 40_000});
+    assert.equal(
+      await page.evaluate(
+        () => window.renderModeApp.viewport.renderScenePreset,
+      ),
+      'side',
+    );
+    await render.click();
+    assert.equal(await scene.innerText(), 'Side light');
+    await scene.click();
+    assert.equal(
+      await sceneMenu
+        .getByRole('menuitemradio', {name: 'Side light'})
+        .getAttribute('aria-checked'),
+      'true',
+    );
+    await modeling.click();
+    await sceneMenu.waitFor({state: 'hidden'});
+    assert.equal(await scene.isVisible(), false);
     assert.deepEqual(errors, []);
   },
 );

@@ -1,3 +1,5 @@
+import {action, makeObservable, observableRef, reaction} from 'mobx';
+import {ChoiceMenu} from './choice-menu';
 import {type IconNode} from 'lucide';
 import {createIcon} from './icons';
 
@@ -16,14 +18,13 @@ export class Toolbar {
     action: ToolbarAction;
   }[] = [];
   private readonly menus: {
-    root: HTMLElement;
-    trigger: HTMLButtonElement;
-    variants: readonly ToolbarAction[];
-    items: HTMLButtonElement[];
+    menu: ChoiceMenu<string>;
     select(name: string): void;
   }[] = [];
+  private readonly stops: (() => void)[] = [];
 
   constructor(label: string) {
+    makeObservable(this, {selectVariant: action});
     this.root.className = 'tool-toolbar';
     this.root.setAttribute('role', 'toolbar');
     this.root.setAttribute('aria-label', label);
@@ -93,101 +94,36 @@ export class Toolbar {
     trigger.tabIndex = -1;
     trigger.title = name;
     trigger.setAttribute('aria-label', name);
-    trigger.setAttribute('aria-haspopup', 'menu');
-    trigger.setAttribute('aria-expanded', 'false');
     trigger.append(createIcon([['path', {d: 'm8 10 4 4 4-4'}]]));
-    const menu = document.createElement('div');
-    menu.className = 'tool-menu';
-    menu.popover = 'auto';
-    menu.setAttribute('role', 'menu');
-    menu.setAttribute('aria-label', name);
-    const items = variants.map(action => {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.tabIndex = -1;
-      item.setAttribute('role', 'menuitemradio');
-      item.setAttribute('aria-checked', String(action === entry.action));
-      item.append(
-        createIcon(action.icon),
-        document.createTextNode(action.name),
-      );
-      item.title = action.title;
-      item.addEventListener('click', () => {
-        if (item.disabled) return;
-        entry.action = action;
-        this.label(primary, action);
-        menu.hidePopover();
-        action.run();
-      });
-      menu.append(item);
-      return item;
+    wrapper.append(trigger);
+    makeObservable(entry, {action: observableRef});
+    this.stops.push(
+      reaction(
+        () => entry.action,
+        value => this.label(primary, value),
+      ),
+    );
+    const select = action((name: string) => {
+      const value = variants.find(variant => variant.name === name);
+      if (value) entry.action = value;
     });
-    this.menus.push({
-      root: menu,
-      trigger,
-      variants,
-      items,
+    const menu = new ChoiceMenu(trigger, {
+      label: name,
+      choices: variants.map(variant => ({
+        value: variant.name,
+        label: variant.name,
+        title: variant.title,
+        icon: variant.icon,
+      })),
+      value: () => entry.action.name,
       select: name => {
-        const action = variants.find(action => action.name === name);
-        if (action) {
-          entry.action = action;
-          this.label(primary, action);
-        }
+        select(name);
+        entry.action.run();
       },
+      anchor: wrapper,
+      keyboardTriggers: [primary],
     });
-    const open = () => {
-      if (trigger.disabled) return;
-      menu.showPopover();
-      const rect = wrapper.getBoundingClientRect();
-      const bounds = menu.getBoundingClientRect();
-      menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - bounds.width - 8))}px`;
-      menu.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - bounds.height - 8)}px`;
-      items.forEach((item, i) =>
-        item.setAttribute('aria-checked', String(variants[i] === entry.action)),
-      );
-      (items[variants.indexOf(entry.action)].disabled
-        ? items.find(item => !item.disabled)
-        : items[variants.indexOf(entry.action)]
-      )?.focus();
-    };
-    trigger.addEventListener('click', () =>
-      menu.matches(':popover-open') ? menu.hidePopover() : open(),
-    );
-    for (const button of [primary, trigger])
-      button.addEventListener('keydown', event => {
-        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-        event.preventDefault();
-        open();
-      });
-    menu.addEventListener('beforetoggle', event =>
-      trigger.setAttribute('aria-expanded', String(event.newState === 'open')),
-    );
-    menu.addEventListener('keydown', event => {
-      event.stopPropagation();
-      if (event.key === 'Escape' || event.key === 'Tab') {
-        if (event.key === 'Escape') event.preventDefault();
-        menu.hidePopover();
-        trigger.focus();
-        return;
-      }
-      const enabled = items.filter(item => !item.disabled);
-      const index = enabled.indexOf(event.target as HTMLButtonElement);
-      const next =
-        event.key === 'Home'
-          ? 0
-          : event.key === 'End'
-            ? enabled.length - 1
-            : event.key === 'ArrowDown'
-              ? (index + 1) % enabled.length
-              : event.key === 'ArrowUp'
-                ? (index + enabled.length - 1) % enabled.length
-                : undefined;
-      if (next !== undefined) {
-        event.preventDefault();
-        enabled[next]?.focus();
-      }
-    });
-    wrapper.append(trigger, menu);
+    this.menus.push({menu, select});
   }
 
   update(
@@ -203,15 +139,8 @@ export class Toolbar {
       button.disabled = disabled;
       if (title !== undefined) button.title = title;
     }
-    for (const menu of this.menus) {
-      menu.items.forEach((item, i) => {
-        item.disabled = state(menu.variants[i].name).disabled;
-      });
-      menu.trigger.disabled = menu.variants.every(
-        action => state(action.name).disabled,
-      );
-      if (menu.trigger.disabled) menu.root.hidePopover();
-    }
+    for (const {menu} of this.menus)
+      menu.setDisabled(name => state(name).disabled);
     const buttons = this.primaryButtons();
     if (!buttons.some(button => !button.disabled && button.tabIndex === 0)) {
       const active =
@@ -229,7 +158,13 @@ export class Toolbar {
   }
 
   close(): void {
-    for (const menu of this.menus) menu.root.hidePopover();
+    for (const {menu} of this.menus) menu.close();
+  }
+
+  dispose(): void {
+    for (const stop of this.stops) stop();
+    for (const {menu} of this.menus) menu.dispose();
+    this.root.remove();
   }
 
   private primaryButtons(): HTMLButtonElement[] {

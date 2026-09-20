@@ -142,7 +142,7 @@ export class SpatialToolbar {
   dispose(): void {
     this.activation++;
     this.stop();
-    this.toolbar.close();
+    this.toolbar.dispose();
     this.root.remove();
   }
 }

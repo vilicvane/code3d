@@ -98,6 +98,7 @@ export class SketchConstraintTools {
           run: () => this.activate(action.kind),
         });
       this.toolbar.root.replaceWith(toolbar.root);
+      this.toolbar.dispose();
       this.toolbar = toolbar;
     }
     this.actions = actions;
@@ -113,6 +114,11 @@ export class SketchConstraintTools {
       disabled: this.actions.find(a => a.name === name)!.disabled,
       title: this.actions.find(a => a.name === name)!.title,
     }));
+  }
+
+  dispose(): void {
+    this.toolbar.dispose();
+    this.root.remove();
   }
 
   cancel(): void {

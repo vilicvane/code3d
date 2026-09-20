@@ -1,3 +1,10 @@
+import {
+  modelingScenePreset,
+  renderScenePresets,
+  RenderScenePreference,
+  type RenderScenePreset,
+  type ScenePreset,
+} from './render-scene';
 import {AdaptiveGrid} from './adaptive-grid';
 import {action, computed, makeObservable, observableRef, reaction} from 'mobx';
 import {appSettings, type AppSettings} from '../app-settings';
@@ -33,9 +40,6 @@ import {
 const defaultSurfaceOpacity = 0.68;
 const boundaryColor = '#080a07';
 const boundaryOpacity = 0.72;
-
-// CPU-backed, neutral studio map: each renderer builds its own GPU reflection cache.
-const studioEnvironment = createStudioEnvironment();
 
 export type ModelRenderMode = 'modeling' | 'render';
 
@@ -92,6 +96,12 @@ export class ModelRenderer {
   readonly grid: AdaptiveGrid;
   private readonly renderSize = new THREE.Vector2();
   private readonly stopSettings: () => void;
+  private readonly stopScenePreset: () => void;
+  private readonly hemisphere = new THREE.HemisphereLight('#ffffff', '#737373');
+  private readonly ambient = new THREE.AmbientLight('#ffffff');
+  private readonly key = new THREE.DirectionalLight('#ffffff');
+  private readonly rim = new THREE.DirectionalLight('#ffffff');
+  private readonly environments = new Map<ScenePreset, THREE.DataTexture>();
   private readonly contentBounds = new THREE.Box3();
   private readonly contentSphere = new THREE.Sphere();
 
@@ -99,11 +109,15 @@ export class ModelRenderer {
     private readonly container: HTMLElement,
     private readonly onChange: () => void = () => {},
     private readonly settings: AppSettings = appSettings,
+    private readonly scenePreference = new RenderScenePreference(),
   ) {
-    makeObservable<this, 'renderMode'>(this, {
+    makeObservable<this, 'renderMode' | 'activeScenePreset'>(this, {
       renderMode: observableRef,
       mode: computed,
+      scenePreset: computed,
+      activeScenePreset: computed,
       setMode: action,
+      setScenePreset: action,
     });
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -115,25 +129,33 @@ export class ModelRenderer {
     this.container.append(this.renderer.domElement);
     this.renderer.domElement.addEventListener('webglcontextrestored', onChange);
 
-    this.scene.background = new THREE.Color('#171815');
-    this.scene.environment = studioEnvironment;
-    this.scene.add(
-      new THREE.HemisphereLight('#ffffff', '#737373', 1.2),
-      new THREE.AmbientLight('#ffffff', 0.8),
-    );
-
-    const key = new THREE.DirectionalLight('#ffffff', 2.4);
-    key.position.set(70, 110, 80);
-    this.scene.add(key);
-
-    const rim = new THREE.DirectionalLight('#ffffff', 1.6);
-    rim.position.set(-80, 55, -65);
-    this.scene.add(rim);
+    this.scene.background = new THREE.Color(modelingScenePreset.background);
+    this.rim.position.set(-80, 55, -65);
+    this.scene.add(this.hemisphere, this.ambient, this.key, this.rim);
 
     this.grid = modelingHelper(new AdaptiveGrid(this.scene.background));
     this.scene.add(this.grid);
 
     this.camera.position.set(105, 82, 120);
+    this.stopScenePreset = reaction(
+      () => this.activeScenePreset,
+      preset => {
+        let environment = this.environments.get(preset);
+        if (!environment) {
+          environment = createStudioEnvironment(preset.environment);
+          this.environments.set(preset, environment);
+        }
+        (this.scene.background as THREE.Color).set(preset.background);
+        this.scene.environment = environment;
+        this.hemisphere.intensity = preset.hemisphere;
+        this.ambient.intensity = preset.ambient;
+        this.key.intensity = preset.key;
+        this.key.position.set(...preset.keyPosition);
+        this.rim.intensity = preset.rim;
+        this.onChange();
+      },
+      {fireImmediately: true},
+    );
     this.stopSettings = reaction(
       () => settings.value.pixelRatioLimit,
       () => this.resize(),
@@ -150,14 +172,31 @@ export class ModelRenderer {
     this.renderMode = mode;
   }
 
+  get scenePreset(): RenderScenePreset {
+    return this.scenePreference.preset;
+  }
+
+  setScenePreset(preset: RenderScenePreset): void {
+    this.scenePreference.select(preset);
+  }
+
+  private get activeScenePreset(): ScenePreset {
+    return this.mode === 'modeling'
+      ? modelingScenePreset
+      : renderScenePresets[this.scenePreset];
+  }
+
   dispose = (): void => {
     this.stopSettings();
+    this.stopScenePreset();
     window.removeEventListener('pagehide', this.dispose);
     this.renderer.domElement.removeEventListener(
       'webglcontextrestored',
       this.onChange,
     );
     this.renderer.dispose();
+    for (const texture of this.environments.values()) texture.dispose();
+    this.environments.clear();
   };
 
   private pixelRatio(): number {
@@ -572,8 +611,10 @@ export function applyTransform(
   object.scale.set(...transform.scale);
 }
 
-/** Broad white softboxes over a gray ambient field keep metals readable from all sides. */
-function createStudioEnvironment(): THREE.DataTexture {
+/** CPU-backed white softboxes; each screen/export renderer owns its GPU reflection cache. */
+function createStudioEnvironment(
+  preset: ScenePreset['environment'],
+): THREE.DataTexture {
   const width = 256;
   const height = 128;
   const data = new Float32Array(width * height * 4);
@@ -592,9 +633,11 @@ function createStudioEnvironment(): THREE.DataTexture {
         Math.sin(latitude),
         Math.cos(latitude) * Math.sin(longitude),
       );
-      let light = 0.45 + 0.25 * Math.max(direction.y, 0);
-      for (const softbox of softboxes)
-        light += 2.5 * Math.exp((direction.dot(softbox) - 1) * 12);
+      let light = preset.ambient + preset.sky * Math.max(direction.y, 0);
+      for (const [i, softbox] of softboxes.entries())
+        light +=
+          preset.softboxes[i] *
+          Math.exp((direction.dot(softbox) - 1) * preset.sharpness);
       const index = (y * width + x) * 4;
       data[index] = data[index + 1] = data[index + 2] = light;
       data[index + 3] = 1;

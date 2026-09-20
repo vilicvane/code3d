@@ -61,6 +61,12 @@ Performance preferences are available from **Settings** in the top bar.
 They are saved for this browser and shared across projects and tabs; see the
 [settings guide](../web/src/content/docs/docs/getting-started/app.md#performance-settings).
 
+The viewport's **Render** mode includes an upper-right **Render scene** menu for Studio,
+Side light, and Soft light. The selected background, lighting, and reflections
+also apply to viewport PNG exports. Modeling retains its original scene; the
+render choice is saved in this browser and restored after reloading. See the
+[App guide](../web/src/content/docs/docs/getting-started/app.md#move-through-a-model).
+
 ## Source map
 
 Read [project and runtime](../../.agents/docs/architecture/runtime.md),

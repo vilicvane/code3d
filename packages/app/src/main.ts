@@ -33,6 +33,8 @@ import {
 import {autorun, observable, reaction, runInAction} from 'mobx';
 import {appSettings} from './app-settings';
 import {AppSettingsDialog} from './ui/app-settings';
+import {RenderScenePreference} from './rendering/render-scene';
+import {ViewportSceneSelector} from './ui/viewport-scene-selector';
 import brandMark from '../../../assets/brand/mark.svg?raw';
 import {AgentConnections} from './agent/connections';
 import {AgentObserver} from './agent/observer';
@@ -660,6 +662,7 @@ window.addEventListener(
     dockPanels.dispose();
     agentConnections.dispose();
     stopViewportModes();
+    viewportSceneSelector.dispose();
     stopPreviewPresentation();
     stopViewportStatus();
     clearTimeout(statusRevealTimer);
@@ -801,6 +804,7 @@ type ContextualToolState = {
 };
 
 const viewport = new ModelViewport(viewportHost, {
+  renderScene: new RenderScenePreference(localStorage),
   onViewChange: observeViewportTarget,
   isViewVisible: () =>
     sketchEditor.navigation.gridStep === undefined && !previewState.empty,
@@ -1090,6 +1094,17 @@ window.addEventListener('pagehide', () => dragPreviewView.dispose(), {
 const viewportGridScale = new ViewportGridScale(
   viewportFeedbackStack,
   () => sketchEditor.navigation.gridStep ?? viewport.gridStep,
+);
+const viewportSceneSelector = new ViewportSceneSelector(
+  viewportHost,
+  viewport,
+  () => ({
+    visible:
+      viewport.renderMode === 'render' &&
+      !sketchEditor.hasTarget &&
+      !previewState.empty,
+    disabled: previewState.retainingView || previewState.inspecting,
+  }),
 );
 const stopViewportModes = reaction(
   () => viewport.renderMode,
