@@ -166,6 +166,44 @@ HarfBuzz 排版提供真实二次/三次曲线，non-zero winding 布尔合并�
 [text](../../../packages/core/src/library/text.ts)、[text tests](../../../packages/core/test/text.test.ts)
 和 [third-party notices](../../../packages/core/THIRD_PARTY.md)。
 
+## 曲面包覆与增厚
+
+`wrap` 将共面的输入组转换到第一输入的平面架，以全部轮廓的二维包围矩形为有限
+区域。目标先与该矩形的法向柱体求交，原生最近距离返回候选锚点；目标跨越源面
+两侧时拒绝。比较候选在整个区域的局部映射，允许圆柱母线等价解，拒绝不同结果。
+映射按原生曲面的二阶导数积分测地线，源平面方向最小旋转至锚点切平面；误差按
+模型单位控制。自适应拟合的二维 B-spline 边界附在原生支撑曲面上，保留孔洞，
+在原目标裁剪域内求交并按周期接缝拆面。完整矩形（含空白）需被目标覆盖。
+
+包覆结果是没有具名 `plane` 的真实 FaceModel。沿平面法线的操作先验证实际支撑
+面，不能用默认参考架伪造曲面法向。`thicken` 用原生简单偏移封闭边界；此构造器
+不保证实体朝外，必须先 OrientClosedSolid，再检查形体与有符号体积，最后进入
+拓扑继承及布尔运算；构造前按曲面主曲率拒绝已检测到的过曲率中心偏移。平面图元
+从 Replicad XZ 草图进入 Core 时统一原生面朝向为 +Y，与作者平面架一致，避免
+extrude、sweep 与 thicken 使用两套相反法向。两种操作保持既有 Core 值语义与普通 inspect 数据，不引入
+App 状态副本。wrap 继承首输入坐标架，thicken 逐个继承源面。
+
+源平面架取模型内部 `geometryAnchor`，不读取能由 expose 改写的具名 plane。
+平面包覆输出同步保存实际支撑平面架，后续原点与旋转操作继续重表达该架。
+
+内部职责分为 [wrap 区域定位](../../../packages/core/src/library/wrap.ts)、
+[测地映射与布局校验](../../../packages/core/src/library/wrap-mapping.ts)、
+[边界拟合与 BRep 构面](../../../packages/core/src/library/wrap-face.ts)。
+[曲面导数与主曲率](../../../packages/core/src/library/surface-geometry.ts)由 wrap 与
+[thicken](../../../packages/core/src/library/thicken.ts)共用；布局校验按曲面上的映射
+插值误差自适应细分，所有探测点位于有限矩形内，并检查短 B-spline 节点区间。
+增厚校验从[裁剪面的私有三角域](../../../packages/core/src/library/surface-domain.ts)
+出发，保留孔与接缝，再按节点区间及曲率裕量/偏移误差细分；不采样整个 UV 包围矩形。
+细分不收敛或超出预算时抛错，不能把未完成检查当作有效结果。
+
+[原生资源作用域](../../../packages/core/src/library/kernel-scope.ts)在取得句柄后立即
+拥有它，返回结果时显式移交；构造、拟合、重建及检查抛错都经过同一清理路径。
+回归见 [wrap tests](../../../packages/core/test/wrap.test.ts)和
+[曲面验证 tests](../../../packages/core/test/surface-validation.test.ts)，包括具名引用
+覆写、孔内曲率、固定采样线之间的窄曲率峰与原生异常释放。
+自适应数值检查与原生有效性检查不构成任意自由曲面全局单射或复杂偏移不自交的
+证明；支持范围以[公开约定](../../../packages/core/docs/api.md#curved-surface-wrapping)为准。
+
 ## 排布与几何查询
 
 `@code3d/layout` 使用公开 Core `originOffset` 和模型 `rotate` 表达共享局部坐标中的

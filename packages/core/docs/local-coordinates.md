@@ -49,6 +49,8 @@ Only an explicit origin operation chooses a different local zero.
 | `extrude`                                         | Inherit the input face's frame, without centering the extrusion.                                                                           |
 | `revolve`                                         | Inherit the input profile's frame; the axis's solved placement is converted into that frame.                                               |
 | `sweep`                                           | Inherit the input profile's frame; the spine's solved placement is converted into that frame.                                              |
+| `wrap`                                            | Inherit the first profile's frame and placement; map all profiles together in their shared plane.                                          |
+| `thicken`                                         | Inherit each face's frame and placement; thickness follows its oriented surface normals.                                                   |
 | `union`, `intersect`                              | Inherit the first operand's frame.                                                                                                         |
 | `cut`                                             | Inherit the stock's frame.                                                                                                                 |
 | `loft`                                            | Inherit the first section's frame.                                                                                                         |

@@ -11,7 +11,9 @@ dependencies. Use [function arguments](cursor.md) to evaluate a design at the
 requested dimensions without rewriting its defaults.
 
 Prefer the public [Core API](../../packages/core/README.md). Build a shape from
-primitives, profiles, sketches, Boolean operations and relationships. Give useful
+primitives, profiles, sketches, Boolean operations and relationships. Use
+`ellipsoid(xRadius, yRadius, zRadius)` for a centered solid with three independent
+axis radii, or `ellipse(xRadius, zRadius)` for a planar profile. Give useful
 intermediate geometry meaningful names so a person can select it in the editor
 and understand the construction. Keep expressions and design constraints where
 they communicate intent; a long list of final coordinates usually loses that
@@ -54,6 +56,14 @@ For a bent rod or duct, use `sweep(profile, spine)` or `profile.sweep(spine)`.
 The profile's local origin must meet the start of an open curve, and its normal
 must point along the curve's starting tangent. A circle and a Bézier path are
 shown in the [path sweep reference](../../packages/core/docs/api.md#path-sweeps).
+
+For text or planar outlines on a curved face, position the profiles first, then
+use `wrap(profiles, target.surface(id))`. The complete finite layout chooses the
+closest target region. `thicken(faces, positiveThickness)` produces raised
+lettering for `union`; a negative thickness produces engraving tools for `cut`.
+Ambiguous local mappings and crossing regions throw. See
+[curved surface wrapping](../../packages/core/docs/api.md#curved-surface-wrapping)
+for supported surfaces, distortion and trimmed boundaries.
 
 Check the [current limitations](../../packages/web/src/content/docs/docs/getting-started/limitations.md)
 before promising a feature.

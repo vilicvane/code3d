@@ -66,6 +66,7 @@ import {
   castOwnedShape,
   castOwnedShape3D,
   centeredBoxShape,
+  ellipsoidShape,
   shapeSubshapes,
   transformShape,
 } from './kernel-shapes.js';
@@ -81,6 +82,9 @@ import {
 } from './relation-solver.js';
 import {estimateRetainedBytes} from './retained-memory.js';
 import {shellWithTopology} from './shell.js';
+import {wrapFaces, type WrapOptions} from './wrap.js';
+import {thickenWithTopology} from './thicken.js';
+import {surfaceRotation} from './surface-geometry.js';
 import {sketchRegionFace} from './sketch-face.js';
 import type {SketchRegion} from './sketch-regions.js';
 import {
@@ -265,6 +269,7 @@ export type ModelOperationKind =
   | 'tube'
   | 'coil'
   | 'sphere'
+  | 'ellipsoid'
   | 'frustum'
   | 'regularPrism'
   | 'circle'
@@ -282,6 +287,8 @@ export type ModelOperationKind =
   | 'extrude'
   | 'revolve'
   | 'sweep'
+  | 'wrap'
+  | 'thicken'
   | 'primitive'
   | 'material'
   | 'scaled'
@@ -1144,6 +1151,12 @@ export type FaceModel<Elements extends NamedElements = PlanarElements> =
     SurfaceTopologyCapabilities &
     AreaMeasurement & {
       flip(): Surface;
+      /**
+       * @code3d.inspect this thicken.inspectMethod
+       * @code3d.inspect thickness thicken.inspectMethod
+       * @code3d.param thickness {kind: 'length', default: 1, label: 'Thickness'}
+       */
+      thicken(thickness: number): SolidModel;
       /**
        * Extrudes along the face's local plane normal. Signed distance; no recentering.
        * @code3d.inspect this extrude.inspectMethod
@@ -3651,18 +3664,232 @@ export class ModelObject<
     );
   }
 
+  /** @internal Wrap the batch in the first profile's resolved coordinate frame. */
+  static wrapProfiles(
+    profiles: readonly ModelObject<{}, 'face'>[],
+    target: Surface | FaceModel<{}>,
+    options: WrapOptions,
+  ): readonly FaceModel<{}>[] {
+    if (!profiles.length) return [];
+    const tolerance = options.tolerance ?? 0.001;
+    assertPositive('wrap tolerance', tolerance);
+    const first = profiles[0],
+      source = first.requireGeometry();
+    if ((source.value.shape as ReplicadFace).geomType !== 'PLANE')
+      throw new Error('wrap requires planar source profiles.');
+    let reference = anchorReference(target);
+    if (reference.whole && isModelObject(reference.model))
+      reference = {
+        ...reference,
+        ...reference.model.exposedElement(),
+        whole: false,
+      };
+    const topology = reference.topology;
+    if (!topology || topology.selection.kind !== 'surface')
+      throw new Error('wrap requires one finite target surface.');
+    const context = this.createSolveContext([...profiles, reference.model]);
+    this.recordCompositionInspection(context, []);
+    const pose = first.solvePose(context);
+    const frame = first.geometryAnchor.transform;
+    const sources = profiles.map(profile => profile.requireGeometry());
+    const transforms = profiles.map(profile =>
+      composeTransforms(
+        invertTransform(frame),
+        relativeTransform(profile.solvePose(context), pose),
+      ),
+    );
+    const targetTransform = composeTransforms(
+      invertTransform(frame),
+      relativeTransform(
+        composeTransforms(
+          reference.model.solvePose(context),
+          topology.transform,
+        ),
+        pose,
+      ),
+    );
+    const targetGeometry = topology.source.requireGeometry();
+    const combined = evaluateModelGeometry(
+      'wrap',
+      [
+        transforms.map(t => [t.position, t.quaternion]),
+        targetTransform.position,
+        targetTransform.quaternion,
+        topology.selection.id,
+        topology.scale,
+        reference.facing ?? 1,
+        tolerance,
+      ],
+      [...sources, targetGeometry],
+      () => {
+        const faces: ReplicadFace[] = [];
+        try {
+          sources.forEach((s, i) =>
+            faces.push(
+              shapeWithTransform(s.value.shape as ReplicadFace, transforms[i]),
+            ),
+          );
+          return withTransformedGeometry(
+            targetGeometry.value,
+            {
+              transform: targetTransform,
+              scale: topology.scale,
+              selection: topology.selection,
+            },
+            selected => {
+              let face = selected as ReplicadFace;
+              if (reference.facing === -1)
+                face = castOwnedShape(
+                  selected.wrapped.Reversed(),
+                ) as ReplicadFace;
+              try {
+                const wrapped = wrapFaces(faces, face, tolerance);
+                try {
+                  return {shape: shapeWithTransform(wrapped, frame)};
+                } finally {
+                  wrapped.delete();
+                }
+              } finally {
+                if (face !== selected) face.delete();
+              }
+            },
+          );
+        } finally {
+          faces.forEach(face => face.delete());
+        }
+      },
+    );
+    const outputs: ModelObject<{}, 'face'>[] = [];
+    try {
+      for (const id of combined.value.topology.surfaces.ids) {
+        const geometry = evaluateModelGeometry(
+          'wrap-face',
+          [id],
+          [combined],
+          () =>
+            withTopologyShape(
+              combined.value.shape,
+              combined.value.topology,
+              {kind: 'surface', id},
+              shape => ({shape: shape.clone()}),
+            ),
+        );
+        const planar =
+          (geometry.value.shape as ReplicadFace).geomType === 'PLANE'
+            ? (faceGeometry(geometry.value.shape as ReplicadFace, 1) as Extract<
+                AlignmentGeometry,
+                {kind: 'plane'}
+              >)
+            : undefined;
+        const result = ModelObject.create<{}, 'face'>({
+          kind: 'face',
+          name: 'Wrap',
+          geometry,
+          geometryAnchor: {
+            kind: 'face',
+            transform: planar
+              ? composeTransforms(
+                  {
+                    position: planar.point,
+                    quaternion: surfaceRotation(
+                      rotateVector([0, 1, 0], frame.quaternion),
+                      planar.normal,
+                    ),
+                  },
+                  {position: [0, 0, 0], quaternion: frame.quaternion},
+                )
+              : identityRigidTransform,
+          },
+          material: first.materialSnapshot,
+          placements: first.placements,
+          sourceRefs: [
+            ...profiles.flatMap(profile => profile.sourceRefs),
+            ...reference.model.sourceRefs,
+          ],
+          parameters: uniqueParameters([
+            ...profiles.flatMap(profile => profile.allParameters()),
+            ...topology.source.allParameters(),
+          ]),
+          meshTolerance: Math.min(
+            ...profiles.map(profile => profile.meshTolerance),
+            topology.source.meshTolerance,
+          ),
+          operation: storedOperation('wrap', [
+            ...profiles.map((model, index) => ({
+              model,
+              role: 'section' as const,
+              index,
+            })),
+            {model: reference.model, role: 'reference', index: profiles.length},
+          ]),
+        });
+        outputs.push(result);
+      }
+      this.recordCompositionInspection(
+        context,
+        outputs.map(result => [result, first]),
+      );
+      return outputs as unknown as readonly FaceModel<{}>[];
+    } finally {
+      combined.value.shape.delete();
+    }
+  }
+
+  thicken(this: ModelObject<Elements, 'face'>, thickness = 1): SolidModel {
+    if (!Number.isFinite(thickness) || thickness === 0)
+      throw new Error('thicken thickness must be finite and non-zero.');
+    ModelObject.recordFaceResults([this], []);
+    const source = this.requireGeometry();
+    const geometry = evaluateSolidGeometry(
+      'thicken',
+      [thickness],
+      [source],
+      () =>
+        thickenWithTopology(
+          {
+            shape: source.value.shape,
+            topology: source.value.topology,
+            namespace: 1,
+          },
+          thickness,
+        ),
+    );
+    const result = ModelObject.create<CanonicalElements, 'solid'>({
+      kind: 'solid',
+      name: 'Thicken',
+      geometry,
+      material: this.materialSnapshot,
+      placements: this.placements,
+      sourceRefs: this.sourceRefs,
+      parameters: this.allParameters(),
+      meshTolerance: this.meshTolerance,
+      operation: storedOperation('thicken', [
+        {model: this, role: 'receiver', index: 0},
+      ]),
+    });
+    ModelObject.recordFaceResults([this], [result]);
+    return result as unknown as SolidModel;
+  }
+
   extrude(this: ModelObject<Elements, 'face'>, distance: number): SolidModel;
   extrude(this: ModelObject<Elements, 'face'>, distance = 10): SolidModel {
     if (this.kind !== 'face')
       throw new Error('extrude requires a single face model.');
-    ModelObject.recordExtrusions([this], []);
+    ModelObject.recordFaceResults([this], []);
     if (!Number.isFinite(distance) || distance === 0)
       throw new Error('Extrusion distance must be finite and non-zero.');
     const source = this.requireGeometry();
-    const direction = rotateVector(
-      [0, distance, 0],
-      this.geometryAnchor.transform.quaternion,
-    );
+    if ((source.value.shape as ReplicadFace).geomType !== 'PLANE')
+      throw new Error(
+        'extrude requires a planar face; use thicken for curved faces.',
+      );
+    const planar = faceGeometry(
+      source.value.shape as ReplicadFace,
+      1,
+    ) as Extract<AlignmentGeometry, {kind: 'plane'}>;
+    const direction = planar.normal.map(
+      value => value * distance,
+    ) as unknown as Vec3;
     const geometry = evaluateSolidGeometry(
       'extrude',
       [direction],
@@ -3699,7 +3926,7 @@ export class ModelObject<
         },
       ),
     });
-    ModelObject.recordExtrusions([this], [result]);
+    ModelObject.recordFaceResults([this], [result]);
     return result as unknown as SolidModel;
   }
 
@@ -3710,6 +3937,10 @@ export class ModelObject<
   ): SolidModel {
     if (this.kind !== 'face')
       throw new Error('revolve requires a single face model.');
+    if (
+      (this.requireGeometry().value.shape as ReplicadFace).geomType !== 'PLANE'
+    )
+      throw new Error('revolve requires a planar face.');
     const {angle = 360, advance = 0} = config;
     if (!Number.isFinite(angle) || angle === 0)
       throw new Error('Revolution angle must be finite and non-zero.');
@@ -3792,10 +4023,13 @@ export class ModelObject<
     );
     const source = this.requireGeometry();
     const pathGeometry = path.requireGeometry();
-    const normal = rotateVector(
-      [0, 1, 0],
-      this.geometryAnchor.transform.quaternion,
-    );
+    if ((source.value.shape as ReplicadFace).geomType !== 'PLANE')
+      throw new Error('sweep requires a planar face.');
+    const planar = faceGeometry(
+      source.value.shape as ReplicadFace,
+      1,
+    ) as Extract<AlignmentGeometry, {kind: 'plane'}>;
+    const normal = planar.normal;
     ModelObject.recordCompositionInspection(context, []);
     const geometry = evaluateSolidGeometry(
       'sweep',
@@ -4652,7 +4886,7 @@ export class ModelObject<
   }
 
   /** @internal Preserve each batch result's matching input placement. */
-  static recordExtrusions(
+  static recordFaceResults(
     faces: readonly ModelObject[],
     results: readonly ModelObject[],
   ): void {
@@ -4780,8 +5014,8 @@ export class ModelObject<
   /** @internal Return ordinary values in the original operation's common frame. */
   static inspectComposition(
     data: CompositionInspectData,
-    ambient: readonly Model[],
-    target: readonly Model[],
+    ambient: readonly Anchor[],
+    target: readonly Anchor[],
   ): InspectResult {
     const frame = this.inspectionFrame(data.poses);
     return {
@@ -5744,6 +5978,38 @@ export function sphere(radius = 5): SolidModel {
 }
 
 /**
+ * An ellipsoid centered at the local origin, with radii along X, Y and Z.
+ * @code3d.param xRadius {kind: 'length', default: 5, label: 'X radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param yRadius {kind: 'length', default: 3, label: 'Y radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param zRadius {kind: 'length', default: 4, label: 'Z radius', constraints: {exclusiveMin: 0}}
+ */
+export function ellipsoid(
+  xRadius: number,
+  yRadius: number,
+  zRadius: number,
+): SolidModel;
+export function ellipsoid(xRadius = 5, yRadius = 3, zRadius = 4): SolidModel {
+  assertPositive('xRadius', xRadius);
+  assertPositive('yRadius', yRadius);
+  assertPositive('zRadius', zRadius);
+  return ModelObject.create<CanonicalElements, 'solid'>({
+    kind: 'solid',
+    name: 'Ellipsoid',
+    geometry: evaluateSolidGeometry(
+      'ellipsoid',
+      [xRadius, yRadius, zRadius],
+      [],
+      () => ({shape: ellipsoidShape(xRadius, yRadius, zRadius)}),
+    ),
+    elements: solidElements([
+      [0, -yRadius, 0],
+      [0, yRadius, 0],
+    ]),
+    operation: storedOperation('ellipsoid'),
+  }) as unknown as SolidModel;
+}
+
+/**
  * @code3d.param bottomRadius {kind: 'length', default: 5, label: 'Bottom radius', constraints: {exclusiveMin: 0}}
  * @code3d.param topRadius {kind: 'length', default: 3, label: 'Top radius', constraints: {exclusiveMin: 0}}
  * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
@@ -6365,7 +6631,7 @@ export function extrude(
   } finally {
     // Inner method records belong to this same free-function invocation.
     // Restore its complete input scope even when a batch member throws.
-    ModelObject.recordExtrusions(
+    ModelObject.recordFaceResults(
       faces,
       solids as unknown as readonly ModelObject[],
     );
@@ -6421,6 +6687,62 @@ export function sweep(
     'face',
     'sweep requires a face model.',
   ).sweep(spine);
+}
+
+/**
+ * Wrap coplanar profiles onto one smooth, finite target surface. The complete
+ * source bounding rectangle chooses the closest correspondence. Distinct local
+ * results and crossing/overlapping regions are errors. Output may split at seams.
+ * @code3d.inspect profiles wrap.inspectProfiles
+ * @code3d.inspect target wrap.inspectTarget
+ */
+export function wrap(
+  profiles: FaceModel<{}> | readonly FaceModel<{}>[],
+  target: Surface | FaceModel<{}>,
+  options: WrapOptions = {},
+): readonly FaceModel<{}>[] {
+  return ModelObject.wrapProfiles(
+    (Array.isArray(profiles) ? profiles : [profiles]).map(profile =>
+      requireModelKind(profile, 'face', 'wrap requires planar face models.'),
+    ),
+    target,
+    options,
+  );
+}
+
+/**
+ * Give each face signed thickness along its surface normals, preserving placement.
+ * @code3d.inspect face thicken.inspectFaces
+ * @code3d.inspect thickness thicken.inspectFaces
+ * @code3d.param thickness {kind: 'length', default: 1, label: 'Thickness'}
+ */
+export function thicken(face: FaceModel<{}>, thickness: number): SolidModel;
+/**
+ * @code3d.inspect faces thicken.inspectFaces
+ * @code3d.inspect thickness thicken.inspectFaces
+ * @code3d.param thickness {kind: 'length', default: 1, label: 'Thickness'}
+ */
+export function thicken(
+  faces: readonly FaceModel<{}>[],
+  thickness: number,
+): readonly SolidModel[];
+export function thicken(
+  face: FaceModel<{}> | readonly FaceModel<{}>[],
+  thickness = 1,
+): SolidModel | readonly SolidModel[] {
+  const faces = (Array.isArray(face) ? face : [face]).map(value =>
+    requireModelKind(value, 'face', 'thicken requires face models.'),
+  );
+  const results: SolidModel[] = [];
+  try {
+    for (const value of faces) results.push(value.thicken(thickness));
+    return Array.isArray(face) ? results : results[0];
+  } finally {
+    ModelObject.recordFaceResults(
+      faces,
+      results as unknown as readonly ModelObject[],
+    );
+  }
 }
 
 /**
@@ -6972,11 +7294,14 @@ export const authoringApi = Object.freeze({
   loft,
   revolve,
   sweep,
+  wrap,
+  thicken,
   box,
   cylinder,
   tube,
   coil,
   sphere,
+  ellipsoid,
   frustum,
   regularPrism,
   group,
@@ -7305,6 +7630,9 @@ function planarFaceModel(
     const sketch = buildSketch();
     try {
       const face = sketch.face();
+      // Replicad's XZ sketches face -Y. Core's planar profiles face +Y;
+      // normalize the native face before normals, offsets and sweeps consume it.
+      face.wrapped.Reverse();
       return {shape: transform?.(face) ?? face};
     } finally {
       sketch.delete();
@@ -8372,4 +8700,83 @@ function hasParameter(
       candidate.expressionRef.end === parameter.expressionRef.end &&
       candidate.target.id === parameter.target.id,
   );
+}
+
+/** @internal */
+export namespace wrap {
+  function inspect(
+    [profiles, target]: [
+      FaceModel<{}> | readonly FaceModel<{}>[],
+      Surface | FaceModel<{}>,
+    ],
+    context: InspectContext<
+      readonly FaceModel<{}>[],
+      unknown,
+      CompositionInspectData | undefined
+    >,
+    focus: 'profiles' | 'target',
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    const faces = Array.isArray(profiles) ? profiles : [profiles];
+    return ModelObject.inspectComposition(
+      context.data,
+      focus === 'profiles'
+        ? [target, ...(context.return ?? [])]
+        : [...faces, ...(context.return ?? [])],
+      focus === 'profiles' ? faces : [target],
+    );
+  }
+  export function inspectProfiles(
+    args: [FaceModel<{}> | readonly FaceModel<{}>[], Surface | FaceModel<{}>],
+    context: InspectContext<
+      readonly FaceModel<{}>[],
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ) {
+    return inspect(args, context, 'profiles');
+  }
+  export function inspectTarget(
+    args: [FaceModel<{}> | readonly FaceModel<{}>[], Surface | FaceModel<{}>],
+    context: InspectContext<
+      readonly FaceModel<{}>[],
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ) {
+    return inspect(args, context, 'target');
+  }
+}
+/** @internal */
+export namespace thicken {
+  export function inspectFaces(
+    [face]: [FaceModel<{}> | readonly FaceModel<{}>[], number],
+    context: InspectContext<
+      SolidModel | readonly SolidModel[],
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    const results = context.return
+      ? Array.isArray(context.return)
+        ? context.return
+        : [context.return]
+      : [];
+    return ModelObject.inspectComposition(
+      context.data,
+      results,
+      Array.isArray(face) ? face : [face],
+    );
+  }
+  export function inspectMethod(
+    [thickness]: [number],
+    context: InspectContext<
+      SolidModel,
+      FaceModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return inspectFaces([context.receiver, thickness], context);
+  }
 }

@@ -35,6 +35,7 @@ export {font, googleFont} from './font.js';
 export type {Font} from './font.js';
 export type {GoogleFontOptions} from './google-font.js';
 export type {TextOptions} from './text.js';
+export type {WrapOptions} from './wrap.js';
 export {sketch} from './sketch.js';
 export type {
   Sketch,
@@ -65,6 +66,7 @@ export {
   cylinder,
   distance,
   ellipse,
+  ellipsoid,
   extrude,
   text,
   frustum,
@@ -80,6 +82,8 @@ export {
   revolve,
   spline,
   sweep,
+  wrap,
+  thicken,
   sphere,
   tube,
   union,

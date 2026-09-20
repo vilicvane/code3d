@@ -1568,3 +1568,28 @@ test('volume inspection retains cubic values and centroid positions for exposed 
     assert.ok(scene.target.some(item => item.kind === target));
   }
 });
+
+test('wrap inspection keeps finite target topology and thicken focuses its source faces', async () => {
+  const inspect =
+    await compile(`import {rectangle,sphere,wrap,thicken} from '@code3d/core';
+    const body=sphere(20);
+    const profile=rectangle(8,6).originOffset(0,-25,0);
+    const target=body.surface(1);
+    const faces=wrap(profile,target);
+    export default thicken(faces,1);`);
+  const profiles = defined(await inspect('profile,target'));
+  assert.equal(profiles.target.length, 1);
+  assert.equal(profiles.ambient.length, 2);
+  const target = defined(await inspect('target);'));
+  assert.equal(target.target.length, 1);
+  assert.equal(target.target[0].kind, 'anchor');
+  assert.equal(target.ambient.length, 2);
+  const thickness = defined(
+    await inspect('thicken(faces,1)', 'thicken(faces,'.length),
+  );
+  assert.equal(thickness.target.length, 1);
+  assert.equal(thickness.ambient.length, 1);
+  const result = defined(await inspect('thicken(faces,1)'));
+  assert.equal(result.target.length, 1);
+  assert.equal(result.ambient.length, 0);
+});

@@ -119,6 +119,42 @@ test('omitted required dimensions show runtime defaults and only the next argume
   assert.ok(intent.target.kind === 'omitted');
 });
 
+test('ellipsoid exposes three independent radii and incomplete-call defaults', async () => {
+  for (const [call, expected] of [
+    ['ellipsoid(7, 4, 5)', [7, 4, 5]],
+    ['ellipsoid()', [5, 3, 4]],
+  ] as const) {
+    const source = `import {ellipsoid} from '@code3d/core';\nexport default ${call};`;
+    const result = await compileParameters(source, 'ellipsoid');
+    assert.equal(result.module.diagnostic, undefined);
+    for (const [i, key] of ['xRadius', 'yRadius', 'zRadius'].entries()) {
+      const parameter = defined(result.parameters.get(key));
+      const view = contextualParameterView(parameter);
+      assert.equal(parameter.schema.kind, 'length');
+      assert.equal(parameter.schema.optional, false);
+      if (call === 'ellipsoid()') {
+        assert.equal(view.placeholder, String(expected[i]));
+        assert.equal(view.disabled, i > 0);
+      } else {
+        assert.equal(view.value, expected[i]);
+        parameter.value = 0;
+        assert.equal(contextualParameterIntent(parameter), undefined);
+        parameter.value = 9;
+        const edited = replaceWithIntent(
+          source,
+          defined(contextualParameterIntent(parameter)),
+        );
+        const radii: number[] = [...expected];
+        radii[i] = 9;
+        assert.equal(
+          edited,
+          source.replace(call, `ellipsoid(${radii.join(', ')})`),
+        );
+      }
+    }
+  }
+});
+
 test('expression replacement uses the same numeric constraints as parameter editing', async () => {
   const {parameters} = await parametersFor('Math.PI');
   const parameter = parameters.get('x');

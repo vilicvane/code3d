@@ -184,6 +184,20 @@ export const renderSamples = [
     tags: ['googleFont', 'text', 'extrude', 'cut'],
   },
   {
+    id: 'wrap',
+    title: 'Text on curved surfaces',
+    description:
+      'Wrap one text layout onto a cylinder, sphere and B-spline ellipsoid, then raise or engrave it along the surface normals.',
+    category: 'Practical models',
+    file: 'operations/wrap.ts',
+    focus: {
+      context: 'export default group([raised, engraved, freeform]);',
+      token: 'group',
+    },
+    view: {direction: [0.2, 1.8, -0.7], up: [0, 0, -1]},
+    tags: ['text', 'wrap', 'thicken', 'cut'],
+  },
+  {
     id: 'annotations',
     title: 'Parameters and presets',
     description:
@@ -593,6 +607,7 @@ export const exampleEntries = [
   },
   {file: 'operations/revolve.ts'},
   {file: 'operations/sweep.ts'},
+  {file: 'operations/wrap.ts'},
   {file: 'operations/origin.ts'},
   {
     file: 'primitives/primitives.ts',

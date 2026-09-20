@@ -40,6 +40,22 @@ font alternative without adding a font file to the examples directory.
 `extrude` processes them using one depth. Inspect the faces or result solids,
 change the depth, then Undo. Text outlines are not editable sketch entities.
 
+## Wrap lettering onto a curved part
+
+<ModelExample id="wrap" />
+
+The cylinder has raised text, the sphere has engraved text, and
+`ellipsoid(20, 26, 22)` provides a B-spline target with independently editable
+X, Y and Z radii. Select `cylindricalText`, `sphericalText`, or `curvedText`
+to inspect the wrapped faces. Select a `thicken` thickness, press Tab and edit it
+to change the relief depth, then Undo.
+
+Move the planar profiles to choose another target region. Their finite bounding
+rectangle determines the shared correspondence; an ambiguous placement or a
+region crossing the surface reports an error. See
+[curved surface wrapping](../../../../../../core/docs/api.md#curved-surface-wrapping)
+for the single-face boundary and distortion rules.
+
 ## Reuse a model and a package
 
 `annotations.ts` demonstrates how defaults, limits and Arguments presets give

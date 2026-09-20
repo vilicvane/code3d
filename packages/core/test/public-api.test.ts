@@ -31,6 +31,7 @@ const authoringValues = [
   'cylinder',
   'distance',
   'ellipse',
+  'ellipsoid',
   'extrude',
   'font',
   'googleFont',
@@ -49,8 +50,10 @@ const authoringValues = [
   'sphere',
   'spline',
   'sweep',
+  'thicken',
   'tube',
   'union',
+  'wrap',
 ].sort();
 
 const inspectorEntries = [

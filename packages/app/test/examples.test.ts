@@ -48,6 +48,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/rotate.ts': ['default', 1],
   'operations/revolve.ts': ['default', 1],
   'operations/sweep.ts': ['default', 1],
+  'operations/wrap.ts': ['default', 3],
   'operations/origin.ts': ['centered', 1],
   'primitives/primitives.ts': ['cuboid', 1],
   'constraints/relate.ts': ['default', 2],
@@ -288,7 +289,7 @@ for (const entry of exampleEntries) {
       }
       if (entry.file === 'primitives/primitives.ts') {
         const kinds = values.map(value => snapshot(value).kind);
-        assert.equal(kinds.filter(kind => kind === 'solid').length, 7);
+        assert.equal(kinds.filter(kind => kind === 'solid').length, 8);
         assert.equal(kinds.filter(kind => kind === 'face').length, 4);
         assert.equal(kinds.filter(kind => kind === 'edge').length, 4);
         assert.equal(kinds.filter(kind => kind === 'vertex').length, 1);
@@ -393,6 +394,11 @@ for (const entry of exampleEntries) {
             'A substantial supporting body remains',
           );
         }
+      }
+      if (entry.file === 'operations/wrap.ts') {
+        assert.ok(volume(exports.raised) > Math.PI * 20 ** 2 * 30);
+        assert.ok(volume(exports.engraved) < (4 / 3) * Math.PI * 20 ** 3);
+        assert.ok(volume(exports.freeform) > (4 / 3) * Math.PI * 20 * 26 * 22);
       }
       if (entry.file === 'text.ts') {
         assert.equal(

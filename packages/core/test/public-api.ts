@@ -15,6 +15,7 @@ import {
   cut,
   cylinder,
   ellipse,
+  ellipsoid,
   extrude,
   font,
   googleFont,
@@ -32,6 +33,9 @@ import {
   sketch,
   spline,
   sweep,
+  wrap,
+  thicken,
+  type WrapOptions,
   sphere,
   text,
   tube,
@@ -118,6 +122,10 @@ box(undefined, 10, 10);
 circle();
 // @ts-expect-error Ellipse radii remain required.
 ellipse();
+// @ts-expect-error All three ellipsoid radii remain required.
+ellipsoid(5, 3);
+const oval: SolidModel = ellipsoid(5, 3, 4);
+oval.surface(1);
 // @ts-expect-error Rectangle dimensions remain required.
 rectangle();
 // @ts-expect-error Polygon radius and sides remain required.
@@ -734,3 +742,17 @@ measuredBounds.size[0] = 10;
 // @ts-expect-error Model position requires an explicit reference frame.
 box(1, 2, 3).position();
 void measuredPosition;
+
+const wrapOptions: WrapOptions = {tolerance: 0.001};
+const wrappedFaces: readonly FaceModel<{}>[] = wrap(
+  faceModel,
+  solid.surface(1),
+  wrapOptions,
+);
+const thickenedFaces: readonly SolidModel[] = thicken(wrappedFaces, 1);
+const thickenedFace: SolidModel = faceModel.thicken(-1);
+// @ts-expect-error Curved wrap results do not promise a plane reference.
+wrappedFaces[0].plane;
+// @ts-expect-error A target must be a finite surface.
+wrap(faceModel, faceModel.plane);
+void [thickenedFaces, thickenedFace];
