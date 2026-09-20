@@ -13,7 +13,11 @@ import type {
   CompilationPhase,
   CompilationProgress,
 } from './compilation-progress';
-import type {DesignContext, ModelModule} from './compiler';
+import type {
+  DesignContext,
+  ModelExecutionConfig,
+  ModelModule,
+} from './compiler';
 import {
   ArtifactChannel,
   type CompileRequest,
@@ -38,7 +42,7 @@ type PendingRequest = {
 } & (
   | {
       kind: 'compile';
-      timeOffset: number;
+      execution: ModelExecutionConfig;
       onProgress?: CompilationProgress;
       resolve(module: ModelModule): void;
     }
@@ -141,7 +145,7 @@ export class ModelCompilerClient {
     designContext?: DesignContext,
     onProgress?: CompilationProgress,
     persist = true,
-    timeOffset = 0,
+    execution: ModelExecutionConfig = {},
   ): Promise<ModelModule> {
     this.cancel();
     const revision = this.preparationRevision;
@@ -156,7 +160,7 @@ export class ModelCompilerClient {
         this.executableArtifact = undefined;
         this.pending = {
           kind: 'compile',
-          timeOffset,
+          execution,
           id,
           resolve,
           reject,
@@ -205,25 +209,27 @@ export class ModelCompilerClient {
   }
 
   /** Re-evaluate the current compiled program without compiling or saving artifacts. */
-  execute(timeOffset: number): Promise<ModelModule> {
+  execute(execution: ModelExecutionConfig): Promise<ModelModule> {
     const artifact = this.executableArtifact;
     if (!artifact || this.pending)
       return Promise.reject(
-        new Error('Wait for the current model to finish before playing.'),
+        new Error(
+          'Wait for the current model to finish before evaluating it again.',
+        ),
       );
     this.cancel();
     this.publication = undefined;
     this.exportable = undefined;
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending = {kind: 'compile', id, timeOffset, resolve, reject};
+      this.pending = {kind: 'compile', id, execution, resolve, reject};
       this.queuedExecution = {
         compileId: id,
         request: {
           kind: 'execute',
           id: this.nextId++,
           artifact,
-          timeOffset,
+          execution,
           cancellation: cancellation(),
         },
       };
@@ -534,7 +540,7 @@ export class ModelCompilerClient {
                 kind: 'execute',
                 id: this.nextId++,
                 artifact: data.artifact,
-                timeOffset: this.pending.timeOffset,
+                execution: this.pending.execution,
                 cancellation: cancellation(),
               },
             };
@@ -573,7 +579,7 @@ export class ModelCompilerClient {
               kind: 'execute',
               id: this.nextId++,
               artifact: data.artifact,
-              timeOffset: this.pending.timeOffset,
+              execution: this.pending.execution,
               cancellation: cancellation(),
             },
           };

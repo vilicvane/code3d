@@ -7,6 +7,8 @@ import {
 } from './tools/contextual-tool-context';
 import {SpatialToolbar} from './ui/spatial-toolbar';
 import {AnimationControls} from './ui/animation-controls';
+import {ModelInputsPanel} from './ui/model-inputs';
+import {ModelInputs} from './model/inputs';
 import {relationSelfExpression} from './tools/source-expression';
 import {ToolDragPreviewView} from './ui/tool-drag-preview';
 import {movedExamplePaths} from '../render-samples/catalog';
@@ -58,6 +60,7 @@ import type {
   DesignInvocation,
   EdgeArgumentTarget,
   ModelModule,
+  ModelExecutionConfig,
   TopologySelectionScope,
   SourceTarget,
 } from './model/compiler';
@@ -390,9 +393,14 @@ const viewportEmptyState = new ViewportEmptyState(
   requiredElement('viewport-empty-state'),
 );
 const previewState = new ModelPreviewState(() => compiler.phase);
-const animation = new ModelAnimation(time =>
-  runModel(activeDesignContext(), time),
-);
+const modelInputs = new ModelInputs(() => previewState.module?.inputs ?? []);
+const animation = new ModelAnimation(async time => {
+  const accepted = await runModel(activeDesignContext(), executionConfig(time));
+  return accepted && previewState.module?.timeOffset !== undefined;
+});
+function executionConfig(timeOffset = animation.time): ModelExecutionConfig {
+  return {timeOffset, inputs: modelInputs.values};
+}
 const designArgumentsPanel = requiredElement('design-arguments-panel');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
@@ -956,8 +964,10 @@ const contextualToolPanel = new ContextualToolPanel(viewportToolStack, {
   onParameterCommit: commitContextualToolParameter,
   onAction: runContextualToolAction,
 });
-codeEditor.setParameterFocusHandler(() =>
-  contextualToolPanel.focusSourceParameter(),
+codeEditor.setParameterFocusHandler(
+  () =>
+    inputsPanel.focusSourceInput() ||
+    contextualToolPanel.focusSourceParameter(),
 );
 window.addEventListener('pagehide', () => contextualToolPanel.dispose(), {
   once: true,
@@ -1144,6 +1154,36 @@ const stopViewportModes = reaction(
       );
   },
   {fireImmediately: true},
+);
+const inputsPanel = new ModelInputsPanel(
+  viewportHost.querySelector('.viewport-dock-panels')!,
+  dockPanels,
+  modelInputs,
+  {
+    sourceInput: () =>
+      modelInputs.atSource(codeEditor.parameterCursor, ref =>
+        codeEditor.resolveSourceRef(ref),
+      ),
+    onEdit: () => animation.pause(),
+  },
+);
+modelInputs.observeExecution(
+  () => !animation.pending && !previewState.busy && compiler.canExecute(),
+  values => {
+    animation.stop();
+    return runModel(activeDesignContext(), {
+      ...executionConfig(),
+      inputs: values,
+    });
+  },
+);
+window.addEventListener(
+  'pagehide',
+  () => {
+    inputsPanel.dispose();
+    modelInputs.dispose();
+  },
+  {once: true},
 );
 const animationControls = new AnimationControls(viewportHost, animation, {
   visible: () =>
@@ -2012,9 +2052,9 @@ function activeDesignContext(
 
 async function runModel(
   designContext = activeDesignContext(),
-  timeOffset?: number,
+  execution?: ModelExecutionConfig,
 ): Promise<boolean> {
-  if (timeOffset === undefined) animation.stop();
+  if (execution === undefined) animation.stop();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   viewport.restoreTransientPreview();
@@ -2031,7 +2071,7 @@ async function runModel(
     pendingAgentFollow?.kind === 'apply' ? pendingAgentFollow : undefined;
   const designContextId =
     designContext && 'id' in designContext ? designContext.id : undefined;
-  if (timeOffset === undefined) {
+  if (execution === undefined) {
     runInAction(() => {
       designContextState.compiling = designContextId;
     });
@@ -2057,16 +2097,16 @@ async function runModel(
   try {
     const selectedKey = viewport.getSelected()?.key ?? 'root';
     const compilation =
-      timeOffset === undefined
+      execution === undefined
         ? compiler.compile(
             codeEditor.project(),
             file,
             designContext,
             undefined,
             true,
-            animation.time,
+            executionConfig(),
           )
-        : compiler.execute(timeOffset);
+        : compiler.execute(execution);
     const nextModule = await compilation;
     if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
       return false;
@@ -2074,7 +2114,7 @@ async function runModel(
     let selection: ReturnType<typeof sourceInspectionSelection> | undefined;
     let scene: Awaited<ReturnType<typeof compiler.inspect>>;
     let inspectionDiagnostic: ModelDiagnostic | undefined;
-    // Prepare the entire replacement before publishing it. A time frame does
+    // Prepare the entire replacement before publishing it. Re-execution does
     // not change source focus or make the currently displayed UI unavailable.
     while (true) {
       const sourceCursor = cursor;
@@ -2145,6 +2185,7 @@ async function runModel(
       // focus selects its replacement. Do not count it as this file's target.
       if (!retainsSketch && !currentSketch) sketchEditor.hide();
       codeEditor.trackSourceRefs([
+        ...nextModule.inputs.flatMap(input => input.sourceRefs),
         ...toolSourceRefs(nextModule),
         ...sketchEditor.sourceRefs(),
       ]);
@@ -2176,11 +2217,7 @@ async function runModel(
     }
     refreshViewportFeedback();
     restoreModelStatus();
-    return (
-      !nextModule.diagnostic &&
-      !previewState.inspectionDiagnostic &&
-      (timeOffset === undefined || nextModule.timeOffset !== undefined)
-    );
+    return !nextModule.diagnostic && !previewState.inspectionDiagnostic;
   } catch (error) {
     if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
       return false;
@@ -2212,6 +2249,7 @@ function activatePreviewFile(reload = false): void {
   )
     return;
   animation.stop(true);
+  modelInputs.clear();
   compiler.cancel();
   runInAction(() => {
     designContextState.compiling = undefined;
@@ -2364,7 +2402,7 @@ async function runCompletionPreview(
       activeDesignContext(preview.cursor),
       undefined,
       false,
-      animation.time,
+      executionConfig(),
     );
     previewState.beginCompilation(focus.memberName);
     const module = await compilation;

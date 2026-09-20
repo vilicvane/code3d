@@ -250,6 +250,32 @@ JSDoc 工具与 inspect 元数据共用声明、重载和别名定位；回调�
 [build-artifacts 浏览器回归](../../../packages/app/test/browser/build-artifacts.test.ts)与
 [compiler-progress](../../../packages/app/test/browser/compiler-progress.test.ts)。
 
+## 数值输入参数
+
+Core `input(name, defaultValue, options?)` 返回普通数值，`beginModelInputs` 为每次完整求值
+安装固定覆盖值并收集实际读取的名称与默认值，finally 恢复上下文。同名调用共享
+输入且默认值、min/max/step 必须一致。`ModelExecutionConfig` 统一传递 `timeOffset` 和数值输入，
+覆盖普通编译、缓存恢复、复用产物求值、补全及 inspect；编译产物身份不包含临时值。
+
+`ModelInputs` 用 MobX 拥有当前文件的覆盖值，从执行结果派生字段。相同可见字段用
+结构比较隔离播放帧；源码变更保留显式覆盖，文件切换清空。`ModelInputsPanel` 拥有
+表单草稿、DOM、订阅与事件清理，复用停靠面板。输入节点按名称保留；有效 input
+事件立即写入对应字段，不等待失焦、松开指针或确认按钮。接受正在输入的值时保留
+其文本形式，空值/非法文本不覆盖最后有效值，也不阻塞其他字段。Reset 立即恢复
+默认值并清除草稿。参数不写回源码或持久化。
+声明的 min/max/step 同步到原生数值控件；双端范围提供滑条，与数值框同步。
+
+ModelInputs 拥有待更新与在途状态，其执行订阅响应值修改和宿主就绪状态，串行求值
+并将计算期间的多次修改合并为下一次的最新值。持续输入不会反复取消尚未完成的
+计算；拖动过程中持续展示结果。装配层连接编译/播放可用性与 runModel，进入表单
+暂停播放；在途帧完成后读取已接受的时间偏移与最新输入。文件切换清除覆盖及排队
+请求，销毁时停止订阅，已有源码请求代次防止旧文件结果发布。
+
+输入上下文在实际读取时通知执行器，由当前 trace callRef 收集源码引用，避免根据
+函数文本名称推测。重复名称保留全部调用位置，Core 定义不携带 App 源码信息。
+引用接入编辑器已有重定位；输入组件响应 parameterCursor 派生高亮和停靠展开，
+复用统一 Tab 入口聚焦对应字段。自动展开不抢走编辑器焦点。
+
 ## 时间偏移与装配播放
 
 Core 的独立函数 `timeOffset(defaultValue = 0)` 返回相对于播放起点的偏移秒数，
@@ -258,7 +284,7 @@ Core 的独立函数 `timeOffset(defaultValue = 0)` 返回相对于播放起点�
 检查回调复用所属执行的偏移。时间偏移不进入编译产物或持久化身份；无宿主执行
 上下文时使用作者默认值。普通表单输入不属于这个 API。
 
-`ModelCompilerClient.execute(timeOffset)` 复用当前完整编译产物，并沿同一串行执行
+`ModelCompilerClient.execute(execution)` 复用当前完整编译产物，并沿同一串行执行
 Worker、取消信号及结果版本边界重新求值。它不启动编译 Worker，也不重复发布构建
 缓存。普通编译、缓存恢复和补全预览携带当前暂停时间；源码或依赖重建后替换可执行
 产物，销毁和清缓存释放该引用。

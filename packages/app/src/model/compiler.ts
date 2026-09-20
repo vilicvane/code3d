@@ -1,6 +1,8 @@
 import {createTransformationInsertions} from '../tools/source-expression';
 import type {TransformationInsertion} from '../tools/source-expression';
 import {
+  type ModelInputDefinition,
+  type ModelInputValues,
   type RelationPreview,
   type RelationSpatialReference,
   type EdgeId,
@@ -276,7 +278,15 @@ export type ObjectCatalogEntry = Readonly<{
   exportNames: readonly string[];
 }>;
 
+export type ModelExecutionConfig = Readonly<{
+  timeOffset?: number;
+  inputs?: ModelInputValues;
+}>;
+
 export type ModelModule = Readonly<{
+  inputs: readonly (ModelInputDefinition & {
+    sourceRefs: readonly SourceRef[];
+  })[];
   /** Seconds from the playback origin; present only when the model reads timeOffset(). */
   timeOffset?: number;
   sketches: ReadonlyMap<string, CompiledSketch>;

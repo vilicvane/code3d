@@ -1,3 +1,5 @@
+export {beginModelInputs} from '../library/input.js';
+export type {ModelInputValues, ModelInputDefinition} from '../library/input.js';
 export {beginTimeOffset} from '../library/time-offset.js';
 export {identifyCachedFunction} from '../library/cached.js';
 export {

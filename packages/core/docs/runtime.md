@@ -5,6 +5,60 @@ sidebar:
   order: 11
 ---
 
+## Numeric inputs
+
+`input(name, defaultValue, options?)` declares a named numeric parameter and returns an
+ordinary number. The App discovers calls during evaluation and displays their
+names and values in **Inputs**. Typing a valid value or dragging a slider updates
+the model immediately, while the field stays focused or the pointer stays down.
+**Reset** restores the source defaults and updates the model.
+
+```ts
+import {box, input} from '@code3d/core';
+
+const width = input('Width', 40, {min: 4, max: 100, step: 1});
+const height = input('Height', 16, {min: 2, max: 60, step: 0.5});
+export default box(width, height, 24);
+```
+
+Names must be non-empty, and defaults and values must be finite numbers. Calls
+with the same name share one field and must agree on their default, range and step. Branches,
+loops and imported project functions can use the returned number normally;
+each evaluation and its source inspection use the same supplied values.
+Outside a host evaluation, the function returns its required default.
+
+The optional third argument accepts `min`, `max` and `step`. Bounds must be
+finite, `min` must be less than `max`, and `step` must be a finite positive number.
+Defaults and supplied values must stay within the declared bounds. `step` sets
+the increment for numeric controls and the slider; without it, arbitrary decimal
+values are accepted. Numeric form values follow the declared step, based on
+`min` when present or the default otherwise. Choose a default on that step.
+Providing both bounds displays a slider. The slider and numeric field stay in sync
+and preview valid changes throughout the drag. Model evaluations run one at a
+time; changes made while one is running are combined into the latest next values.
+Empty, unfinished or invalid text stays in the field while the model keeps its
+last valid value. Other valid fields can still update the model.
+
+Place the editor caret inside an evaluated input call to expand **Inputs** and
+highlight its value. Press Tab to focus that numeric field and select its text;
+further Tab / Shift+Tab moves between form controls. Source matching follows
+actual calls, including aliased imports and repeated calls with the same name.
+
+Values are local to the current file session: editing that file keeps overrides,
+while switching files or reloading the App clears them. An untouched field follows
+changes to its source default. The form does not rewrite source. Focus a field
+to pause playback; unfinished text and focus survive model frames. `timeOffset()` remains
+a separate playback function. Text, boolean and option-list fields are not yet
+supported.
+
+Read inputs outside `cache()` and pass their values as explicit arguments when a
+cached result depends on them. Only calls reached during evaluation appear in
+the form. Try the [numeric inputs example](../../app/examples/inputs.ts).
+The [robot arm example](../../app/examples/assemblies/robot-arm.ts) combines five
+inputs with nested joint frames to move a complete arm and its gripper. Its
+links have actual hinge bores and alternate between two depth layers to leave
+clearance while bending.
+
 ## Time offset
 
 `timeOffset(defaultValue = 0)` returns the offset from the playback origin in

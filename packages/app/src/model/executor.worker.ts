@@ -29,7 +29,7 @@ async function execute(
       phase => send({kind: 'progress', id: request.id, phase}),
       checkCancelled,
       request.settings,
-      request.timeOffset,
+      request.execution,
     );
     checkCancelled();
     compileId = request.id;

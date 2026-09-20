@@ -24,6 +24,36 @@ default 2 GiB memory budget. It removes the least recently used historical
 results when over budget and keeps the current model's complete working set.
 This budget does not cap the total memory used by the browser tab.
 
+Select a group to see its bounding box. In **Elements → References**, hover
+**up**, **down**, **left**, **right**, **front** or **back** to show a matching
+reference face. The box and faces follow the selected instance's local frame.
+
+## Adjust model inputs
+
+Open `/examples/inputs.ts`. Place the editor caret inside a Width or Height
+`input(...)` call: **Inputs** expands and highlights the corresponding value.
+Press Tab to focus and select that value. Tab / Shift+Tab then moves through the
+form. You can also expand **Inputs** using its handle at the bottom of the viewport.
+
+Drag a slider to see the box resize before releasing the mouse. Typing a valid
+value updates it while the field stays focused. Sliders and numeric fields stay
+in sync. Models declare the allowed range and control step with
+`input('Width', 40, {min: 4, max: 100, step: 1})`;
+a slider appears when both bounds are provided.
+**Reset** restores both source defaults immediately. Empty or invalid text stays
+in the field while the model keeps the last valid value; continue typing or reset.
+
+Inputs are numeric parameters declared by the model. They do not rewrite code,
+and their values last only for the current file session. Switching files or
+reloading the App clears them. Focusing a field pauses animation; playback keeps
+unfinished text and focus intact. See [numeric inputs](/docs/packages/core/runtime/#numeric-inputs)
+for the authoring API.
+
+For an articulated model, open `/examples/assemblies/robot-arm.ts`. Five sliders
+control the base, shoulder, elbow, wrist and gripper opening. Drag a joint slider
+to move the attached links and gripper together. The links use bored joints,
+separate depth layers and limited travel to keep moving parts clear.
+
 ## Play an assembly animation
 
 A model that reads `timeOffset()` displays playback controls below the

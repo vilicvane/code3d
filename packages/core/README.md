@@ -42,6 +42,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 ## Usage notes
 
 - Dimensions are in millimetres and angles are in degrees.
+- Declare numeric form parameters with `input('Width', 40)`, or add `{min, max, step}` as a third argument for bounded controls and sliders. See [numeric inputs](docs/runtime.md#numeric-inputs).
 - Models have local coordinate frames. Constructors choose the initial origin;
   derived operations inherit their main input frame. See [local coordinates](docs/local-coordinates.md).
 - Modeling operations return new values. Measurements such as `.length`, `.area`
@@ -63,7 +64,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx): compose model functions.
 - [Model tools](../web/src/content/docs/docs/guides/model-tools.mdx): add editing tools and argument presets.
 - [Custom primitives](docs/custom-primitives.mdx): extend modeling with Replicad geometry.
-- [Runtime integration](docs/runtime.md): time offsets, resources, materials and source inspection.
+- [Runtime integration](docs/runtime.md): numeric inputs, time offsets, resources, materials and source inspection.
 - [Current limitations](../web/src/content/docs/docs/getting-started/limitations.md): supported workflows and known boundaries.
 
 ## Source and development

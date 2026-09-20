@@ -15,7 +15,7 @@ declare const window: Window & {
 };
 
 test(
-  'time executions reuse compiled code, change ordinary control flow and reject superseded frames',
+  'parameter and time executions reuse compiled code, change ordinary control flow and reject superseded frames',
   {timeout: 120_000},
   async t => {
     const browser = await chromium.connectOverCDP(
@@ -49,22 +49,27 @@ test(
         send(message);
       }) as typeof worker.postMessage;
       try {
-        const source = `import {box, timeOffset} from '@code3d/core';
+        const source = `import {box, input as parameter, timeOffset} from '@code3d/core';
         const time = timeOffset(9);
+        const width = parameter('Width', 4);
+        parameter('Width', 4);
         await Promise.resolve();
         if (time !== timeOffset()) throw new Error('Time changed within an execution');
         /** @code3d.inspect part.inspect */
         function part(width) { return box(width, 2, 3); }
         namespace part {
-          export function inspect() { return {target: [box(100 + timeOffset(), 2, 3)]}; }
+          export function inspect() { return {target: [box(100 + timeOffset() + parameter('Width', 4), 2, 3)]}; }
         }
-        export default part(time < 1 ? 4 : 8);`;
+        export default part(time < 1 ? width : width * 2);`;
         const initial = await client.compile(
           {files: [{path: '/model.ts', source}]},
           '/model.ts',
         );
         messages.length = 0;
-        const frame = await client.execute(2);
+        const frame = await client.execute({
+          timeOffset: 2,
+          inputs: {Width: 12},
+        });
         const inspection = await client.inspect(frame, {
           file: '/model.ts',
           offset: source.lastIndexOf('part('),
@@ -76,9 +81,12 @@ test(
           (_, i) => i % 3 === 0,
         );
         const inspectedWidth = Math.max(...xs) - Math.min(...xs);
-        const reset = await client.execute(0);
+        const reset = await client.execute({
+          timeOffset: 0,
+          inputs: {Width: 12},
+        });
         const playbackMessages = [...messages];
-        const pending = client.execute(3).then(
+        const pending = client.execute({timeOffset: 3}).then(
           () => 'accepted',
           () => 'cancelled',
         );
@@ -109,6 +117,12 @@ test(
           ],
           widths: [initial, frame, reset, replacement].map(width),
           playbackMessages,
+          inputs: frame.inputs.map(({sourceRefs, ...definition}) => ({
+            ...definition,
+            sourceCalls: sourceRefs.map(ref =>
+              source.slice(ref.start, ref.end),
+            ),
+          })),
           inspectedWidth,
           pending: await pending,
           exportable: client.canExport(replacement),
@@ -118,7 +132,7 @@ test(
       }
     });
     assert.deepEqual(result.times, [0, 2, 0, undefined]);
-    assert.deepEqual(result.widths, [4, 8, 4, 12]);
+    assert.deepEqual(result.widths, [4, 24, 12, 12]);
     assert.deepEqual(
       result.playbackMessages,
       [],
@@ -126,9 +140,16 @@ test(
     );
     assert.equal(
       result.inspectedWidth,
-      102,
+      114,
       'inspect reads the time belonging to its model execution',
     );
+    assert.deepEqual(result.inputs, [
+      {
+        name: 'Width',
+        defaultValue: 4,
+        sourceCalls: ["parameter('Width', 4)", "parameter('Width', 4)"],
+      },
+    ]);
     assert.equal(result.pending, 'cancelled');
     assert.equal(result.exportable, true);
   },

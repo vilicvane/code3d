@@ -13,6 +13,7 @@ export const isolatedBrowserTests = new Set([
 // meaningful while ordinary files use bounded parallelism.
 export const exclusiveBrowserTests = new Set([
   'animation.test.ts',
+  'inputs.test.ts',
   'agent-cancellation.test.ts',
   'agent-follow.test.ts',
   'agent-panel.test.ts',

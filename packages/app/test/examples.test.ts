@@ -26,6 +26,8 @@ import {
 import {sourceTokenOffset} from '../render-samples/source-focus.ts';
 
 const expectedSolids: Record<string, readonly [string, number]> = {
+  'inputs.ts': ['default', 1],
+  'assemblies/robot-arm.ts': ['default', 23],
   'packages/gears/parts.ts': ['default', 5],
   'packages/gears/assembly.ts': ['default', 4],
   'packages/screws.ts': ['default', 10],

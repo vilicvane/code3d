@@ -24,6 +24,10 @@ export class DockPanelCoordinator {
     return panel;
   }
 
+  unregister(panel: DockPanelController): void {
+    if (this.panels.delete(panel)) panel.dispose();
+  }
+
   handleKeyDown(event: KeyboardEvent): boolean {
     if (event.key === 'Escape' && this.transient) {
       this.transient.collapseTransient();
@@ -33,8 +37,7 @@ export class DockPanelCoordinator {
   }
 
   dispose(): void {
-    for (const panel of this.panels) panel.dispose();
-    this.panels.clear();
+    for (const panel of this.panels) this.unregister(panel);
     this.transient = undefined;
   }
 
@@ -110,6 +113,11 @@ export class DockPanelController {
     if (this.state === 'peek') {
       this.setState('collapsed');
     }
+  }
+
+  reveal(): void {
+    this.cancelClose();
+    if (this.state === 'collapsed') this.setState('peek');
   }
 
   private readonly onPointerEnter = (): void => {

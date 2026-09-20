@@ -7,7 +7,7 @@ import type {
 import type {ExecutionSettings} from '../app-settings';
 import type {ArtifactStoreConnection} from './artifact-store';
 import type {CompilationProgress} from './compilation-progress';
-import type {ModelModule} from './compiler';
+import type {ModelExecutionConfig, ModelModule} from './compiler';
 import {ModelDiagnosticError, diagnosticFromError} from './diagnostic';
 import {createModelExecutor} from './executor';
 import type {InspectSelection} from './inspection';
@@ -46,7 +46,7 @@ export class ProjectExecutor {
     onProgress?: CompilationProgress,
     checkCancelled: () => void = () => {},
     settings?: ExecutionSettings,
-    timeOffset = 0,
+    execution: ModelExecutionConfig = {},
   ): Promise<ModelModule> {
     try {
       await this.storage?.ready;
@@ -112,7 +112,7 @@ export class ProjectExecutor {
             runtime.tooling.planModelSnapshotQueries(objects),
             checkCancelled,
           ),
-        timeOffset,
+        execution,
       );
     } finally {
       runtime.tooling.setKernelArtifactStore(undefined);

@@ -47,6 +47,7 @@ import type {
   DesignArgumentContext,
   EvaluationContext,
   ModelModule,
+  ModelExecutionConfig,
   ObjectCatalogEntry,
   RuntimeReach,
   SourceTarget,
@@ -1040,7 +1041,7 @@ export function createModelExecutor(
     return [];
   }
 
-  let executionTimeOffset = 0;
+  let executionConfig: ModelExecutionConfig = {};
 
   async function execute(
     artifact: CompiledModelSource,
@@ -1051,7 +1052,7 @@ export function createModelExecutor(
     captureGeometry?: (objects: readonly RelationObject[]) => void,
     checkCancelled: () => void = () => {},
     prepareSnapshots?: (objects: readonly RelationObject[]) => Promise<void>,
-    timeOffset = 0,
+    execution: ModelExecutionConfig = {},
   ): Promise<ModelModule> {
     const {rootPath, files, designArguments, activeDesignContext} = artifact;
     inspection?.dispose();
@@ -1083,11 +1084,33 @@ export function createModelExecutor(
     evaluationOrder = 0;
     sourceReachOrder = 0;
     sketches.begin(artifact.sketches);
-    executionTimeOffset = timeOffset;
+    executionConfig = execution;
+    const inputSources = new Map<string, SourceRef[]>();
+    const inputScope = runtime.beginModelInputs(
+      execution.inputs ?? {},
+      name => {
+        const ref = traceFrames.at(-1)?.trace.callRef;
+        if (!ref) return;
+        const refs = inputSources.get(name) ?? [];
+        if (
+          !refs.some(
+            source =>
+              source.file === ref.file &&
+              source.start === ref.start &&
+              source.end === ref.end,
+          )
+        )
+          refs.push(ref);
+        inputSources.set(name, refs);
+      },
+    );
     let observedTimeOffset: number | undefined;
-    const finishTimeOffset = runtime.beginTimeOffset(timeOffset, value => {
-      observedTimeOffset = value;
-    });
+    const finishTimeOffset = runtime.beginTimeOffset(
+      execution.timeOffset ?? 0,
+      value => {
+        observedTimeOffset = value;
+      },
+    );
     let finishEvaluation: (() => void) | undefined;
     const finishRecording = runtime.recordInspectionCalls(data =>
       inspection?.capture(data),
@@ -1192,6 +1215,10 @@ export function createModelExecutor(
       const sketchSnapshots = sketches.snapshots();
       return {
         timeOffset: observedTimeOffset,
+        inputs: [...inputScope.definitions.values()].map(definition => ({
+          ...definition,
+          sourceRefs: inputSources.get(definition.name) ?? [],
+        })),
         sketches: sketchSnapshots,
         warnings: sketchSourceDiagnostics(sketchSnapshots, artifact.sketches),
         diagnostic,
@@ -1269,6 +1296,7 @@ export function createModelExecutor(
       // release shapes when their actual owners become unreachable.
       finishEvaluation?.();
       finishTimeOffset();
+      inputScope.finish();
       finishRecording();
       tracedObjects.clear();
       sourceValueTraces.clear();
@@ -3039,7 +3067,10 @@ export function createModelExecutor(
     ) {
       checkCancelled();
       const finish = runtime.beginModelInspection(checkCancelled);
-      const finishTimeOffset = runtime.beginTimeOffset(executionTimeOffset);
+      const finishTimeOffset = runtime.beginTimeOffset(
+        executionConfig.timeOffset ?? 0,
+      );
+      const inputScope = runtime.beginModelInputs(executionConfig.inputs ?? {});
       try {
         const result = await inspection?.inspect(selection);
         checkCancelled();
@@ -3056,6 +3087,7 @@ export function createModelExecutor(
         );
       } finally {
         finishTimeOffset();
+        inputScope.finish();
         finish();
       }
     },

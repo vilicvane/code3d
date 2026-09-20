@@ -1,3 +1,4 @@
+import {input} from './input.js';
 import {timeOffset} from './time-offset.js';
 import {
   assembleWire,
@@ -6944,6 +6945,7 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  input,
   timeOffset,
   dimension,
   boundsAnnotation,
