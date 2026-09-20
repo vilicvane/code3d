@@ -26,8 +26,8 @@ import {
 import {sourceTokenOffset} from '../render-samples/source-focus.ts';
 
 const expectedSolids: Record<string, readonly [string, number]> = {
-  'packages/gears.ts': ['default', 5],
-  'packages/gear-assembly.ts': ['default', 4],
+  'packages/gears/parts.ts': ['default', 5],
+  'packages/gears/assembly.ts': ['default', 4],
   'packages/screws.ts': ['default', 10],
   'projects/phone-stand.ts': ['default', 1],
   'assemblies/screw-box/model.ts': ['default', 6],
@@ -43,7 +43,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/area.ts': ['default', 1],
   'operations/volume.ts': ['default', 2],
   'materials.ts': ['plain', 1],
-  'packages/material-presets.ts': ['default', 10],
+  'packages/materials.ts': ['default', 10],
   'text.ts': ['lettering', 4],
   'operations/rotate.ts': ['default', 1],
   'operations/revolve.ts': ['default', 1],
@@ -222,7 +222,7 @@ for (const entry of exampleEntries) {
         validateGeometry(snapshot(exports[expected[0]])),
         expected[1],
       );
-      if (entry.file === 'packages/gear-assembly.ts') {
+      if (entry.file === 'packages/gears/assembly.ts') {
         const [plate, train] = snapshot(exports.default).children;
         assert.equal(plate.kind, 'solid');
         assert.equal(train.kind, 'group');

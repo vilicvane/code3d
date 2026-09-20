@@ -82,5 +82,5 @@ The App uses neutral white studio lighting and a shared reflection environment.
 The viewport and PNG output use the same environment. Switch to **Render** to
 compare surface finishes without modeling overlays.
 
-Complete example: [material palette](../../app/examples/packages/material-presets.ts).
+Complete example: [material palette](../../app/examples/packages/materials.ts).
 For package setup, see [installation](../README.md#installation).

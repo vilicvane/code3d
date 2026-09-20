@@ -294,8 +294,11 @@ configuration after the build if necessary. For source changes, use Astro dev.
 Keep each example focused on one learning goal. Group basic operations under
 `operations/`, relations under `constraints/`, and shape constructors under
 `primitives/`. Keep standalone Core text, expose, materials and topology-paths files at the example
-root. Put focused extension-package examples in `examples/packages/`: `gears.ts`,
-the shared ISO/GB screw gallery `screws.ts`, `material-presets.ts` and `layout/`.
+root. Put focused extension-package examples in `examples/packages/`, using
+the package's unscoped name. A package with one example uses a single file,
+such as `materials.ts` or the shared ISO/GB screw gallery `screws.ts`.
+Multiple examples use a package folder, such as `gears/parts.ts`,
+`gears/assembly.ts` and the examples under `layout/`.
 Complete projects and assemblies retain their existing directories even when they
 use extension packages; do not wrap one file in a directory of the same name.
 The primitive overview is a visual vocabulary of the built-in shapes, with each

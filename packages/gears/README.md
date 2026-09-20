@@ -41,7 +41,7 @@ a 2.4 mm keyway and a 22 mm hub.
 The gallery also includes a plain bore, an integral shaft, a helical gear and
 an internal ring.
 
-Complete example: [gears and mounting options](../app/examples/packages/gears.ts).
+Complete example: [gears and mounting options](../app/examples/packages/gears/parts.ts).
 
 ## Usage notes
 
@@ -62,7 +62,7 @@ Complete example: [gears and mounting options](../app/examples/packages/gears.ts
   leaving a 120° included angle, then positions the whole train with
   a `group(...).relate(...)` constraint.
 
-Complete example: [a three-gear train](../app/examples/packages/gear-assembly.ts).
+Complete example: [a three-gear train](../app/examples/packages/gears/assembly.ts).
 
 ## Documentation
 

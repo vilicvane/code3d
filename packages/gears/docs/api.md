@@ -51,7 +51,7 @@ const shaftPinion = helicalGear({
 
 The keyed hub has an 8 mm through bore and a 2.4 mm keyway.
 
-Complete example: [gears and mounting options](../../app/examples/packages/gears.ts).
+Complete example: [gears and mounting options](../../app/examples/packages/gears/parts.ts).
 
 `kind: 'solid'` is the explicit solid choice. A `bore` is through all axial
 features. Its optional rectangular `keyway` runs along the whole bore; `depth`
@@ -81,7 +81,7 @@ const ring = internalGear({
 
 The ring has 48 teeth and six 3 mm holes on a 116 mm bolt circle.
 
-Complete example: [gears and mounting options](../../app/examples/packages/gears.ts).
+Complete example: [gears and mounting options](../../app/examples/packages/gears/parts.ts).
 
 The interior tooth space passes through the ring. `outerDiameter` defines the
 annular blank; optional equally spaced through-holes use the given bolt-circle
@@ -135,7 +135,7 @@ export default group(gears);
 
 ![Three spur gears meeting at a 120-degree center angle, assembled as a group on a mounting plate.](../../web/src/assets/models/gear-assembly.png)
 
-Complete example: [three-gear train](../../app/examples/packages/gear-assembly.ts).
+Complete example: [three-gear train](../../app/examples/packages/gears/assembly.ts).
 
 The two-gear snippet has a nominal shaft distance of 44 mm and requests
 44.2 mm. In the pictured three-gear example, both adjacent pairs are 50.2 mm
