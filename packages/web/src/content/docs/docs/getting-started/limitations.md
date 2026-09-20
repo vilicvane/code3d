@@ -28,7 +28,7 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 - Browser-compatible npm packages installed in browser storage or in a local
   project’s `node_modules`.
 - Custom solid primitives with parameter tools, built through Replicad.
-- Numeric model inputs with an Apply/Reset form, local to the current file session.
+- Numeric model inputs with live form updates, sliders and Reset, local to the current file session.
 - Time-driven assembly playback with `timeOffset()`, pause and reset.
 - STEP, STL, and 3MF model export, plus PNG viewport images.
 
