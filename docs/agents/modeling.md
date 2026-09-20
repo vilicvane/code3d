@@ -11,7 +11,9 @@ dependencies. Use [function arguments](cursor.md) to evaluate a design at the
 requested dimensions without rewriting its defaults.
 
 Prefer the public [Core API](../../packages/core/README.md). Build a shape from
-primitives, profiles, sketches, Boolean operations and relationships. Give useful
+primitives, profiles, sketches, Boolean operations and relationships. Use
+`ellipsoid(xRadius, yRadius, zRadius)` for a centered solid with three independent
+axis radii, or `ellipse(xRadius, zRadius)` for a planar profile. Give useful
 intermediate geometry meaningful names so a person can select it in the editor
 and understand the construction. Keep expressions and design constraints where
 they communicate intent; a long list of final coordinates usually loses that

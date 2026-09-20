@@ -57,7 +57,9 @@ solid. Later operations must select topology from their own input model.
 uniquely into the selected trimmed surface. Tangency is allowed; crossing,
 ambiguity, singularities and overlapping maps report errors. Double curvature
 can distort text. Periodic seams within a face work; crossing between separate
-faces is not supported. See
+faces is not supported. Adaptive checks report nonconvergence instead of
+accepting an unresolved region; they do not prove global uniqueness or offset
+non-intersection for every freeform surface. See
 [curved wrapping](../../../../../../core/docs/api.md#curved-surface-wrapping).
 
 **Bound relations only translate.** Multiple positional conditions solve together

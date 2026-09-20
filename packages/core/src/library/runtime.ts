@@ -66,6 +66,7 @@ import {
   castOwnedShape,
   castOwnedShape3D,
   centeredBoxShape,
+  ellipsoidShape,
   shapeSubshapes,
   transformShape,
 } from './kernel-shapes.js';
@@ -83,6 +84,7 @@ import {estimateRetainedBytes} from './retained-memory.js';
 import {shellWithTopology} from './shell.js';
 import {wrapFaces, type WrapOptions} from './wrap.js';
 import {thickenWithTopology} from './thicken.js';
+import {surfaceRotation} from './surface-geometry.js';
 import {sketchRegionFace} from './sketch-face.js';
 import type {SketchRegion} from './sketch-regions.js';
 import {
@@ -267,6 +269,7 @@ export type ModelOperationKind =
   | 'tube'
   | 'coil'
   | 'sphere'
+  | 'ellipsoid'
   | 'frustum'
   | 'regularPrism'
   | 'circle'
@@ -3687,12 +3690,7 @@ export class ModelObject<
     const context = this.createSolveContext([...profiles, reference.model]);
     this.recordCompositionInspection(context, []);
     const pose = first.solvePose(context);
-    const planar = faceGeometry(source.value.shape as ReplicadFace, 1);
-    if (planar.kind !== 'plane')
-      throw new Error('wrap requires planar source profiles.');
-    const frame =
-      first.elements.plane?.transform ??
-      frameFromYAxis(planar.point, planar.normal);
+    const frame = first.geometryAnchor.transform;
     const sources = profiles.map(profile => profile.requireGeometry());
     const transforms = profiles.map(profile =>
       composeTransforms(
@@ -3776,10 +3774,32 @@ export class ModelObject<
               shape => ({shape: shape.clone()}),
             ),
         );
+        const planar =
+          (geometry.value.shape as ReplicadFace).geomType === 'PLANE'
+            ? (faceGeometry(geometry.value.shape as ReplicadFace, 1) as Extract<
+                AlignmentGeometry,
+                {kind: 'plane'}
+              >)
+            : undefined;
         const result = ModelObject.create<{}, 'face'>({
           kind: 'face',
           name: 'Wrap',
           geometry,
+          geometryAnchor: {
+            kind: 'face',
+            transform: planar
+              ? composeTransforms(
+                  {
+                    position: planar.point,
+                    quaternion: surfaceRotation(
+                      rotateVector([0, 1, 0], frame.quaternion),
+                      planar.normal,
+                    ),
+                  },
+                  {position: [0, 0, 0], quaternion: frame.quaternion},
+                )
+              : identityRigidTransform,
+          },
           material: first.materialSnapshot,
           placements: first.placements,
           sourceRefs: [
@@ -3818,7 +3838,7 @@ export class ModelObject<
   thicken(this: ModelObject<Elements, 'face'>, thickness = 1): SolidModel {
     if (!Number.isFinite(thickness) || thickness === 0)
       throw new Error('thicken thickness must be finite and non-zero.');
-    ModelObject.recordExtrusions([this], []);
+    ModelObject.recordFaceResults([this], []);
     const source = this.requireGeometry();
     const geometry = evaluateSolidGeometry(
       'thicken',
@@ -3847,7 +3867,7 @@ export class ModelObject<
         {model: this, role: 'receiver', index: 0},
       ]),
     });
-    ModelObject.recordExtrusions([this], [result]);
+    ModelObject.recordFaceResults([this], [result]);
     return result as unknown as SolidModel;
   }
 
@@ -3855,7 +3875,7 @@ export class ModelObject<
   extrude(this: ModelObject<Elements, 'face'>, distance = 10): SolidModel {
     if (this.kind !== 'face')
       throw new Error('extrude requires a single face model.');
-    ModelObject.recordExtrusions([this], []);
+    ModelObject.recordFaceResults([this], []);
     if (!Number.isFinite(distance) || distance === 0)
       throw new Error('Extrusion distance must be finite and non-zero.');
     const source = this.requireGeometry();
@@ -3906,7 +3926,7 @@ export class ModelObject<
         },
       ),
     });
-    ModelObject.recordExtrusions([this], [result]);
+    ModelObject.recordFaceResults([this], [result]);
     return result as unknown as SolidModel;
   }
 
@@ -4866,7 +4886,7 @@ export class ModelObject<
   }
 
   /** @internal Preserve each batch result's matching input placement. */
-  static recordExtrusions(
+  static recordFaceResults(
     faces: readonly ModelObject[],
     results: readonly ModelObject[],
   ): void {
@@ -5958,6 +5978,38 @@ export function sphere(radius = 5): SolidModel {
 }
 
 /**
+ * An ellipsoid centered at the local origin, with radii along X, Y and Z.
+ * @code3d.param xRadius {kind: 'length', default: 5, label: 'X radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param yRadius {kind: 'length', default: 3, label: 'Y radius', constraints: {exclusiveMin: 0}}
+ * @code3d.param zRadius {kind: 'length', default: 4, label: 'Z radius', constraints: {exclusiveMin: 0}}
+ */
+export function ellipsoid(
+  xRadius: number,
+  yRadius: number,
+  zRadius: number,
+): SolidModel;
+export function ellipsoid(xRadius = 5, yRadius = 3, zRadius = 4): SolidModel {
+  assertPositive('xRadius', xRadius);
+  assertPositive('yRadius', yRadius);
+  assertPositive('zRadius', zRadius);
+  return ModelObject.create<CanonicalElements, 'solid'>({
+    kind: 'solid',
+    name: 'Ellipsoid',
+    geometry: evaluateSolidGeometry(
+      'ellipsoid',
+      [xRadius, yRadius, zRadius],
+      [],
+      () => ({shape: ellipsoidShape(xRadius, yRadius, zRadius)}),
+    ),
+    elements: solidElements([
+      [0, -yRadius, 0],
+      [0, yRadius, 0],
+    ]),
+    operation: storedOperation('ellipsoid'),
+  }) as unknown as SolidModel;
+}
+
+/**
  * @code3d.param bottomRadius {kind: 'length', default: 5, label: 'Bottom radius', constraints: {exclusiveMin: 0}}
  * @code3d.param topRadius {kind: 'length', default: 3, label: 'Top radius', constraints: {exclusiveMin: 0}}
  * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
@@ -6579,7 +6631,7 @@ export function extrude(
   } finally {
     // Inner method records belong to this same free-function invocation.
     // Restore its complete input scope even when a batch member throws.
-    ModelObject.recordExtrusions(
+    ModelObject.recordFaceResults(
       faces,
       solids as unknown as readonly ModelObject[],
     );
@@ -6686,7 +6738,7 @@ export function thicken(
     for (const value of faces) results.push(value.thicken(thickness));
     return Array.isArray(face) ? results : results[0];
   } finally {
-    ModelObject.recordExtrusions(
+    ModelObject.recordFaceResults(
       faces,
       results as unknown as readonly ModelObject[],
     );
@@ -7249,6 +7301,7 @@ export const authoringApi = Object.freeze({
   tube,
   coil,
   sphere,
+  ellipsoid,
   frustum,
   regularPrism,
   group,

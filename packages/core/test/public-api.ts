@@ -15,6 +15,7 @@ import {
   cut,
   cylinder,
   ellipse,
+  ellipsoid,
   extrude,
   font,
   googleFont,
@@ -121,6 +122,10 @@ box(undefined, 10, 10);
 circle();
 // @ts-expect-error Ellipse radii remain required.
 ellipse();
+// @ts-expect-error All three ellipsoid radii remain required.
+ellipsoid(5, 3);
+const oval: SolidModel = ellipsoid(5, 3, 4);
+oval.surface(1);
 // @ts-expect-error Rectangle dimensions remain required.
 rectangle();
 // @ts-expect-error Polygon radius and sides remain required.

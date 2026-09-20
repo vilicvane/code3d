@@ -7,6 +7,8 @@ import {
 import type {Shape3D, AnyShape} from 'replicad';
 import type {Model} from '@code3d/core';
 import * as primitives from '@code3d/core';
+import {getOC} from 'replicad';
+import {ellipsoidShape} from '../bld/library/kernel-shapes.js';
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -28,6 +30,7 @@ for (const [name, defaults] of [
   ['tube', [5, 3, 10]],
   ['coil', [5, 1, 3, 3]],
   ['sphere', [5]],
+  ['ellipsoid', [5, 3, 4]],
   ['frustum', [5, 3, 10]],
   ['regularPrism', [5, 10, 6, 0]],
 ] as const) {
@@ -65,6 +68,56 @@ for (const [name, defaults] of [
     }
   });
 }
+
+test('ellipsoid radii control the local bounds, volume and oriented surface', () => {
+  const oval = primitives.ellipsoid(7, 4, 5);
+  const turned = oval.rotate(0, 0, 90);
+  try {
+    for (const [actual, expected] of [
+      [oval.bounds().minimum, [-7, -4, -5]],
+      [oval.bounds().maximum, [7, 4, 5]],
+      [turned.bounds().size, [8, 14, 10]],
+    ])
+      actual.forEach((value, i) =>
+        assert.ok(Math.abs(value - expected[i]) < 1e-5),
+      );
+    assert.ok(Math.abs(oval.volume - (4 / 3) * Math.PI * 7 * 4 * 5) < 0.001);
+    const snapshot = createModelSnapshotter()(oval);
+    assert.equal(snapshot.operation.kind, 'ellipsoid');
+    const face = modelGeometry(oval).value.shape.faces[0];
+    const center = face.center;
+    const normal = face.normalAt(center);
+    try {
+      assert.ok(normal.dot(center) > 0, 'surface normals point outward');
+    } finally {
+      normal.delete();
+      center.delete();
+      face.delete();
+    }
+    for (const radii of [
+      [7, 0, 5],
+      [7, 4, NaN],
+      [Infinity, 4, 5],
+    ])
+      assert.throws(
+        () => primitives.ellipsoid(...(radii as [number, number, number])),
+        /positive finite/,
+      );
+  } finally {
+    disposeModelObjects([oval, turned]);
+    clearKernelOperationCache();
+  }
+});
+
+test('ellipsoid construction releases its native surface and builder handles', () => {
+  const oc = getOC() as import('@code3d/opencascade').OpenCascadeInstance;
+  const batch = () => {
+    for (let i = 0; i < 12; i++) ellipsoidShape(7, 4, 5).delete();
+    return oc.Code3dMemory.AllocatedBytes();
+  };
+  const warm = batch();
+  assert.ok(batch() - warm < 4096);
+});
 
 test('repeated primitive arguments skip the builder and reuse geometry and meshes', () => {
   clearKernelOperationCache();

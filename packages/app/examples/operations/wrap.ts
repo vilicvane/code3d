@@ -1,6 +1,7 @@
 import {
   cut,
   cylinder,
+  ellipsoid,
   googleFont,
   group,
   sphere,
@@ -9,7 +10,6 @@ import {
   union,
   wrap,
 } from '@code3d/core';
-import {definePrimitive, replicad} from '@code3d/core/replicad';
 
 const sans = googleFont('Play');
 // Position the complete text layout outside the target. Its finite bounding
@@ -31,8 +31,7 @@ export const engraved = cut(ball, thicken(sphericalText, -1)).material(
 );
 
 // The same operation also accepts a general B-spline surface.
-const ellipsoid = definePrimitive(() => replicad.makeEllipsoid(20, 26, 22));
-const oval = ellipsoid();
+const oval = ellipsoid(20, 26, 22);
 const smallProfiles = text('CAD', sans, 6).map(face =>
   face.originOffset(6, -32, 3),
 );

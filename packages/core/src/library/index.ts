@@ -66,6 +66,7 @@ export {
   cylinder,
   distance,
   ellipse,
+  ellipsoid,
   extrude,
   text,
   frustum,

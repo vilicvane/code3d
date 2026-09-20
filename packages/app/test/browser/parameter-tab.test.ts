@@ -554,6 +554,59 @@ test(
 );
 
 test(
+  'ellipsoid radius fields support Tab, editing and Undo',
+  {timeout: 120_000},
+  async t => {
+    const page = await openApp(t);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const source = `import {ellipsoid} from '@code3d/core';\nexport default ellipsoid(7, 4, 5);`;
+    await page.evaluate(source => {
+      const editor = window.parameterTabApp.codeEditor.editor;
+      editor.getModel()!.setValue(source);
+      editor.setPosition(
+        editor.getModel()!.getPositionAt(source.indexOf('7, 4, 5')),
+      );
+      editor.focus();
+    }, source);
+    for (const [token, name, replacement] of [
+      ['7, 4', 'xRadius', '9, 4, 5'],
+      ['4, 5', 'yRadius', '7, 9, 5'],
+      ['5);', 'zRadius', '7, 4, 9'],
+    ]) {
+      await focus(page, token);
+      await page
+        .locator(`input.source-active[data-parameter="${name}"]`)
+        .waitFor();
+      await page.keyboard.press('Tab');
+      assert.equal(await focusedInput(page), name);
+      await page.keyboard.type('9');
+      await page.keyboard.press('Enter');
+      await page.waitForFunction(
+        replacement =>
+          window.parameterTabApp.codeEditor.editor
+            .getValue()
+            .includes(`ellipsoid(${replacement})`),
+        replacement,
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+      await page.evaluate(() => {
+        const editor = window.parameterTabApp.codeEditor.editor;
+        editor.focus();
+        editor.trigger('test', 'undo', null);
+      });
+      await page.waitForFunction(
+        source =>
+          window.parameterTabApp.codeEditor.editor.getValue() === source,
+        source,
+      );
+      await page.getByText('Ready', {exact: true}).waitFor();
+    }
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'wrapped faces expose thickness editing and preserve source through Undo',
   {timeout: 120_000},
   async t => {

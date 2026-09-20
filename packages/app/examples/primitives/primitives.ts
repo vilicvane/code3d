@@ -6,6 +6,7 @@ import {
   coil,
   cylinder,
   ellipse,
+  ellipsoid,
   frustum,
   line,
   point,
@@ -22,6 +23,7 @@ export const cuboid = box(12, 10, 8);
 export const roundCylinder = cylinder(5, 12);
 export const hollowTube = tube(5, 3, 12);
 export const ball = sphere(6);
+export const oval = ellipsoid(7, 4, 5);
 export const taperedCylinder = frustum(6, 3, 12);
 export const hexagonalPrism = regularPrism(6, 12, 6);
 export const helicalCoil = coil(5, 1, 4, 3);

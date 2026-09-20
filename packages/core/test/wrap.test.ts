@@ -5,6 +5,7 @@ import {
   circle,
   cut,
   cylinder,
+  ellipsoid,
   font,
   group,
   rectangle,
@@ -15,7 +16,7 @@ import {
   wrap,
   type Model,
 } from '../bld/node/index.js';
-import {definePrimitive, replicad} from '../bld/node/replicad.js';
+import {replicad} from '../bld/node/replicad.js';
 import {
   clearKernelOperationCache,
   kernelOperationCacheStats,
@@ -86,8 +87,7 @@ test('sphere uses geodesic distance and normal thickness rather than a planar ex
 });
 
 test('B-spline ellipsoid supports the same public API', () => {
-  const ellipsoid = definePrimitive(() => replicad.makeEllipsoid(20, 30, 25));
-  const body = keep(ellipsoid());
+  const body = keep(ellipsoid(20, 30, 25));
   const source = keep(keep(rectangle(6, 4)).originOffset(0, -35, 5));
   const patches = keepAll(wrap(source, body.surface(1)));
   assert.equal((native(patches[0]) as Face).geomType, 'BSPLINE_SURFACE');
@@ -154,6 +154,26 @@ test('periodic seam crossing splits valid patches without losing area', () => {
   near(keep(union([body, ...solids])).volume - body.volume, 40.5, 0.01);
 });
 
+test('exposed plane aliases cannot change the wrap frame or invalidate coplanarity', () => {
+  const profile = keep(keep(rectangle(4, 6)).originOffset(0, -25, 0));
+  const reference = keep(
+    keep(rectangle(4, 6)).rotate(20, 30, 40).originOffset(0, -30, 0),
+  );
+  const aliased = keep(profile.expose({plane: reference.plane}));
+  const target = keep(sphere(20));
+  const original = keepAll(wrap(profile, target.surface(1)));
+  const repeated = keepAll(wrap(aliased, target.surface(1)));
+  assert.deepEqual(
+    repeated.map(p => p.bounds()),
+    original.map(p => p.bounds()),
+  );
+  assert.deepEqual(
+    repeated.map(p => p.area),
+    original.map(p => p.area),
+  );
+  assert.equal(modelGeometry(repeated[0]).id, modelGeometry(original[0]).id);
+});
+
 test('tangency is allowed, crossing and missing target regions report errors', () => {
   const body = keep(sphere(20));
   const tangent = keep(keep(rectangle(4, 4)).originOffset(0, -20, 0));
@@ -167,6 +187,22 @@ test('tangency is allowed, crossing and missing target regions report errors', (
     /tolerance/,
   );
   assert.throws(() => thicken(tangent, 0), /non-zero/);
+});
+
+test('a planar wrap preserves authored in-plane axes for subsequent finite-region wrapping', () => {
+  const source = keep(
+    keep(keep(rectangle(10, 2)).rotate(0, 37, 0)).originOffset(0, -25, 0),
+  );
+  const target = keep(keep(rectangle(20, 20)).originOffset(0, -22, 0));
+  const patches = keepAll(wrap(source, target));
+  const back = keepAll(wrap(patches, source));
+  near(
+    back.reduce((area, face) => area + face.area, 0),
+    source.area,
+  );
+  back[0]
+    .bounds()
+    .size.forEach((value, i) => near(value, source.bounds().size[i]));
 });
 
 test('a finite target must cover the complete mapped region', () => {

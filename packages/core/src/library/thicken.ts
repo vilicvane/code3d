@@ -1,8 +1,22 @@
 import {cast, getOC, type Face, type Shape3D} from 'replicad';
-import {cross, dot, scale} from './alignment-geometry.js';
-import type {Vec3} from './spatial.js';
+import {cross, scale} from './alignment-geometry.js';
 import {castOwnedShape3D} from './kernel-shapes.js';
+import {withNativeScope} from './kernel-scope.js';
+import {
+  SurfaceGeometry,
+  principalCurvatures,
+  distance,
+  type UV,
+} from './surface-geometry.js';
+import {
+  faceTriangles,
+  knotTriangles,
+  centroid,
+  subdivide,
+  type Triangle,
+} from './surface-domain.js';
 import {describeOpenCascadeException} from './open-cascade-error.js';
+import type {Vec3} from './spatial.js';
 import {
   transferShapeTopology,
   type TopologyInput,
@@ -14,36 +28,26 @@ export function thickenWithTopology(
   source: TopologyInput,
   thickness: number,
 ): {shape: Shape3D; topology: ShapeTopology} {
-  const oc = getOC(),
-    builder = new oc.BRepOffsetAPI_MakeThickSolid();
-  let shape: Shape3D | undefined;
   try {
-    requireRegularOffset(source.shape as Face, thickness);
-    builder.MakeThickSolidBySimple(source.shape.wrapped, thickness);
-    if (!builder.IsDone())
-      throw new Error('The surface offset could not be constructed.');
-    shape = castOwnedShape3D(builder.Shape());
-    const solid = oc.TopoDS.Solid(shape.wrapped);
-    try {
+    return withNativeScope(scope => {
+      requireRegularOffset(source.shape as Face, thickness);
+      const oc = getOC(),
+        builder = scope.own(new oc.BRepOffsetAPI_MakeThickSolid());
+      builder.MakeThickSolidBySimple(source.shape.wrapped, thickness);
+      if (!builder.IsDone())
+        throw new Error('The surface offset could not be constructed.');
+      const raw = scope.own(castOwnedShape3D(builder.Shape()));
+      const solid = scope.own(oc.TopoDS.Solid(raw.wrapped));
       // MakeSimpleOffset closes its shell without orienting it as a solid.
-      // Normalize that native result before signed volume and boolean operations.
       if (!oc.BRepLib.OrientClosedSolid(solid))
         throw new Error('The offset did not form a closed solid.');
-      const oriented = cast(solid).asShape3D();
-      shape.delete();
-      shape = oriented;
-    } finally {
-      solid.delete();
-    }
-    const check = new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false);
-    try {
+      const shape = scope.own(cast(solid).asShape3D());
+      const check = scope.own(
+        new oc.BRepCheck_Analyzer(shape.wrapped, true, false, false),
+      );
       if (!check.IsValid())
         throw new Error('The offset is invalid. Reduce the thickness.');
-    } finally {
-      check.delete();
-    }
-    const properties = new oc.GProp_GProps();
-    try {
+      const properties = scope.own(new oc.GProp_GProps());
       oc.BRepGProp.VolumeProperties(
         shape.wrapped,
         properties,
@@ -51,87 +55,80 @@ export function thickenWithTopology(
         false,
         false,
       );
-      if (!(properties.Mass() > 0))
+      if (!(Number.isFinite(properties.Mass()) && properties.Mass() > 0))
         throw new Error(
           'The offset has no positive volume. Reduce the thickness.',
         );
-    } finally {
-      properties.delete();
-    }
-    return {shape, topology: transferShapeTopology([source], shape, builder)};
+      const topology = transferShapeTopology([source], shape, builder);
+      return {shape: scope.release(shape), topology};
+    });
   } catch (error) {
-    shape?.delete();
     const detail =
       describeOpenCascadeException(error) ??
       (error instanceof Error ? error.message : String(error));
     throw new Error(`thicken: ${detail}`, {cause: error});
-  } finally {
-    builder.delete();
   }
 }
 
-/** OCCT's simple offset can accept a folded offset past a curvature centre. */
+/** Validate the trimmed face, including small spline spans, before native offsetting. */
 function requireRegularOffset(face: Face, thickness: number): void {
   if (face.geomType === 'PLANE') return;
-  const oc = getOC(),
-    surface = oc.BRep_Tool.Surface(face.wrapped),
-    point = new oc.gp_Pnt();
-  const derivatives = Array.from({length: 5}, () => new oc.gp_Vec());
-  const coordinates = (v: {X(): number; Y(): number; Z(): number}): Vec3 => [
-    v.X(),
-    v.Y(),
-    v.Z(),
-  ];
-  const {uMin, uMax, vMin, vMax} = face.UVBounds;
-  try {
-    // Interior samples avoid removable UV singularities at analytic poles.
-    // Native shape validation separately checks the constructed boundaries.
-    for (let i = 0; i < 9; i++)
-      for (let j = 0; j < 9; j++) {
-        const [du, dv, duu, dvv, duv] = derivatives;
-        surface.D2(
-          uMin + ((uMax - uMin) * (i + 0.5)) / 9,
-          vMin + ((vMax - vMin) * (j + 0.5)) / 9,
-          point,
-          du,
-          dv,
-          duu,
-          dvv,
-          duv,
+  withNativeScope(scope => {
+    const geometry = scope.own(
+      new SurfaceGeometry(getOC().BRep_Tool.Surface(face.wrapped)),
+    );
+    const facing = face.orientation === 'forward' ? 1 : -1;
+    const tolerance = Math.max(
+      1e-7,
+      Math.min(0.001, Math.abs(thickness) * 0.001),
+    );
+    const triangles = knotTriangles(face, faceTriangles(face, tolerance));
+    let visits = 0;
+    const evaluate = (uv: UV) => {
+      const d = geometry.differential(uv),
+        normal = scale(cross(d.du, d.dv), facing / Math.sqrt(d.det));
+      const margin = Math.min(
+        ...principalCurvatures(d, facing).map(k => 1 - thickness * k),
+      );
+      if (!(margin > 1e-7))
+        throw new Error(
+          'Thickness reaches or crosses a curvature centre. Reduce the thickness.',
         );
-        const u = coordinates(du),
-          v = coordinates(dv),
-          n = cross(u, v),
-          magnitude = Math.hypot(...n);
-        if (!(magnitude > 0))
-          throw new Error('The surface has a singular offset normal.');
-        const normal = scale(
-          n,
-          (face.orientation === 'forward' ? 1 : -1) / magnitude,
+      return {
+        point: d.point,
+        offset: d.point.map(
+          (n, i) => n + thickness * normal[i],
+        ) as unknown as Vec3,
+        margin,
+      };
+    };
+    function visit(triangle: Triangle, depth: number): void {
+      if (++visits > 65536)
+        throw new Error(
+          'Could not resolve offset regularity within the validation budget. Reduce the thickness.',
         );
-        const E = dot(u, u),
-          F = dot(u, v),
-          G = dot(v, v),
-          det = E * G - F * F;
-        const e = dot(normal, coordinates(duu)),
-          f = dot(normal, coordinates(duv)),
-          g = dot(normal, coordinates(dvv));
-        const mean = (e * G - 2 * f * F + g * E) / (2 * det),
-          gaussian = (e * g - f * f) / det;
-        const spread = Math.sqrt(Math.max(0, mean * mean - gaussian));
-        if (
-          Math.min(
-            1 - thickness * (mean + spread),
-            1 - thickness * (mean - spread),
-          ) <= 1e-7
-        )
+      const children = subdivide(triangle);
+      // Interior barycentric samples stay in the triangulated trim and avoid UV poles.
+      const middle = evaluate(centroid(triangle)),
+        samples = children.slice(0, 3).map(t => evaluate(centroid(t)));
+      const average = (key: 'point' | 'offset') =>
+        samples[0][key].map(
+          (_, i) => samples.reduce((sum, s) => sum + s[key][i], 0) / 3,
+        ) as unknown as Vec3;
+      const error = Math.max(
+        distance(middle.point, average('point')),
+        distance(middle.offset, average('offset')),
+      );
+      const margins = [middle.margin, ...samples.map(s => s.margin)];
+      const spread = Math.max(...margins) - Math.min(...margins);
+      if (error > tolerance / 4 || spread > Math.min(...margins) * 0.1) {
+        if (depth >= 12)
           throw new Error(
-            'Thickness reaches or crosses a curvature centre. Reduce the thickness.',
+            'Could not converge while checking offset regularity. Reduce the thickness.',
           );
+        for (const child of children) visit(child, depth + 1);
       }
-  } finally {
-    derivatives.forEach(v => v.delete());
-    point.delete();
-    surface.delete();
-  }
+    }
+    for (const triangle of triangles) visit(triangle, 0);
+  });
 }

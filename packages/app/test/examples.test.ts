@@ -289,7 +289,7 @@ for (const entry of exampleEntries) {
       }
       if (entry.file === 'primitives/primitives.ts') {
         const kinds = values.map(value => snapshot(value).kind);
-        assert.equal(kinds.filter(kind => kind === 'solid').length, 7);
+        assert.equal(kinds.filter(kind => kind === 'solid').length, 8);
         assert.equal(kinds.filter(kind => kind === 'face').length, 4);
         assert.equal(kinds.filter(kind => kind === 'edge').length, 4);
         assert.equal(kinds.filter(kind => kind === 'vertex').length, 1);

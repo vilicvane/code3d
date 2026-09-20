@@ -24,10 +24,18 @@ are available from `@code3d/core/replicad` alongside `definePrimitive`.
 | `box(x, y, z)`                               | Box dimensions along X, Y, and Z  |
 | `cylinder(radius, y)`                        | Cylinder with its axis along Y    |
 | `sphere(radius)`                             | Sphere of the given radius        |
+| `ellipsoid(xRadius, yRadius, zRadius)`       | Ellipsoid with three axis radii   |
 | `frustum(bottomRadius, topRadius, y)`        | Truncated cone                    |
 | `regularPrism(radius, y, sides, rotation?)`  | Regular polygonal prism           |
 | `tube(outerRadius, innerRadius, y)`          | Straight tube with a through bore |
 | `coil(coilRadius, wireRadius, pitch, turns)` | Circular-wire coil along Y        |
+
+Ellipsoids are centered at the local origin. The three positive, finite radii
+follow local X, Y and Z; `ellipsoid(7, 4, 5)` spans 14 × 8 × 10 units. Select a
+radius in the editor and press Tab to edit it. Like other primitives, incomplete
+calls have runtime editing defaults (5, 3 and 4); TypeScript requires all three.
+See the [primitive example](../../app/examples/primitives/primitives.ts) or use
+an ellipsoid as a target in the [wrapping example](../../app/examples/operations/wrap.ts).
 
 Tubes are centered on Y; the inner radius must be smaller than the outer
 radius. For coils, `coilRadius` is measured to the wire centerline and
@@ -205,7 +213,9 @@ of distortion-free wrapping around an entire surface.
   a perpendicular source plane, folds, a full periodic overlap, or a failed boundary fit raise errors. Reduce
   the region or reposition it when a regular local mapping cannot be found.
 - `options.tolerance` is a positive length in model units (default `0.001`), used
-  for numerical mapping and boundary fitting.
+  for numerical mapping, adaptive layout checks and boundary fitting. Checks
+  refine where interpolation error or spline knot spans need more detail;
+  nonconvergence or an exhausted validation budget raises an error.
 - Wrap results are true curved faces and have no named `plane` reference.
   Extrusion, revolution and path sweep require planar inputs.
 - Thickness is finite and non-zero. Its sign follows the selected face's
@@ -213,10 +223,15 @@ of distortion-free wrapping around an entire surface.
   thickness with `union` for raised text and negative thickness with `cut` for
   engraving. Surface offsets can fail on tight curvature or intersecting walls;
   curvature-centre crossings detected by the offset check are rejected. Small
-  lettering and thicknesses are the intended use.
+  lettering and thicknesses are the intended use. Curvature checks follow the
+  trimmed face, including its holes, using a private tessellation and adaptive
+  refinement. These numerical checks do not prove global injectivity or the
+  absence of every possible self-intersection on arbitrary freeform surfaces.
 - Wrap results inherit the first profile's coordinate frame and placement.
   Thicken preserves each input face's frame and placement. Empty arrays return
   empty arrays. Original profiles and targets remain unchanged.
+  Replacing a named `plane` reference with `expose` does not change the source
+  geometry's wrapping frame.
 
 ## Measurements
 
