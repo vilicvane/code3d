@@ -37,6 +37,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/union.ts': ['default', 1],
   'constraints/combined-constraints.ts': ['default', 2],
   'constraints/transformations.ts': ['default', 2],
+  'constraints/animation.ts': ['default', 2],
   'operations/group.ts': ['default', 2],
   'operations/distance.ts': ['default', 3],
   'operations/length.ts': ['default', 0],

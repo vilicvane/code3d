@@ -1,4 +1,11 @@
-import {action, computed, makeObservable, observableRef, reaction} from 'mobx';
+import {
+  action,
+  compareStructural,
+  computed,
+  makeObservable,
+  observableRef,
+  reaction,
+} from 'mobx';
 import {formatDisplayNumber} from '../tools/parameter-policy';
 
 export type ContextualToolParameterView = Readonly<{
@@ -108,19 +115,28 @@ export class ContextualToolPanel {
       hide: action,
     });
     this.stopParameterSteps = reaction(
-      () => ({view: this.view, gridStep: this.options.gridStep?.()}),
-      ({view, gridStep}) => {
-        for (const parameter of view?.parameters ?? []) {
-          const step =
-            parameter.gridStep && gridStep !== undefined
-              ? gridStep
-              : parameter.step;
-          this.controls.get(parameter.name)!.input.step = String(step);
-        }
+      () => ({
+        id: this.view?.id,
+        parameters: this.view?.parameters.map(parameter => ({
+          name: parameter.name,
+          step: parameter.gridStep
+            ? (this.options.gridStep?.() ?? parameter.step)
+            : parameter.step,
+        })),
+      }),
+      ({parameters}) => {
+        for (const {name, step} of parameters ?? [])
+          this.controls.get(name)!.input.step = String(step);
       },
+      {equals: compareStructural},
     );
     this.stopSourceHighlight = reaction(
-      () => ({name: this.sourceParameter, view: this.view}),
+      () => ({
+        name: this.sourceParameter,
+        id: this.view?.id,
+        parameters: this.view?.parameters.map(parameter => parameter.name),
+        selection: this.view?.selection?.name,
+      }),
       ({name}) => {
         for (const [parameter, {input}] of this.controls)
           input.classList.toggle('source-active', parameter === name);
@@ -129,18 +145,25 @@ export class ContextualToolPanel {
           name !== undefined && this.view?.selection?.name === name,
         );
       },
-      {fireImmediately: true},
+      {fireImmediately: true, equals: compareStructural},
     );
   }
 
   show(view: ContextualToolPanelView, forceParameterValues = false): void {
+    if (!forceParameterValues && compareStructural(this.view, view)) {
+      this.completePendingNavigation();
+      return;
+    }
+    const previous = this.view;
     const structureChanged =
-      this.view?.id !== view.id ||
+      previous?.id !== view.id ||
       !sameNames([...this.controls.keys()], view.parameters);
     this.view = view;
-    this.title.textContent = view.title;
-    this.meta.textContent = view.meta ?? '';
-    this.meta.hidden = !view.meta;
+    if (previous?.title !== view.title) this.title.textContent = view.title;
+    if (!previous || previous.meta !== view.meta) {
+      this.meta.textContent = view.meta ?? '';
+      this.meta.hidden = !view.meta;
+    }
     if (structureChanged) {
       this.cancelPendingNavigation();
       this.rebuildParameterControls(view.parameters);
@@ -148,18 +171,22 @@ export class ContextualToolPanel {
     view.parameters.forEach(parameter =>
       this.updateParameterControl(parameter, forceParameterValues),
     );
-    this.selectionField.hidden = !view.selection;
-    if (view.selection) {
-      this.selectionSummary.dataset.parameter = view.selection.name;
-      this.selectionLabel.textContent = view.selection.label;
-      this.selectionSummary.textContent = view.selection.summary;
+    if (!previous || !compareStructural(previous.selection, view.selection)) {
+      this.selectionField.hidden = !view.selection;
+      if (view.selection) {
+        this.selectionSummary.dataset.parameter = view.selection.name;
+        this.selectionLabel.textContent = view.selection.label;
+        this.selectionSummary.textContent = view.selection.summary;
+      }
     }
-    this.renderActions(view.actions);
-    this.root.hidden = false;
+    if (!compareStructural(previous?.actions, view.actions))
+      this.renderActions(view.actions);
+    if (this.root.hidden) this.root.hidden = false;
     this.completePendingNavigation();
   }
 
   hide(): void {
+    if (!this.view) return;
     this.cancelPendingNavigation();
     this.root.hidden = true;
     this.view = undefined;
@@ -328,15 +355,17 @@ export class ContextualToolPanel {
     forceValue: boolean,
   ): void {
     const control = this.controls.get(parameter.name)!;
-    control.label.textContent = parameter.label.toUpperCase();
+    const label = parameter.label.toUpperCase();
+    if (control.label.textContent !== label) control.label.textContent = label;
     setOptionalNumberAttribute(control.input, 'min', parameter.min);
     setOptionalNumberAttribute(control.input, 'max', parameter.max);
-    control.input.disabled = parameter.disabled ?? false;
-    control.input.placeholder = parameter.placeholder ?? '';
-    control.input.setAttribute(
-      'aria-invalid',
-      String(parameter.invalid ?? false),
-    );
+    if (control.input.disabled !== !!parameter.disabled)
+      control.input.disabled = !!parameter.disabled;
+    if (control.input.placeholder !== (parameter.placeholder ?? ''))
+      control.input.placeholder = parameter.placeholder ?? '';
+    const invalid = String(parameter.invalid ?? false);
+    if (control.input.getAttribute('aria-invalid') !== invalid)
+      control.input.setAttribute('aria-invalid', invalid);
     if (forceValue || document.activeElement !== control.input) {
       control.input.value =
         parameter.value === undefined
@@ -374,7 +403,8 @@ function setOptionalNumberAttribute(
   if (value === undefined) {
     input.removeAttribute(name);
   } else {
-    input.setAttribute(name, String(value));
+    if (input.getAttribute(name) !== String(value))
+      input.setAttribute(name, String(value));
   }
 }
 

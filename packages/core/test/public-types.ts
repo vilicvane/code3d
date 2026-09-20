@@ -1,3 +1,4 @@
+import {timeOffset} from '@code3d/core';
 import {
   box,
   anchorAnnotation,
@@ -248,3 +249,8 @@ export function readonlyMeasurements() {
   group([body]).area;
   return values;
 }
+
+const offset: number = timeOffset();
+void offset;
+// @ts-expect-error A standalone default is a number of seconds.
+timeOffset('time');

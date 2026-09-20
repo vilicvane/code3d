@@ -277,6 +277,8 @@ export type ObjectCatalogEntry = Readonly<{
 }>;
 
 export type ModelModule = Readonly<{
+  /** Seconds from the playback origin; present only when the model reads timeOffset(). */
+  timeOffset?: number;
   sketches: ReadonlyMap<string, CompiledSketch>;
   warnings: readonly ModelDiagnostic[];
   diagnostic?: ModelDiagnostic;

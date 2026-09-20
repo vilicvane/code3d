@@ -97,6 +97,19 @@ for example `[offset(0, 8, 0), rotate(0, 25, 0)]`. Read the
 before mixing these operations. Shared source, including a loop callback, changes
 all of its runtime instances.
 
+## Animate an assembly
+
+Read `timeOffset()` from Core and derive angles or offsets with ordinary
+TypeScript. The offset is measured in seconds from the playback origin, starts
+at zero in the App, and is fixed during each full project evaluation. Use existing
+`group` and `relate` APIs to assemble parts. The App provides Play, Pause and Reset below the viewport; source edits
+pause playback. Read time before calling a cached function and pass it explicitly
+when its result depends on time. This API does not provide persistent writable
+state or history-dependent mechanism solving.
+
+See [time offset](../../packages/core/docs/runtime.md#time-offset) and the
+[rotating arm example](../../packages/app/examples/constraints/animation.ts).
+
 ## Reuse expensive computations
 
 Use `cache()` for deterministic synchronous data and `definePrimitive()` for

@@ -1,3 +1,4 @@
+import {timeOffset} from './time-offset.js';
 import {
   assembleWire,
   basicFaceExtrusion,
@@ -6943,6 +6944,7 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  timeOffset,
   dimension,
   boundsAnnotation,
   anchorAnnotation,

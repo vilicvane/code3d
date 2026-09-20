@@ -63,7 +63,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx): compose model functions.
 - [Model tools](../web/src/content/docs/docs/guides/model-tools.mdx): add editing tools and argument presets.
 - [Custom primitives](docs/custom-primitives.mdx): extend modeling with Replicad geometry.
-- [Runtime integration](docs/runtime.md): resources, materials and source inspection.
+- [Runtime integration](docs/runtime.md): time offsets, resources, materials and source inspection.
 - [Current limitations](../web/src/content/docs/docs/getting-started/limitations.md): supported workflows and known boundaries.
 
 ## Source and development

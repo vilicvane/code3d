@@ -1040,6 +1040,8 @@ export function createModelExecutor(
     return [];
   }
 
+  let executionTimeOffset = 0;
+
   async function execute(
     artifact: CompiledModelSource,
     runtimeModules: ReadonlyMap<string, ModuleExports>,
@@ -1049,6 +1051,7 @@ export function createModelExecutor(
     captureGeometry?: (objects: readonly RelationObject[]) => void,
     checkCancelled: () => void = () => {},
     prepareSnapshots?: (objects: readonly RelationObject[]) => Promise<void>,
+    timeOffset = 0,
   ): Promise<ModelModule> {
     const {rootPath, files, designArguments, activeDesignContext} = artifact;
     inspection?.dispose();
@@ -1080,6 +1083,11 @@ export function createModelExecutor(
     evaluationOrder = 0;
     sourceReachOrder = 0;
     sketches.begin(artifact.sketches);
+    executionTimeOffset = timeOffset;
+    let observedTimeOffset: number | undefined;
+    const finishTimeOffset = runtime.beginTimeOffset(timeOffset, value => {
+      observedTimeOffset = value;
+    });
     let finishEvaluation: (() => void) | undefined;
     const finishRecording = runtime.recordInspectionCalls(data =>
       inspection?.capture(data),
@@ -1183,6 +1191,7 @@ export function createModelExecutor(
       captureGeometry?.(graphObjects);
       const sketchSnapshots = sketches.snapshots();
       return {
+        timeOffset: observedTimeOffset,
         sketches: sketchSnapshots,
         warnings: sketchSourceDiagnostics(sketchSnapshots, artifact.sketches),
         diagnostic,
@@ -1259,6 +1268,7 @@ export function createModelExecutor(
       // values). Drop this evaluation's references; Replicad's native wrappers
       // release shapes when their actual owners become unreachable.
       finishEvaluation?.();
+      finishTimeOffset();
       finishRecording();
       tracedObjects.clear();
       sourceValueTraces.clear();
@@ -3029,6 +3039,7 @@ export function createModelExecutor(
     ) {
       checkCancelled();
       const finish = runtime.beginModelInspection(checkCancelled);
+      const finishTimeOffset = runtime.beginTimeOffset(executionTimeOffset);
       try {
         const result = await inspection?.inspect(selection);
         checkCancelled();
@@ -3044,6 +3055,7 @@ export function createModelExecutor(
           ))
         );
       } finally {
+        finishTimeOffset();
         finish();
       }
     },

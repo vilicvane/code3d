@@ -250,6 +250,35 @@ JSDoc 工具与 inspect 元数据共用声明、重载和别名定位；回调�
 [build-artifacts 浏览器回归](../../../packages/app/test/browser/build-artifacts.test.ts)与
 [compiler-progress](../../../packages/app/test/browser/compiler-progress.test.ts)。
 
+## 时间偏移与装配播放
+
+Core 的独立函数 `timeOffset(defaultValue = 0)` 返回相对于播放起点的偏移秒数，
+不是当前时钟。App 每次执行通过 `beginTimeOffset` 安装固定偏移，finally 恢复
+上下文；执行结果仅在作者实际调用该函数时携带 `timeOffset`，据此显示播放入口。
+检查回调复用所属执行的偏移。时间偏移不进入编译产物或持久化身份；无宿主执行
+上下文时使用作者默认值。普通表单输入不属于这个 API。
+
+`ModelCompilerClient.execute(timeOffset)` 复用当前完整编译产物，并沿同一串行执行
+Worker、取消信号及结果版本边界重新求值。它不启动编译 Worker，也不重复发布构建
+缓存。普通编译、缓存恢复和补全预览携带当前暂停时间；源码或依赖重建后替换可执行
+产物，销毁和清缓存释放该引用。
+
+`ModelAnimation` 拥有 MobX 播放状态、已接受时间及单个待执行帧。完成一次求值与
+呈现后才预约下帧，以播放起点和单调时钟计算秒数，慢模型不积压请求。暂停让当前帧
+完成后停住；Reset 在当前帧收尾后重新求值零秒。源码更新使待发布的播放时间失效，
+文件切换同时重置时间，页面隐藏暂停、销毁取消预约。主 App 在 `runModel` 中先
+准备求值结果与当前源码选择的检查场景，再以一次 action 发布模型与视图；时间帧
+不进入源码编译或切换检查的交互锁定状态，暂停/重置控件不受视口检查的 inert 影响。
+播放图标、可用性和时间读数分别订阅实际显示值，不维护另一份显示时钟。状态栏在
+播放期间统一显示 Playing，执行错误优先显示；暂停后恢复普通预览状态，避免每帧
+执行、检查与 Ready 之间的切换。
+
+普通 UI 根据各自实际显示值订阅：设计参数、诊断、源码装饰及空间工具栏不因新的
+模型快照对象而重建。元素面板保留节点和焦点，列表结构只由名称、拓扑 ID 与引用
+名称/种类决定；帧内 nodeId 不作为 DOM 身份，悬停/焦点预览从最新快照取几何。
+
+本子集仅支持时间驱动的纯函数模型，没有可写程序 state、跨帧实例 key 或求解历史。
+
 ## 执行与生命周期
 
 [ProjectExecutor](../../../packages/app/src/model/project-executor.ts)在独立执行 Worker

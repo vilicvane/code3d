@@ -1,4 +1,10 @@
-import {action, autorun, makeObservable, observableRef} from 'mobx';
+import {
+  action,
+  compareStructural,
+  makeObservable,
+  observableRef,
+  reaction,
+} from 'mobx';
 import type {IconNode} from 'lucide';
 import type {SourceTarget} from '../model/compiler';
 import type {
@@ -109,31 +115,37 @@ export class SpatialToolbar {
     this.root.append(this.toolbar.root);
     container.append(this.root);
     makeObservable(this, {selection: observableRef, setSelection: action});
-    this.stop = autorun(() => {
-      const tool = tools.tool;
-      const available = options.availableTools();
-      const context = options.context();
-      group.style.display = context === 'relation' ? '' : 'none';
-      modelGroup.style.display = context === 'model' ? '' : 'none';
-      this.root.hidden = !options.visible() || !available.length;
-      if (this.root.hidden) this.toolbar.close();
-      if (context === 'relation' && tool && tool !== 'translate')
-        this.toolbar.selectVariant(names[tool]);
-      this.toolbar.update(name => ({
-        pressed:
-          !!tool &&
-          name ===
-            (context === 'model' && tool !== 'rotate-axis'
-              ? modelNames[tool]
-              : names[tool]),
-        disabled: !available.some(
-          tool =>
-            (context === 'model' && tool !== 'rotate-axis'
-              ? modelNames[tool]
-              : names[tool]) === name,
-        ),
-      }));
-    });
+    this.stop = reaction(
+      () => ({
+        tool: tools.tool,
+        available: options.availableTools(),
+        context: options.context(),
+        visible: options.visible(),
+      }),
+      ({tool, available, context, visible}) => {
+        group.style.display = context === 'relation' ? '' : 'none';
+        modelGroup.style.display = context === 'model' ? '' : 'none';
+        this.root.hidden = !visible || !available.length;
+        if (this.root.hidden) this.toolbar.close();
+        if (context === 'relation' && tool && tool !== 'translate')
+          this.toolbar.selectVariant(names[tool]);
+        this.toolbar.update(name => ({
+          pressed:
+            !!tool &&
+            name ===
+              (context === 'model' && tool !== 'rotate-axis'
+                ? modelNames[tool]
+                : names[tool]),
+          disabled: !available.some(
+            tool =>
+              (context === 'model' && tool !== 'rotate-axis'
+                ? modelNames[tool]
+                : names[tool]) === name,
+          ),
+        }));
+      },
+      {fireImmediately: true, equals: compareStructural},
+    );
   }
 
   setSelection(value: SpatialToolbar['selection']): void {

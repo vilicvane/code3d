@@ -72,6 +72,7 @@ type WorkerRequest =
   | Readonly<
       {
         kind: 'execute';
+        timeOffset: number;
         settings: ExecutionSettings;
         id: number;
         cancellation: CompilationCancellation;

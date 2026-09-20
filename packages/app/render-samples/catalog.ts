@@ -574,6 +574,7 @@ export const exampleEntries = [
     file: 'constraints/combined-constraints.ts',
   },
   {file: 'constraints/transformations.ts'},
+  {file: 'constraints/animation.ts'},
   {
     file: 'operations/group.ts',
   },

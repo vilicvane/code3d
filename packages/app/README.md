@@ -10,6 +10,10 @@ Agents editing a model through the App should read the [Markdown entry](../../do
 To develop Code3D itself, use the [development guide](../../.agents/docs/development.md)
 and [architecture overview](../../.agents/docs/architecture/overview.md).
 
+Models can read `timeOffset()` to animate an assembly. Play, Pause and Reset
+controls appear below the viewport; see [animation playback](../web/src/content/docs/docs/getting-started/app.md#play-an-assembly-animation)
+and the [rotating arm example](examples/constraints/animation.ts).
+
 ## Run locally
 
 From the repository root:

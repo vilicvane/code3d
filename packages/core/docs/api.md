@@ -17,6 +17,10 @@ named-element result types, and capability interfaces. Use `import type` from
 `NamedElements`, `ExposedElements`, `Bound`, and `TopologyId`. Replicad builder types such as `Shape3D`
 are available from `@code3d/core/replicad` alongside `definePrimitive`.
 
+For time-dependent assembly motion, read `timeOffset()` and derive angles
+or offsets with ordinary TypeScript. See [time offset](runtime.md#time-offset)
+for playback and evaluation semantics.
+
 ## Solid primitives
 
 | Function                                     | Meaning                           |

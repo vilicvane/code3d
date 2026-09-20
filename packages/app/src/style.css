@@ -1834,7 +1834,8 @@ kbd {
 #viewport-host:has(.sketch-editor:not([hidden])) .contextual-tool-panel {
   display: none;
 }
-#viewport-host:has(.sketch-editor:not([hidden])) .viewport-mode {
+#viewport-host:has(.sketch-editor:not([hidden]))
+  :is(.viewport-mode, .viewport-animation) {
   display: none;
 }
 #viewport-host:has(.sketch-editor:not([hidden])) .viewport-header {
@@ -2482,7 +2483,7 @@ kbd {
   pointer-events: none;
 }
 
-.viewport-mode {
+:is(.viewport-mode, .viewport-animation) {
   display: flex;
   height: var(--viewport-header-height);
   flex-shrink: 0;
@@ -2496,7 +2497,7 @@ kbd {
   pointer-events: auto;
 }
 
-.viewport-mode button {
+:is(.viewport-mode, .viewport-animation) button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2510,19 +2511,49 @@ kbd {
   cursor: pointer;
 }
 
-.viewport-mode button:hover {
+:is(.viewport-mode, .viewport-animation) button:hover {
   background: #272b21;
   color: #edf3d5;
 }
 
-.viewport-mode button[aria-pressed='true'] {
+:is(.viewport-mode, .viewport-animation) button[aria-pressed='true'] {
   background: #303922;
   color: #d8ff3e;
 }
 
-.viewport-mode button:focus-visible {
+:is(.viewport-mode, .viewport-animation) button:focus-visible {
   outline: 1px solid #d8ff3e;
   outline-offset: -1px;
+}
+
+.viewport-animation {
+  position: absolute;
+  bottom: var(--viewport-inset);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  height: 38px;
+}
+
+.viewport-animation[hidden] {
+  display: none;
+}
+
+.viewport-animation button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.viewport-animation output {
+  align-self: center;
+  min-width: 7ch;
+  padding: 0 8px;
+  color: #dfe2d8;
+  font:
+    11px 'IBM Plex Mono',
+    monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .viewport-host[data-render-mode='render']:not(

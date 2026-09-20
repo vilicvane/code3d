@@ -46,6 +46,7 @@ export class ProjectExecutor {
     onProgress?: CompilationProgress,
     checkCancelled: () => void = () => {},
     settings?: ExecutionSettings,
+    timeOffset = 0,
   ): Promise<ModelModule> {
     try {
       await this.storage?.ready;
@@ -111,6 +112,7 @@ export class ProjectExecutor {
             runtime.tooling.planModelSnapshotQueries(objects),
             checkCancelled,
           ),
+        timeOffset,
       );
     } finally {
       runtime.tooling.setKernelArtifactStore(undefined);

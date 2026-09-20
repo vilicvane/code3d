@@ -27,10 +27,19 @@ import {
   FolderPlus,
   PanelLeftClose,
   PanelLeftOpen,
+  Play,
+  Pause,
+  RotateCcw,
   RefreshCw,
   X,
 } from 'lucide';
-import {autorun, observable, reaction, runInAction} from 'mobx';
+import {
+  autorun,
+  compareStructural,
+  observable,
+  reaction,
+  runInAction,
+} from 'mobx';
 import {appSettings} from './app-settings';
 import {AppSettingsDialog} from './ui/app-settings';
 import brandMark from '../../../assets/brand/mark.svg?raw';
@@ -54,6 +63,7 @@ import type {
   TopologySelectionScope,
   SourceTarget,
 } from './model/compiler';
+import {ModelAnimation} from './model/animation';
 import {ModelCompilerClient} from './model/compiler-client';
 import {
   diagnosticFromError,
@@ -321,6 +331,11 @@ app.innerHTML = `
             </span>
             <strong>Select to preview</strong>
           </div>
+          <div class="viewport-animation" id="viewport-animation" role="group" aria-label="Animation playback" hidden>
+            <button id="animation-play" type="button" aria-label="Play animation" title="Play animation"></button>
+            <button id="animation-reset" type="button" aria-label="Reset animation" title="Reset to 0 seconds"></button>
+            <output id="animation-time" aria-label="Time offset">0.00 s</output>
+          </div>
           <div class="viewport-tool-stack" id="viewport-tool-stack"></div>
           <div class="viewport-feedback-stack" id="viewport-feedback-stack">
             <div class="viewport-diagnostic-stack" id="viewport-diagnostic-stack" role="status" aria-live="polite" aria-atomic="true" hidden></div>
@@ -382,6 +397,9 @@ const viewportEmptyState = new ViewportEmptyState(
   requiredElement('viewport-empty-state'),
 );
 const previewState = new ModelPreviewState(() => compiler.phase);
+const animation = new ModelAnimation(time =>
+  runModel(activeDesignContext(), time),
+);
 const designArgumentsPanel = requiredElement('design-arguments-panel');
 const designArgumentsCount = requiredElement('design-arguments-count');
 const designArgumentsFunction = requiredElement('design-arguments-function');
@@ -737,10 +755,12 @@ let contextualToolCounter = 0;
 const toolParameterCommitTimers = new Map<string, number>();
 let fileOpenVersion = 0;
 let preferredEvaluationContextId: string | undefined;
-let selectedDesignContextId: string | undefined;
+const designContextState = observable({
+  selected: undefined as string | undefined,
+  compiling: undefined as string | undefined,
+});
 let selectedDesignInvocation: DesignInvocation | undefined;
 let pendingAgentFollow: AgentUpdate | undefined;
-let compilingDesignContextId: string | undefined;
 let activeCompletionFocus: CompletionFocus | undefined;
 let applyingFileRoute = false;
 type EdgeSelectionTool = {
@@ -807,7 +827,9 @@ const viewport = new ModelViewport(viewportHost, {
   onSelect: occurrence => {
     if (occurrence.view === 'model') {
       preferredEvaluationContextId = undefined;
-      selectedDesignContextId = undefined;
+      runInAction(() => {
+        designContextState.selected = undefined;
+      });
     } else {
       preferredEvaluationContextId =
         viewport.sourceContext?.evaluation.contextId;
@@ -874,6 +896,9 @@ new ViewportContextMenu(
     {label: 'Export model…', run: () => modelExportDialog.open()},
   ],
 );
+window.addEventListener('pagehide', () => elementsPanel.dispose(), {
+  once: true,
+});
 const elementsDecorationOwner = 'elements-panel';
 const elementsPanel = new ElementsPanel(elements, elementsCount, {
   onPreview: preview => {
@@ -1039,11 +1064,36 @@ const stopContextualTool = reaction(
   },
 );
 window.addEventListener('pagehide', stopContextualTool, {once: true});
+const stopDesignArguments = reaction(
+  designArgumentsView,
+  renderDesignArguments,
+  {
+    fireImmediately: true,
+    equals: compareStructural,
+  },
+);
+window.addEventListener('pagehide', stopDesignArguments, {once: true});
 const stopSketchFeedback = reaction(
   () => [sketchEditor.diagnosticScope, sketchEditor.isStale] as const,
   () => refreshViewportFeedback(),
 );
 window.addEventListener('pagehide', stopSketchFeedback, {once: true});
+const stopViewportDiagnostic = reaction(
+  () => {
+    const diagnostic = activeViewportDiagnostic();
+    const active = sketchEditor.diagnosticScope?.at(-1)?.id;
+    return {
+      diagnostic,
+      upstream:
+        !!diagnostic?.relatedSketchIds?.length &&
+        (!active || !diagnostic.relatedSketchIds.includes(active)),
+      editable: previewState.sourceVersion === codeEditor.sourceVersion(),
+    };
+  },
+  renderViewportDiagnostic,
+  {fireImmediately: true, equals: compareStructural},
+);
+window.addEventListener('pagehide', stopViewportDiagnostic, {once: true});
 const stopRotationReferences = reaction(
   () => ({
     tool: viewport.positionTools.referencePicking,
@@ -1102,12 +1152,95 @@ const stopViewportModes = reaction(
   },
   {fireImmediately: true},
 );
+const animationControls = requiredElement('viewport-animation');
+const animationPlay = requiredElement<HTMLButtonElement>('animation-play');
+const animationReset = requiredElement<HTMLButtonElement>('animation-reset');
+const animationTime = requiredElement('animation-time');
+animationReset.append(createIcon(RotateCcw));
+animationPlay.addEventListener('click', () => {
+  if (animation.playing) animation.pause();
+  else animation.play();
+});
+animationReset.addEventListener('click', () => animation.reset());
+const stopAnimationControls = [
+  reaction(
+    () => animation.playing,
+    playing => {
+      animationPlay.replaceChildren(createIcon(playing ? Pause : Play));
+      const label = playing ? 'Pause animation' : 'Play animation';
+      animationPlay.setAttribute('aria-label', label);
+      animationPlay.title = label;
+      animationPlay.setAttribute('aria-pressed', String(playing));
+    },
+    {fireImmediately: true},
+  ),
+  reaction(
+    () =>
+      previewState.module?.timeOffset === undefined || sketchEditor.hasTarget,
+    hidden => {
+      animationControls.hidden = hidden;
+    },
+    {fireImmediately: true},
+  ),
+  reaction(
+    () =>
+      !animation.playing &&
+      (animation.pending ||
+        previewState.busy ||
+        previewState.status === 'error' ||
+        previewState.sourceVersion !== codeEditor.sourceVersion() ||
+        !compiler.canExecute()),
+    disabled => {
+      animationPlay.disabled = disabled;
+    },
+    {fireImmediately: true},
+  ),
+  reaction(
+    () => !animation.pending && (previewState.busy || !compiler.canExecute()),
+    disabled => {
+      animationReset.disabled = disabled;
+    },
+    {fireImmediately: true},
+  ),
+  reaction(
+    () => `${animation.time.toFixed(2)} s`,
+    time => {
+      animationTime.textContent = time;
+    },
+    {fireImmediately: true},
+  ),
+];
+const pauseHiddenAnimation = () => {
+  if (document.hidden) animation.pause();
+};
+document.addEventListener('visibilitychange', pauseHiddenAnimation);
+window.addEventListener(
+  'pagehide',
+  () => {
+    animation.stop();
+    stopAnimationControls.forEach(stop => stop());
+    document.removeEventListener('visibilitychange', pauseHiddenAnimation);
+  },
+  {once: true},
+);
 let statusRevealTimer: ReturnType<typeof setTimeout> | undefined;
 const stopViewportStatus = reaction(
-  () => ({
-    status: previewState.presentation,
-    diagnostic: previewState.statusDiagnostic,
-  }),
+  () => {
+    const diagnostic = previewState.statusDiagnostic;
+    return {
+      // Frame execution phases remain internal while playback is active.
+      status:
+        animation.playing && !diagnostic
+          ? {
+              state: 'busy' as const,
+              label: 'Playing',
+              description: undefined,
+              delay: 0,
+            }
+          : previewState.presentation,
+      diagnostic,
+    };
+  },
   ({status, diagnostic}) => {
     clearTimeout(statusRevealTimer);
     statusRevealTimer = undefined;
@@ -1150,7 +1283,7 @@ const stopPreviewPresentation = reaction(
     ))
       element.inert = retaining;
   },
-  {fireImmediately: true},
+  {fireImmediately: true, equals: compareStructural},
 );
 
 function revealStatusDiagnostic(): void {
@@ -1189,6 +1322,7 @@ codeEditor.onChange(change => {
 });
 
 codeEditor.onCursorOffset(({file, offset, sourceRef}) => {
+  animation.pause();
   pendingAgentFollow = undefined;
   const module = previewState.module;
   if (previewState.pendingFile || !module) return;
@@ -1232,6 +1366,33 @@ async function inspectSourceSelection(
   contextId = preferredEvaluationContextId,
   preferredSource?: SourceRef,
 ): Promise<boolean> {
+  const selection = sourceInspectionSelection(
+    module,
+    file,
+    offset,
+    contextId,
+    preferredSource,
+  );
+  const published = await previewState.inspect(
+    () => compiler.inspect(module, selection),
+    scene => {
+      if (previewState.module !== module) return;
+      viewport.renderInspection(module, scene, selection, selectedKey);
+      previewState.presented(hasViewportTarget(), viewport.presentedModule);
+      updatePresentedSourceSelection();
+    },
+  );
+  refreshViewportFeedback();
+  return published;
+}
+
+function sourceInspectionSelection(
+  module: ModelModule,
+  file: string,
+  offset: number,
+  contextId: string | undefined,
+  preferredSource?: SourceRef,
+) {
   const scope = viewport.sourceEvaluationAt(
     module,
     file,
@@ -1239,9 +1400,10 @@ async function inspectSourceSelection(
     contextId,
     preferredSource,
   );
-  const selection = {
+  return {
     file,
     offset,
+    sourceRef: scope?.target.sourceRef ?? preferredSource,
     contextId: scope?.evaluation.contextId ?? contextId,
     order: scope?.evaluation.runtime.order,
     callId: scope?.evaluation.inspectCallId,
@@ -1253,38 +1415,22 @@ async function inspectSourceSelection(
         }
       : undefined,
   };
-  const published = await previewState.inspect(
-    () => compiler.inspect(module, selection),
-    scene => {
-      if (previewState.module !== module) return;
-      viewport.renderInspection(
-        module,
-        scene,
-        {...selection, sourceRef: scope?.target.sourceRef ?? preferredSource},
-        selectedKey,
-      );
-      previewState.presented(hasViewportTarget(), viewport.presentedModule);
-      updatePresentedSourceSelection();
-    },
-  );
-  refreshViewportFeedback();
-  return published;
 }
 
 function updatePresentedSourceSelection(): void {
   preferredEvaluationContextId = viewport.sourceContext?.evaluation.contextId;
   if (
     selectedDesignInvocation &&
-    preferredEvaluationContextId !== selectedDesignContextId
+    preferredEvaluationContextId !== designContextState.selected
   ) {
     selectedDesignInvocation = undefined;
-    selectedDesignContextId = undefined;
+    runInAction(() => {
+      designContextState.selected = undefined;
+    });
   }
   const occurrence = viewport.getSelected();
   if (occurrence) {
     selectOccurrence(occurrence, false);
-  } else if (previewState.module) {
-    renderDesignArguments(previewState.module);
   }
 }
 codeEditor.onCompletionFocus(handleCompletionFocus);
@@ -1307,7 +1453,9 @@ codeEditor.onActiveFile((path, reason) => {
   renderProjectNavigation();
   if (!applyingFileRoute) updateFileRoute(path, reason);
   preferredEvaluationContextId = undefined;
-  selectedDesignContextId = undefined;
+  runInAction(() => {
+    designContextState.selected = undefined;
+  });
   requestModelUpdate(0);
 });
 
@@ -1347,7 +1495,9 @@ function followAgentUpdate(update: AgentUpdate): void {
   };
   selectedDesignInvocation =
     invocation.arguments === undefined ? undefined : invocation;
-  selectedDesignContextId = undefined;
+  runInAction(() => {
+    designContextState.selected = undefined;
+  });
   preferredEvaluationContextId = undefined;
   pendingAgentFollow = update;
   void runModel(invocation);
@@ -1920,12 +2070,16 @@ function activeDesignContext(
 ): DesignContext | undefined {
   if (selectedDesignInvocation) return {...selectedDesignInvocation, ...cursor};
   const context = previewState.module?.designArguments.find(
-    context => context.id === selectedDesignContextId,
+    context => context.id === designContextState.selected,
   );
   return context && {file: context.functionRef.file, id: context.id};
 }
 
-async function runModel(designContext = activeDesignContext()): Promise<void> {
+async function runModel(
+  designContext = activeDesignContext(),
+  timeOffset?: number,
+): Promise<boolean> {
+  if (timeOffset === undefined) animation.stop();
   window.clearTimeout(compileTimer);
   compileTimer = undefined;
   viewport.restoreTransientPreview();
@@ -1936,16 +2090,17 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
   if (!file) {
     compiler.cancel();
     restoreModelStatus();
-    return;
+    return false;
   }
   const following =
     pendingAgentFollow?.kind === 'apply' ? pendingAgentFollow : undefined;
   const designContextId =
     designContext && 'id' in designContext ? designContext.id : undefined;
-  compilingDesignContextId = designContextId;
-  previewState.beginCompilation();
-  if (designContextId) {
-    renderCurrentPanels();
+  if (timeOffset === undefined) {
+    runInAction(() => {
+      designContextState.compiling = designContextId;
+    });
+    previewState.beginCompilation();
   }
 
   const stopRestore = reaction(
@@ -1966,35 +2121,81 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
 
   try {
     const selectedKey = viewport.getSelected()?.key ?? 'root';
-    const compilation = compiler.compile(
-      codeEditor.project(),
-      file,
-      designContext,
-    );
+    const compilation =
+      timeOffset === undefined
+        ? compiler.compile(
+            codeEditor.project(),
+            file,
+            designContext,
+            undefined,
+            true,
+            animation.time,
+          )
+        : compiler.execute(timeOffset);
     const nextModule = await compilation;
-    if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
-    const cursor = codeEditor.cursorSource();
-    if (
-      cursor &&
-      !nextModule.sourceTargets.some(
-        ({sourceRef}) =>
-          sourceRef.file === cursor.file &&
-          sourceRef.start <= cursor.offset &&
-          cursor.offset <= sourceRef.end,
-      )
-    ) {
-      const context = designContextAt(nextModule, cursor.file, cursor.offset);
-      if (context && nextModule.activeDesignContextId !== context.id) {
-        preferredEvaluationContextId = context.id;
-        selectedDesignContextId = context.id;
-        selectedDesignInvocation = undefined;
-        void runModel({file: context.functionRef.file, id: context.id});
-        return;
+    if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
+      return false;
+    let cursor = codeEditor.cursorSource();
+    let selection: ReturnType<typeof sourceInspectionSelection> | undefined;
+    let scene: Awaited<ReturnType<typeof compiler.inspect>>;
+    let inspectionDiagnostic: ModelDiagnostic | undefined;
+    // Prepare the entire replacement before publishing it. A time frame does
+    // not change source focus or make the currently displayed UI unavailable.
+    while (true) {
+      const sourceCursor = cursor;
+      if (
+        sourceCursor &&
+        !nextModule.sourceTargets.some(
+          ({sourceRef}) =>
+            sourceRef.file === sourceCursor.file &&
+            sourceRef.start <= sourceCursor.offset &&
+            sourceCursor.offset <= sourceRef.end,
+        )
+      ) {
+        const context = designContextAt(
+          nextModule,
+          sourceCursor.file,
+          sourceCursor.offset,
+        );
+        if (context && nextModule.activeDesignContextId !== context.id) {
+          preferredEvaluationContextId = context.id;
+          runInAction(() => {
+            designContextState.selected = context.id;
+          });
+          selectedDesignInvocation = undefined;
+          void runModel({file: context.functionRef.file, id: context.id});
+          return false;
+        }
       }
+      const previousSource = viewport.sourceContext?.target.sourceRef;
+      selection = cursor
+        ? sourceInspectionSelection(
+            nextModule,
+            cursor.file,
+            cursor.offset,
+            preferredEvaluationContextId,
+            previousSource?.end === cursor.offset ? previousSource : undefined,
+          )
+        : undefined;
+      inspectionDiagnostic = undefined;
+      try {
+        scene = selection
+          ? await compiler.inspect(nextModule, selection)
+          : undefined;
+      } catch (error) {
+        inspectionDiagnostic = diagnosticFromError(error, 'inspect');
+      }
+      if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
+        return false;
+      const current = codeEditor.cursorSource();
+      if (current?.file === cursor?.file && current?.offset === cursor?.offset)
+        break;
+      cursor = current;
     }
     const retainOnError = previewState.module !== null;
     runInAction(() => {
       previewState.accept(request, nextModule);
+      previewState.inspectionDiagnostic = inspectionDiagnostic;
       codeEditor.setDesignArguments(nextModule.designArguments);
       const retainsSketch = sketchEditor.retain(cursor, nextModule.sketches);
       const currentSketch =
@@ -2012,32 +2213,22 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
         ...toolSourceRefs(nextModule),
         ...sketchEditor.sourceRefs(),
       ]);
-      selectedDesignContextId = nextModule.activeDesignContextId;
-      compilingDesignContextId = undefined;
+      designContextState.selected = nextModule.activeDesignContextId;
+      designContextState.compiling = undefined;
       if (
         preferredEvaluationContextId === designContextId &&
         !nextModule.activeDesignContextId
       ) {
         preferredEvaluationContextId = undefined;
       }
-      if (!cursor) {
-        viewport.renderModule(nextModule, selectedKey, retainOnError);
+      if (!inspectionDiagnostic) {
+        if (selection)
+          viewport.renderInspection(nextModule, scene, selection, selectedKey);
+        else viewport.renderModule(nextModule, selectedKey, retainOnError);
         previewState.presented(hasViewportTarget(), viewport.presentedModule);
         updatePresentedSourceSelection();
       }
     });
-    if (cursor) {
-      const previousSource = viewport.sourceContext?.target.sourceRef;
-      await inspectSourceSelection(
-        nextModule,
-        cursor.file,
-        cursor.offset,
-        selectedKey,
-        preferredEvaluationContextId,
-        previousSource?.end === cursor.offset ? previousSource : undefined,
-      );
-      if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
-    }
     if (following && pendingAgentFollow === following) {
       pendingAgentFollow = undefined;
       if (
@@ -2050,9 +2241,17 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     }
     refreshViewportFeedback();
     restoreModelStatus();
+    return (
+      !nextModule.diagnostic &&
+      !previewState.inspectionDiagnostic &&
+      (timeOffset === undefined || nextModule.timeOffset !== undefined)
+    );
   } catch (error) {
-    if (!previewState.isCurrent(request, codeEditor.sourceVersion())) return;
-    compilingDesignContextId = undefined;
+    if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
+      return false;
+    runInAction(() => {
+      designContextState.compiling = undefined;
+    });
     const diagnostic = diagnosticFromError(error, 'project');
     if (previewState.pendingFile || previewState.retainingView)
       clearPresentedView();
@@ -2062,6 +2261,7 @@ async function runModel(designContext = activeDesignContext()): Promise<void> {
     renderCurrentPanels();
     refreshViewportFeedback();
     restoreModelStatus();
+    return false;
   } finally {
     stopRestore();
   }
@@ -2076,14 +2276,16 @@ function activatePreviewFile(reload = false): void {
     )
   )
     return;
+  animation.stop(true);
   compiler.cancel();
-  compilingDesignContextId = undefined;
+  runInAction(() => {
+    designContextState.compiling = undefined;
+  });
   codeEditor.setDesignArguments([]);
   codeEditor.trackSourceRefs([]);
   if (previewState.retainingView) sketchEditor.invalidate();
   else clearPresentedView();
   renderElementsPanel();
-  renderDesignArguments(null);
 }
 
 function clearPresentedView(): void {
@@ -2108,10 +2310,20 @@ function activeViewportDiagnostic(): ModelDiagnostic | undefined {
 
 function refreshViewportFeedback(): void {
   observeViewportTarget();
-  const diagnostic = activeViewportDiagnostic();
+  if (!previewState.busy) restoreModelStatus();
+}
+
+function renderViewportDiagnostic({
+  diagnostic,
+  upstream,
+  editable,
+}: {
+  diagnostic: ModelDiagnostic | undefined;
+  upstream: boolean;
+  editable: boolean;
+}): void {
   viewportDiagnosticStack.replaceChildren();
   viewportDiagnosticStack.hidden = !diagnostic;
-  if (!previewState.busy) restoreModelStatus();
   if (!diagnostic) return;
 
   const item = document.createElement('section');
@@ -2130,12 +2342,7 @@ function refreshViewportFeedback(): void {
     button.type = 'button';
     button.className = 'viewport-diagnostic-action';
     button.textContent = action.label;
-    const active = sketchEditor.diagnosticScope?.at(-1)?.id;
-    const upstream =
-      !!diagnostic.relatedSketchIds?.length &&
-      (!active || !diagnostic.relatedSketchIds.includes(active));
-    button.disabled =
-      upstream || previewState.sourceVersion !== codeEditor.sourceVersion();
+    button.disabled = upstream || !editable;
     if (upstream) button.title = 'Open the owning sketch to apply this fix.';
     button.addEventListener('click', () => {
       if (previewState.sourceVersion !== codeEditor.sourceVersion()) {
@@ -2156,6 +2363,7 @@ function refreshViewportFeedback(): void {
 }
 
 function handleCompletionFocus(focus: CompletionFocus | undefined): void {
+  animation.pause();
   if (previewState.pendingFile) return;
   const previous = activeCompletionFocus;
   activeCompletionFocus = focus;
@@ -2221,6 +2429,7 @@ async function runCompletionPreview(
       activeDesignContext(preview.cursor),
       undefined,
       false,
+      animation.time,
     );
     previewState.beginCompilation(focus.memberName);
     const module = await compilation;
@@ -2283,6 +2492,7 @@ function scheduleModelRun(delay: number): void {
 }
 
 function requestModelUpdate(delay: number, interactive = false): void {
+  animation.stop();
   pendingAgentFollow = undefined;
   activeCompletionFocus = undefined;
   window.clearTimeout(completionPreviewTimer);
@@ -2314,7 +2524,9 @@ function selectCompiledEvaluationContext(
   selectedDesignInvocation = undefined;
   cancelPendingDesignCompile();
   preferredEvaluationContextId = contextId;
-  selectedDesignContextId = design ? contextId : undefined;
+  runInAction(() => {
+    designContextState.selected = design ? contextId : undefined;
+  });
   void inspectSourceSelection(
     module,
     cursor.file,
@@ -2329,13 +2541,17 @@ function selectCompiledEvaluationContext(
 function activateDesignContext(contextId: string): void {
   selectedDesignInvocation = undefined;
   preferredEvaluationContextId = contextId;
-  selectedDesignContextId = contextId;
+  runInAction(() => {
+    designContextState.selected = contextId;
+  });
   void runModel();
 }
 
 function cancelPendingDesignCompile(): void {
-  if (!compilingDesignContextId) return;
-  compilingDesignContextId = undefined;
+  if (!designContextState.compiling) return;
+  runInAction(() => {
+    designContextState.compiling = undefined;
+  });
   previewState.invalidate();
   compiler.cancel();
   restoreModelStatus();
@@ -2379,7 +2595,6 @@ function containsSourceRef(
 
 function selectOccurrence(occurrence: Occurrence, revealSource: boolean): void {
   renderElementsPanel(occurrence);
-  if (previewState.module) renderDesignArguments(previewState.module);
 
   if (revealSource) {
     const sourceRef = primarySource(occurrence.node);
@@ -2451,51 +2666,56 @@ function preferredObjectSource(
   );
 }
 
-function renderDesignArguments(module: ModelModule | null): void {
+function designArgumentsView() {
+  const module = previewState.module;
   const functionId = module ? inspectedFunctionId(module) : undefined;
-  const contexts =
+  const activeContextId =
+    viewport.sourceContext?.evaluation.contextId ?? designContextState.selected;
+  return (
     module?.designArguments.filter(
       context => context.functionId === functionId,
-    ) ?? [];
+    ) ?? []
+  ).map(context => ({
+    id: context.id,
+    functionName: context.functionName,
+    label: designArgumentCall(context),
+    active: context.id === activeContextId,
+    compiling: context.id === designContextState.compiling,
+  }));
+}
+
+function renderDesignArguments(
+  contexts: ReturnType<typeof designArgumentsView>,
+): void {
   designArgumentsPanel.hidden = contexts.length === 0;
   designArgumentsCount.textContent = String(contexts.length);
   designArgumentsFunction.textContent =
     contexts[0]?.functionName ?? 'No function context';
   designArgumentsOptions.replaceChildren();
-  if (contexts.length === 0) return;
-
-  const activeContextId =
-    viewport.sourceContext?.evaluation.contextId ?? selectedDesignContextId;
   contexts.forEach(context => {
-    const active = context.id === activeContextId;
-    const compiling = context.id === compilingDesignContextId;
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'design-argument-option';
-    button.classList.toggle('active', active);
-    button.classList.toggle('compiling', compiling);
-    button.setAttribute('aria-pressed', String(active));
-    button.title = designArgumentCall(context);
-    if (compiling) button.setAttribute('aria-busy', 'true');
-
+    button.classList.toggle('active', context.active);
+    button.classList.toggle('compiling', context.compiling);
+    button.setAttribute('aria-pressed', String(context.active));
+    button.title = context.label;
+    if (context.compiling) button.setAttribute('aria-busy', 'true');
     const label = document.createElement('span');
-    label.textContent = designArgumentCall(context);
+    label.textContent = context.label;
     const state = document.createElement('span');
     state.className = 'design-argument-state';
-    if (compiling) {
+    if (context.compiling) {
       const spinner = document.createElement('span');
       spinner.className = 'design-argument-spinner';
       spinner.setAttribute('aria-hidden', 'true');
       state.append(spinner, 'COMPILING');
-    } else {
-      state.textContent = active ? 'ACTIVE' : 'VIEW';
-    }
+    } else state.textContent = context.active ? 'ACTIVE' : 'VIEW';
     button.append(label, state);
     button.addEventListener('click', () => {
-      if (compilingDesignContextId === context.id) return;
-      if (!selectCompiledEvaluationContext(context.id, true)) {
+      if (designContextState.compiling === context.id) return;
+      if (!selectCompiledEvaluationContext(context.id, true))
         activateDesignContext(context.id);
-      }
     });
     designArgumentsOptions.append(button);
   });
@@ -2508,8 +2728,6 @@ function designArgumentCall(context: DesignArgumentContext): string {
 function renderCurrentPanels(): void {
   const occurrence = viewport.getSelected();
   renderElementsPanel(occurrence);
-  if (!occurrence && previewState.module)
-    renderDesignArguments(previewState.module);
 }
 
 function syncContextualTool(): void {
@@ -3572,6 +3790,7 @@ function sortedEdgeIds(edgeIds: readonly EdgeId[]): EdgeId[] {
 }
 
 function interruptCompileForTool(): boolean {
+  animation.stop();
   const scheduled = compileTimer !== undefined;
   const compiling = compiler.isCompiling();
   if (!scheduled && !compiling) return false;

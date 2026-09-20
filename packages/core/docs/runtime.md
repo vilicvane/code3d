@@ -5,6 +5,39 @@ sidebar:
   order: 11
 ---
 
+## Time offset
+
+`timeOffset(defaultValue = 0)` returns the offset from the playback origin in
+seconds, not the current clock time. In the App, the offset starts at zero and
+the playback controls advance it. Each execution receives one fixed value, so
+branches, loops and imported project functions can use time just like any other
+number. Outside a host evaluation, the function returns `defaultValue`, which must be finite.
+
+```ts
+import {timeOffset, rotate} from '@code3d/core';
+
+const time = timeOffset();
+const angle = (time * 60) % 360;
+// Use rotate(0, angle, 0) after the constraints in a relate callback.
+```
+
+Open the [rotating arm example](../../app/examples/constraints/animation.ts),
+select its final group, and use **Play**, **Pause**, and **Reset** below the
+viewport. Reset returns to zero and stays paused. Editing source pauses at the
+last accepted time; changing files starts again at zero. Moving the source
+selection or hiding the page pauses playback. Time is session-local and does
+not modify source files.
+
+The App re-executes the complete compiled project for each frame and reuses
+geometry caches. Playback follows elapsed time; expensive models produce fewer
+frames, with no backlog of frame requests. Read time outside `cache()` and pass
+it as an explicit argument to a cached computation whose result depends on it.
+
+This dedicated function provides explicitly parameterized motion; writable
+persistent state, solver history, timeline seeking and video export are not
+part of this API. Define periodic motion with ordinary expressions such as `%`
+or `Math.sin`.
+
 ## Cached computations and custom primitives
 
 `cache(fn)` memoizes synchronous, deterministic data computations;

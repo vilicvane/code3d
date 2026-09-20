@@ -24,6 +24,23 @@ default 2 GiB memory budget. It removes the least recently used historical
 results when over budget and keeps the current model's complete working set.
 This budget does not cap the total memory used by the browser tab.
 
+## Play an assembly animation
+
+A model that reads `timeOffset()` displays playback controls below the
+viewport. Select the complete assembly in the source, then choose **Play**.
+**Pause** keeps the current pose; **Reset** returns to zero seconds and stays
+paused. The time display shows the most recently completed frame.
+
+Editing code pauses playback and re-evaluates at the last accepted time.
+Changing files resets time to zero. Selecting another source expression or
+hiding the page also pauses playback. Source files remain unchanged by playback.
+Frame rate depends on model cost; slow frames skip elapsed time instead of
+queuing older frames.
+
+Try `/examples/constraints/animation.ts` in the file explorer. See
+[time offset](/docs/packages/core/runtime/#time-offset) for the authoring
+API and current scope.
+
 ## Performance settings
 
 Open **Settings** in the top bar to adjust performance preferences for all

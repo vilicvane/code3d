@@ -6,6 +6,7 @@ import {
 import {
   action,
   computed,
+  computedStruct,
   makeObservable,
   observableRef,
   runInAction,
@@ -74,7 +75,7 @@ export class ModelPreviewState {
       changingSource: observableRef,
       activity: observableRef,
       diagnosticsByEntry: observableRef,
-      editorDiagnostics: computed,
+      editorDiagnostics: computedStruct,
       clearEditorDiagnostics: action,
       file: observableRef,
       status: observableRef,

@@ -134,6 +134,50 @@ body;`,
       await page.locator('#elements-count').textContent(),
       String(expectedReferences),
     );
+    const refreshed = await page.evaluate(async () => {
+      const {ElementsPanel} = await import('/src/ui/elements-panel.ts');
+      const node = window.elementsTestApp.viewport.getSelected()!.node;
+      const body = document.createElement('div');
+      body.style.position = 'fixed';
+      const count = document.createElement('span');
+      document.body.append(body, count);
+      let preview:
+        | import('../../src/ui/elements-panel.ts').ElementsPanelPreview
+        | undefined;
+      const panel = new ElementsPanel(body, count, {
+        onPreview: value => {
+          preview = value;
+        },
+      });
+      try {
+        panel.render(node);
+        body.querySelectorAll<HTMLButtonElement>('[role=tab]')[1].click();
+        const row = body.querySelector<HTMLElement>('.element-row')!;
+        row.focus({preventScroll: true});
+        const next = {
+          ...node,
+          nodeId: 'next-frame',
+          elements: node.elements.map(element => ({...element})),
+        };
+        panel.render(next);
+        return {
+          rowRetained: body.querySelector('.element-row') === row,
+          focusRetained: document.activeElement === row,
+          currentPreview:
+            preview?.kind === 'reference' &&
+            preview.element === next.elements[0],
+        };
+      } finally {
+        panel.dispose();
+        body.remove();
+        count.remove();
+      }
+    });
+    assert.deepEqual(refreshed, {
+      rowRetained: true,
+      focusRetained: true,
+      currentPreview: true,
+    });
     await page
       .getByRole('listitem', {name: 'center, point', exact: true})
       .hover();
