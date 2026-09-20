@@ -75,11 +75,7 @@ const fileReader = (source: FileRequest['source']): ProjectFileReader => ({
 });
 const projectFiles = fileReader('project');
 const builtinFiles = fileReader('builtin');
-const compiler = new ProjectCompiler(
-  projectFiles,
-  builtinFiles,
-  esbuild,
-);
+const compiler = new ProjectCompiler(projectFiles, builtinFiles, esbuild);
 const autoImports = new ProjectAutoImportLoader(projectFiles, builtinFiles);
 
 let activeRequest: number | undefined;
