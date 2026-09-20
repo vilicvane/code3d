@@ -21,7 +21,8 @@ jobs:
   build:
     if: ${{ !inputs.example_pattern }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Workspace tests and the complete image batch can together exceed an hour.
+    timeout-minutes: 75
 
     steps:
       - name: Check out repository
