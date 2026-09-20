@@ -112,6 +112,35 @@ for example `[offset(0, 8, 0), rotate(0, 25, 0)]`. Read the
 before mixing these operations. Shared source, including a loop callback, changes
 all of its runtime instances.
 
+## Expose numeric inputs
+
+Use `input('Width', 40)` from Core for a numeric parameter shown in the App's
+Inputs form. Valid values re-evaluate the complete model as you type or drag,
+without waiting for blur or pointer release. Reset restores defaults; neither
+action changes source. Values are temporary for the current file session, and
+switching files clears them. Repeated names share one field and
+must declare the same default, range and step. Add a third argument such as
+`{min: 4, max: 100, step: 1}` to define bounds and control increments; providing
+both bounds adds a slider. Defaults must fit the range and form step. Selecting
+a call opens and highlights its field; Tab focuses its value. Empty or invalid
+text keeps the last valid model value; other fields continue to update. Read inputs
+outside cached functions and pass changing values explicitly. See
+[numeric inputs](../../packages/core/docs/runtime.md#numeric-inputs)
+and the [complete example](../../packages/app/examples/inputs.ts).
+
+## Animate an assembly
+
+Read `timeOffset()` from Core and derive angles or offsets with ordinary
+TypeScript. The offset is measured in seconds from the playback origin, starts
+at zero in the App, and is fixed during each full project evaluation. Use existing
+`group` and `relate` APIs to assemble parts. The App provides Play, Pause and Reset below the viewport; source edits
+pause playback. Read time before calling a cached function and pass it explicitly
+when its result depends on time. This API does not provide persistent writable
+state or history-dependent mechanism solving.
+
+See [time offset](../../packages/core/docs/runtime.md#time-offset) and the
+[rotating arm example](../../packages/app/examples/constraints/animation.ts).
+
 ## Reuse expensive computations
 
 Use `cache()` for deterministic synchronous data and `definePrimitive()` for

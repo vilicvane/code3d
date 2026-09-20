@@ -1,3 +1,4 @@
+import {input, timeOffset} from '@code3d/core';
 import {
   box,
   anchorAnnotation,
@@ -248,3 +249,18 @@ export function readonlyMeasurements() {
   group([body]).area;
   return values;
 }
+
+const offset: number = timeOffset();
+void offset;
+// @ts-expect-error A standalone default is a number of seconds.
+timeOffset('time');
+
+const width: number = input('Width', 40);
+const boundedWidth: number = input('Width', 40, {min: 1, max: 100, step: 0.5});
+// @ts-expect-error Input steps must be numeric.
+input('Width', 40, {step: '1'});
+void width;
+// @ts-expect-error Numeric inputs require a numeric default.
+input('Name', 'Box');
+// @ts-expect-error A default is required outside host evaluations.
+input('Width');

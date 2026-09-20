@@ -10,6 +10,21 @@ Agents editing a model through the App should read the [Markdown entry](../../do
 To develop Code3D itself, use the [development guide](../../.agents/docs/development.md)
 and [architecture overview](../../.agents/docs/architecture/overview.md).
 
+Models can declare `input('Width', 40, {min: 4, max: 100, step: 1})` to expose
+numeric fields and sliders in **Inputs**. Select an input call in the editor to
+expand the panel and highlight its field; Tab focuses and selects the value.
+Valid numbers update the model as you type, and sliders preview throughout the
+drag. Reset restores source defaults; values are local to the current file session.
+Try the [inputs example](examples/inputs.ts).
+The [robot arm](examples/assemblies/robot-arm.ts) uses five live sliders for base
+yaw, shoulder, elbow, wrist and gripper opening; nested groups carry downstream
+parts around each joint. Bored links sit in alternating layers, with clearance
+around the hinge pins and shoulder support.
+
+Models can read `timeOffset()` to animate an assembly. Play, Pause and Reset
+controls appear below the viewport; see [animation playback](../web/src/content/docs/docs/getting-started/app.md#play-an-assembly-animation)
+and the [rotating arm example](examples/constraints/animation.ts).
+
 ## Run locally
 
 From the repository root:

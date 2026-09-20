@@ -1,3 +1,6 @@
+export {input} from './input.js';
+export type {InputOptions} from './input.js';
+export {timeOffset} from './time-offset.js';
 export {cache} from './cached.js';
 export type {CacheOptions} from './cached.js';
 export {

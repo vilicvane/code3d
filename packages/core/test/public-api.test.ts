@@ -10,6 +10,8 @@ import * as browserAuthoring from '../bld/library/index.js';
 import * as browserReplicadInterop from '../bld/library/replicad.js';
 
 const authoringValues = [
+  'input',
+  'timeOffset',
   'dimension',
   'boundsAnnotation',
   'anchorAnnotation',

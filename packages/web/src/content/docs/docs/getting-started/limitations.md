@@ -30,6 +30,8 @@ Code3D is Prototype 01. APIs and project behavior are still evolving.
 - Browser-compatible npm packages installed in browser storage or in a local
   project’s `node_modules`.
 - Custom solid primitives with parameter tools, built through Replicad.
+- Numeric model inputs with live form updates, sliders and Reset, local to the current file session.
+- Time-driven assembly playback with `timeOffset()`, pause and reset.
 - STEP, STL, and 3MF model export, plus PNG viewport images.
 
 ## What to account for
@@ -77,6 +79,18 @@ For several relations involving align on one model, use numeric parameters or
 source edits so each change resolves the joint system. Spatial drags are
 available for a single align relation. See
 [geometric alignment](../../../../../../core/docs/relations.mdx#align-underlying-geometry).
+
+**Model input forms support numbers.** `input(name, defaultValue, options?)` accepts
+finite numeric values, with optional `min`, `max` and `step` for bounded controls
+and sliders. Text, boolean and option-list inputs, persistent form values and
+per-instance input scopes are not yet available. See
+[numeric inputs](/docs/packages/core/runtime/#numeric-inputs).
+
+**Animation uses explicit time-dependent parameters.** Each frame executes the
+complete project with a fixed time in seconds. Persistent writable state,
+previous-frame solver history, timeline seeking and video export are not
+supported. Playback frame rate depends on model cost. See
+[time offset](/docs/packages/core/runtime/#time-offset).
 
 **Intermediate relation stages have their own diagnostics.** Inspecting an
 early call can expose a conflict with inherited constraints even when the

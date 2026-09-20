@@ -12,6 +12,8 @@ export const isolatedBrowserTests = new Set([
 // workloads. Running them in a separate serial lane keeps those assertions
 // meaningful while ordinary files use bounded parallelism.
 export const exclusiveBrowserTests = new Set([
+  'animation.test.ts',
+  'inputs.test.ts',
   'agent-cancellation.test.ts',
   'agent-follow.test.ts',
   'agent-panel.test.ts',

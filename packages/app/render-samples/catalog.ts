@@ -560,6 +560,8 @@ export const sourceContextSets: Readonly<
 
 // Every runnable source, including reusable project parts, is checked by the example tests.
 export const exampleEntries = [
+  {file: 'inputs.ts'},
+  {file: 'assemblies/robot-arm.ts'},
   {file: 'packages/gears/parts.ts'},
   {file: 'packages/gears/assembly.ts'},
   {file: 'packages/screws.ts'},
@@ -588,6 +590,7 @@ export const exampleEntries = [
     file: 'constraints/combined-constraints.ts',
   },
   {file: 'constraints/transformations.ts'},
+  {file: 'constraints/animation.ts'},
   {
     file: 'operations/group.ts',
   },

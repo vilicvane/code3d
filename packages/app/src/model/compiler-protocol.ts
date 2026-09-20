@@ -10,7 +10,11 @@ import type {ModelProject} from '../project/project';
 import type {ProjectLanguage} from '../project/project-language';
 import type {CompilationCancellation} from './compilation-cancellation';
 import type {CompilationPhase} from './compilation-progress';
-import type {DesignContext, ModelModule} from './compiler';
+import type {
+  DesignContext,
+  ModelExecutionConfig,
+  ModelModule,
+} from './compiler';
 import type {DependencyArtifact} from './dependency-builder';
 import type {ModelDiagnostic} from './diagnostic';
 import type {InspectSelection} from './inspection';
@@ -72,6 +76,7 @@ type WorkerRequest =
   | Readonly<
       {
         kind: 'execute';
+        execution: ModelExecutionConfig;
         settings: ExecutionSettings;
         id: number;
         cancellation: CompilationCancellation;

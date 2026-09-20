@@ -166,7 +166,8 @@ export class ViewportCoordinateReference {
     this.camera.getWorldQuaternion(this.cameraQuaternion).invert();
     if (
       this.hasProjection &&
-      this.projectedCameraQuaternion.equals(this.cameraQuaternion)
+      // Restoring an unchanged view can introduce floating-point roundoff.
+      this.projectedCameraQuaternion.angleTo(this.cameraQuaternion) < 1e-7
     ) {
       return;
     }

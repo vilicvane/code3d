@@ -1,4 +1,12 @@
 import {
+  action,
+  computedStruct,
+  makeObservable,
+  observableRef,
+  reaction,
+  runInAction,
+} from 'mobx';
+import {
   compareTopologyIds,
   formatTopologyId,
   TopologyIdSet,
@@ -12,25 +20,107 @@ export type ElementsPanelPreview =
   | Readonly<{kind: 'reference'; element: ElementSnapshot}>
   | Readonly<{kind: 'topology'; topologyKind: TopologyKind; id: TopologyId}>;
 
+type ElementSelection =
+  | Readonly<{
+      kind: 'reference';
+      name: string;
+      elementKind: ElementSnapshot['kind'];
+    }>
+  | Extract<ElementsPanelPreview, {kind: 'topology'}>;
+
 export type ElementsPanelOptions = Readonly<{
   onPreview: (element: ElementsPanelPreview | undefined) => void;
 }>;
 
 export class ElementsPanel {
-  private hoveredElement?: ElementsPanelPreview;
-  private focusedElement?: ElementsPanelPreview;
+  private node?: ModelSnapshotObject;
+  private sourceElementName?: string;
+  private readonly stop: (() => void)[];
+  private hoveredElement?: ElementSelection;
+  private focusedElement?: ElementSelection;
   private activeTab: ElementsPanelPreview['kind'] = 'topology';
 
   constructor(
     private readonly body: HTMLElement,
     private readonly count: HTMLElement,
     private readonly options: ElementsPanelOptions,
-  ) {}
+  ) {
+    makeObservable<
+      this,
+      | 'node'
+      | 'sourceElementName'
+      | 'hoveredElement'
+      | 'focusedElement'
+      | 'structure'
+      | 'renderStructure'
+    >(this, {
+      node: observableRef,
+      sourceElementName: observableRef,
+      hoveredElement: observableRef,
+      focusedElement: observableRef,
+      structure: computedStruct,
+      render: action,
+      renderStructure: action,
+    });
+    this.stop = [
+      reaction(
+        () => this.structure,
+        () => this.renderStructure(),
+        {fireImmediately: true},
+      ),
+      reaction(
+        () => {
+          const selected = this.hoveredElement ?? this.focusedElement;
+          return selected ? {selected, node: this.node} : undefined;
+        },
+        value => {
+          const selected = value?.selected;
+          const element =
+            selected?.kind === 'reference'
+              ? value?.node?.elements.find(
+                  element =>
+                    element.name === selected.name &&
+                    element.kind === selected.elementKind,
+                )
+              : undefined;
+          this.options.onPreview(
+            selected?.kind === 'reference'
+              ? element && {kind: 'reference', element}
+              : selected,
+          );
+        },
+      ),
+    ];
+  }
 
   render(node?: ModelSnapshotObject, sourceElementName?: string): void {
+    this.node = node;
+    this.sourceElementName = sourceElementName;
+  }
+
+  dispose(): void {
+    this.stop.forEach(stop => stop());
+    this.options.onPreview(undefined);
+  }
+
+  private get structure() {
+    const node = this.node;
+    return (
+      node && {
+        name: node.name,
+        sourceElementName: this.sourceElementName,
+        references: node.elements.map(({name, kind}) => ({name, kind})),
+        surfaces: node.mesh?.surfaceGroups.map(group => group.surfaceId),
+        edges: node.mesh?.edgeGroups.map(group => group.edgeId),
+        vertices: node.mesh?.vertexIds,
+      }
+    );
+  }
+
+  private renderStructure(): void {
+    const node = this.node;
     this.hoveredElement = undefined;
     this.focusedElement = undefined;
-    this.options.onPreview(undefined);
     this.body.replaceChildren();
     this.count.textContent = '0';
 
@@ -65,8 +155,10 @@ export class ElementsPanel {
       tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-controls', content.id);
       tab.addEventListener('click', () => {
-        this.activeTab = category;
-        renderContent();
+        runInAction(() => {
+          this.activeTab = category;
+          renderContent();
+        });
       });
       tabs.append(tab);
       return tab;
@@ -91,9 +183,10 @@ export class ElementsPanel {
       buttons[next].click();
     });
     const renderContent = (): void => {
+      const node = this.node!;
+      const sourceElementName = this.sourceElementName;
       this.hoveredElement = undefined;
       this.focusedElement = undefined;
-      this.updatePreview();
       content.replaceChildren();
       buttons.forEach((button, index) => {
         const active = index === (this.activeTab === 'topology' ? 0 : 1);
@@ -130,7 +223,11 @@ export class ElementsPanel {
             this.elementRow(
               element.name,
               element.kind,
-              {kind: 'reference', element},
+              {
+                kind: 'reference',
+                name: element.name,
+                elementKind: element.kind,
+              },
               element.name === sourceElementName,
             ),
           );
@@ -159,7 +256,7 @@ export class ElementsPanel {
   private elementRow(
     label: string,
     elementKind: ElementSnapshot['kind'] | TopologyKind,
-    element: ElementsPanelPreview,
+    element: ElementSelection,
     sourceActive = false,
   ): HTMLElement {
     const row = document.createElement('div');
@@ -182,26 +279,26 @@ export class ElementsPanel {
     row.append(glyph, name, kind);
 
     row.addEventListener('pointerenter', () => {
-      this.hoveredElement = element;
-      this.updatePreview();
+      runInAction(() => {
+        this.hoveredElement = element;
+      });
     });
     row.addEventListener('pointerleave', () => {
-      if (this.hoveredElement === element) this.hoveredElement = undefined;
-      this.updatePreview();
+      runInAction(() => {
+        if (this.hoveredElement === element) this.hoveredElement = undefined;
+      });
     });
     row.addEventListener('focus', () => {
-      this.focusedElement = element;
-      this.updatePreview();
+      runInAction(() => {
+        this.focusedElement = element;
+      });
     });
     row.addEventListener('blur', () => {
-      if (this.focusedElement === element) this.focusedElement = undefined;
-      this.updatePreview();
+      runInAction(() => {
+        if (this.focusedElement === element) this.focusedElement = undefined;
+      });
     });
     return row;
-  }
-
-  private updatePreview(): void {
-    this.options.onPreview(this.hoveredElement ?? this.focusedElement);
   }
 }
 

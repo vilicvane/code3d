@@ -13,7 +13,11 @@ import type {
   CompilationPhase,
   CompilationProgress,
 } from './compilation-progress';
-import type {DesignContext, ModelModule} from './compiler';
+import type {
+  DesignContext,
+  ModelExecutionConfig,
+  ModelModule,
+} from './compiler';
 import {
   ArtifactChannel,
   type CompileRequest,
@@ -38,6 +42,7 @@ type PendingRequest = {
 } & (
   | {
       kind: 'compile';
+      execution: ModelExecutionConfig;
       onProgress?: CompilationProgress;
       resolve(module: ModelModule): void;
     }
@@ -85,7 +90,7 @@ export class ModelCompilerClient {
   language: ProjectLanguage | undefined;
   restored: Readonly<{rootPath: string; module: ModelModule}> | undefined;
   private lastEntry?: string;
-  private compiledArtifact?: string;
+  private executableArtifact?: ProjectBuildArtifact;
   private executorDependency?: string;
   private cacheReset?: {
     promise: Promise<void>;
@@ -111,20 +116,25 @@ export class ModelCompilerClient {
     ) => Promise<void>,
     private readonly projectIdentity?: string,
   ) {
-    makeObservable<this, 'pending' | 'exportable'>(this, {
-      pending: observableRef,
-      exportable: observableRef,
-      phase: observableRef,
-      restored: observableRef,
-      language: observableRef,
-      cancel: action,
-      dispose: action,
-      refreshProject: action,
-      clearBuildCache: action,
-      export: action,
-      previewSketchDrag: action,
-      inspectTopology: action,
-    });
+    makeObservable<this, 'pending' | 'exportable' | 'executableArtifact'>(
+      this,
+      {
+        pending: observableRef,
+        exportable: observableRef,
+        executableArtifact: observableRef,
+        phase: observableRef,
+        restored: observableRef,
+        language: observableRef,
+        cancel: action,
+        execute: action,
+        dispose: action,
+        refreshProject: action,
+        clearBuildCache: action,
+        export: action,
+        previewSketchDrag: action,
+        inspectTopology: action,
+      },
+    );
     this.compiler = this.createCompiler();
     this.executor = this.createExecutor();
   }
@@ -135,6 +145,7 @@ export class ModelCompilerClient {
     designContext?: DesignContext,
     onProgress?: CompilationProgress,
     persist = true,
+    execution: ModelExecutionConfig = {},
   ): Promise<ModelModule> {
     this.cancel();
     const revision = this.preparationRevision;
@@ -146,9 +157,10 @@ export class ModelCompilerClient {
         this.phase = undefined;
         this.restored = undefined;
         this.cachedResult = undefined;
-        this.compiledArtifact = undefined;
+        this.executableArtifact = undefined;
         this.pending = {
           kind: 'compile',
+          execution,
           id,
           resolve,
           reject,
@@ -196,6 +208,39 @@ export class ModelCompilerClient {
     );
   }
 
+  /** Re-evaluate the current compiled program without compiling or saving artifacts. */
+  execute(execution: ModelExecutionConfig): Promise<ModelModule> {
+    const artifact = this.executableArtifact;
+    if (!artifact || this.pending)
+      return Promise.reject(
+        new Error(
+          'Wait for the current model to finish before evaluating it again.',
+        ),
+      );
+    this.cancel();
+    this.publication = undefined;
+    this.exportable = undefined;
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending = {kind: 'compile', id, execution, resolve, reject};
+      this.queuedExecution = {
+        compileId: id,
+        request: {
+          kind: 'execute',
+          id: this.nextId++,
+          artifact,
+          execution,
+          cancellation: cancellation(),
+        },
+      };
+      this.startExecution();
+    });
+  }
+
+  canExecute(): boolean {
+    return !!this.executableArtifact && !this.pending;
+  }
+
   isCompiling(): boolean {
     return this.pending?.kind === 'compile';
   }
@@ -203,6 +248,7 @@ export class ModelCompilerClient {
   refreshProject(): void {
     this.cancel();
     this.language = undefined;
+    this.executableArtifact = undefined;
     this.compiler.postMessage({kind: 'refresh-project'});
   }
 
@@ -212,7 +258,7 @@ export class ModelCompilerClient {
     this.restartCompiler();
     this.restored = undefined;
     this.cachedResult = undefined;
-    this.compiledArtifact = undefined;
+    this.executableArtifact = undefined;
     this.publication = undefined;
     this.exportable = undefined;
     if (!this.projectIdentity) return Promise.resolve();
@@ -374,6 +420,7 @@ export class ModelCompilerClient {
     this.compiledArtifacts.reset();
     this.executionArtifacts.reset();
     this.runningCompile = undefined;
+    this.executableArtifact = undefined;
     this.exportable = undefined;
   }
   inspectTopology(
@@ -481,7 +528,11 @@ export class ModelCompilerClient {
           return;
         }
         if (data.kind === 'cached') {
-          if (data.id === this.pending?.id && !this.compiledArtifact) {
+          if (
+            this.pending?.kind === 'compile' &&
+            data.id === this.pending.id &&
+            !this.executableArtifact
+          ) {
             this.queuedExecution = {
               compileId: data.id,
               cached: true,
@@ -489,6 +540,7 @@ export class ModelCompilerClient {
                 kind: 'execute',
                 id: this.nextId++,
                 artifact: data.artifact,
+                execution: this.pending.execution,
                 cancellation: cancellation(),
               },
             };
@@ -500,9 +552,10 @@ export class ModelCompilerClient {
         if (data.id === this.runningCompile?.id)
           this.runningCompile = undefined;
         this.startCompile();
-        if (data.id !== this.pending?.id) return;
+        if (this.pending?.kind !== 'compile' || data.id !== this.pending.id)
+          return;
         if (data.kind === 'compiled') {
-          this.compiledArtifact = data.artifact.id;
+          this.executableArtifact = data.artifact;
           if (
             this.cachedResult?.requestId === data.id &&
             this.cachedResult.artifactId === data.artifact.id
@@ -526,6 +579,7 @@ export class ModelCompilerClient {
               kind: 'execute',
               id: this.nextId++,
               artifact: data.artifact,
+              execution: this.pending.execution,
               cancellation: cancellation(),
             },
           };
@@ -649,8 +703,8 @@ export class ModelCompilerClient {
     if (pending?.kind !== 'compile') return;
     this.pending = null;
     this.exportable = {module, compileId: executionId};
-    if (!module.diagnostic && this.compiledArtifact)
-      this.publishSuccessful(this.compiledArtifact);
+    if (!module.diagnostic && this.executableArtifact)
+      this.publishSuccessful(this.executableArtifact.id);
     pending.resolve(module);
   }
 

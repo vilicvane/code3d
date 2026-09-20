@@ -7,6 +7,7 @@ import {ModelPreviewState} from '../src/model/preview-state.ts';
 import type {InspectionSnapshot} from '../src/model/inspection-snapshot.ts';
 
 const emptyModule: ModelModule = {
+  inputs: [],
   sketches: new Map(),
   warnings: [],
   objects: new Map(),

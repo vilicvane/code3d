@@ -246,8 +246,6 @@ type ObjectHighlightAppearance =
     }>;
 
 class ObjectHighlight extends THREE.Group {
-  private readonly bounds = new THREE.Box3();
-  private readonly boundsPositions = new Float32Array(12 * 2 * 3);
   private readonly corners?: ScreenSpaceCornerLines;
   private boundsOverridden = false;
 
@@ -264,14 +262,29 @@ class ObjectHighlight extends THREE.Group {
     if (geometryHighlight) {
       this.add(geometryHighlight);
     } else {
+      // Directional faces already carry Core's exact local geometry bounds.
+      // Reusing them avoids both tessellation error and inflated world AABBs
+      // from rotated child boxes; the instance matrix is applied in update().
+      const up = node.elements.find(element => element.name === 'up');
+      const down = node.elements.find(element => element.name === 'down');
+      if (!up?.bound || !down?.bound) return;
+      const [x, y, z] = up.transform.position;
+      const [width, depth] = up.bound.size;
+      const boundsPositions = new Float32Array(12 * 2 * 3);
+      const edges = writeBoxEdges(
+        boundsPositions,
+        [x - width / 2, down.transform.position[1], z - depth / 2],
+        [x + width / 2, y, z + depth / 2],
+      );
       const lines = new ScreenSpaceCornerLines(
-        this.boundsPositions,
+        boundsPositions,
         appearance.color,
         appearance.lineWidth,
         appearance.opacity,
         false,
         appearance.renderOrder,
       );
+      lines.geometry.instanceCount = edges * 2;
       this.corners = lines;
       this.add(lines);
     }
@@ -281,24 +294,10 @@ class ObjectHighlight extends THREE.Group {
   }
 
   update(): void {
-    if (!this.corners) {
-      this.target.updateWorldMatrix(true, false);
-      this.matrix.copy(this.target.matrixWorld);
-      this.matrixWorldNeedsUpdate = true;
-      return;
-    }
-
-    this.bounds.setFromObject(this.target);
-    this.visible = !this.bounds.isEmpty() && !this.boundsOverridden;
-    if (!this.visible) return;
-
-    const {min, max} = this.bounds;
-    this.corners.geometry.instanceCount =
-      writeBoxEdges(
-        this.boundsPositions,
-        [min.x, min.y, min.z],
-        [max.x, max.y, max.z],
-      ) * 2;
+    this.target.updateWorldMatrix(true, false);
+    this.matrix.copy(this.target.matrixWorld);
+    this.matrixWorldNeedsUpdate = true;
+    this.visible = !this.corners || !this.boundsOverridden;
   }
 
   updateScreenSize(camera: THREE.Camera, width: number, height: number): void {

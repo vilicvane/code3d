@@ -44,10 +44,10 @@ test(
         onTopologySelection() {},
       });
       try {
-        const source = `import {box, group} from '@code3d/core';
-        const solid = box(20, 10, 30);
-        const assembly = group([solid]);
-        export default group([assembly, assembly]);`;
+        const source = `import {box, cylinder, group} from '@code3d/core';
+        const solid = cylinder(9, 32).rotate(33, 21, 17);
+        const assembly = group([solid, box(8, 6, 4).originOffset(-18, -9, 5)]);
+        export default group([assembly, assembly]).rotate(17, 29, 11);`;
         const module = await client.compile(
           {files: [{path: '/main.ts', source}]},
           '/main.ts',
@@ -110,15 +110,65 @@ test(
           if (viewport['selectionHighlight'])
             collect('box', key, viewport['selectionHighlight']);
           viewport['rendering'].renderFrame();
+          const highlight = viewport['selectionHighlight'];
+          if (highlight) {
+            // Compare the uploaded corner endpoints with the actual rendered
+            // bound surface in world space, including the occurrence transform.
+            const lines = highlight['corners']!;
+            const starts = lines.geometry.getAttribute('instanceStart');
+            const corners = Array.from(
+              {length: lines.geometry.instanceCount},
+              (_, i) =>
+                viewport['root'].position
+                  .clone()
+                  .fromBufferAttribute(starts, i)
+                  .applyMatrix4(lines.matrixWorld),
+            );
+            const instance = viewport['decorationLayers']
+              .get('group-bound')!
+              .find(
+                value =>
+                  value.occurrenceKey === key &&
+                  value.object.children[0].userData.decoration.kind ===
+                    'surface',
+              )!;
+            instance.object.traverse(object => {
+              if (!('isMesh' in object)) return;
+              const mesh = object as import('three').Mesh;
+              const positions = mesh.geometry.getAttribute('position');
+              for (let i = 0; i < positions.count; i++) {
+                const point = viewport['root'].position
+                  .clone()
+                  .fromBufferAttribute(positions, i)
+                  .applyMatrix4(mesh.matrixWorld);
+                const error = Math.min(
+                  ...corners.map(corner => corner.distanceTo(point)),
+                );
+                if (error > 1e-4)
+                  throw new Error(`Bound/box mismatch at ${key}: ${error}`);
+              }
+            });
+          }
           return drawn;
         };
+        const frames = [
+          ...groups.map(item => inspect(item.key)),
+          inspect(solid.key),
+          inspect(group.key),
+        ];
+        for (const name of ['down', 'left', 'right', 'front', 'back']) {
+          viewport.setDecorations(
+            'group-bound',
+            namedElementDecorations(
+              group.node,
+              group.node.elements.find(element => element.name === name)!,
+            ),
+          );
+          for (const item of groups) inspect(item.key);
+        }
         return {
           keys: groups.map(item => item.key),
-          frames: [
-            ...groups.map(item => inspect(item.key)),
-            inspect(solid.key),
-            inspect(group.key),
-          ],
+          frames,
         };
       } finally {
         client.dispose();

@@ -1,7 +1,15 @@
 import * as monaco from 'monaco-editor/editor';
 import {AgentError} from '@code3d/agent';
 import {diffChars} from 'diff';
-import {action, autorun, computed, makeObservable, observableRef} from 'mobx';
+import {
+  action,
+  autorun,
+  compareStructural,
+  computed,
+  makeObservable,
+  observableRef,
+  reaction,
+} from 'mobx';
 import {randomAgentColor} from './agent/colors';
 import {projectTypeScriptWorker} from './monaco/typescript-worker-client';
 import type {CursorTypeInfo} from './monaco/type-info';
@@ -1412,61 +1420,70 @@ export class CodeEditor {
     this.decorationContext = decorationContext;
     const decorations = this.editor.createDecorationsCollection();
     let revealed: string | undefined;
-    const stop = autorun(() => {
-      const current = this.decorationContext?.() ?? context();
-      const state = this.cursorState;
-      const model = state?.model;
-      const cursor = state?.cursor;
-      const marks: monaco.editor.IModelDeltaDecoration[] = [];
-      let reveal: monaco.Range | undefined;
-      if (current && model && cursor) {
-        if (!state.focused) {
-          const position = model.getPositionAt(cursor.offset);
-          const word = model.getWordAtPosition(position);
-          if (word && !current.caretOnly)
+    const stop = reaction(
+      () => {
+        const current = this.decorationContext?.() ?? context();
+        const state = this.cursorState;
+        const model = state?.model;
+        const cursor = state?.cursor;
+        const marks: monaco.editor.IModelDeltaDecoration[] = [];
+        let reveal: monaco.Range | undefined;
+        if (current && model && cursor) {
+          if (!state.focused) {
+            const position = model.getPositionAt(cursor.offset);
+            const word = model.getWordAtPosition(position);
+            if (word && !current.caretOnly)
+              marks.push({
+                range: new monaco.Range(
+                  position.lineNumber,
+                  word.startColumn,
+                  position.lineNumber,
+                  word.endColumn,
+                ),
+                options: {inlineClassName: 'code3d-context-word'},
+              });
             marks.push({
-              range: new monaco.Range(
-                position.lineNumber,
-                word.startColumn,
-                position.lineNumber,
-                word.endColumn,
-              ),
-              options: {inlineClassName: 'code3d-context-word'},
-            });
-          marks.push({
-            range: monaco.Range.fromPositions(position),
-            options: {
-              beforeContentClassName: 'code3d-context-caret',
-              showIfCollapsed: true,
-            },
-          });
-        }
-        const refs = current.tool.map(ref => this.resolveSourceRef(ref));
-        if (refs.length && refs.every(ref => ref?.file === cursor.file)) {
-          const range = sourceRange(model, {
-            file: cursor.file,
-            start: Math.min(...refs.map(ref => ref!.start)),
-            end: Math.max(...refs.map(ref => ref!.end)),
-          });
-          marks.push({
-            range,
-            options: {
-              className: 'code3d-active-tool-source',
-              inlineClassName: 'code3d-active-tool-source-inline',
-              overviewRuler: {
-                color: '#d8ff3e88',
-                position: monaco.editor.OverviewRulerLane.Right,
+              range: monaco.Range.fromPositions(position),
+              options: {
+                beforeContentClassName: 'code3d-context-caret',
+                showIfCollapsed: true,
               },
-            },
-          });
-          reveal = range;
+            });
+          }
+          const refs = current.tool.map(ref => this.resolveSourceRef(ref));
+          if (refs.length && refs.every(ref => ref?.file === cursor.file)) {
+            const range = sourceRange(model, {
+              file: cursor.file,
+              start: Math.min(...refs.map(ref => ref!.start)),
+              end: Math.max(...refs.map(ref => ref!.end)),
+            });
+            marks.push({
+              range,
+              options: {
+                className: 'code3d-active-tool-source',
+                inlineClassName: 'code3d-active-tool-source-inline',
+                overviewRuler: {
+                  color: '#d8ff3e88',
+                  position: monaco.editor.OverviewRulerLane.Right,
+                },
+              },
+            });
+            reveal = range;
+          }
         }
-      }
-      decorations.set(marks);
-      const key = reveal && cursor && `${cursor.file}:${reveal.toString()}`;
-      if (reveal && key !== revealed) this.revealSourceRange(reveal);
-      revealed = key;
-    });
+        return {
+          marks,
+          reveal,
+          key: reveal && cursor && `${cursor.file}:${reveal.toString()}`,
+        };
+      },
+      ({marks, reveal, key}) => {
+        decorations.set(marks);
+        if (reveal && key !== revealed) this.revealSourceRange(reveal);
+        revealed = key;
+      },
+      {fireImmediately: true, equals: compareStructural},
+    );
     this.editor.onDidDispose(stop);
   }
 
