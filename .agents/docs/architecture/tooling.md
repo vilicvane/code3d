@@ -339,7 +339,7 @@ loft 参数预览突出当前截面，其他截面和完成形体作为淡灰上
 
 ## 编辑器状态与诊断
 
-项目语言快照区分真实依赖文件与声明映射的导航文件，并显式传递当前项目根文件。
+项目语言快照区分真实依赖文件、声明映射的导航文件与可选的包导出索引，并显式传递当前项目根文件。
 Monaco Worker 不再把 mirror models 和全部 extra libs 当作根文件；生成的 tooling
 导入单独提供为编译根，不进入用户文件快照。真实引用的声明继续参与类型解析，
 并遵循 App 的 `skipLibCheck`；仅沿声明映射打开的源码不参与项目检查，也不能
@@ -357,7 +357,7 @@ Program。CodeEditor 排除仅导航文件的编译/执行输入，只读状态�
 
 语言依赖加载期间只发布语法诊断。CompilerClient 以 observable 快照表示当前编译的
 语言环境：开始编译、刷新或重建编译 Worker 时失效，只有当前请求的语言消息可以
-重新发布；装配层 autorun 将其同步到 CodeEditor，编辑器销毁时释放。编辑器保留
+重新发布。请求身份保留到下一次取消或编译，允许模型完成后补充可选索引；装配层 autorun 将其同步到 CodeEditor，编辑器销毁时释放。编辑器保留
 上一份文件快照供补全与导航使用，就绪标记经 extra libs 同步给语言 Worker，
 不通过切换 Monaco 诊断配置重启 Worker。包内容失效后的不完整快照同样标记未就绪。
 语义、建议和编译选项诊断等待就绪，真实加载失败仍由原有包/模型错误通道展示。
@@ -366,6 +366,32 @@ Monaco 诊断适配器的补丁在每个异步边界核对文档版本、extra l
 身份。依赖更新事件尚未派发时，快照身份也会立即失效；内容修改、语言配置更新及
 销毁前发出的旧请求不能回写标记。验证见
 [语言就绪与迟到诊断](../../../packages/app/test/browser/language-readiness.test.ts)。
+
+[快速修复适配](../../../packages/app/src/monaco/typescript-code-actions.ts)替代 Monaco
+内置 code-action provider，按各条诊断的实际范围查询 Worker。补全和快速修复共用
+导入偏好及格式；单符号修复与 TypeScript 的文件级 import fix 都通过带文档版本的
+Monaco WorkspaceEdit 应用。菜单查询只提供批量操作的标题，选中后通过
+`resolveCodeAction` 让语言服务合并为一次可撤销事务，不提前计算整文件修改。每个异步
+边界核对取消、文档版本、语言及 extra libs/编译配置身份；不应用陈旧修复，也不把
+涉及文件创建、其他文件或额外命令的修复误写入当前文件。
+
+可见依赖的导出由 [ProjectAutoImportLoader](../../../packages/app/src/project/project-auto-imports.ts)
+在编译 Worker 中独立准备。模型语言加载只读取真实依赖，后台索引有自己的文件缓存、
+Program 与请求代次，不阻塞编译/执行，也不让未使用包的 I/O 错误进入模型错误通道。
+失败路径保留在索引快照中，下次请求重新读取；其他可用包继续提供候选。请求串行更新
+缓存，排队时合并过期请求，取消、刷新或切换包作用域后不发布旧结果。
+两者复用 [TypeScriptFiles](../../../packages/app/src/project/typescript-files.ts) 的同步发现/
+异步读取规则，各自拥有加载状态。索引声明单独传递，不混入声明映射导航列表；编辑器
+合并 extra libs 时真实编译文件优先，索引文件不能改变模型 Program 的全局类型。
+
+索引从当前包清单的可见依赖中枚举根入口及 `exports` 明确列出的子路径，由 TypeScript
+按项目的 types/browser/import 条件解析，不暴露 null 封闭入口。现有文件接口按路径
+读取，不枚举目录，因此不展开通配符导出；显式导入仍沿正常解析路径工作。
+Worker 经 TypeScript 的 `getPackageJsonAutoImportProvider` 使用独立入口，extra libs
+更新同步索引服务。内置模式的虚拟 package.json 包含可用内置依赖，使导入过滤与
+实际包解析一致，不改写磁盘清单。验证见
+[语言加载与索引隔离](../../../packages/app/test/project-language.test.ts)与
+[补全及导入修复](../../../packages/app/test/browser/completion-language.test.ts)。
 
 语法着色由 Monaco 的 tokenizer 和可见行调度负责，与 TypeScript Worker 诊断、
 未使用变量淡化和括号配色分别运行。Monaco 0.56 的初次渲染没有登记可见行，

@@ -3,7 +3,8 @@
 import * as esbuild from 'esbuild-wasm';
 import esbuildWasmUrl from 'esbuild-wasm/esbuild.wasm?url';
 import compilerRecipe from 'virtual:code3d-compiler-recipe';
-import type {ProjectFileInfo} from '../project/file-reader';
+import type {ProjectFileInfo, ProjectFileReader} from '../project/file-reader';
+import {ProjectAutoImportLoader} from '../project/project-auto-imports';
 import {ArtifactStoreConnection} from './artifact-store';
 import {
   BuildArtifactCache,
@@ -61,38 +62,25 @@ function cacheFor(identity: string): BuildArtifactCache {
   return cachedProject.cache;
 }
 let clearing = Promise.resolve();
+const fileReader = (source: FileRequest['source']): ProjectFileReader => ({
+  readFile: path =>
+    requestFile<Uint8Array | undefined>(source, {operation: 'readFile', path}),
+  stat: path =>
+    requestFile<ProjectFileInfo | undefined>(source, {operation: 'stat', path}),
+  statMany: paths =>
+    requestFile<readonly (ProjectFileInfo | undefined)[]>(source, {
+      operation: 'statMany',
+      paths,
+    }),
+});
+const projectFiles = fileReader('project');
+const builtinFiles = fileReader('builtin');
 const compiler = new ProjectCompiler(
-  {
-    readFile: path =>
-      requestFile<Uint8Array | undefined>('project', {
-        operation: 'readFile',
-        path,
-      }),
-    stat: path =>
-      requestFile<ProjectFileInfo | undefined>('project', {
-        operation: 'stat',
-        path,
-      }),
-    statMany: paths =>
-      requestFile<readonly (ProjectFileInfo | undefined)[]>('project', {
-        operation: 'statMany',
-        paths,
-      }),
-  },
-  {
-    readFile: path =>
-      requestFile<Uint8Array | undefined>('builtin', {
-        operation: 'readFile',
-        path,
-      }),
-    stat: path =>
-      requestFile<ProjectFileInfo | undefined>('builtin', {
-        operation: 'stat',
-        path,
-      }),
-  },
+  projectFiles,
+  builtinFiles,
   esbuild,
 );
+const autoImports = new ProjectAutoImportLoader(projectFiles, builtinFiles);
 
 let activeRequest: number | undefined;
 const restoring = new Map<number, Promise<void>>();
@@ -101,6 +89,7 @@ const restoring = new Map<number, Promise<void>>();
 // Cancellation retains the compiler's contexts for the next revision.
 async function compile(request: CompileRequest): Promise<void> {
   activeRequest = request.id;
+  autoImports.cancel();
   const checkCancelled = () =>
     checkCompilationCancellation(request.cancellation);
   try {
@@ -123,7 +112,21 @@ async function compile(request: CompileRequest): Promise<void> {
       request.project,
       request.rootPath,
       request.designContext,
-      language => send({kind: 'language', id: request.id, language}),
+      language => {
+        send({kind: 'language', id: request.id, language});
+        // Export discovery is optional and can finish after model execution.
+        void autoImports.load(request.project, request.rootPath, language).then(
+          index => {
+            if (index && !Atomics.load(request.cancellation, 0))
+              send({
+                kind: 'language',
+                id: request.id,
+                language: {...language, autoImports: index},
+              });
+          },
+          error => console.error('Package export discovery failed:', error),
+        );
+      },
       phase => send({kind: 'progress', id: request.id, phase}),
       checkCancelled,
       request.projectIdentity
@@ -238,10 +241,12 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
     restoring.set(data.id, pending);
   } else if (data.kind === 'compile') {
     void compile(data);
-  } else if (data.kind === 'cancel-compile' && activeRequest === data.id) {
-    void compiler.cancel();
+  } else if (data.kind === 'cancel-compile') {
+    autoImports.cancel();
+    if (activeRequest === data.id) void compiler.cancel();
   } else if (data.kind === 'refresh-project') {
     compiler.refreshProject();
+    autoImports.reset();
   } else if (data.kind === 'clear-build-cache') {
     // The client starts this command in a fresh compiler Worker. Any new source
     // or restore request waits until the old project's disk records are gone.

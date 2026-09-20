@@ -765,3 +765,19 @@ test('local folders resolve latest workspace imports and their closure without a
     '/node_modules/@code3d/core/index.js',
   );
 });
+
+test('built-in dependencies are visible to auto-imports without rewriting the stored manifest', async () => {
+  const files = memoryFiles({
+    '/package.json': {type: 'module', dependencies: {external: '1'}},
+  });
+  const stored = files.contents.get('/package.json');
+  const packages = new ProjectPackages(files, memoryFiles());
+  await packages.update(emptyProject);
+  const metadata = JSON.parse(
+    new TextDecoder().decode(await packages.readFile('/package.json')),
+  );
+  assert.equal(metadata.dependencies.external, '1');
+  for (const name of packages.packageSpecifiers)
+    assert.equal(metadata.dependencies[name], '*');
+  assert.equal(files.contents.get('/package.json'), stored);
+});

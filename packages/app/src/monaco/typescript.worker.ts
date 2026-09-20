@@ -13,7 +13,7 @@ import {
   typeScriptWorkerRequests,
 } from './typescript-file-names';
 
-const completionPreferences = {
+const languagePreferences = {
   quotePreference: 'single',
   includeCompletionsForModuleExports: true,
   includeCompletionsForImportStatements: true,
@@ -27,7 +27,7 @@ const completionPreferences = {
   includePackageJsonAutoImports: 'on',
 } satisfies typeScript.UserPreferences;
 
-const completionFormatSettings = {
+const languageFormatSettings = {
   indentSize: 2,
   tabSize: 2,
   newLineCharacter: '\n',
@@ -43,11 +43,12 @@ const completionFormatSettings = {
 class ProjectTypeScriptWorker extends TypeScriptWorker {
   private readonly annotations = new AnnotationLanguageService(this);
   private navigationWorker?: ProjectTypeScriptWorker;
+  private autoImportWorker?: ProjectTypeScriptWorker;
 
   constructor(
     private readonly context: unknown,
     private readonly createData: unknown,
-    private readonly navigationRoot?: string,
+    private readonly isolatedRoot?: string,
   ) {
     super(context, createData);
   }
@@ -66,7 +67,7 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
       !this.getScriptSnapshot(file)
     )
       return this;
-    if (this.navigationWorker?.navigationRoot !== file) {
+    if (this.navigationWorker?.isolatedRoot !== file) {
       this.navigationWorker?.getLanguageService().dispose();
       this.navigationWorker = new ProjectTypeScriptWorker(
         this.context,
@@ -85,6 +86,32 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
   ) {
     await super.updateExtraLibs(libs);
     await this.navigationWorker?.updateExtraLibs(libs);
+    await this.autoImportWorker?.updateExtraLibs(libs);
+  }
+
+  /** TypeScript's export index is a separate program so unused packages cannot add globals. */
+  getPackageJsonAutoImportProvider(): typeScript.Program | undefined {
+    if (this.isolatedRoot) return undefined;
+    const snapshot = this.getScriptSnapshot(
+      '/workspace/.__code3d-auto-import-root.json',
+    );
+    const root =
+      snapshot &&
+      (JSON.parse(snapshot.getText(0, snapshot.getLength())) as string | null);
+    if (this.autoImportWorker?.isolatedRoot !== root) {
+      this.autoImportWorker?.getLanguageService().dispose();
+      this.autoImportWorker = root
+        ? new ProjectTypeScriptWorker(
+            this.context,
+            {
+              ...(this.createData as object),
+              extraLibs: this.getExtraLibs(),
+            },
+            root,
+          )
+        : undefined;
+    }
+    return this.autoImportWorker?.getLanguageService().getProgram();
   }
 
   private isProjectFile(file: string): boolean {
@@ -212,7 +239,7 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
   }
 
   override getScriptFileNames(): string[] {
-    if (this.navigationRoot) return [this.navigationRoot];
+    if (this.isolatedRoot) return [this.isolatedRoot];
     const roots = this.getScriptSnapshot('/workspace/.__code3d-roots.json');
     return roots
       ? (JSON.parse(roots.getText(0, roots.getLength())) as string[])
@@ -228,12 +255,12 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
       : undefined;
     const annotations =
       sourceFile &&
-      this.annotations.completions(sourceFile, position, completionPreferences);
+      this.annotations.completions(sourceFile, position, languagePreferences);
     if (annotations) return annotations;
     return this.getLanguageService().getCompletionsAtPosition(
       fileName,
       position,
-      completionPreferences,
+      languagePreferences,
     );
   }
 
@@ -253,18 +280,48 @@ class ProjectTypeScriptWorker extends TypeScriptWorker {
         sourceFile,
         position,
         name,
-        completionFormatSettings,
-        completionPreferences,
+        languageFormatSettings,
+        languagePreferences,
       );
     if (annotation) return annotation;
     return this.getLanguageService().getCompletionEntryDetails(
       fileName,
       position,
       name,
-      completionFormatSettings,
+      languageFormatSettings,
       source,
-      completionPreferences,
+      languagePreferences,
       data,
+    );
+  }
+
+  async getProjectCodeFixes(
+    fileName: string,
+    start: number,
+    end: number,
+    errorCodes: readonly number[],
+  ): Promise<readonly typeScript.CodeFixAction[]> {
+    if (!this.languageReady) return [];
+    return this.getLanguageService().getCodeFixesAtPosition(
+      fileName,
+      start,
+      end,
+      errorCodes,
+      languageFormatSettings,
+      languagePreferences,
+    );
+  }
+
+  async getProjectCombinedCodeFix(
+    fileName: string,
+    fixId: string,
+  ): Promise<typeScript.CombinedCodeActions> {
+    if (!this.languageReady) return {changes: []};
+    return this.getLanguageService().getCombinedCodeFix(
+      {type: 'file', fileName},
+      fixId,
+      languageFormatSettings,
+      languagePreferences,
     );
   }
 

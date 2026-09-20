@@ -72,6 +72,7 @@ export class ModelCompilerClient {
   private readonly compiledArtifacts = new ArtifactChannel();
   private readonly executionArtifacts = new ArtifactChannel();
   private preparationRevision = 0;
+  private languageRequestId?: number;
   private pending: PendingRequest | null = null;
   private queuedCompile?: CompileRequest;
   private runningCompile?: CompileRequest;
@@ -152,6 +153,7 @@ export class ModelCompilerClient {
     return new Promise((resolve, reject) =>
       runInAction(() => {
         const id = this.nextId++;
+        this.languageRequestId = id;
         this.language = undefined;
         this.exportable = undefined;
         this.phase = undefined;
@@ -346,6 +348,7 @@ export class ModelCompilerClient {
     if (this.restoreCancellation) Atomics.store(this.restoreCancellation, 0, 1);
     this.restoreCancellation = undefined;
     this.preparationRevision++;
+    this.languageRequestId = undefined;
     const pending = this.pending;
     this.pending = null;
     this.queuedCompile = undefined;
@@ -524,7 +527,7 @@ export class ModelCompilerClient {
           return;
         }
         if (data.kind === 'language') {
-          if (data.id === this.pending?.id) this.language = data.language;
+          if (data.id === this.languageRequestId) this.language = data.language;
           return;
         }
         if (data.kind === 'cached') {
@@ -725,6 +728,7 @@ export class ModelCompilerClient {
     pending.reject(error);
   }
   private restartCompiler(): void {
+    this.languageRequestId = undefined;
     this.language = undefined;
     this.finishCacheReset(new Error('The compiler worker was restarted.'));
     this.runningCompile = undefined;

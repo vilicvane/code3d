@@ -45,6 +45,7 @@ import {
   typeScriptCompletionItemKind,
 } from './monaco/typescript-completions';
 import type {TypeScriptCompletionEntry} from './monaco/typescript-protocol';
+import {registerProjectTypeScriptCodeActions} from './monaco/typescript-code-actions';
 import {registerProjectTypeScriptSelectionRanges} from './monaco/typescript-selection-ranges';
 import {EmbeddedCodeProjection} from './monaco/embedded-code';
 import {code3dAnnotations, type Code3dAnnotation} from './model/annotations';
@@ -169,7 +170,7 @@ const languageCompilerOptions = {
   target: typeScriptLanguage.ScriptTarget.ESNext,
   lib: ['lib.esnext.d.ts'],
   module: typeScriptLanguage.ModuleKind.ESNext,
-  // Monaco's enum predates Bundler; the project worker uses TypeScript 6.
+  // Monaco's public enum predates Bundler.
   moduleResolution: 100 as typeScriptLanguage.ModuleResolutionKind,
   customConditions: ['browser'],
   allowNonTsExtensions: true,
@@ -185,18 +186,23 @@ typeScriptLanguage.javascriptDefaults.setCompilerOptions({
   ...languageCompilerOptions,
   allowJs: true,
 });
-typeScriptLanguage.typescriptDefaults.setEagerModelSync(true);
-typeScriptLanguage.javascriptDefaults.setEagerModelSync(true);
-typeScriptLanguage.typescriptDefaults.setDiagnosticsOptions({
-  noSemanticValidation: false,
-  noSyntaxValidation: false,
-});
+for (const defaults of [
+  typeScriptLanguage.typescriptDefaults,
+  typeScriptLanguage.javascriptDefaults,
+]) {
+  defaults.setEagerModelSync(true);
+  defaults.setDiagnosticsOptions({
+    noSemanticValidation: false,
+    noSyntaxValidation: false,
+  });
+}
 let projectPackageSpecifiers: readonly string[] = [];
 registerProjectTypeScriptCompletions(
   projectLanguageSelector,
   () => projectPackageSpecifiers,
 );
 registerProjectTypeScriptSelectionRanges(projectLanguageSelector);
+registerProjectTypeScriptCodeActions(projectLanguageSelector);
 
 monaco.editor.addKeybindingRule({
   keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyP,
@@ -375,8 +381,11 @@ export class CodeEditor {
 
   private isNavigationSource(path: string): boolean {
     return (
-      this.projectLanguage?.navigationFiles.some(file => file.path === path) ??
-      false
+      this.projectLanguage?.navigationFiles.some(file => file.path === path) ||
+      (!!this.projectLanguage?.autoImports?.files.some(
+        file => file.path === path,
+      ) &&
+        !this.projectLanguage.files.some(file => file.path === path))
     );
   }
 
@@ -415,6 +424,7 @@ export class CodeEditor {
       this.setProjectLanguage(
         {
           ...this.projectLanguage,
+          autoImports: undefined,
           files: this.projectLanguage.files.filter(
             file => !affected(file.path),
           ),
@@ -464,19 +474,34 @@ export class CodeEditor {
     this.projectLanguage = language;
     projectPackageSpecifiers = language.packageSpecifiers;
     this.navigationFiles = new Map(
-      [...language.files, ...language.navigationFiles].map(file => [
-        file.path,
-        file.source,
-      ]),
+      [
+        ...(language.autoImports?.files ?? []),
+        ...language.files,
+        ...language.navigationFiles,
+      ].map(file => [file.path, file.source]),
     );
     const extraLibs = [
-      ...language.files,
-      ...language.navigationFiles,
-      ...(language.toolingFile ? [language.toolingFile] : []),
+      ...new Map(
+        [
+          ...(language.autoImports?.files ?? []),
+          ...language.files,
+          ...language.navigationFiles,
+          ...(language.toolingFile ? [language.toolingFile] : []),
+          ...(language.autoImports ? [language.autoImports.root] : []),
+        ].map(file => [file.path, file]),
+      ).values(),
     ].map(file => ({
       filePath: monaco.Uri.file('/workspace' + file.path).toString(),
       content: file.source,
     }));
+    extraLibs.push({
+      filePath: 'file:///workspace/.__code3d-auto-import-root.json',
+      content: JSON.stringify(
+        language.autoImports
+          ? '/workspace' + language.autoImports.root.path
+          : null,
+      ),
+    });
     extraLibs.push({
       filePath: 'file:///workspace/.__code3d-language-ready.json',
       content: JSON.stringify(ready),
@@ -494,10 +519,10 @@ export class CodeEditor {
       filePath: 'file:///workspace/.__code3d-realpaths.json',
       content: JSON.stringify(
         Object.fromEntries(
-          Object.entries(language.realPaths ?? {}).map(([from, to]) => [
-            '/workspace' + from,
-            '/workspace' + to,
-          ]),
+          Object.entries({
+            ...language.autoImports?.realPaths,
+            ...language.realPaths,
+          }).map(([from, to]) => ['/workspace' + from, '/workspace' + to]),
         ),
       ),
     });
