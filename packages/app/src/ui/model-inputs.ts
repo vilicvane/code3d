@@ -1,20 +1,92 @@
-import {compareStructural, reaction, type IReactionDisposer} from 'mobx';
+import {reaction, type IReactionDisposer} from 'mobx';
 import type {ModelInputs} from '../model/inputs';
 import type {DockPanelCoordinator, DockPanelController} from './dock-panels';
 
-type InputRow = {
-  root: HTMLDivElement;
-  input: HTMLInputElement;
-  slider: HTMLInputElement;
-  value: number;
-};
+type InputField = ModelInputs['fields'][number];
+
+/** Own a field's native draft and the last numeric value accepted by the model. */
+class NumericInputField {
+  readonly root = document.createElement('div');
+  private readonly input = document.createElement('input');
+  private readonly slider = document.createElement('input');
+  private acceptedValue?: number;
+
+  constructor(name: string) {
+    this.root.className = 'model-input-field';
+    const label = document.createElement('label');
+    label.className = 'model-input-label';
+    const title = document.createElement('span');
+    title.textContent = name;
+    const control = document.createElement('div');
+    control.className = 'model-input-control';
+    this.input.type = 'number';
+    this.input.required = true;
+    this.input.name = name;
+    this.input.setAttribute('aria-label', name);
+    const hint = document.createElement('kbd');
+    hint.className = 'model-input-tab-hint';
+    hint.textContent = 'Tab';
+    hint.setAttribute('aria-hidden', 'true');
+    control.append(this.input, hint);
+    label.append(title, control);
+    this.slider.type = 'range';
+    this.slider.name = name;
+    this.slider.tabIndex = -1;
+    this.slider.setAttribute('aria-label', `${name} slider`);
+    this.root.append(label, this.slider);
+  }
+
+  render(field: InputField): void {
+    this.input.min = this.slider.min =
+      field.min === undefined ? '' : String(field.min);
+    this.input.max = this.slider.max =
+      field.max === undefined ? '' : String(field.max);
+    this.input.step = this.slider.step = String(field.step ?? 'any');
+    this.input.defaultValue = String(field.defaultValue);
+    this.slider.hidden = field.min === undefined || field.max === undefined;
+    if (this.acceptedValue !== field.value) this.resetDraft(field.value);
+    else this.syncDraft();
+  }
+
+  accept(control: HTMLInputElement): number | undefined {
+    if (control === this.slider) this.input.value = control.value;
+    const value = this.syncDraft();
+    // Record acceptance before publishing the model value, so a reaction does
+    // not replace the user's equivalent text (e.g. "5.") while typing.
+    if (value !== undefined) this.acceptedValue = value;
+    return value;
+  }
+
+  resetDraft(value: number): void {
+    this.acceptedValue = value;
+    this.input.value = String(value);
+    this.syncDraft();
+  }
+
+  highlight(active: boolean): void {
+    this.input.classList.toggle('source-active', active);
+  }
+
+  focus(): void {
+    this.input.focus();
+    this.input.select();
+  }
+
+  private syncDraft(): number | undefined {
+    const valid = this.input.validity.valid;
+    this.input.setAttribute('aria-invalid', String(!valid));
+    if (!valid) return;
+    this.slider.value = this.input.value;
+    return this.input.valueAsNumber;
+  }
+}
 
 /** Valid input events update the model while unfinished text and DOM focus survive frames. */
 export class ModelInputsPanel {
   private readonly root = document.createElement('aside');
   private readonly fields = document.createElement('div');
   private readonly count = document.createElement('span');
-  private readonly rows = new Map<string, InputRow>();
+  private readonly rows = new Map<string, NumericInputField>();
   private readonly events = new AbortController();
   private readonly panel: DockPanelController;
   private readonly stop: IReactionDisposer[];
@@ -63,14 +135,8 @@ export class ModelInputsPanel {
         const control = event.target as HTMLInputElement;
         const row = this.rows.get(control.name)!;
         options.onEdit();
-        if (control === row.slider) row.input.value = control.value;
-        const valid = row.input.validity.valid;
-        row.input.setAttribute('aria-invalid', String(!valid));
-        if (!valid) return;
-        row.slider.value = row.input.value;
-        // Preserve the typed representation (e.g. "5.") when accepting its numeric value.
-        row.value = row.input.valueAsNumber;
-        inputs.set(control.name, row.value);
+        const value = row.accept(control);
+        if (value !== undefined) inputs.set(control.name, value);
       },
       {signal},
     );
@@ -80,27 +146,25 @@ export class ModelInputsPanel {
       () => {
         options.onEdit();
         inputs.reset();
-        for (const field of inputs.fields) {
-          const row = this.rows.get(field.name)!;
-          row.input.value = row.slider.value = String(field.value);
-          row.input.setAttribute('aria-invalid', 'false');
-        }
+        for (const field of inputs.fields)
+          this.rows.get(field.name)!.resetDraft(field.value);
       },
       {signal},
     );
     this.stop = [
       reaction(
-        () => ({fields: inputs.fields, source: options.sourceInput()}),
-        ({fields, source}, previous) => {
-          this.render(fields);
-          for (const [name, row] of this.rows)
-            row.input.classList.toggle('source-active', name === source);
-          if (source !== undefined && source !== previous?.source) {
-            this.panel.reveal();
-            this.rows.get(source)?.root.scrollIntoView({block: 'nearest'});
-          }
+        () => inputs.fields,
+        fields => this.render(fields),
+        {fireImmediately: true},
+      ),
+      reaction(
+        options.sourceInput,
+        source => {
+          for (const [name, row] of this.rows) row.highlight(name === source);
+          const row = source === undefined ? undefined : this.rows.get(source);
+          if (row) this.reveal(row);
         },
-        {fireImmediately: true, equals: compareStructural},
+        {fireImmediately: true},
       ),
     ];
   }
@@ -109,9 +173,8 @@ export class ModelInputsPanel {
     const name = this.options.sourceInput();
     const row = name === undefined ? undefined : this.rows.get(name);
     if (!row) return false;
-    this.panel.reveal();
-    row.input.focus();
-    row.input.select();
+    this.reveal(row);
+    row.focus();
     return true;
   }
 
@@ -124,55 +187,27 @@ export class ModelInputsPanel {
       row.root.remove();
       this.rows.delete(name);
     }
+    const source = this.options.sourceInput();
     fields.forEach((field, index) => {
       let row = this.rows.get(field.name);
+      const added = !row;
       if (!row) {
-        const root = document.createElement('div');
-        root.className = 'model-input-field';
-        const label = document.createElement('label');
-        label.className = 'model-input-label';
-        const name = document.createElement('span');
-        name.textContent = field.name;
-        const control = document.createElement('div');
-        control.className = 'model-input-control';
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.step = 'any';
-        input.required = true;
-        input.name = field.name;
-        input.setAttribute('aria-label', field.name);
-        input.value = String(field.value);
-        const hint = document.createElement('kbd');
-        hint.className = 'model-input-tab-hint';
-        hint.textContent = 'Tab';
-        hint.setAttribute('aria-hidden', 'true');
-        control.append(input, hint);
-        label.append(name, control);
-        const slider = document.createElement('input');
-        slider.type = 'range';
-        slider.name = field.name;
-        slider.tabIndex = -1;
-        slider.setAttribute('aria-label', `${field.name} slider`);
-        root.append(label, slider);
-        row = {root, input, slider, value: field.value};
+        row = new NumericInputField(field.name);
         this.rows.set(field.name, row);
       }
-      row.input.min = row.slider.min =
-        field.min === undefined ? '' : String(field.min);
-      row.input.max = row.slider.max =
-        field.max === undefined ? '' : String(field.max);
-      row.input.step = row.slider.step = String(field.step ?? 'any');
-      row.input.defaultValue = String(field.defaultValue);
-      row.slider.hidden = field.min === undefined || field.max === undefined;
-      if (row.value !== field.value) {
-        row.input.value = String(field.value);
-        row.value = field.value;
-      }
-      row.input.setAttribute('aria-invalid', String(!row.input.validity.valid));
-      if (row.input.validity.valid) row.slider.value = row.input.value;
+      row.render(field);
+      row.highlight(field.name === source);
       if (this.fields.children[index] !== row.root)
         this.fields.insertBefore(row.root, this.fields.children[index] ?? null);
+      // A declaration can arrive after the caret reaction. Applying its current
+      // highlight here keeps the subscriptions independent of their order.
+      if (added && field.name === source) this.reveal(row);
     });
+  }
+
+  private reveal(row: NumericInputField): void {
+    this.panel.reveal();
+    row.root.scrollIntoView({block: 'nearest'});
   }
 
   dispose(): void {

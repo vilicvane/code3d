@@ -181,6 +181,50 @@ test(
     await waitForWidth(40);
     assert.equal(await widthSlider.inputValue(), '40');
     assert.equal(await heightSlider.inputValue(), '16');
+    // Reset is also a draft command when the model is already at its defaults.
+    await width.fill('');
+    assert.equal(await width.getAttribute('aria-invalid'), 'true');
+    await reset.click();
+    assert.equal(await width.inputValue(), '40');
+    assert.equal(await widthSlider.inputValue(), '40');
+    assert.equal(await width.getAttribute('aria-invalid'), 'false');
+    await width.fill('4e1');
+    assert.equal(await width.inputValue(), '4e1');
+    const sourceMutations = await page.evaluate(async () => {
+      const mutations: string[] = [];
+      const observer = new MutationObserver(records => {
+        mutations.push(...records.map(record => record.attributeName!));
+      });
+      document.querySelectorAll('#model-inputs input').forEach(control =>
+        observer.observe(control, {
+          attributes: true,
+          attributeFilter: ['min', 'max', 'step', 'value', 'aria-invalid'],
+        }),
+      );
+      const editor = window.inputTest.editor.editor;
+      editor.setPosition(
+        editor
+          .getModel()!
+          .getPositionAt(editor.getValue().indexOf("input('Height'") + 2),
+      );
+      editor.focus();
+      await new Promise(resolve =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      observer.disconnect();
+      return mutations;
+    });
+    assert.deepEqual(
+      sourceMutations,
+      [],
+      'source highlighting does not rewrite form controls',
+    );
+    assert.equal(
+      await width.inputValue(),
+      '4e1',
+      'source focus preserves the accepted text',
+    );
+    await reset.click();
     await page.evaluate(() => {
       const editor = window.inputTest.editor.editor;
       editor.setPosition(
