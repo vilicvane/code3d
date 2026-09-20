@@ -13,6 +13,7 @@ import {
   type ModelBounds,
   circle,
   coil,
+  coupleRotation,
   cut,
   cylinder,
   ellipse,
@@ -769,3 +770,29 @@ wrappedFaces[0].plane;
 // @ts-expect-error A target must be a finite surface.
 wrap(faceModel, faceModel.plane);
 void [thickenedFaces, thickenedFace];
+
+const couplingConfig: import('@code3d/core').RotationCouplingConfig = {
+  ratio: -2 / 3,
+  phase: 6,
+};
+solid.relate(() => coupleRotation(solid, couplingConfig));
+solid.relate(() =>
+  // @ts-expect-error Rotation coupling takes a model, not an axis reference.
+  coupleRotation(solid.axis, couplingConfig),
+);
+solid.relate(() =>
+  // @ts-expect-error A group without an exposed axis cannot be the other participant.
+  coupleRotation(group([solid]), couplingConfig),
+);
+// @ts-expect-error Self comes from relate; there is no two-model overload.
+coupleRotation(solid, solid, couplingConfig);
+// @ts-expect-error Frame references do not build rotation couplings.
+solid.frame.coupleRotation(solid.frame, couplingConfig);
+// @ts-expect-error Axis selectors only build rotations.
+axisLine(solid.axis).coupleRotation(solid, couplingConfig);
+// @ts-expect-error Topology selectors only build rotations.
+axisEdge(1).coupleRotation(solid, couplingConfig);
+// @ts-expect-error A completed transformation has no coupling method.
+axisLine(solid.axis).rotate(10).coupleRotation(solid, couplingConfig);
+// @ts-expect-error The models define their own axes; there is no axis override.
+coupleRotation(solid, {ratio: 1, axis: 'y'});

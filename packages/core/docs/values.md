@@ -26,7 +26,7 @@ angles use degrees. Read [local coordinates](local-coordinates.md)
 and [relations](relations.mdx) before mixing
 origin changes, alignment, and rotation.
 
-Constraints express `on` and `align`; relative `offset` and `rotate` operations
+Constraints express `on`, `align` and fixed-axis [rotation coupling](api.md#rotation-coupling); relative `offset` and `rotate` operations
 follow them as separate items in the `relate` array. For pivots, reference axes
 and operation order, see the [placement guide](relations.mdx#transform-a-joint-result)
 and [transformation example](../../app/examples/constraints/transformations.ts).

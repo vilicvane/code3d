@@ -19,6 +19,7 @@ const authoringValues = [
   'arc',
   'axisEdge',
   'axisLine',
+  'coupleRotation',
   'offset',
   'originCenter',
   'rotate',

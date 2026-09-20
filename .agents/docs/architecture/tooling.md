@@ -533,7 +533,7 @@ backdrop blur and shadow, and each readout row uses
 
 ### 独立 Transformation 与分段工具
 
-Core 快照的 relationStages 提供分段边界，transformations 保留动作的 sourceRef 和结果架。contextualToolActivation 是已有调用与插入位置的唯一选择入口；它读取当前完整模块，不能拿截断的阶段预览查找后项。编辑器命令提交源码目标后，源码标记、面板、参考选择和 gizmo 都消费该目标。binding 构建不做候选调用搜索。单值 return 可转数组，完成后的独立变换不允许接链。Constraint 只携带 on/align、参与引用和源码追踪，不携带变换动作或 offset/rotation 快照；工具统一使用 Transformation 快照、spatial bindings 和 model.spatial 事务。
+Core 快照的 relationStages 提供分段边界，transformations 保留动作的 sourceRef 和结果架。contextualToolActivation 是已有调用与插入位置的唯一选择入口；它读取当前完整模块，不能拿截断的阶段预览查找后项。编辑器命令提交源码目标后，源码标记、面板、参考选择和 gizmo 都消费该目标。binding 构建不做候选调用搜索。单值 return 可转数组，完成后的独立变换不允许接链。独立 coupleRotation 是完成的 Constraint，构造时解析隐含 self；源码检查通过通用关系 inspector 显示两个模型及其轴，函数名与 other 参数消费同一阶段，参数引用保留焦点身份。Constraint 携带 on/align 或 coupleRotation 参数、参与引用和源码追踪，不携带变换动作或 offset/rotation 快照；工具统一使用 Transformation 快照、spatial bindings 和 model.spatial 事务。
 
 relate 直接返回数组内的空白是 self 的插入上下文，保留实际 callback 的执行实例。编译器记录前置数组项及对应插入锚点；执行器按 callback 实例还原该前缀，Core 从该回调开始前的继承关系构造预览，不混入已完成回调的后续操作。在空白中激活工具同样只比较紧随其后的第一项；匹配则定位已有项，否则保持该插入位置；空数组也提供入口。末尾光标在 ] 前，中间在后续项前，且不高亮邻接的调用名称。
 

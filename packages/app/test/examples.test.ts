@@ -27,6 +27,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'assemblies/robot-arm.ts': ['default', 23],
   'packages/gears/parts.ts': ['default', 5],
   'packages/gears/assembly.ts': ['default', 4],
+  'packages/gears/transmission.ts': ['default', 12],
   'packages/screws.ts': ['default', 10],
   'projects/phone-stand.ts': ['default', 1],
   'assemblies/screw-box/model.ts': ['default', 6],

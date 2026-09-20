@@ -115,8 +115,10 @@ opposite hands. Internal-to-internal meshes are unsupported.
 
 `assembleGears(gears, config)` connects each adjacent pair in array order:
 `0→1→2…`. It returns related gear values, with the first gear unchanged.
-The helper calculates the static tooth angle needed for engagement from the
-tooth counts and contact direction; no tooth-phase argument is needed. By
+The helper calculates the engagement phase from tooth counts and contact
+direction, then couples the models through Core’s
+`coupleRotation(source, {ratio, phase})`, using their own axes and tooth-count ratio; no
+tooth-phase argument is needed. By
 default, the centers form a straight chain along +X. Compose the returned
 values with Core's `group()` when the entire train should be one placeable
 model:
@@ -192,11 +194,33 @@ anchor, relate the first gear before calling `assembleGears()`, or relate the
 completed `group()` afterward. A later replacement such as
 `first = first.relate(...)` does not retarget the already returned gears.
 
-This is nominal static placement for parallel shafts. The chosen tooth angle
-uses the gear profiles at their common face midplane; it is not a persistent
-rotation constraint. Later changes to other placement constraints do not
-recalculate gear phases. The helper does not guarantee interference-free teeth,
-manufactured clearance, load capacity, or kinematic motion.
+### Drive through connected parts
+
+Attach the first gear to an input shaft or crank with
+`pinion.relate(self => self.frame.align(inputCrank.frame))`, then pass that value
+to `assembleGears`. Only the external crank needs the input angle. Each adjacent
+pair receives a rotation coupling; parts aligned to a returned gear's frame
+follow its solved angle. External gears reverse direction, while an internal
+ring and pinion turn in the same direction. Angular changes scale by
+`sourceTeeth / targetTeeth`.
+
+The [live transmission example](../../app/examples/packages/gears/transmission.ts)
+uses a single **Drive angle** slider and 20/30/40 teeth. One input revolution
+produces −2/3 revolution at the middle shaft and +1/2 revolution at the output
+crank. Drag through zero or several turns; cumulative angles are preserved.
+The shaft centers remain fixed as the input rotates.
+
+This subset uses fixed parallel +Y shafts in the assembly solve frame, with
+frame alignment, origin coincidence, `on()` and independent Y `rotate()` steps.
+Use `group()` to place or tilt the completed mechanism. Closed driving cycles,
+moving carriers and angles driven by arbitrary geometric alignments are not
+supported; conflicting angular drivers report an error. Models keep Core's
+value semantics: replacing a variable with a new related value does not retarget
+references already captured by an assembly.
+
+The engagement phase uses the profiles at their common face midplane. This is
+nominal kinematic transmission, without tooth-contact simulation, manufacturing
+clearance validation or load-capacity analysis.
 
 ## Standards and scope
 

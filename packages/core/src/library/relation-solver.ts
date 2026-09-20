@@ -28,6 +28,7 @@ import {
   invertTransform,
   rotateVector,
   rotation,
+  frameFromYAxis,
   type Quaternion,
   type RigidTransform,
   type Vec3,
@@ -51,13 +52,224 @@ type FrameRelation = Readonly<{
   source: Omit<AlignEndpoint, 'geometry'>;
   target: Omit<AlignEndpoint, 'geometry'>;
 }>;
-type Relation = (BoundRelation & {kind: 'on'}) | AlignRelation | FrameRelation;
+type RotationRelation = Readonly<{
+  kind: 'coupleRotation';
+  id: string;
+  source: Omit<AlignEndpoint, 'geometry'> & {direction: 1 | -1};
+  target: Omit<AlignEndpoint, 'geometry'> & {direction: 1 | -1};
+  ratio: number;
+  phase?: number;
+}>;
+type Relation =
+  | (BoundRelation & {kind: 'on'})
+  | AlignRelation
+  | FrameRelation
+  | RotationRelation;
 export type Body = Readonly<{
   name: string;
   relations: readonly Relation[];
   initial?: RigidTransform;
   transformations?: readonly BodyAction[];
+  /** Full authored order, before stage reduction, for cumulative angular coordinates. */
+  rotationProgram: () => readonly (Relation | BodyAction)[];
+  rotationInitial: RigidTransform;
 }>;
+
+/** Lift selected-axis rotations before converting to periodic rigid orientations. */
+function coupledOrientations(bodies: readonly Body[]): Map<number, Quaternion> {
+  if (
+    !bodies.some(body => body.relations.some(r => r.kind === 'coupleRotation'))
+  )
+    return new Map();
+  const programs = bodies.map(body => body.rotationProgram());
+  const axes = new Map<number, RigidTransform>();
+  const direction = (frame: RigidTransform): Vec3 =>
+    rotateVector([0, 1, 0], frame.quaternion);
+  const parallelSign = (a: RigidTransform, b: RigidTransform): number => {
+    const product = dot(direction(a), direction(b));
+    if (Math.abs(product) < 1 - 1e-8)
+      throw new Error(
+        'Rotation coupling requires one fixed axis direction per body.',
+      );
+    return product < 0 ? -1 : 1;
+  };
+  const mark = (body: number, frame: RigidTransform) => {
+    const previous = axes.get(body);
+    if (previous) parallelSign(previous, frame);
+    else axes.set(body, frame);
+  };
+  for (const program of programs)
+    for (const step of program)
+      if ('kind' in step && step.kind === 'coupleRotation') {
+        mark(step.source.body, step.source.transform);
+        mark(step.target.body, step.target.transform);
+      }
+  // Only upstream dependencies participate. Other branches on a common support
+  // keep their ordinary geometric degrees of freedom.
+  for (let changed = true; changed;) {
+    const before = axes.size;
+    for (const [owner, basis] of axes) {
+      for (const step of programs[owner]) {
+        if ('kind' in step && step.kind === 'frame') {
+          const self = step.source.body === owner ? step.source : step.target;
+          const other = step.source.body === owner ? step.target : step.source;
+          if (self.body !== other.body)
+            mark(
+              other.body,
+              composeTransforms(
+                other.transform,
+                composeTransforms(invertTransform(self.transform), basis),
+              ),
+            );
+        } else if ('body' in step && 'axis' in step) {
+          mark(step.body, step.axis);
+        }
+      }
+    }
+    changed = before !== axes.size;
+  }
+  const wrap = (angle: number) => angle - 360 * Math.floor((angle + 180) / 360);
+  // The axis frame's X direction is its angular datum. The zero frame is the
+  // same deterministic Y-axis frame used by line references throughout Core.
+  const principal = (pose: RigidTransform, axis: RigidTransform): number => {
+    const frame = composeTransforms(pose, axis);
+    const zero = frameFromYAxis([0, 0, 0], direction(frame));
+    const q = composeTransforms(invertTransform(zero), frame).quaternion;
+    return wrap((Math.atan2(q[1], q[3]) * 360) / Math.PI);
+  };
+  type AngularPose = {pose: RigidTransform; angle: number};
+  const solved = new Map<number, AngularPose>();
+  const visiting = new Set<number>();
+  const angleAt = (
+    owner: number,
+    state: AngularPose,
+    axis: RigidTransform,
+  ): number => {
+    const basis = axes.get(owner)!;
+    const sign = parallelSign(basis, axis);
+    return (
+      sign * state.angle +
+      wrap(principal(state.pose, axis) - sign * principal(state.pose, basis))
+    );
+  };
+  const solve = (owner: number): AngularPose => {
+    const known = solved.get(owner);
+    if (known) return known;
+    if (visiting.has(owner))
+      throw new Error(
+        'Rotation coupling requires an acyclic driving chain; cyclic frame or transmission dependencies are not supported.',
+      );
+    visiting.add(owner);
+    const basis = axes.get(owner)!;
+    let state: AngularPose = {
+      pose: bodies[owner].rotationInitial,
+      angle: principal(bodies[owner].rotationInitial, basis),
+    };
+    let constrained: number | undefined;
+    for (const step of programs[owner]) {
+      if (!('kind' in step)) {
+        constrained = undefined;
+        if ('offset' in step) continue;
+        let increment = 0;
+        if ('axis' in step) {
+          const axis =
+            'local' in step
+              ? step.axis
+              : composeTransforms(
+                  invertTransform(state.pose),
+                  composeTransforms(solve(step.body).pose, step.axis),
+                );
+          increment = parallelSign(basis, axis) * step.angle;
+        } else {
+          const vector = direction(basis);
+          for (let i = 0; i < 3; i++) {
+            if (Math.abs(step.angles[i]) < 1e-10) continue;
+            if (Math.abs(vector[i]) < 1 - 1e-8)
+              throw new Error(
+                'Rotation coupling requires rotations about the selected fixed axis; use axisLine(...).rotate(angle) for an arbitrary axis.',
+              );
+            increment += step.angles[i] * Math.sign(vector[i]);
+          }
+        }
+        // All supported rotation actions are about this material axis. Their
+        // explicit angle carries winding which a quaternion alone cannot retain.
+        state = {
+          pose: composeTransforms(state.pose, axisRotation(basis, increment)),
+          angle: state.angle + increment,
+        };
+        continue;
+      }
+      if (step.kind === 'on') continue;
+      if (step.kind === 'align') {
+        if (
+          step.source.geometry.kind !== 'point' ||
+          step.target.geometry.kind !== 'point'
+        )
+          throw new Error(
+            'Rotation coupling currently supports frame alignment, point alignment and on() placement; other geometric alignment cannot drive its angle.',
+          );
+        continue;
+      }
+      let next = state;
+      if (step.kind === 'frame') {
+        const self = step.source.body === owner ? step.source : step.target;
+        const other = step.source.body === owner ? step.target : step.source;
+        if (self.body !== other.body) {
+          const driver = solve(other.body);
+          const mapped = composeTransforms(
+            other.transform,
+            composeTransforms(invertTransform(self.transform), basis),
+          );
+          next = {
+            pose: composeTransforms(
+              driver.pose,
+              composeTransforms(
+                other.transform,
+                invertTransform(self.transform),
+              ),
+            ),
+            angle: angleAt(other.body, driver, mapped),
+          };
+        }
+      } else {
+        const {source: own, target: driverAxis} = step;
+        const driver =
+          driverAxis.body === owner ? state : solve(driverAxis.body);
+        const targetAngle =
+          driverAxis.direction *
+          angleAt(driverAxis.body, driver, driverAxis.transform);
+        const desired = step.ratio * targetAngle + (step.phase ?? 0);
+        const current = own.direction * angleAt(owner, state, own.transform);
+        const delta =
+          (desired - current) /
+          (own.direction * parallelSign(basis, own.transform));
+        if (own.body === driverAxis.body && Math.abs(delta) > 1e-7)
+          throw new Error(
+            `Conflicting rotation constraints (${step.id}) on ${bodies[owner].name}.`,
+          );
+        next = {
+          pose: composeTransforms(state.pose, axisRotation(basis, delta)),
+          angle: state.angle + delta,
+        };
+      }
+      if (
+        constrained !== undefined &&
+        Math.abs(next.angle - constrained) > 1e-7
+      )
+        throw new Error(
+          `Conflicting rotation constraints (${step.id}) on ${bodies[owner].name}.`,
+        );
+      state = next;
+      constrained = state.angle;
+    }
+    visiting.delete(owner);
+    solved.set(owner, state);
+    return state;
+  };
+  return new Map(
+    [...axes.keys()].map(body => [body, solve(body).pose.quaternion]),
+  );
+}
 
 function applyExternalRotation(
   pose: RigidTransform,
@@ -266,6 +478,7 @@ export function solveBodies(
         relations: readonly (BoundRelation & {kind: 'on'})[];
       }[],
     );
+  const coupled = coupledOrientations(bodies);
   for (const body of bodies)
     for (const relation of body.relations)
       if (relation.kind === 'align')
@@ -314,8 +527,10 @@ export function solveBodies(
     .map(([, entry]) => entry);
   let poses = bodies.map(body => body.initial ?? identityRigidTransform);
   for (const owner of active) poses[owner] = place(poses[owner], owner, poses);
+  for (const [body, quaternion] of coupled)
+    poses[body] = {...poses[body], quaternion};
   for (const {owner, relation} of unique) {
-    if (relation.kind === 'on') continue;
+    if (relation.kind === 'on' || relation.kind === 'coupleRotation') continue;
     const sourceSelf = relation.source.body === owner;
     if (relation.target.body === relation.source.body) continue;
     const baseline = baselinePose(poses[owner], poses, owner);
@@ -347,6 +562,8 @@ export function solveBodies(
       : alignmentSeed(target, source);
     poses[owner] = place(composeTransforms(seed, baseline), owner, poses);
   }
+  for (const [body, quaternion] of coupled)
+    poses[body] = {...poses[body], quaternion};
   const geometryScale = Math.max(
     1,
     ...unique.flatMap(({relation: r}) =>
@@ -364,8 +581,9 @@ export function solveBodies(
     Array.from(
       {
         length:
-          flexible[body] ||
-          bodies[body].transformations?.some(action => !('offset' in action))
+          !coupled.has(body) &&
+          (flexible[body] ||
+            bodies[body].transformations?.some(action => !('offset' in action)))
             ? 6
             : 3,
       },
@@ -375,6 +593,7 @@ export function solveBodies(
   let variables = fullVariables.filter(variable => variable.axis < 3);
   const residual = (candidate: readonly RigidTransform[]): number[] => [
     ...unique.flatMap(({owner, relation: r}) => {
+      if (r.kind === 'coupleRotation') return [];
       const baseline = baselinePose(candidate[owner], candidate, owner);
       const source =
           r.source.body === owner ? baseline : candidate[r.source.body],

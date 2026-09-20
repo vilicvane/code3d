@@ -19,9 +19,13 @@ export type ExternalRotation =
       point: Vec3;
       body: number;
       rotation: Quaternion;
+      angles: Vec3;
       displacement: Vec3;
     }>;
-export type BodyRotation = Readonly<{local: RigidTransform}> | ExternalRotation;
+export type BodyRotation =
+  | Readonly<{local: RigidTransform; angles: Vec3}>
+  | Readonly<{local: RigidTransform; axis: RigidTransform; angle: number}>
+  | ExternalRotation;
 
 /** External center relative to its owning body; point references retain self's axes. */
 export function externalRotationFrame(

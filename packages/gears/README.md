@@ -53,7 +53,9 @@ Complete example: [gears and mounting options](../app/examples/packages/gears/pa
   capacity and interference-free meshing require separate checks.
 - `assembleGears([first, second], {centerDistanceDelta: 0.2})` returns related
   gear values and chooses their tooth angle automatically. Use `group(gears)`
-  to make one placeable assembly. The signed delta changes shaft distance; it
+  to make one placeable assembly. Rotation follows the tooth-count ratio, including
+  complete revolutions, and parts aligned to a gear frame follow that gear.
+  The signed delta changes shaft distance; it
   does not specify backlash.
 - `pairs[i].angle` turns from the preceding center-line direction, in degrees.
   The default 0° continues straight. The first pair starts from +X; two 60°
@@ -62,13 +64,14 @@ Complete example: [gears and mounting options](../app/examples/packages/gears/pa
   leaving a 120° included angle, then positions the whole train with
   a `group(...).relate(...)` constraint.
 
-Complete example: [a three-gear train](../app/examples/packages/gears/assembly.ts).
+Complete examples: [a three-gear train](../app/examples/packages/gears/assembly.ts)
+and [a live input crank and output transmission](../app/examples/packages/gears/transmission.ts).
 
 ## Documentation
 
 - [Gear API](docs/api.md): constructors, dimensions, mounting and named references.
 - [Gear assembly](docs/api.md#assemble-compatible-gears): shaft distance, axial
-  offset, array-order engagement and per-pair angles.
+  offset, array-order engagement, per-pair angles and fixed-axis transmission.
 - [Standards and scope](docs/api.md#standards-and-scope): nominal profiles, validation and modeling limits.
 
 ## Source and development

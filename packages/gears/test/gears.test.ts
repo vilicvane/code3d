@@ -367,3 +367,104 @@ test('assembly rejects incompatible gears or malformed pair overrides', () => {
     );
   assert.throws(() => nominalCenterDistance(a.scaled(2), b), /created by/);
 });
+
+test('external crank drives meshed gears and output attachments without moving the shafts', async () => {
+  const {box, rotate} = await import('@code3d/core');
+  const {rotateVector} = await import('@code3d/core/tooling');
+  const snapshot = createModelSnapshotter();
+  const prototypes = [20, 30, 40].map(teeth =>
+    keep(spurGear({module: 2, teeth, faceWidth: 10})),
+  );
+  const base = box(1, 1, 1);
+  let initialHeadings: number[] | undefined;
+  for (const angle of [0, 17, -55, 180, 359, 360, 361, 720, -1080]) {
+    const crank = box(15, 2, 3).relate(self => [
+      self.frame.align(base.frame),
+      rotate(0, angle, 0),
+    ]);
+    const pinion = prototypes[0].relate(self => self.frame.align(crank.frame));
+    const gears = assembleGears([pinion, ...prototypes.slice(1)], {
+      centerDistanceDelta: 0.2,
+    });
+    const output = box(20, 2, 3).relate(self =>
+      self.frame.align(gears[2].frame),
+    );
+    const assembly = snapshot(group([base, crank, ...gears, output]));
+    const headings = assembly.children.slice(2, 5).map(child => {
+      const x = rotateVector([1, 0, 0], child.transform.quaternion);
+      return Math.atan2(-x[2], x[0]);
+    });
+    initialHeadings ??= headings;
+    headings.forEach((value, i) => {
+      const expected =
+        initialHeadings![i] + ([1, -2 / 3, 0.5][i] * angle * Math.PI) / 180;
+      near(
+        [Math.cos(value), Math.sin(value)],
+        [Math.cos(expected), Math.sin(expected)],
+      );
+      near(
+        assembly.children[i + 2].transform.position,
+        [
+          [0, 0, 0],
+          [50.2, 0, 0],
+          [120.4, 0, 0],
+        ][i],
+      );
+    });
+    near(
+      rotateVector([1, 0, 0], assembly.children[5].transform.quaternion),
+      rotateVector([1, 0, 0], assembly.children[4].transform.quaternion),
+    );
+    if ([0, 17, -55].includes(angle))
+      for (const pair of [gears.slice(0, 2), gears.slice(1)])
+        assert.throws(() => intersect(pair), /no common solid volume/);
+  }
+});
+
+test('internal and helical transmission remain engaged away from the initial pose', async () => {
+  const {box, rotate} = await import('@code3d/core');
+  const base = box(1, 1, 1);
+  const ring = keep(
+    internalGear({module: 2, teeth: 48, faceWidth: 10, outerDiameter: 130}),
+  );
+  const pinion = keep(spurGear({module: 2, teeth: 20, faceWidth: 10}));
+  const right = keep(
+    helicalGear({
+      normalModule: 2,
+      teeth: 20,
+      faceWidth: 10,
+      helixAngle: 20,
+      hand: 'right',
+    }),
+  );
+  const left = keep(
+    helicalGear({
+      normalModule: 2,
+      teeth: 30,
+      faceWidth: 14,
+      helixAngle: 20,
+      hand: 'left',
+    }),
+  );
+  for (const [source, target, centerDistanceDelta] of [
+    [ring, pinion, -0.2],
+    [pinion, ring, -0.2],
+    [right, left, 0.2],
+  ] as const)
+    for (const angle of [-37, 53, 361]) {
+      const driver = source.relate(self => [
+        self.frame.align(base.frame),
+        rotate(0, angle, 0),
+      ]);
+      assert.throws(
+        () =>
+          intersect(
+            assembleGears([driver, target], {
+              centerDistanceDelta,
+              axialOffset: 1,
+            }),
+          ),
+        /no common solid volume/,
+      );
+    }
+});

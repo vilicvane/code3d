@@ -137,6 +137,15 @@ the output group. Both constraints participate in the same joint solve as other
 Named frames work the same way: `assembly.expose({mount: part.frame})` provides
 `assembly.mount` and `assembly.mount.origin` in the assembly's coordinates.
 
+For fixed-axis transmission, use
+`coupleRotation(driver, {ratio: -0.5})` to couple
+the current model to the driver using each model’s own axis, leaving position
+free. Full turns survive the ratio, and ordinary
+frame attachments carry the driven angle to other parts. See
+[rotation coupling](api.md#rotation-coupling) for the supported driving chain and
+[Gears](../../gears/docs/api.md#drive-through-connected-parts) for automatic tooth
+ratios and engagement phases.
+
 ## Choose a rotation pivot or axis
 
 ```ts

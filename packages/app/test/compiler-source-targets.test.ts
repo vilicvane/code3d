@@ -2917,3 +2917,36 @@ export default box(...placed.size);`;
   assert.equal(module.diagnostic, undefined);
   assert.ok(module.fallback?.mesh);
 });
+
+test('standalone coupling traces implicit self without offering a rotation edit', async () => {
+  const source = `import {box, axisLine, coupleRotation} from '@code3d/core';
+const driver = box(4, 3, 2).relate(self => axisLine(self.axis).rotate(725));
+export default box(6, 3, 2).relate(self =>
+  coupleRotation(driver, {ratio: -0.5}),
+);`;
+  const module = await compileProject(
+    {files: [{path: '/model.ts', source}]},
+    '/model.ts',
+  );
+  assert.equal(module.diagnostic, undefined);
+  const coupling = module.sourceTargets.find(
+    target => target.tool?.signature.name === 'coupleRotation',
+  );
+  assert.ok(coupling);
+  assert.ok(
+    coupling.evaluations.some(value =>
+      value.relationPreview?.constraints.some(c => c.kind === 'coupleRotation'),
+    ),
+  );
+  const start = source.indexOf('coupleRotation(driver');
+  for (const target of module.sourceTargets.filter(
+    target => target.sourceRef.start >= start,
+  )) {
+    assert.equal(
+      target.rotationSelection,
+      undefined,
+      source.slice(target.sourceRef.start, target.sourceRef.end),
+    );
+    assert.equal(target.rotationToolId, undefined);
+  }
+});

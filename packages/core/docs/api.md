@@ -386,7 +386,7 @@ chaining methods. Use an array to combine steps: `[offset(0, 8, 0), rotate(0, 25
 These five reference selectors return an unfinished selection with a
 `rotate` method; its result is again a completed transformation.
 Point selectors additionally accept one `pivotOffset(dx, dy, dz)`; axis selectors
-accept one `axisOffset(dx, dy, dz)`. The resulting selector only exposes `rotate`.
+accept one `axisOffset(dx, dy, dz)`. Both kinds of selector complete with `rotate`.
 Point offsets use self local axes. Axis offsets use the selected axis reference
 frame, retaining its direction. Both retain the original point/axis reference.
 
@@ -659,6 +659,68 @@ anchors and the `center` anchor scale together; the model origin stays zero;
 topology IDs are preserved. Groups do not provide `.scaled()`; scale their
 geometric parts before composing them. To change only an exported file's unit
 conversion, use the [export scale](../../web/src/content/docs/docs/guides/exporting.md#scale-and-orientation).
+
+## Rotation coupling
+
+`coupleRotation(other, {ratio: -2 / 3, phase: 6})` couples the current model
+from the enclosing `relate` callback to another model. It uses each model's own
+`.axis` and constrains `selfAngle = ratio * otherAngle + phase`. `ratio` must be
+finite and nonzero; `phase` is in degrees (default zero). It returns a complete
+`Constraint`, used as its own placement entry.
+
+```ts
+const crank = box(20, 3, 6).relate(self => [
+  self.frame.align(base.frame),
+  axisLine(self.axis).rotate(
+    input('Drive angle', 0, {min: -1080, max: 1080, step: 1}),
+  ),
+]);
+const output = box(30, 3, 6).relate(self => [
+  self.origin.align(crank.origin),
+  coupleRotation(crank, {ratio: -0.5}),
+  offset(40, 0, 0),
+]);
+```
+
+Call `coupleRotation` inside `relate`; helpers called by that callback use the
+same current model. Nested callbacks use their own self. Both models must
+provide a straight `.axis`; a group without an exposed axis cannot participate
+directly. The other argument is a model, not an axis reference. There is no axis
+override or separate axis-editing operation in this API.
+
+The current model is the new value produced by `relate`. Passing the original
+receiver as `other` still refers to that earlier value, with its own placement.
+Each axis retains its model's local direction and angular datum, including
+changes from geometric rotation and origin operations. Coupling leaves
+translation free: use origin alignment, `on()` and independent `offset()` steps
+to place the shafts. It does not make their axes coincident.
+
+Each axis frame's X direction supplies its angular datum. Zero is Core's
+standard frame for the axis's positive Y direction in the assembly solve frame:
+project +X perpendicular to Y, using +Z when Y is nearly parallel to +X
+(`abs(Y.x) >= 0.9`). Rotation is measured about that Y, then signed by the
+reference direction. An axis in the usual +Y orientation therefore uses +X as
+zero. `phase` relates these two datums; there is no separate XYZ axis option.
+
+Cumulative angles come from the authored placement sequence, including full
+turns, frame attachments and upstream couplings. They do not depend on previous
+App frames or playback history. A 360° driver step produces a −180° output step
+in this example. Geometric `.rotate()` changes local geometry; use a standalone
+or selected-axis `rotate()` inside `relate()` to drive a placement angle.
+
+The supported driving chain is acyclic, with one fixed material-axis direction
+per participating body. Axes may have arbitrary directions; use
+`axisLine(...).rotate(angle)` to turn about such an axis. XYZ rotations can drive
+an axis parallel to the corresponding local X, Y or Z. Frame alignment, point
+coincidence and `on()` can participate; other geometric alignments cannot drive
+this angular coordinate. Conflicting angles, rotations about other directions,
+and driving cycles report errors. Moving carriers are outside this subset;
+place a completed mechanism as a group. Constraint stages and immutable reference
+identity follow the same rules as `align()`.
+
+For automatic tooth ratios and engagement phase, use
+[Gears](../../gears/docs/api.md#drive-through-connected-parts) and its
+[connected-crank example](../../app/examples/packages/gears/transmission.ts).
 
 ## Origins and rotation
 

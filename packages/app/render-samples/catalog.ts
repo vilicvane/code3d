@@ -564,6 +564,7 @@ export const exampleEntries = [
   {file: 'assemblies/robot-arm.ts'},
   {file: 'packages/gears/parts.ts'},
   {file: 'packages/gears/assembly.ts'},
+  {file: 'packages/gears/transmission.ts'},
   {file: 'packages/screws.ts'},
   {
     file: 'projects/desktop-controller/enclosure.ts',

@@ -950,6 +950,8 @@ export default group([straight, curve, sheet, pipe]);`);
         const before = pixels();
         camera.zoom *= 1.5;
         camera.updateProjectionMatrix();
+        // Native camera edits must publish a navigation change to the idle viewport.
+        viewport['controls'].syncCamera();
         await new Promise<void>(resolve =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         );
@@ -957,7 +959,7 @@ export default group([straight, curve, sheet, pipe]);`);
         const png = await viewport.captureImage(1200, 800);
         camera.zoom /= 1.5;
         camera.updateProjectionMatrix();
-        viewport['rendering'].renderFrame();
+        viewport['controls'].syncCamera();
         return {
           text: label.userData.text,
           line: !!measurement.getObjectByName('distance-line'),

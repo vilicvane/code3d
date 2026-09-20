@@ -1,4 +1,5 @@
 import {
+  coupleRotation,
   box,
   cut,
   cylinder,
@@ -6,7 +7,6 @@ import {
   group,
   inspectGroupMembers,
   offset,
-  rotate,
   setModelData,
   union,
 } from '@code3d/core';
@@ -160,12 +160,13 @@ function alignedToothAngle(
       ? directionAngle + Math.PI
       : directionAngle;
   const targetContact = internal ? sourceContact : directionAngle + Math.PI;
+  const ratio = ((internal ? 1 : -1) * source.teeth) / target.teeth;
   const raw =
+    ratio * sourceAngle +
     (Math.PI -
-      source.teeth *
-        (sourceContact + sourceAngle + toothTwist(source, sourceY)) -
+      source.teeth * (sourceContact + toothTwist(source, sourceY)) -
       target.teeth * (targetContact + toothTwist(target, targetY))) /
-    target.teeth;
+      target.teeth;
   const pitch = (2 * Math.PI) / target.teeth;
   return raw - Math.round(raw / pitch) * pitch;
 }
@@ -235,17 +236,23 @@ export function assembleGears(
       contactY - axisY[index - 1],
       contactY - axisY[index],
     );
-    const relativeAngle =
-      ((toothAngles[index] - toothAngles[index - 1]) * 180) / Math.PI;
+    const ratio =
+      ((sourceProfile.kind === 'internal' || targetProfile.kind === 'internal'
+        ? 1
+        : -1) *
+        sourceProfile.teeth) /
+      targetProfile.teeth;
+    const phase =
+      ((toothAngles[index] - ratio * toothAngles[index - 1]) * 180) / Math.PI;
 
     assembled[index] = target.relate(self => [
-      self.frame.align(source.frame),
+      self.origin.align(source.origin),
+      coupleRotation(source, {ratio, phase}),
       offset(
         distance * Math.cos(directionAngle),
         axialOffset,
         distance * Math.sin(directionAngle),
       ),
-      ...(Math.abs(relativeAngle) > 1e-10 ? [rotate(0, relativeAngle, 0)] : []),
     ]);
   }
   return assembled;

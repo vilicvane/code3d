@@ -56,6 +56,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Model values](docs/values.md): immutable values and geometry measurements.
 - [Local coordinates](docs/local-coordinates.md): frames, origins and placement conventions.
 - [Relations](docs/relations.mdx): position parts using bounds, geometry and frames.
+- [Rotation coupling](docs/api.md#rotation-coupling): transmit cumulative angles through fixed-axis connections.
 - [Origins and rotation](docs/origins-and-rotation.mdx): choose a pivot and adjust a part.
 - [Shells](docs/shells.mdx): hollow solids and choose openings.
 - [Topology](docs/topology.md): select vertices, edges and faces and expose named elements.
