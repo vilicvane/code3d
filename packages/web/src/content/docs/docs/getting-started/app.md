@@ -191,8 +191,11 @@ missing imports** applies TypeScript's suggested imports throughout the file.
 Use an individual fix to choose a source when several modules export the same name.
 
 Imports can come from project modules, built-in Code3D packages, and installed
-project dependencies, including packages not yet imported in the file. Project
-paths are relative, with extensions chosen by the TypeScript configuration;
+project dependencies, including packages not yet imported in the file and named
+subpath exports such as `package/feature`. Unused package suggestions load in the
+background; a package that cannot be read does not prevent the rest of the model
+from rendering. Wildcard-only package entries are not automatically discovered.
+Project paths are relative, with extensions chosen by the TypeScript configuration;
 packages use their package names, matching completion suggestions. The repair is
 one edit, so **Undo** restores the previous source. Quick fixes do not install missing packages.
 

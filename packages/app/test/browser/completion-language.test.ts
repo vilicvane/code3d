@@ -8,6 +8,7 @@ import {chromium} from './browser-connection.ts';
 interface CompletionHarness {
   editor: import('../../src/editor.ts').CodeEditor;
   model: import('monaco-editor/editor').editor.ITextModel;
+  compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
   language: import('../../src/project/project-language.ts').ProjectLanguage;
   worker(): Promise<ProjectTypeScriptWorker>;
   complete(
@@ -19,6 +20,13 @@ interface CompletionHarness {
 declare const harness: CompletionHarness;
 declare const window: Window & {
   harness: CompletionHarness;
+  indexReadPending?: boolean;
+  releaseIndex?: () => void;
+  combinedFixCalls: number;
+  combinedFixResolved?: boolean;
+  combinedFixReturned?: boolean;
+  combinedFixGate?: Promise<void>;
+  releaseCombinedFix?: () => void;
   markers(): import('monaco-editor/editor').editor.IMarker[];
 };
 
@@ -30,6 +38,7 @@ async function createEditor(
       source: "import {box} from '@code3d/core';\nbox(100, 100, 100).up;",
     },
   ],
+  delayIndex = false,
 ) {
   assert.ok(
     process.env.CODE3D_TEST_URL,
@@ -61,6 +70,44 @@ async function createEditor(
       body: '<main style="height:600px"></main>',
     }),
   );
+  await page.route(
+    '**/src/monaco/typescript-worker-client.ts*',
+    async route => {
+      const response = await route.fetch();
+      const source = await response.text();
+      assert.ok(
+        source.includes('export async function projectTypeScriptWorker'),
+      );
+      await route.fulfill({
+        response,
+        body:
+          source.replace(
+            'export async function projectTypeScriptWorker',
+            'async function originalProjectTypeScriptWorker',
+          ) +
+          `
+      const workers = new WeakMap();
+      export async function projectTypeScriptWorker(...args) {
+        const worker = await originalProjectTypeScriptWorker(...args);
+        if (workers.has(worker)) return workers.get(worker);
+        const instrumented = new Proxy(worker, {get(target, key) {
+          if (key !== 'getProjectCombinedCodeFix') return Reflect.get(target, key);
+          return async (...args) => {
+            window.combinedFixCalls = (window.combinedFixCalls ?? 0) + 1;
+            const result = await target[key](...args);
+            window.combinedFixResolved = true;
+            await window.combinedFixGate;
+            window.combinedFixReturned = true;
+            return result;
+          };
+        }});
+        workers.set(worker, instrumented);
+        return instrumented;
+      }
+    `,
+      });
+    },
+  );
   await page.route('**/src/editor.ts*', async route => {
     const response = await route.fetch();
     await route.fulfill({
@@ -71,39 +118,79 @@ async function createEditor(
     });
   });
   await page.goto(url);
-  await page.evaluate(async files => {
-    const {CodeEditor} = await import('/src/editor.ts');
-    const {ModelCompilerClient} = await import('/src/model/compiler-client.ts');
-    const {browserPackageFiles} =
-      await import('/src/project/browser-packages.ts');
-    const {projectTypeScriptWorker} =
-      await import('/src/monaco/typescript-worker-client.ts');
-    const project = {files};
-    const editor = new CodeEditor(
-      document.querySelector('main')!,
-      project,
-      files[0].path,
-    );
-    const compiler = new ModelCompilerClient(browserPackageFiles);
-    try {
+  await page.evaluate(
+    async ({files, delayIndex}) => {
+      const {CodeEditor} = await import('/src/editor.ts');
+      const {ModelCompilerClient} =
+        await import('/src/model/compiler-client.ts');
+      const {browserPackageFiles} =
+        await import('/src/project/browser-packages.ts');
+      const {projectTypeScriptWorker} =
+        await import('/src/monaco/typescript-worker-client.ts');
+      const project = {files};
+      const editor = new CodeEditor(
+        document.querySelector('main')!,
+        project,
+        files[0].path,
+      );
+      const slowFiles = new Map([
+        [
+          '/node_modules/slow-parts/package.json',
+          '{"name":"slow-parts","types":"index.d.ts"}',
+        ],
+        [
+          '/node_modules/slow-parts/index.d.ts',
+          'export declare const slowPart: number;',
+        ],
+      ]);
+      const gate = delayIndex
+        ? new Promise<void>(resolve => {
+            window.releaseIndex = resolve;
+          })
+        : undefined;
+      const compiler = new ModelCompilerClient({
+        async readFile(path) {
+          if (delayIndex && path === '/node_modules/slow-parts/index.d.ts') {
+            window.indexReadPending = true;
+            await gate;
+          }
+          const source = delayIndex ? slowFiles.get(path) : undefined;
+          return source === undefined
+            ? browserPackageFiles.readFile(path)
+            : new TextEncoder().encode(source);
+        },
+        async stat(path) {
+          const source = delayIndex ? slowFiles.get(path) : undefined;
+          return source === undefined
+            ? browserPackageFiles.stat(path)
+            : {kind: 'file', version: source};
+        },
+      });
       await compiler.compile(project, files[0].path);
       editor.setProjectLanguage(compiler.language!);
-    } finally {
-      compiler.dispose();
-    }
-    const model = editor.editor.getModel()!;
-    window.harness = {
-      editor,
-      model,
-      language: compiler.language!,
-      worker: () => projectTypeScriptWorker(model.getLanguageId(), model.uri),
-      complete: worker =>
-        worker.getProjectCompletions(
-          model!.uri.toString(),
-          model!.getValueLength(),
-        ),
-    };
-  }, files);
+      const model = editor.editor.getModel()!;
+      window.harness = {
+        editor,
+        compiler,
+        model,
+        language: compiler.language!,
+        worker: () => projectTypeScriptWorker(model.getLanguageId(), model.uri),
+        complete: worker =>
+          worker.getProjectCompletions(
+            model!.uri.toString(),
+            model!.getValueLength(),
+          ),
+      };
+    },
+    {files, delayIndex},
+  );
+  if (delayIndex) return page;
+  await page.waitForFunction(() => !!harness.compiler.language?.autoImports);
+  await page.evaluate(() => {
+    harness.language = harness.compiler.language!;
+    harness.editor.setProjectLanguage(harness.language);
+    harness.compiler.dispose();
+  });
   return page;
 }
 
@@ -383,6 +470,7 @@ async function quickFix(
   page: Awaited<ReturnType<typeof createEditor>>,
   symbol: string,
   title: string,
+  waitForEdit = true,
 ) {
   await page.waitForFunction(symbol => {
     const offset = harness.model.getValue().lastIndexOf(symbol);
@@ -416,7 +504,14 @@ async function quickFix(
     bounds.x + bounds.width / 2,
     bounds.y + bounds.height / 2,
   );
+  const before = await page.evaluate(() => harness.model.getValue());
   await option.click();
+  // Applying an action includes asynchronous edit resolution after the click.
+  if (waitForEdit)
+    await page.waitForFunction(
+      before => harness.model.getValue() !== before,
+      before,
+    );
 }
 
 test(
@@ -426,11 +521,19 @@ test(
     const page = await createEditor(t);
     const source =
       'export const model = box(10, 20, 30);\nexport const hole = cylinder(4, 5);';
-    await page.evaluate(source => harness.model.setValue(source), source);
+    await page.evaluate(source => {
+      harness.model.setValue(source);
+      window.combinedFixCalls = 0;
+    }, source);
     await quickFix(page, 'box', 'Add import from "@code3d/core"');
     const single = await page.evaluate(() => harness.model.getValue());
     assert.match(single, /^import \{box\} from '@code3d\/core';/);
     assert.ok(!single.includes('{box, cylinder}'));
+    assert.equal(
+      await page.evaluate(() => window.combinedFixCalls),
+      0,
+      'single fixes and menu discovery do not resolve file-wide edits',
+    );
     await page.evaluate(() => harness.model.undo());
     assert.equal(await page.evaluate(() => harness.model.getValue()), source);
 
@@ -446,6 +549,7 @@ test(
       /^import \{box, cylinder\} from '@code3d\/core';/,
     );
     assert.deepEqual(combined.diagnostics, []);
+    assert.equal(await page.evaluate(() => window.combinedFixCalls), 1);
     await page.evaluate(() => harness.model.undo());
     assert.equal(await page.evaluate(() => harness.model.getValue()), source);
 
@@ -508,18 +612,21 @@ test(
       const h = harness;
       h.language = {
         ...h.language,
-        autoImportFile: {
-          path: '/.__code3d-auto-imports.ts',
-          source: 'import type {} from "fixture-parts";',
-        },
-        navigationFiles: [
-          ...h.language.navigationFiles,
-          {
-            path: '/node_modules/fixture-parts/index.d.ts',
-            source:
-              'export declare const fixturePart: number;\ndeclare global { interface String { unwantedPackageGlobal: number; } }',
+        autoImports: {
+          root: {
+            path: '/.__code3d-auto-imports.ts',
+            source: 'import type {} from "fixture-parts/feature";',
           },
-        ],
+          realPaths: {},
+          failures: [],
+          files: [
+            {
+              path: '/node_modules/fixture-parts/feature.d.ts',
+              source:
+                'export declare const fixturePart: number;\ndeclare global { interface String { unwantedPackageGlobal: number; } }',
+            },
+          ],
+        },
         files: [
           ...h.language.files.filter(file => file.path !== '/package.json'),
           {
@@ -529,7 +636,8 @@ test(
           },
           {
             path: '/node_modules/fixture-parts/package.json',
-            source: '{"name":"fixture-parts","types":"index.d.ts"}',
+            source:
+              '{"name":"fixture-parts","exports":{"./feature":"./feature.d.ts"}}',
           },
         ],
       };
@@ -546,10 +654,14 @@ test(
       ).map(d => d.code),
     );
     assert.deepEqual(before.sort(), [2304, 2339]);
-    await quickFix(page, 'fixturePart', 'Add import from "fixture-parts"');
+    await quickFix(
+      page,
+      'fixturePart',
+      'Add import from "fixture-parts/feature"',
+    );
     assert.match(
       await page.evaluate(() => harness.model.getValue()),
-      /^import \{fixturePart\} from 'fixture-parts';/,
+      /^import \{fixturePart\} from 'fixture-parts\/feature';/,
     );
     const after = await page.evaluate(async () =>
       (
@@ -583,3 +695,104 @@ test(
     );
   },
 );
+
+test(
+  'late batch imports cannot edit a changed document or language environment',
+  {timeout: 60_000},
+  async t => {
+    const page = await createEditor(t);
+    for (const change of ['source', 'dependencies'] as const) {
+      await page.evaluate(() => {
+        harness.editor.setProjectLanguage(harness.language);
+        harness.model.setValue(
+          'export const parts = [box(1, 2, 3), cylinder(2, 3)];',
+        );
+        window.combinedFixResolved = false;
+        window.combinedFixReturned = false;
+        window.combinedFixGate = new Promise(resolve => {
+          window.releaseCombinedFix = resolve;
+        });
+      });
+      await quickFix(page, 'box', 'Add all missing imports', false);
+      await page.waitForFunction(() => window.combinedFixResolved);
+      const source = await page.evaluate(change => {
+        if (change === 'source')
+          harness.model.setValue('export const changed = 42;');
+        else
+          harness.editor.setProjectLanguage({
+            ...harness.language,
+            compilerOptions: {
+              ...harness.language.compilerOptions,
+              noUnusedLocals: true,
+            },
+          });
+        const source = harness.model.getValue();
+        window.releaseCombinedFix!();
+        return source;
+      }, change);
+      await page.waitForFunction(() => window.combinedFixReturned);
+      assert.equal(await page.evaluate(() => harness.model.getValue()), source);
+    }
+  },
+);
+
+for (const supersede of [false, true]) {
+  test(
+    `optional exports can finish after execution and ${supersede ? 'discard superseded' : 'publish current'} results`,
+    {timeout: 60_000},
+    async t => {
+      const page = await createEditor(
+        t,
+        [
+          {path: '/model.ts', source: 'export const value = 1;'},
+          {
+            path: '/package.json',
+            source: '{"type":"module","dependencies":{"slow-parts":"1"}}',
+          },
+        ],
+        true,
+      );
+      await page.waitForFunction(() => window.indexReadPending);
+      assert.equal(
+        await page.evaluate(() => harness.compiler.language?.autoImports),
+        undefined,
+      );
+      assert.deepEqual(
+        await page.evaluate(async () =>
+          (await harness.worker()).getSemanticDiagnostics(
+            harness.model.uri.toString(),
+          ),
+        ),
+        [],
+      );
+      if (supersede) {
+        await page.evaluate(async () => {
+          await harness.compiler.compile(
+            {
+              files: [
+                {path: '/model.ts', source: 'export const value = 2;'},
+                {path: '/package.json', source: '{"type":"module"}'},
+              ],
+            },
+            '/model.ts',
+          );
+        });
+      }
+      await page.evaluate(() => window.releaseIndex!());
+      await page.waitForFunction(
+        () => !!harness.compiler.language?.autoImports,
+      );
+      const index = await page.evaluate(
+        () => harness.compiler.language!.autoImports!,
+      );
+      assert.equal(index.root.source.includes('"slow-parts"'), !supersede);
+      assert.equal(
+        index.files.some(
+          file => file.path === '/node_modules/slow-parts/index.d.ts',
+        ),
+        !supersede,
+      );
+      await page.evaluate(() => harness.compiler.dispose());
+    },
+  );
+}

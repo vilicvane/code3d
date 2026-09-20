@@ -8,11 +8,15 @@ let server: Awaited<ReturnType<typeof createAppTestServer>>;
 let ProjectLanguageLoader: typeof import('../src/project/project-language.ts').ProjectLanguageLoader;
 let ProjectFileCache: typeof import('../src/project/file-cache.ts').ProjectFileCache;
 let ProjectPackages: typeof import('../src/project/project-packages.ts').ProjectPackages;
+let ProjectAutoImportLoader: typeof import('../src/project/project-auto-imports.ts').ProjectAutoImportLoader;
 before(async () => {
   server = await createAppTestServer();
   ({ProjectLanguageLoader} = await server.ssrLoadModule<
     typeof import('../src/project/project-language.ts')
   >('/src/project/project-language.ts'));
+  ({ProjectAutoImportLoader} = await server.ssrLoadModule<
+    typeof import('../src/project/project-auto-imports.ts')
+  >('/src/project/project-auto-imports.ts'));
   ({ProjectFileCache} = await server.ssrLoadModule<
     typeof import('../src/project/file-cache.ts')
   >('/src/project/file-cache.ts'));
@@ -74,6 +78,7 @@ function fixture(extra: Record<string, string> = {}) {
     reads,
     reader,
     loader,
+    index: new ProjectAutoImportLoader(reader, reader),
     async load(source: string, extra: ModelProject['files'] = []) {
       const project = {files: [{path: '/model.ts', source}, ...extra]};
       const changed = await cache.refresh();
@@ -86,7 +91,7 @@ function fixture(extra: Record<string, string> = {}) {
         '/model.ts',
         () => preparations++,
       );
-      return {language, preparations};
+      return {language, preparations, project};
     },
   };
 }
@@ -323,24 +328,21 @@ test('declaration-map sources remain outside the dependency graph until directly
   );
 });
 
-test('indexes declared dependencies separately and refreshes exports when the manifest changes', async () => {
+test('optional export discovery stays isolated, reuses files and follows dependency changes', async () => {
   const state = fixture({
     '/package.json': '{"type":"module","dependencies":{"one":"1"}}',
     '/node_modules/one/index.d.ts':
       'export declare const part: number; declare global { interface String { packageGlobal: number; } }',
   });
   const source = 'export const result = "".packageGlobal;';
-  const first = await state.load(source);
-  assert.ok(first.language.autoImportFile?.source.includes('"one"'));
+  const loadIndex = async () => {
+    const {language, project} = await state.load(source);
+    return (await state.index.load(project, '/model.ts', language))!;
+  };
+  const first = await loadIndex();
+  assert.ok(first.root.source.includes('"one"'));
   assert.ok(
-    first.language.navigationFiles.some(
-      file => file.path === '/node_modules/one/index.d.ts',
-    ),
-  );
-  assert.ok(
-    !first.language.files.some(
-      file => file.path === '/node_modules/one/index.d.ts',
-    ),
+    first.files.some(file => file.path === '/node_modules/one/index.d.ts'),
   );
   const program = state.loader.typeScriptProgram;
   assert.equal(
@@ -352,28 +354,178 @@ test('indexes declared dependencies separately and refreshes exports when the ma
       .getSemanticDiagnostics(program.getSourceFile('/model.ts'))
       .some(d => d.code === 2339),
   );
-  const reads = state.reads.length;
-  assert.equal((await state.load(source)).preparations, 0);
-  assert.equal(
-    state.reads.length,
-    reads,
-    'warm edits reuse package export declarations',
-  );
-
+  const readCount = () =>
+    state.reads.filter(path => path.endsWith('/one/index.d.ts')).length;
+  const reads = readCount();
+  await loadIndex();
+  assert.equal(readCount(), reads, 'warm exports reuse package declarations');
   state.files.set(
     '/package.json',
     '{"type":"module","dependencies":{"two":"1"}}',
   );
-  const changed = await state.load(source);
-  assert.ok(!changed.language.autoImportFile?.source.includes('"one"'));
+  const changed = await loadIndex();
+  assert.ok(!changed.root.source.includes('"one"'));
   assert.ok(
-    changed.language.navigationFiles.some(
-      file => file.path === '/node_modules/two/index.d.ts',
+    changed.files.some(file => file.path === '/node_modules/two/index.d.ts'),
+  );
+  assert.ok(
+    !changed.files.some(file => file.path === '/node_modules/one/index.d.ts'),
+  );
+});
+
+test('unused failing and delayed declarations never block mandatory language loading; index failures retry', async t => {
+  const state = fixture({
+    '/package.json': '{"type":"module","dependencies":{"one":"1","two":"1"}}',
+  });
+  const original = state.reader.readFile;
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const started = new Promise<void>(resolve => {
+    entered = resolve;
+  });
+  let fail = true;
+  t.mock.method(state.reader, 'readFile', async (path: string) => {
+    if (path === '/node_modules/one/index.d.ts' && fail) {
+      entered();
+      await gate;
+      throw new Error('Unavailable optional package');
+    }
+    return original(path);
+  });
+  const {project, language} = await state.load('export const value = 1;');
+  const pending = state.index.load(project, '/model.ts', language);
+  await started;
+  await state.load('export const value = 2;');
+  release();
+  const partial = (await pending)!;
+  assert.ok(
+    partial.failures.some(failure =>
+      /Unavailable optional package/.test(failure.message),
     ),
   );
   assert.ok(
-    !changed.language.navigationFiles.some(
-      file => file.path === '/node_modules/one/index.d.ts',
-    ),
+    partial.files.some(file => file.path === '/node_modules/two/index.d.ts'),
+  );
+  // A real dependency must still fail through the mandatory path.
+  await assert.rejects(
+    state.load('export {value} from "one";'),
+    /Unavailable optional package/,
+  );
+  fail = false;
+  const recovered = (await state.index.load(project, '/model.ts', language))!;
+  assert.deepEqual(recovered.failures, []);
+  assert.ok(
+    recovered.files.some(file => file.path === '/node_modules/one/index.d.ts'),
+  );
+});
+
+test('indexes public subpaths using TypeScript conditions and excludes null or unavailable exports', async () => {
+  const state = fixture({
+    '/package.json': '{"type":"module","dependencies":{"one":"1"}}',
+    '/node_modules/one/package.json': JSON.stringify({
+      type: 'module',
+      exports: {
+        './feature': {
+          browser: {types: './browser.d.ts', default: './browser.js'},
+          default: './server.d.ts',
+        },
+        './blocked': null,
+        './server': {node: './server.d.ts'},
+      },
+    }),
+    '/node_modules/one/browser.d.ts':
+      'export declare const browserPart: number;',
+    '/node_modules/one/server.d.ts': 'export declare const serverPart: number;',
+  });
+  const {project, language} = await state.load('export const value = 1;');
+  const index = (await state.index.load(project, '/model.ts', language))!;
+  assert.ok(index.root.source.includes('"one/feature"'));
+  assert.ok(!index.root.source.includes('"one"'));
+  assert.ok(!index.root.source.includes('"one/blocked"'));
+  assert.ok(
+    index.files.some(file => file.path === '/node_modules/one/browser.d.ts'),
+  );
+  assert.ok(
+    !index.files.some(file => file.path === '/node_modules/one/server.d.ts'),
+  );
+});
+
+test('superseded export reads cannot publish after a package scope change or reset', async t => {
+  const state = fixture({
+    '/package.json': '{"type":"module","dependencies":{"one":"1"}}',
+    '/nested/package.json': '{"type":"module","dependencies":{"two":"1"}}',
+  });
+  const original = state.reader.readFile;
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const started = new Promise<void>(resolve => {
+    entered = resolve;
+  });
+  t.mock.method(state.reader, 'readFile', async (path: string) => {
+    if (path === '/node_modules/one/index.d.ts') {
+      entered();
+      await gate;
+    }
+    return original(path);
+  });
+  const {project, language} = await state.load('export const value = 1;');
+  const obsolete = state.index.load(project, '/model.ts', language);
+  await started;
+  state.index.reset();
+  const latest = state.index.load({files: []}, '/nested/model.ts', {
+    ...language,
+    packageSpecifiers: ['two'],
+  });
+  release();
+  assert.equal(await obsolete, undefined);
+  const result = (await latest)!;
+  assert.equal(result.root.path, '/nested/.__code3d-auto-imports.ts');
+  assert.ok(
+    result.files.some(file => file.path === '/node_modules/two/index.d.ts'),
+  );
+  assert.ok(
+    !result.files.some(file => file.path === '/node_modules/one/index.d.ts'),
+  );
+});
+
+test('an index cancelled during refresh preserves invalidation for its successor', async t => {
+  const state = fixture({
+    '/package.json': '{"type":"module","dependencies":{"one":"1"}}',
+  });
+  const {project, language} = await state.load('export const value = 1;');
+  await state.index.load(project, '/model.ts', language);
+  const path = '/node_modules/one/index.d.ts';
+  state.files.set(path, 'export declare const replacement: 42;');
+  const original = state.reader.stat;
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const started = new Promise<void>(resolve => {
+    entered = resolve;
+  });
+  t.mock.method(state.reader, 'stat', async (file: string) => {
+    if (file === path) {
+      entered();
+      await gate;
+    }
+    return original(file);
+  });
+  const obsolete = state.index.load(project, '/model.ts', language);
+  await started;
+  const latest = state.index.load(project, '/model.ts', language);
+  release();
+  assert.equal(await obsolete, undefined);
+  const result = (await latest)!;
+  assert.equal(
+    result.files.find(file => file.path === path)?.source,
+    'export declare const replacement: 42;',
   );
 });

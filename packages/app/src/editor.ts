@@ -381,8 +381,11 @@ export class CodeEditor {
 
   private isNavigationSource(path: string): boolean {
     return (
-      this.projectLanguage?.navigationFiles.some(file => file.path === path) ??
-      false
+      this.projectLanguage?.navigationFiles.some(file => file.path === path) ||
+      (!!this.projectLanguage?.autoImports?.files.some(
+        file => file.path === path,
+      ) &&
+        !this.projectLanguage.files.some(file => file.path === path))
     );
   }
 
@@ -421,6 +424,7 @@ export class CodeEditor {
       this.setProjectLanguage(
         {
           ...this.projectLanguage,
+          autoImports: undefined,
           files: this.projectLanguage.files.filter(
             file => !affected(file.path),
           ),
@@ -470,16 +474,22 @@ export class CodeEditor {
     this.projectLanguage = language;
     projectPackageSpecifiers = language.packageSpecifiers;
     this.navigationFiles = new Map(
-      [...language.files, ...language.navigationFiles].map(file => [
-        file.path,
-        file.source,
-      ]),
+      [
+        ...(language.autoImports?.files ?? []),
+        ...language.files,
+        ...language.navigationFiles,
+      ].map(file => [file.path, file.source]),
     );
     const extraLibs = [
-      ...language.files,
-      ...language.navigationFiles,
-      ...(language.toolingFile ? [language.toolingFile] : []),
-      ...(language.autoImportFile ? [language.autoImportFile] : []),
+      ...new Map(
+        [
+          ...(language.autoImports?.files ?? []),
+          ...language.files,
+          ...language.navigationFiles,
+          ...(language.toolingFile ? [language.toolingFile] : []),
+          ...(language.autoImports ? [language.autoImports.root] : []),
+        ].map(file => [file.path, file]),
+      ).values(),
     ].map(file => ({
       filePath: monaco.Uri.file('/workspace' + file.path).toString(),
       content: file.source,
@@ -487,8 +497,8 @@ export class CodeEditor {
     extraLibs.push({
       filePath: 'file:///workspace/.__code3d-auto-import-root.json',
       content: JSON.stringify(
-        language.autoImportFile
-          ? '/workspace' + language.autoImportFile.path
+        language.autoImports
+          ? '/workspace' + language.autoImports.root.path
           : null,
       ),
     });
@@ -509,10 +519,10 @@ export class CodeEditor {
       filePath: 'file:///workspace/.__code3d-realpaths.json',
       content: JSON.stringify(
         Object.fromEntries(
-          Object.entries(language.realPaths ?? {}).map(([from, to]) => [
-            '/workspace' + from,
-            '/workspace' + to,
-          ]),
+          Object.entries({
+            ...language.autoImports?.realPaths,
+            ...language.realPaths,
+          }).map(([from, to]) => ['/workspace' + from, '/workspace' + to]),
         ),
       ),
     });

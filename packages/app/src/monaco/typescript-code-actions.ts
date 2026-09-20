@@ -16,6 +16,12 @@ export function registerProjectTypeScriptCodeActions(
       codeActions: false,
     });
   }
+  const resolvers = new WeakMap<
+    monaco.languages.CodeAction,
+    (
+      token: monaco.CancellationToken,
+    ) => Promise<monaco.languages.CodeAction | undefined>
+  >();
   return monaco.languages.registerCodeActionProvider(
     selector,
     {
@@ -29,8 +35,8 @@ export function registerProjectTypeScriptCodeActions(
             : typeScriptLanguage.typescriptDefaults;
         const libs = defaults.getExtraLibs();
         const options = defaults.getCompilerOptions();
-        const current = () =>
-          !token.isCancellationRequested &&
+        const current = (requestToken = token) =>
+          !requestToken.isCancellationRequested &&
           !model.isDisposed() &&
           model.getVersionId() === version &&
           model.getLanguageId() === language &&
@@ -79,21 +85,37 @@ export function registerProjectTypeScriptCodeActions(
             }
           }
           for (const [fixId, title] of combined) {
-            // One TypeScript transaction merges imports without overlapping edits.
-            const fix = await worker.getProjectCombinedCodeFix(
-              model.uri.toString(),
-              fixId,
-            );
-            if (!current()) return undefined;
-            if (fix.commands?.length) continue;
-            const edit = fileEdit(model, version, fix.changes);
-            if (edit) actions.push({title, kind: 'quickfix', edit});
+            const action: monaco.languages.CodeAction = {
+              title,
+              kind: 'quickfix',
+            };
+            resolvers.set(action, async resolveToken => {
+              if (!current(resolveToken)) return undefined;
+              try {
+                // Resolve only when selected; TypeScript merges the file's imports.
+                const fix = await worker.getProjectCombinedCodeFix(
+                  model.uri.toString(),
+                  fixId,
+                );
+                if (!current(resolveToken) || fix.commands?.length)
+                  return undefined;
+                const edit = fileEdit(model, version, fix.changes);
+                return edit ? {...action, edit} : undefined;
+              } catch (error) {
+                if (current(resolveToken)) throw error;
+                return undefined;
+              }
+            });
+            actions.push(action);
           }
           return {actions, dispose() {}};
         } catch (error) {
           if (current()) throw error;
           return undefined;
         }
+      },
+      resolveCodeAction(action, token) {
+        return resolvers.get(action)?.(token);
       },
     },
     {providedCodeActionKinds: ['quickfix']},

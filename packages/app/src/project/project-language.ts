@@ -1,11 +1,8 @@
 import ts from '@typescript/typescript6';
-import es5Library from '@typescript/old/lib/lib.es5.d.ts?raw';
-import {
-  decodeProjectFile,
-  statProjectFiles,
-  type ProjectFileReader,
-} from './file-reader';
+import {decodeProjectFile, type ProjectFileReader} from './file-reader';
 import {findPackageScope} from './package-manifest';
+import {TypeScriptFiles, settleReads} from './typescript-files';
+import type {ProjectAutoImports} from './project-auto-imports';
 import {
   normalizeProjectPath,
   projectDirectory,
@@ -34,77 +31,49 @@ export type ProjectLanguage = Readonly<{
   /** Compiler-injected imports, kept out of user files and navigation snapshots. */
   toolingFile?: ProjectSourceFile;
   /** Package exports indexed separately, without adding globals to the model program. */
-  autoImportFile?: ProjectSourceFile;
+  autoImports?: ProjectAutoImports;
   compilerOptions: ts.CompilerOptions;
   packageSpecifiers: readonly string[];
   realPaths?: Readonly<Record<string, string>>;
   rootPaths: readonly string[];
 }>;
 
-async function readAll(reads: readonly Promise<unknown>[]): Promise<void> {
-  // Settle shared cache writes before a failed load allows the next revision.
-  const results = await Promise.allSettled(reads);
-  for (const result of results)
-    if (result.status === 'rejected') throw result.reason;
-}
-
 /** Retain TypeScript's parsed dependency closure between model revisions. */
 export class ProjectLanguageLoader {
-  private readonly sources = new Map<string, string | undefined>();
-  private readonly filePresence = new Map<string, boolean>();
-  private readonly realPaths = new Map<string, string>();
-  private readonly sourceFiles = new Map<string, ts.SourceFile>();
+  private files: TypeScriptFiles;
   private localPaths = new Set<string>();
   private metadataOverlays = new Map<string, string>();
   private readonly navigation = new Map<string, Set<string>>();
   private program?: ts.Program;
-  private autoImportProgram?: ts.Program;
   private options?: ts.CompilerOptions;
   private directory?: string;
 
-  constructor(private readonly reader: ProjectFileReader) {}
+  constructor(private readonly reader: ProjectFileReader) {
+    this.files = new TypeScriptFiles(reader);
+  }
 
   get typeScriptProgram(): ts.Program {
     return this.program!;
   }
 
   reset(): void {
-    this.sources.clear();
-    this.filePresence.clear();
-    this.realPaths.clear();
-    this.sourceFiles.clear();
+    this.files = new TypeScriptFiles(this.reader);
     this.localPaths.clear();
     this.metadataOverlays.clear();
     this.navigation.clear();
     this.program = undefined;
-    this.autoImportProgram = undefined;
     this.options = undefined;
     this.directory = undefined;
   }
 
   invalidate(changed: ReadonlySet<string>): void {
-    const paths = new Set(changed);
-    for (const [path, realPath] of this.realPaths) {
-      if (changed.has(path) || changed.has(realPath)) {
-        paths.add(path);
-        paths.add(realPath);
-        this.realPaths.delete(path);
-      }
-    }
-    for (const path of paths) {
-      // Current editor contents replace these directly in load().
-      if (
-        this.localPaths.has(path) ||
-        (!this.sources.has(path) && !this.filePresence.has(path))
+    // Editor source overlays are replaced directly in load().
+    if (
+      this.files.invalidate(
+        new Set([...changed].filter(path => !this.localPaths.has(path))),
       )
-        continue;
-      this.sources.delete(path);
-      this.filePresence.delete(path);
-      this.sourceFiles.delete(path);
-      if (path.endsWith('.json')) this.sourceFiles.clear();
-      // Previously failed resolutions must also notice newly created files.
+    ) {
       this.program = undefined;
-      this.autoImportProgram = undefined;
       this.options = undefined;
       this.navigation.clear();
     }
@@ -122,7 +91,7 @@ export class ProjectLanguageLoader {
       this.reset();
       this.directory = directory;
     }
-    const {sources, realPaths, sourceFiles} = this;
+    const {sources, realPaths, host, read} = this.files;
     // Configs can also arrive as unsaved editor overlays.
     const metadataOverlays = new Map(
       project.files
@@ -164,9 +133,6 @@ export class ProjectLanguageLoader {
     const toolingPath = normalizeProjectPath(
       directory + '/.__code3d-tooling.ts',
     );
-    const autoImportPath = normalizeProjectPath(
-      directory + '/.__code3d-auto-imports.ts',
-    );
     const metadataPath = normalizeProjectPath(directory + '/package.json');
     const configPath = normalizeProjectPath(directory + '/tsconfig.json');
     const localPaths = new Set(
@@ -174,99 +140,27 @@ export class ProjectLanguageLoader {
     );
     for (const path of this.localPaths) {
       if (!localPaths.has(path)) {
-        sources.delete(path);
-        this.filePresence.delete(path);
-        sourceFiles.delete(path);
+        this.files.invalidate(new Set([path]));
         this.program = undefined;
-        this.autoImportProgram = undefined;
       }
     }
-    for (const file of localFiles) {
-      const path = normalizeProjectPath(file.path);
-      if (sources.get(path) !== file.source) sourceFiles.delete(path);
-      sources.set(path, file.source);
-    }
+    for (const file of localFiles)
+      this.files.set(normalizeProjectPath(file.path), file.source);
     this.localPaths = localPaths;
-    sources.set(toolingPath, 'import type {} from "@code3d/core/tooling";');
-    sources.set('/lib.es5.d.ts', es5Library);
-    const pending = new Set<string>();
-    const pendingPresence = new Set<string>();
-    const read = (path: string): string | undefined => {
-      path = normalizeProjectPath(path);
-      if (!sources.has(path)) pending.add(path);
-      return sources.get(path);
-    };
-    const host: ts.CompilerHost = {
-      fileExists: path => {
-        path = normalizeProjectPath(path);
-        if (sources.has(path)) return sources.get(path) !== undefined;
-        const present = this.filePresence.get(path);
-        if (present !== undefined) return present;
-        pendingPresence.add(path);
-        return false;
-      },
-      realpath: path => realPaths.get(path) ?? path,
-      readFile: read,
-      directoryExists: () => true,
-      getDirectories: () => [],
-      getSourceFile(path, options) {
-        const source = read(path);
-        if (source === undefined) return undefined;
-        let file = sourceFiles.get(path);
-        if (!file) {
-          file = ts.createSourceFile(path, source, options, true);
-          sourceFiles.set(path, file);
-        }
-        return file;
-      },
-      getDefaultLibFileName: () => '/lib.es5.d.ts',
-      writeFile: () => {},
-      getCurrentDirectory: () => '/',
-      getCanonicalFileName: path => normalizeProjectPath(path),
-      useCaseSensitiveFileNames: () => true,
-      getNewLine: () => '\n',
-    };
+    this.files.set(toolingPath, 'import type {} from "@code3d/core/tooling";');
     const roots = [...localPaths, toolingPath, '/lib.es5.d.ts'];
     // Metadata is needed even for a project which currently contains no imports.
     read(metadataPath);
     read(configPath);
     let options = this.options ?? projectCompilerOptions;
     let program: ts.Program;
-    let autoImportProgram: ts.Program;
     let packageSpecifiers: string[];
     for (;;) {
-      if (pending.size || pendingPresence.size) {
+      if (this.files.needsRead) {
         prepare();
-        const requests = [...pending];
-        const presenceRequests = [...pendingPresence].filter(
-          path => !pending.has(path),
-        );
-        pending.clear();
-        pendingPresence.clear();
-        // Discovery may have resolved a prior miss; do not reuse its resolution.
+        // A newly discovered file may resolve a previous miss.
         this.program = undefined;
-        this.autoImportProgram = undefined;
-        await readAll([
-          statProjectFiles(reader, presenceRequests).then(infos => {
-            for (const [index, path] of presenceRequests.entries())
-              this.filePresence.set(path, infos[index]?.kind === 'file');
-          }),
-          ...requests.map(async path => {
-            const [bytes, info] = await Promise.all([
-              reader.readFile(path),
-              reader.stat(path),
-            ]);
-            if (info?.realPath && bytes) {
-              realPaths.set(path, info.realPath);
-              sources.set(info.realPath, decodeProjectFile(bytes));
-            }
-            sources.set(
-              path,
-              bytes === undefined ? undefined : decodeProjectFile(bytes),
-            );
-            this.filePresence.set(path, bytes !== undefined);
-          }),
-        ]);
+        await this.files.readPending();
       }
       const configSource = sources.get(configPath);
       if (configSource && !this.options) {
@@ -309,30 +203,16 @@ export class ProjectLanguageLoader {
           }),
         ]),
       ];
-      const autoImports = packageSpecifiers
-        .map(name => `import type {} from ${JSON.stringify(name)};`)
-        .join('\n');
-      if (sources.get(autoImportPath) !== autoImports) {
-        sources.set(autoImportPath, autoImports);
-        sourceFiles.delete(autoImportPath);
-      }
-      autoImportProgram = ts.createProgram({
-        rootNames: [autoImportPath, '/lib.es5.d.ts'],
-        options,
-        host,
-        oldProgram: this.autoImportProgram,
-      });
       program = ts.createProgram({
         rootNames: roots,
         options,
         host,
         oldProgram: this.program,
       });
-      if (!pending.size && !pendingPresence.size) break;
+      if (!this.files.needsRead) break;
     }
     this.options = options;
     this.program = program;
-    this.autoImportProgram = autoImportProgram;
     const projectPaths = new Set(
       project.files
         .filter(file => isSourceFile(file.path))
@@ -346,14 +226,14 @@ export class ProjectLanguageLoader {
       if (!sources.has(path)) {
         prepare();
         const bytes = await reader.readFile(path);
-        sources.set(
+        this.files.set(
           path,
           bytes === undefined ? undefined : decodeProjectFile(bytes),
         );
       }
       return sources.get(path);
     };
-    await readAll(
+    await settleReads(
       [...reachable].map(async path => {
         const source = sources.get(path);
         if (!source || !/\.d\.[cm]?ts$/.test(path)) return;
@@ -375,7 +255,7 @@ export class ProjectLanguageLoader {
                 sourcesContent?: (string | null)[];
               };
               navigation.add(mapPath);
-              await readAll(
+              await settleReads(
                 map.sources.map(async (file, index) => {
                   const sourcePath = normalizeProjectPath(
                     projectDirectory(mapPath) +
@@ -388,7 +268,7 @@ export class ProjectLanguageLoader {
                     map.sourcesContent?.[index] ??
                     (await readNavigation(sourcePath));
                   if (contents !== undefined) {
-                    sources.set(sourcePath, contents);
+                    this.files.set(sourcePath, contents);
                     navigation!.add(sourcePath);
                   }
                 }),
@@ -400,18 +280,8 @@ export class ProjectLanguageLoader {
         navigation.forEach(path => navigationFiles.add(path));
       }),
     );
-    // Keep unreferenced package declarations available to the export index and
-    // navigation, without making them roots or globals in the model program.
-    for (const file of autoImportProgram.getSourceFiles()) {
-      if (file.fileName !== autoImportPath && file.fileName !== '/lib.es5.d.ts')
-        navigationFiles.add(file.fileName);
-    }
     return {
       rootPaths: [...localPaths],
-      autoImportFile: {
-        path: autoImportPath,
-        source: sources.get(autoImportPath)!,
-      },
       toolingFile: {path: toolingPath, source: sources.get(toolingPath)!},
       realPaths: Object.fromEntries(realPaths),
       navigationFiles: [...navigationFiles].flatMap(path => {
@@ -426,7 +296,6 @@ export class ProjectLanguageLoader {
         source !== undefined &&
         path !== '/lib.es5.d.ts' &&
         path !== toolingPath &&
-        path !== autoImportPath &&
         (reachable.has(path) ||
           reachable.has(realPaths.get(path) ?? '') ||
           path.endsWith('.json')) &&
