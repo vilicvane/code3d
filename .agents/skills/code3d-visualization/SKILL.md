@@ -48,7 +48,7 @@ description: 'code3d App 的既定三维可视化约定。USE FOR: 修改 viewpo
 - 方向头部共用 `ScreenSpaceArrowHead`，不要恢复随模型缩放的锥体箭头。
 - 普通参考轴显示双向箭头；关系中的有向轴显示单个正向箭头，`reverse()` 和面的 `flip()` 尊重已有方向元数据。
 - 曲线自身就是箭杆，只在有向端点放切向箭头头部，不另画短直线。反向曲线使用另一端及反向切线；闭合曲线使用稳定接缝点。
-- 被动预览由通用 JSDoc inspector 返回的 `target` / `ambient` 决定，renderer 不根据建模函数名或工具状态拼装画面。层级依次为 target 中与 `context.focused.values` 同一对象的值、其余 target、ambient；生成的新几何不继承输入 focused。没有 focused 时全部 target 保持完整强调，不因选中 on/align 方法名而人为指定 self 为主侧。
+- 被动预览由通用 JSDoc inspector 返回的 `target` / `ambient` 决定，renderer 不根据建模函数名或工具状态拼装画面。当前执行的输入即使未出现在返回场景中，也不能被自动补画为背景；摆放副本或新几何与原始输入的 node ID 不同不构成补画理由。循环背景只补其他执行实例。层级依次为 target 中与 `context.focused.values` 同一对象的值、其余 target、ambient；生成的新几何不继承输入 focused。没有 focused 时全部 target 保持完整强调，不因选中 on/align 方法名而人为指定 self 为主侧。
 - 工具可用性由当前源码调用及其参数元数据派生，不以 inspect 返回可预览值为前提。空参数或失败调用没有检查画面时，仍发布其源码工具上下文，让候选选择与参数补入可用；不为此伪造公共 inspector 返回值。
 - 拓扑引用的空参数、无效 ID、空选择与有效选择共用所属模型的背景样式；有无已选元素只影响元素标记。缺失结果所需的被动背景由接口 inspector 声明，不在工具补画时退回普通模型材质或按方法名猜测预览层级。
 - 标记在 target:focused / target 层级分别保留基础不透明度或整组乘 0.7；没有 focused 时 target 使用基础不透明度。箭头、圆环、角线、范围框、真实边界及面填充一起变化，例如 bound 角线 85% / 59.5%、填充 18% / 12.6%。同一锚点的别名只画一次，最强层级生效；同属一个模型的不同元素仍保留各自身份。

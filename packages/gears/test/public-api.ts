@@ -1,5 +1,16 @@
-import {helicalGear, internalGear, spurGear} from '@code3d/gears';
-import type {Gear, Mounting} from '@code3d/gears';
+import {
+  assembleGears,
+  helicalGear,
+  internalGear,
+  nominalCenterDistance,
+  spurGear,
+} from '@code3d/gears';
+import type {
+  Gear,
+  GearAssemblyConfig,
+  GearPairConfig,
+  Mounting,
+} from '@code3d/gears';
 import type {SolidModel} from '@code3d/core';
 
 const mounting: Mounting = {
@@ -24,6 +35,17 @@ const ring: SolidModel = internalGear({
 spur.gearAxis;
 spur.gearFaceUp;
 spur.gearFaceDown;
+const pairConfig: GearPairConfig = {angle: 60};
+const assemblyConfig: GearAssemblyConfig = {
+  centerDistanceDelta: 0.2,
+  pairs: [pairConfig],
+};
+const pair: Gear[] = assembleGears(
+  [spur, spurGear({module: 2, teeth: 20, faceWidth: 10})],
+  assemblyConfig,
+);
+const centerDistance: number = nominalCenterDistance(pair[0], pair[1]);
+void centerDistance;
 void helical;
 void ring;
 

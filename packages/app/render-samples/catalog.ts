@@ -66,6 +66,21 @@ export const renderSamples = [
     tags: ['gears', 'bore', 'hub', 'shaft', 'helical', 'internal'],
   },
   {
+    id: 'gear-assembly',
+    title: 'Assemble a three-gear train',
+    description:
+      'Mesh three spur gears around a 120° center angle, then constrain the assembled group to a mounting plate.',
+    category: 'Practical models',
+    file: 'packages/gear-assembly.ts',
+    focus: {
+      context:
+        "export default group([mountingPlate, train], 'Mounted gear train')",
+      token: 'group',
+    },
+    view: {direction: [0.5, 1.8, 1.2], up: [0, 1, 0]},
+    tags: ['gears', 'assembly', 'center distance', 'phase'],
+  },
+  {
     id: 'layout-ventilation',
     title: 'Ventilation in a construction space',
     description:
@@ -427,6 +442,28 @@ export const sourceContextSets: Readonly<
       },
     },
   ],
+  'gear-assembly': [
+    {
+      id: 'wheel',
+      image: 'gear-assembly-wheel',
+      label: 'Focus the middle gear',
+      description:
+        'Inspect the wheel in its solved mesh while the pinion and idler stay visible as context.',
+      focus: {context: '[pinion, wheel, idler]', token: 'wheel'},
+    },
+    {
+      id: 'mounted',
+      image: 'gear-assembly',
+      label: 'Mount the gear group',
+      description:
+        'Constrain the complete 120° train to the upper face of a mounting plate.',
+      focus: {
+        context:
+          "export default group([mountingPlate, train], 'Mounted gear train')",
+        token: 'group',
+      },
+    },
+  ],
   'desktop-stand': [
     {
       id: 'body',
@@ -510,6 +547,7 @@ export const sourceContextSets: Readonly<
 // Every runnable source, including reusable project parts, is checked by the example tests.
 export const exampleEntries = [
   {file: 'packages/gears.ts'},
+  {file: 'packages/gear-assembly.ts'},
   {file: 'packages/screws.ts'},
   {
     file: 'projects/desktop-controller/enclosure.ts',

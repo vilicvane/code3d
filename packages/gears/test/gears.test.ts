@@ -1,11 +1,19 @@
 import assert from 'node:assert/strict';
 import {after, test} from 'node:test';
 import {replicad} from '@code3d/core/replicad';
+import {group, intersect} from '@code3d/core';
 import {
+  createModelSnapshotter,
   disposeModelObjects,
   modelGeometry,
 } from '../../core/test/model-test.ts';
-import {helicalGear, internalGear, spurGear} from '../src/library/index.ts';
+import {
+  assembleGears,
+  helicalGear,
+  internalGear,
+  nominalCenterDistance,
+  spurGear,
+} from '../src/library/index.ts';
 import {resolveToothDimensions} from '../src/library/specification.ts';
 import type {Gear} from '../src/library/index.ts';
 
@@ -14,6 +22,13 @@ after(() => disposeModelObjects(models));
 const keep = (gear: Gear) => (models.push(gear), gear);
 const volume = (gear: Gear) =>
   replicad.measureVolume(modelGeometry(gear).value.shape.asShape3D());
+const near = (actual: readonly number[], expected: readonly number[]) =>
+  actual.forEach((value, index) =>
+    assert.ok(
+      Math.abs(value - expected[index]) < 1e-6,
+      `${value} ≠ ${expected[index]}`,
+    ),
+  );
 
 test('external gears produce complete bore, keyway, hub and shaft solids', () => {
   const plain = keep(
@@ -158,4 +173,197 @@ test('standards and dimensions reject unsupported nominal parts', () => {
       }),
     /Bolt holes must fit/,
   );
+});
+
+test('nominal center distance covers external, internal and helical pairs', () => {
+  const small = keep(spurGear({module: 2, teeth: 20, faceWidth: 10}));
+  const large = keep(spurGear({module: 2, teeth: 24, faceWidth: 10}));
+  const ring = keep(
+    internalGear({module: 2, teeth: 48, faceWidth: 10, outerDiameter: 130}),
+  );
+  assert.equal(nominalCenterDistance(small, large), 44);
+  assert.equal(nominalCenterDistance(small, ring), 28);
+  assert.equal(nominalCenterDistance(ring, small), 28);
+  assert.equal(
+    nominalCenterDistance(
+      small.material('#aaa'),
+      large.relate(self => self.frame.align(small.frame)),
+    ),
+    44,
+  );
+
+  const right = keep(
+    helicalGear({
+      normalModule: 2,
+      teeth: 20,
+      faceWidth: 10,
+      helixAngle: 20,
+      hand: 'right',
+    }),
+  );
+  const left = keep(
+    helicalGear({
+      normalModule: 2,
+      teeth: 24,
+      faceWidth: 10,
+      helixAngle: 20,
+      hand: 'left',
+    }),
+  );
+  assert.ok(
+    Math.abs(
+      nominalCenterDistance(right, left) - 44 / Math.cos((20 * Math.PI) / 180),
+    ) < 1e-9,
+  );
+  assert.throws(() => nominalCenterDistance(right, right), /opposite hands/);
+  assert.throws(() => nominalCenterDistance(right, small), /helix angle/);
+  assert.throws(() => nominalCenterDistance(ring, ring), /internal gears/);
+});
+
+test('assembly meshes adjacent gears in order with automatic tooth phase', () => {
+  const a = keep(spurGear({module: 2, teeth: 24, faceWidth: 10}));
+  const b = keep(spurGear({module: 2, teeth: 20, faceWidth: 10}));
+  const c = keep(spurGear({module: 2, teeth: 18, faceWidth: 10}));
+  const [first, second, third] = assembleGears([a, b, c], {
+    centerDistanceDelta: 0.2,
+    pairs: [{}, {angle: 90, axialOffset: 1}],
+  });
+  const assembly = group([first, second, third]);
+  near(first.position(assembly), [0, 0, 0]);
+  near(second.position(assembly), [44.2, 0, 0]);
+  near(third.position(assembly), [44.2, 1, 38.2]);
+  const chainGears = assembleGears([a, b, c], {centerDistanceDelta: 0.2});
+  const defaultChain = group(chainGears);
+  near(chainGears[2].position(defaultChain), [82.4, 0, 0]);
+  assert.notDeepEqual(
+    createModelSnapshotter()(assembly).children[1].transform.quaternion,
+    createModelSnapshotter()(assembly).children[0].transform.quaternion,
+  );
+  assert.throws(
+    () => intersect(assembleGears([a, b])),
+    /no common solid volume/,
+  );
+  for (const pair of [
+    [first, second],
+    [second, third],
+  ])
+    assert.throws(() => intersect(pair), /no common solid volume/);
+  assert.equal(first, a);
+  assert.notEqual(second, b);
+});
+
+test('assembly angles turn from the preceding center-line direction', () => {
+  const a = keep(spurGear({module: 2, teeth: 24, faceWidth: 10}));
+  const b = keep(spurGear({module: 2, teeth: 20, faceWidth: 10}));
+  const c = keep(spurGear({module: 2, teeth: 18, faceWidth: 10}));
+  for (const [angle, side] of [
+    [60, 1],
+    [-60, -1],
+    [660, -1],
+  ]) {
+    const turned = assembleGears([a, b, c], {
+      centerDistanceDelta: 0.2,
+      pairs: [{}, {angle}],
+    });
+    near(turned[2].position(group(turned)), [
+      63.3,
+      0,
+      side * 19.1 * Math.sqrt(3),
+    ]);
+    assert.throws(() => intersect(turned.slice(1)), /no common solid volume/);
+  }
+
+  for (const pair of [{}, {angle: 0}]) {
+    const straight = assembleGears([a, b, c], {
+      centerDistanceDelta: 0.2,
+      pairs: [{angle: 90}, pair],
+    });
+    const train = group(straight);
+    near(straight[1].position(train), [0, 0, 44.2]);
+    near(straight[2].position(train), [0, 0, 82.4]);
+  }
+
+  const bent = assembleGears([a, b, c], {
+    centerDistanceDelta: 0.2,
+    pairs: [{angle: 60}, {angle: 60}],
+  });
+  const train = group(bent);
+  near(bent[1].position(train), [22.1, 0, 22.1 * Math.sqrt(3)]);
+  near(bent[2].position(train), [3, 0, 41.2 * Math.sqrt(3)]);
+  for (const pair of [bent.slice(0, 2), bent.slice(1)])
+    assert.throws(() => intersect(pair), /no common solid volume/);
+});
+
+test('automatic tooth phase also clears odd, internal and helical pairs', () => {
+  const odd = assembleGears(
+    [
+      keep(spurGear({module: 2, teeth: 21, faceWidth: 10})),
+      keep(spurGear({module: 2, teeth: 31, faceWidth: 10})),
+    ],
+    {centerDistanceDelta: 0.2},
+  );
+  assert.throws(() => intersect(odd), /no common solid volume/);
+
+  const ring = keep(
+    internalGear({module: 2, teeth: 48, faceWidth: 10, outerDiameter: 130}),
+  );
+  const pinion = keep(spurGear({module: 2, teeth: 20, faceWidth: 10}));
+  for (const pair of [
+    [ring, pinion],
+    [pinion, ring],
+  ])
+    assert.throws(
+      () => intersect(assembleGears(pair, {centerDistanceDelta: -0.2})),
+      /no common solid volume/,
+    );
+
+  const helical = assembleGears(
+    [
+      keep(
+        helicalGear({
+          normalModule: 2,
+          teeth: 20,
+          faceWidth: 10,
+          helixAngle: 20,
+          hand: 'right',
+        }),
+      ),
+      keep(
+        helicalGear({
+          normalModule: 2,
+          teeth: 30,
+          faceWidth: 14,
+          helixAngle: 20,
+          hand: 'left',
+        }),
+      ),
+    ],
+    {centerDistanceDelta: 0.2, axialOffset: 1},
+  );
+  assert.throws(() => intersect(helical), /no common solid volume/);
+});
+
+test('assembly rejects incompatible gears or malformed pair overrides', () => {
+  const a = keep(spurGear({module: 2, teeth: 20, faceWidth: 10}));
+  const b = keep(spurGear({module: 2, teeth: 24, faceWidth: 10}));
+  const otherModule = keep(spurGear({module: 2.5, teeth: 20, faceWidth: 10}));
+  assert.throws(() => assembleGears([a, otherModule]), /normal module/);
+  assert.throws(
+    () => assembleGears([a, b], {centerDistanceDelta: -44}),
+    /must be positive/,
+  );
+  assert.throws(
+    () => assembleGears([a, b], {axialOffset: 10}),
+    /overlap axially/,
+  );
+  assert.throws(
+    () => assembleGears([a, b], {pairs: []}),
+    /number of adjacent gear pairs/,
+  );
+  for (const angle of [NaN, Infinity, -Infinity])
+    assert.throws(
+      () => assembleGears([a, b], {pairs: [{angle}]}),
+      /Pair angle must be finite/,
+    );
+  assert.throws(() => nominalCenterDistance(a.scaled(2), b), /created by/);
 });

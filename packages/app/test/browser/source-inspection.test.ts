@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import {readFile} from 'node:fs/promises';
 import {chromium} from './browser-connection.ts';
 import {appIsolationHeaders} from '../../build/response-headers.ts';
 
@@ -12,6 +13,75 @@ declare const window: Window & {
     resumeInspection?: () => void;
   };
 };
+
+test(
+  'gear array member carets draw only the assembled gears on screen and in exports',
+  {timeout: 120_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/\[mobx\]/i.test(message.text())) errors.push(message.text());
+    });
+    const url = new URL(
+      '/__gear-inspection-test__',
+      process.env.CODE3D_TEST_URL,
+    ).href;
+    await page.route(url, route =>
+      route.fulfill({
+        contentType: 'text/html',
+        headers: appIsolationHeaders,
+        body: '<main style="width:900px;height:700px"></main>',
+      }),
+    );
+    await page.goto(url);
+    const source = await readFile(
+      new URL('../../examples/packages/gear-assembly.ts', import.meta.url),
+      'utf8',
+    );
+    const samples = await page.evaluate(async source => {
+      const path = '/test/browser/relation-focus-fixture.ts';
+      const fixture: typeof import('./relation-focus-fixture.ts') =
+        await import(path);
+      return fixture.measureGearAssemblyFocus(source);
+    }, source);
+    for (const sample of samples) {
+      const focused = ['pinion', 'wheel', 'idler'].indexOf(sample.focus);
+      for (const draws of [sample.onscreen, sample.exported]) {
+        assert.equal(
+          draws.length,
+          3,
+          `${sample.focus}: an input gear must not reappear outside the inspector scene`,
+        );
+        draws.sort((a, b) => a.position[0] - b.position[0]);
+        const positions = [
+          [0, 0, 0],
+          [50.2, 0, 0],
+          [75.3, 0, (50.2 * Math.sqrt(3)) / 2],
+        ];
+        draws.forEach((draw, index) => {
+          draw.position.forEach((value, axis) =>
+            assert.ok(Math.abs(value - positions[index][axis]) < 1e-6),
+          );
+          assert.equal(
+            draw.opacity,
+            focused < 0 || focused === index ? 0.82 : 0.4,
+            sample.focus,
+          );
+        });
+      }
+    }
+    assert.deepEqual(errors, []);
+  },
+);
 
 test(
   'the App inspects failed calls and preserves the modeling diagnostic through inspection and repair',
