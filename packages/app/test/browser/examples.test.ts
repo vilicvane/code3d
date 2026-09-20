@@ -214,6 +214,33 @@ for (const {file} of selectedExamples.filter(
         assert.equal(await input.getAttribute('placeholder'), value);
       }
     }
+    if (file === 'text.ts') {
+      await page.evaluate(() => {
+        const editor = window.exampleApp.codeEditor.editor;
+        editor.setPosition(
+          editor
+            .getModel()!
+            .getPositionAt(editor.getValue().indexOf('originCenter(outlines)')),
+        );
+        editor.focus();
+      });
+      await page.waitForFunction(
+        () =>
+          window.exampleApp.viewport.sourceContext?.target.operation?.kind ===
+          'originCenter',
+      );
+      const centered = await page.evaluate(() => {
+        const viewport = window.exampleApp.viewport;
+        return {
+          collection: viewport.sourceContext?.evaluation.isCollection,
+          count: viewport.sourceContext?.evaluation.nodeIds.length,
+          tools: viewport.availablePositionTools,
+        };
+      });
+      assert.equal(centered.collection, true);
+      assert.equal(centered.count, 6);
+      assert.deepEqual(centered.tools, []);
+    }
     await editAndUndo(page, file, file === 'sketches/constraints.ts', phase);
     if (file === 'projects/phone-stand.ts')
       await editAndUndo(page, file, true, phase);

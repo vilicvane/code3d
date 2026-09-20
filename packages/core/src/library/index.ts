@@ -50,6 +50,7 @@ export type {
 export {
   getModelData,
   offset,
+  originCenter,
   rotate,
   setModelData,
   pivot,

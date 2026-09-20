@@ -45,6 +45,14 @@ loft 使用第一截面，extrude、revolve 与 sweep 保留输入面。group �
 完整[原点选择规则](../../../packages/core/docs/local-coordinates.md#default-origin-rules)
 统一记录构造器、继承操作、文字和自定义图元的行为。
 
+`originCenter()` 按当前局部有限几何的包围盒中心重设原点；携带的 `center`
+锚点继续随变换保持同一几何点，通过 `originPoint(model.center)` 显式选用。
+同名自由函数对单对象及单元素数组等价；多成员以首成员坐标架求解完整布局，
+再统一把几何、内部平面架、具名引用和拓扑重表达到中心为零的坐标架，返回
+相同顺序与类型的普通模型数组。原有关系已在布局中求解，结果不再重复求解
+输入关系。Core 保持模型值语义；App 从现有 `isCollection` 派生空间编辑可用性，
+数组不能追加单模型方法，单个成员仍可正常编辑。
+
 运行时的 `RelationObject` 提供关系存储、位姿求解与阶段预览，`ModelObject`
 负责有限几何和拓扑，`SketchFrame` 表达不依赖 B-Rep 的草图参考架。两者共用
 关系语义，不用虚构面或组合体把空草图接入模型路径；参考架快照不参与几何导出。

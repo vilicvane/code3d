@@ -36,7 +36,7 @@ position remain editable.
 Select `lettering`, `raised`, or `engraved`. `googleFont('Play')` downloads the
 font on first use; this example needs network access. A comment shows the local
 font alternative without adding a font file to the examples directory.
-`B8i` demonstrates counters and the separate dot. `text` returns faces, and
+`Code3D` is centered as one layout with `originCenter`. `text` returns faces, and
 `extrude` processes them using one depth. Inspect the faces or result solids,
 change the depth, then Undo. Text outlines are not editable sketch entities.
 
@@ -44,7 +44,7 @@ change the depth, then Undo. Text outlines are not editable sketch entities.
 
 <ModelExample id="wrap" />
 
-The cylinder has raised text, the sphere has engraved text, and
+The layouts use `originCenter()` before wrapping. The cylinder has raised text, the sphere has engraved text, and
 `ellipsoid(20, 26, 22)` provides a B-spline target with independently editable
 X, Y and Z radii. Select `cylindricalText`, `sphericalText`, or `curvedText`
 to inspect the wrapped faces. Select a `thicken` thickness, press Tab and edit it

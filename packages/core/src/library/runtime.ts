@@ -1041,7 +1041,7 @@ export interface GeometryCapabilities<
   Elements extends NamedElements,
   Kind extends ModelGeometryKind,
 > extends GeometryQueryCapabilities {
-  /** Re-express the model with its geometric center at local zero. */
+  /** Re-express the model with its current local bounding-box center at zero. */
   originCenter(): ModelForKind<Elements, Kind>;
   /**
    * Re-express the model with the selected vertex at local zero.
@@ -3482,9 +3482,52 @@ export class ModelObject<
   }
 
   originCenter(): RuntimeModel<Elements, Kind> {
-    this.requireGeometry();
-    const position = this.elements.center.transform.position;
+    const position = boundsCenter(this.requireGeometry().value.localBounds);
     return this.withOrigin(position, {kind: 'originCenter'});
+  }
+
+  /** Resolve an array as one layout in the first member's frame, retaining its shape kinds. */
+  static centerOrigins(models: readonly ModelObject[]): readonly ModelObject[] {
+    if (models.length === 0) return [];
+    if (models.length === 1) return [models[0].originCenter()];
+    const context = this.createAssembly(models);
+    const center = boundsCenter(
+      combineBounds(
+        models.map(model => {
+          model.requireGeometry();
+          return model[referenceBounds](
+            model.relationAnchorReference(),
+            model.solvePose(context),
+          );
+        }),
+      ),
+    );
+    const shift = translation(negateVector(center));
+    const results: ModelObject[] = [];
+    try {
+      for (const model of models) {
+        const operation = storedOperation(
+          'originCenter',
+          models.map((input, index) => ({
+            model: input,
+            role: input === model ? 'source' : 'operand',
+            index,
+          })),
+        );
+        operation.spatial = {origin, vector: center};
+        results.push(
+          model.transformed(
+            composeTransforms(shift, model.solvePose(context)),
+            operation,
+            [],
+          ),
+        );
+      }
+      return results;
+    } catch (error) {
+      disposeModelObjects(results);
+      throw error;
+    }
   }
 
   private withOrigin(
@@ -3530,6 +3573,7 @@ export class ModelObject<
   private transformed(
     transform: RigidTransform,
     operation: StoredOperation,
+    placements?: readonly StoredPlacement[],
   ): RuntimeModel<Elements, Kind> {
     const overrides: Partial<ModelObjectInit<Kind>> = {
       geometryAnchor: transformElement(this.geometryAnchor, transform),
@@ -3539,10 +3583,12 @@ export class ModelObject<
           transformElement(element, transform),
         ]),
       ),
-      placements: this.mapConstraintGeometry(
-        element => transformElement(element, transform),
-        point => composeTransforms(transform, translation(point)).position,
-      ),
+      placements:
+        placements ??
+        this.mapConstraintGeometry(
+          element => transformElement(element, transform),
+          point => composeTransforms(transform, translation(point)).position,
+        ),
     };
     if (this.assembly)
       return this.copy(
@@ -6590,6 +6636,52 @@ export namespace align {
   export const inspect = on.inspect;
 }
 
+type CenterableModel = Model & {originCenter(): Model};
+
+/**
+ * Put the current local bounding-box center at zero, like model.originCenter().
+ * @code3d.inspect model originCenter.inspectModels
+ */
+export function originCenter<T extends CenterableModel>(model: T): T;
+/**
+ * Center the complete layout, preserving order and spacing. Member placements
+ * are resolved into the first member's axes before choosing the shared origin.
+ * @code3d.inspect models originCenter.inspectModels
+ */
+export function originCenter<const T extends readonly CenterableModel[]>(
+  models: T,
+): {readonly [Index in keyof T]: T[Index]};
+export function originCenter(
+  model: CenterableModel | readonly CenterableModel[],
+): Model | readonly Model[] {
+  const models = (Array.isArray(model) ? model : [model]).map(value =>
+    requireModelObject(
+      value,
+      'originCenter requires a geometric model or an array of geometric models.',
+    ),
+  );
+  const results = ModelObject.centerOrigins(
+    models,
+  ) as unknown as readonly Model[];
+  return Array.isArray(model) ? results : results[0];
+}
+
+/** @internal */
+export namespace originCenter {
+  export function inspectModels(
+    [models]: [Model | readonly Model[]],
+    context: InspectContext<Model | readonly Model[]>,
+  ): InspectResult | undefined {
+    if (context.return === undefined) return;
+    return inspectGroupMembers(
+      Array.isArray(context.return)
+        ? context.return
+        : [context.return as Model],
+      Array.isArray(models) ? models : [models as Model],
+    );
+  }
+}
+
 /** @code3d.inspect operands union.inspectOperands */
 export function union(operands: readonly SolidModel<{}>[]): SolidModel {
   const {first, others} = booleanOperands('union', operands);
@@ -7265,6 +7357,7 @@ export function retainModelGeometry(
 }
 
 export const authoringApi = Object.freeze({
+  originCenter,
   dimension,
   boundsAnnotation,
   anchorAnnotation,

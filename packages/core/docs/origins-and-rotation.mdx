@@ -28,7 +28,7 @@ other [topology selections](topology.md).
 
 Use `.originPoint(pointRef)` to select a center, named point, or topology vertex
 on any model, including a group member. Use `.originOffset(dx, dy, dz)` to move the origin by a displacement or `.originCenter()` to make
-the body's center local zero. `originVertex()` similarly makes the chosen
+the current bounding-box center local zero. `originVertex()` similarly makes the chosen
 vertex zero. These operations return new model values; `blank` is unchanged.
 
 ## Fine-tune the origin
@@ -55,9 +55,14 @@ afterward does not undo an earlier rotation.
 
 ## Recenter without undoing the rotation
 
-After a rotation, `.originCenter()` recenters the result. The `center` anchor follows the body's
-transforms; it is not recalculated from the rotated shape's axis-aligned
-bounding box. A subsequent `originOffset(0, 2, 0)` moves the pivot beyond that center.
+After a rotation, `.originCenter()` recalculates the current local bounding-box
+center and recenters the result. The `center` anchor still follows the body's
+transforms; select that stable point with `originPoint(model.center)`. A subsequent
+`originOffset(0, 2, 0)` moves the pivot beyond the chosen center.
+
+Use `originCenter(profiles)` to center an entire array while preserving its layout.
+The [text example](../../app/examples/text.ts) centers all glyph regions together
+before extrusion; the returned faces also work with `wrap`.
 
 Applying `originOffset(0, -2, 0)` cancels that last offset. The center is again
 local zero, and the shape retains its rotation.

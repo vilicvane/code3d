@@ -44,7 +44,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/volume.ts': ['default', 2],
   'materials.ts': ['plain', 1],
   'packages/materials.ts': ['default', 10],
-  'text.ts': ['lettering', 4],
+  'text.ts': ['lettering', 6],
   'operations/rotate.ts': ['default', 1],
   'operations/revolve.ts': ['default', 1],
   'operations/sweep.ts': ['default', 1],
@@ -401,19 +401,25 @@ for (const entry of exampleEntries) {
         assert.ok(volume(exports.freeform) > (4 / 3) * Math.PI * 20 * 26 * 22);
       }
       if (entry.file === 'text.ts') {
+        const {minimum, maximum} = exports.lettering.bounds();
+        for (const axis of [0, 2])
+          assert.ok(
+            Math.abs(minimum[axis] + maximum[axis]) < 1e-6,
+            'The complete lettering is centered in XZ',
+          );
         assert.equal(
           snapshot(exports.lettering).children.length,
-          4,
-          'B8i retains the dot and independent glyphs',
+          6,
+          'Code3D retains its six glyphs',
         );
         assert.equal(snapshot(exports.raised).kind, 'solid');
         assert.equal(snapshot(exports.engraved).kind, 'solid');
         assert.ok(
-          volume(exports.raised) > 26 * 2 * 14,
+          volume(exports.raised) > 46 * 2 * 14,
           'Raised letters add material',
         );
         assert.ok(
-          volume(exports.engraved) < 26 * 2 * 14,
+          volume(exports.engraved) < 46 * 2 * 14,
           'Engraving removes material',
         );
       }

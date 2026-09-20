@@ -64,9 +64,9 @@ plane, while `box(10, 20, 10)` is centered on its origin.
 
 Explicit choices are `originOffset(dx, dy, dz)` for a displacement,
 `originPoint(pointRef)` for a referenced point, `originVertex(id)` for an own
-topology vertex, and `originCenter()` for the existing center anchor. The last
-two require geometry and are not available on groups. A carried center anchor
-is not necessarily the center of the current axis-aligned bounding box.
+topology vertex, and `originCenter()` for the current local bounding-box center. The last
+two require geometry and are not available on groups. The carried `center` anchor can differ from the current bounding-box center;
+select it explicitly with `originPoint(model.center)`.
 
 ## Coordinate references
 
@@ -105,7 +105,7 @@ their meaning. Successive origin offsets add and opposite offsets cancel.
 
 Use `originPoint(pointRef)` on any model to make a referenced point zero.
 For geometric models, `originVertex(id)` selects an own topology vertex and
-`originCenter()` selects the carried center anchor. The [origin and rotation guide](origins-and-rotation.mdx)
+`originCenter()` recomputes the current bounding-box center. The [origin and rotation guide](origins-and-rotation.mdx)
 shows how to select and drag these in the viewport.
 
 ## The origin, center, and axes have different roles

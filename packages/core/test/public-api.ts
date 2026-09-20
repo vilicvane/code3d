@@ -1,6 +1,7 @@
 import {
   arc,
   offset,
+  originCenter,
   rotate,
   pivot,
   pivotVertex,
@@ -327,6 +328,18 @@ solid
   .fillet(1)
   .chamfer(0.5);
 solid.vertices();
+const centeredSolid: SolidModel = originCenter(solid);
+const centeredPair: readonly [SolidModel, FaceModel] = originCenter([
+  solid,
+  circle(2),
+]);
+const centeredProfiles: readonly FaceModel[] = originCenter(
+  text('Hi', googleFont('Play'), 10),
+);
+// @ts-expect-error A group has no geometric originCenter capability.
+originCenter(group([solid]));
+// @ts-expect-error References are not geometric model values.
+originCenter(solid.center);
 solid.edges();
 solid.surfaces();
 solid

@@ -113,6 +113,7 @@ export function spatialBindings(
   parameterValues: ReadonlyMap<string, number>,
 ): Extract<TransformGizmoBinding, {kind: 'spatial'}>[] {
   const {target, evaluation} = scope;
+  if (evaluation.isCollection) return [];
   const relation = evaluation.relationSpatial;
   if (
     relation &&

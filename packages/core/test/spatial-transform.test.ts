@@ -44,7 +44,7 @@ function boundsCenter(model: Model) {
   });
 }
 
-test('originCenter follows the carried geometric center, independently of the rotated bounds', () => {
+test('originCenter uses current bounds while originPoint can select the carried center', () => {
   const body = regularPrism(6, 2, 3);
   const initialCenter = center(body);
   near(initialCenter, boundsCenter(body));
@@ -58,9 +58,14 @@ test('originCenter follows the carried geometric center, independently of the ro
   const offset = rotated.originOffset(9, 8, 7).originOffset(1, 2, 3);
   near(center(offset), shifted(expected, [10, 10, 10]));
   const centered = offset.originCenter();
+  const currentCenter = boundsCenter(offset);
   near(snapshot(centered).origin, [0, 0, 0]);
-  near(center(centered), [0, 0, 0]);
-  near(vertices(centered), shifted(vertices(rotated), expected));
+  near(boundsCenter(centered), [0, 0, 0]);
+  near(center(centered), shifted(center(offset), currentCenter));
+  near(vertices(centered), shifted(vertices(offset), currentCenter));
+  const anchored = offset.originPoint(offset.center);
+  near(center(anchored), [0, 0, 0]);
+  near(vertices(anchored), shifted(vertices(rotated), expected));
   near(vertices(centered.originCenter()), vertices(centered));
   near(center(body), initialCenter);
 });

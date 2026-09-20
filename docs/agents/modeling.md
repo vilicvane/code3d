@@ -57,6 +57,11 @@ The profile's local origin must meet the start of an open curve, and its normal
 must point along the curve's starting tangent. A circle and a Bézier path are
 shown in the [path sweep reference](../../packages/core/docs/api.md#path-sweeps).
 
+Use `originCenter(profiles)` to center a complete text layout and keep its face
+array for `extrude` or `wrap`. The instance method and singleton arrays use the
+current local bounding-box center; `originPoint(model.center)` selects the stable
+center anchor instead. See [centering a collection](../../packages/core/docs/api.md#centering-a-collection).
+
 For text or planar outlines on a curved face, position the profiles first, then
 use `wrap(profiles, target.surface(id))`. The complete finite layout chooses the
 closest target region. `thicken(faces, positiveThickness)` produces raised
