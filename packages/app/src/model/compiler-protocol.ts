@@ -51,7 +51,7 @@ type WorkerRequest =
       cancellation: CompilationCancellation;
     }>
   | Readonly<{kind: 'cancel-compile'; id: number}>
-  | Readonly<{kind: 'refresh-project'}>
+  | Readonly<{kind: 'refresh-project'; fonts?: boolean}>
   | Readonly<{kind: 'clear-build-cache'; projectIdentity: string}>
   | Readonly<{
       kind: 'execution-succeeded';

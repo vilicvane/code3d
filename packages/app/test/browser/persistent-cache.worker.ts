@@ -18,6 +18,7 @@ export type CacheRequest = {
   cancellation?: Int32Array<SharedArrayBuffer>;
   inspect?: boolean;
   summary?: boolean;
+  refresh?: {fonts?: boolean};
 };
 export type CacheResult = {
   probe?: {
@@ -119,6 +120,7 @@ scope.onmessage = async ({
   const start = performance.now();
   const phases: {phase: string; milliseconds: number}[] = [];
   try {
+    if (data.refresh) compiler.compiler.refreshProject(data.refresh);
     const module = await compiler.compile(
       {files: [{path: '/model.ts', source: data.source}]},
       '/model.ts',

@@ -4,7 +4,7 @@ import {locateModelError} from '../model/diagnostic';
 import type {ProjectFileReader} from './file-reader';
 import {fontResourceRequests} from './font-resources';
 import {normalizeProjectPath, projectDirectory} from './project';
-import {ResourceCache} from './resource-cache';
+import {ResourceCache, type Resource} from './resource-cache';
 
 /** Prepares static project and HTTP(S) assets before synchronous model execution. */
 export class ProjectAssets {
@@ -12,7 +12,7 @@ export class ProjectAssets {
 
   private readonly pending = new Map<string, Promise<string>>();
   private readonly contents = new Map<string, Uint8Array>();
-  private readonly remote = new Map<string, Promise<string>>();
+  private readonly remote = new Map<string, Promise<Resource>>();
   private downloads = new AbortController();
   private readonly cache: ResourceCache;
   private readonly googlePending = new Map<string, Promise<void>>();
@@ -25,6 +25,7 @@ export class ProjectAssets {
   };
   private cancellationPoll?: ReturnType<typeof setInterval>;
   private checkCancelled = () => {};
+  private refreshFonts = false;
 
   constructor(
     private readonly files: ProjectFileReader,
@@ -33,8 +34,11 @@ export class ProjectAssets {
     this.cache = new ResourceCache(request);
   }
 
-  /** Recheck remote resources once per compilation, respecting HTTP freshness. */
-  beginCompilation(checkCancelled: () => void = () => {}): void {
+  /** Reuse resolved fonts; other remote assets follow HTTP freshness. */
+  beginCompilation(
+    checkCancelled: () => void = () => {},
+    refreshFonts = false,
+  ): void {
     this.downloads.abort();
     clearInterval(this.cancellationPoll);
     this.cancellationPoll = undefined;
@@ -44,6 +48,7 @@ export class ProjectAssets {
     this.urls.clear();
     this.remote.clear();
     this.checkCancelled = checkCancelled;
+    this.refreshFonts = refreshFonts;
   }
 
   snapshot(): ReadonlyMap<string, Uint8Array> {
@@ -80,10 +85,10 @@ export class ProjectAssets {
     return url;
   }
 
-  private remoteUrl(url: string): Promise<string> {
+  private remoteResource(url: string, refresh = false): Promise<Resource> {
     const existing = this.remote.get(url);
     if (existing) return existing;
-    const loading = this.loadRemoteUrl(url);
+    const loading = this.loadRemoteResource(url, refresh);
     this.remote.set(url, loading);
     loading.catch(() => {
       if (this.remote.get(url) === loading) this.remote.delete(url);
@@ -129,13 +134,16 @@ export class ProjectAssets {
     }, 50);
   }
 
-  private async loadRemoteUrl(url: string): Promise<string> {
+  private async loadRemoteResource(
+    url: string,
+    refresh: boolean,
+  ): Promise<Resource> {
     const downloads = this.downloads;
     const checkCancelled = this.checkCancelled;
     checkCancelled();
     this.watchCancellation();
     try {
-      const resource = await this.cache.load(url, downloads.signal);
+      const resource = await this.cache.load(url, downloads.signal, refresh);
       let bytes = resource.bytes;
       if (
         bytes.length >= 4 &&
@@ -158,7 +166,7 @@ export class ProjectAssets {
       checkCancelled();
       downloads.signal.throwIfAborted();
       this.contents.set(url, bytes);
-      return url;
+      return {...resource, bytes};
     } catch (error) {
       checkCancelled();
       throw new Error(
@@ -179,18 +187,37 @@ export class ProjectAssets {
         requests.map(async ({family, options, sourceRef}) => {
           try {
             const url = context.tooling.googleFontUrl(family, options);
-            await this.remoteUrl(url.href);
-            const sources = context.tooling.googleFontSources(this.read(url)!);
-            const urls = [...new Set(sources.map(source => source.url))];
-            let next = 0;
-            await Promise.all(
-              Array.from({length: Math.min(8, urls.length)}, async () => {
-                while (next < urls.length) {
-                  this.checkCancelled();
-                  await this.remoteUrl(urls[next++]);
-                }
-              }),
+            const downloads = this.downloads;
+            const checkCancelled = this.checkCancelled;
+            const refresh = this.refreshFonts;
+            checkCancelled();
+            const resources = await this.cache.bundle(
+              'google-font:' + url.href,
+              async () => {
+                const css = await this.remoteResource(url.href, refresh);
+                const sources = context.tooling.googleFontSources(css.bytes);
+                const urls = [...new Set(sources.map(source => source.url))];
+                const resources = new Map([[url.href, css]]);
+                let next = 0;
+                await Promise.all(
+                  Array.from({length: Math.min(8, urls.length)}, async () => {
+                    while (next < urls.length) {
+                      checkCancelled();
+                      const fontUrl = urls[next++];
+                      resources.set(
+                        fontUrl,
+                        await this.remoteResource(fontUrl, refresh),
+                      );
+                    }
+                  }),
+                );
+                return resources;
+              },
+              refresh,
             );
+            checkCancelled();
+            downloads.signal.throwIfAborted();
+            for (const [url, bytes] of resources) this.contents.set(url, bytes);
           } catch (error) {
             throw locateModelError(error, sourceRef, 'module');
           }
@@ -266,8 +293,9 @@ export class ProjectAssets {
             return;
           onResource?.(site.path);
           const url = site.remote
-            ? await this.remoteUrl(new URL(site.path).href)
+            ? new URL(site.path).href
             : await this.url(site.path);
+          if (site.remote) await this.remoteResource(url);
           return {...site, url};
         } catch (error) {
           throw locateModelError(

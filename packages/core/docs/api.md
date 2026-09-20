@@ -931,11 +931,24 @@ aliases, object properties and spreads. Computed calls are reported at their sou
 Large families such as Chinese fonts require downloading all returned subsets on
 the first use; changing the text subsequently reuses those font resources.
 
+The App saves each Google Font selection (family, weight and italic) as a
+complete bundle of CSS and decoded font subsets. It reuses that bundle across
+edits, project refreshes and Worker/page restarts without requesting Google CSS,
+even after the original HTTP expiry. Character ranges and subset precedence
+remain those of the saved CSS. The bundle is published only after every subset
+loads successfully and remains subject to the cache budget.
+To fetch updated fonts for the active model, choose **Refresh fonts** from the
+explorer's empty-space menu. This rechecks CSS and font files and can change
+geometry. A failed refresh reports the error and keeps the previous complete
+bundle for ordinary builds. First use and evicted bundles still need network
+access.
+
 Network resources use an engine-owned 64 MiB memory LRU and the shared OPFS disk
 journal, then the network. CSS, compressed font bytes and content-addressed decoded
 bytes are retained. The disk budget is the smaller of 1 GiB and 10% of the browser's
 origin quota, including compaction space, shared with geometry. Fresh resources
-need no request across edits or Worker/page restarts. Expired resources revalidate
+need no request across edits or Worker/page restarts. Outside resolved Google
+Font bundles, expired resources revalidate
 through the browser HTTP cache; `no-store` resources are not retained. Concurrent
 requests share one download. Failed or cancelled builds preserve completed resources;
 partial downloads are discarded and can retry. Without OPFS, memory caching remains.

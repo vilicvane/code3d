@@ -55,7 +55,7 @@ export class ProjectCompiler {
   private readonly builder: ProjectBuilder;
   private dependencies: DependencyBuilder;
   private restoredDependencies?: DependencyArtifact;
-  private projectRefreshRequested = false;
+  private refreshRequested?: Readonly<{fonts: boolean}>;
 
   constructor(
     files: ProjectFileReader,
@@ -96,7 +96,8 @@ export class ProjectCompiler {
   ): Promise<ProjectBuildArtifact> {
     checkCancelled();
     onProgress?.('reading-files');
-    const refresh = this.projectRefreshRequested;
+    const refreshRequest = this.refreshRequested;
+    const refresh = !!refreshRequest;
     if (refresh) {
       // Manual refresh must see files whose timestamps and sizes were preserved.
       this.files.clear();
@@ -145,7 +146,6 @@ export class ProjectCompiler {
       this.language.reset();
     }
     if (refresh) this.restoredDependencies = undefined;
-    this.projectRefreshRequested = false;
     this.language.invalidate(changed);
     // Finish applying invalidation before cancellation can consume these changes.
     checkCancelled();
@@ -221,7 +221,9 @@ export class ProjectCompiler {
     onLanguage?.(language);
 
     try {
-      this.assets.beginCompilation(checkCancelled);
+      if (this.refreshRequested === refreshRequest)
+        this.refreshRequested = undefined;
+      this.assets.beginCompilation(checkCancelled, refreshRequest?.fonts);
       this.assets.setStore(this.resourceStore);
       this.assets.setGoogleContext(this.language.typeScriptProgram, {
         googleFontUrl,
@@ -318,7 +320,9 @@ export class ProjectCompiler {
     return (this.restoredDependencies = this.dependencies.reuse(artifact));
   }
 
-  refreshProject(): void {
-    this.projectRefreshRequested = true;
+  refreshProject(options: {fonts?: boolean} = {}): void {
+    this.refreshRequested = {
+      fonts: !!(options.fonts || this.refreshRequested?.fonts),
+    };
   }
 }

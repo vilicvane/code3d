@@ -24,6 +24,13 @@ their order and placement. Node can read local file URLs or use downloaded,
 decoded font bytes. See the [text reference](api.md#text),
 [runnable example](../../app/examples/text.ts) and [font notices](../THIRD_PARTY.md).
 
+After a successful first download, the App caches each Google Font selection
+with its complete character subsets. Edits and page reloads reuse that font
+without requesting Google CSS again, while the cache is available. To fetch a
+new version for the active model, right-click empty space in the file explorer
+and choose **Refresh fonts**. This can change the text geometry.
+First use, evicted caches and explicit font refresh still require network access.
+
 ## Lettering on a curved surface
 
 Use `wrap(profiles, surface)` to carry the complete text layout onto a smooth

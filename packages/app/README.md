@@ -50,6 +50,12 @@ explorer to pick up manual edits inside an unchanged installed package.
 Right-click empty space in the explorer and choose **Clear build cache** to
 discard this workspace's in-memory and saved builds and rebuild the active file.
 Geometry, downloaded resources, and other workspaces' build caches are retained.
+Google Font selections are saved with their complete CSS and decoded subsets,
+so ordinary builds and page reloads reuse them without a CSS request, even after
+HTTP expiry. Choose **Refresh fonts** from the same menu to fetch current fonts
+for the active model; updated fonts may change text geometry. A failed refresh
+keeps the previous complete font bundle. First use and evicted caches still
+require network access.
 Cancelling also interrupts a cache read waiting for another tab to release storage.
 A later build may still need to wait for that tab if it needs disk records.
 Cache writes run in the background and continue after a model is cancelled or

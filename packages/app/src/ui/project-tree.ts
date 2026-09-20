@@ -49,6 +49,7 @@ type ProjectTreeOptions = Readonly<{
   onInstallPackage?(directory: string): Promise<void>;
   onUpdateDependencies?(directory: string): Promise<void>;
   onClearBuildCache?(): Promise<void>;
+  onRefreshFonts?(): Promise<void>;
   onBusy(busy: boolean): void;
   diagnosticCounts?(): ReadonlyMap<string, FileDiagnosticCounts>;
 }>;
@@ -989,14 +990,21 @@ export class ProjectTree {
           ),
         !this.runningPackageOperation,
       );
-    if (!path && this.options.onClearBuildCache) {
+    if (
+      !path &&
+      (this.options.onClearBuildCache || this.options.onRefreshFonts)
+    ) {
       separator();
-      action('Clear build cache', () => {
-        this.setStatusMessage(undefined);
-        void this.options.onClearBuildCache!().catch(error =>
-          this.showError(error),
-        );
-      });
+      for (const [label, command] of [
+        ['Refresh fonts', this.options.onRefreshFonts],
+        ['Clear build cache', this.options.onClearBuildCache],
+      ] as const) {
+        if (command)
+          action(label, () => {
+            this.setStatusMessage(undefined);
+            void command().catch(error => this.showError(error));
+          });
+      }
     }
     const examples = this.options.examples;
     if (
