@@ -442,7 +442,8 @@ test('model method defaults appear for groups and geometry operations without re
     ['box(20, 30, 40).chamfer()', 'chamfer()', {distance: 1}],
     ['box(20, 30, 40).shell()', 'shell()', {thickness: 1}],
   ] as const) {
-    const source = `import {box, group, rectangle, extrude} from '@code3d/core';\n${expression};`;
+    const source = `import {box, group, rectangle, extrude} from '@code3d/core';
+${expression};`;
     await setSource(page, source, selection);
     await expectDefaults(page, defaults);
     const input = page.locator(`[data-parameter=${Object.keys(defaults)[0]}]`);
@@ -471,7 +472,11 @@ test('relate transformation defaults are available on offset, pivot and axis rot
     ['pivotVertex(1).rotate()', 'rotate()', {x: 0, y: 0, z: 0}],
     ['axisLine(base.axis).rotate()', 'rotate()', {angle: 0}],
   ] as const) {
-    const source = `import * as core from '@code3d/core';\nconst base = core.box(20, 30, 40);\nconst part = core.box(4, 6, 8).relate(self => [self.on(base.up), core.${chain}]);\ncore.group([base, part]);`;
+    const source = `import * as core from '@code3d/core';
+import {on} from '@code3d/core';
+const base = core.box(20, 30, 40);
+const part = core.box(4, 6, 8).relate(self => [on(self, base.up), core.${chain}]);
+core.group([base, part]);`;
     await setSource(page, source, selection);
     await expectDefaults(page, defaults);
     const input = page.locator(

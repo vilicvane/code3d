@@ -1,4 +1,4 @@
-import {box, cylinder, group, input, rotate} from '@code3d/core';
+import {align, box, cylinder, group, input, rotate} from '@code3d/core';
 import {assembleGears, spurGear} from '@code3d/gears';
 
 const driveAngle = input('Drive angle', 0, {min: -1080, max: 1080, step: 1});
@@ -11,7 +11,7 @@ const handle = cylinder(3, 12).originOffset(-21, -25.5, 0);
 export const inputCrank = group(
   [shaft, arm.material('#d49a85'), handle.material('#d49a85')],
   'Input crank',
-).relate(self => [self.frame.align(plate.frame), rotate(0, driveAngle, 0)]);
+).relate(self => [align(self.frame, plate.frame), rotate(0, driveAngle, 0)]);
 
 // Only the external crank reads the input. The pinion follows its frame.
 const pinion = spurGear({
@@ -21,7 +21,7 @@ const pinion = spurGear({
   mounting: {kind: 'bore', diameter: 7},
 })
   .material('#d49a85')
-  .relate(self => self.frame.align(inputCrank.frame));
+  .relate(self => align(self.frame, inputCrank.frame));
 const middle = spurGear({
   module: 2,
   teeth: 30,
@@ -41,11 +41,11 @@ export const gears = assembleGears([pinion, middle, wheel], {
 export const middleShaft = group(
   [shaft, arm.material('#d3b46c')],
   'Middle shaft',
-).relate(self => self.frame.align(gears[1].frame));
+).relate(self => align(self.frame, gears[1].frame));
 export const outputCrank = group(
   [shaft, arm.material('#91aeca'), handle.material('#91aeca')],
   'Output crank',
-).relate(self => self.frame.align(gears[2].frame));
+).relate(self => align(self.frame, gears[2].frame));
 
 // Angular changes: input 1×, middle −2/3×, output +1/2×.
 export default group(

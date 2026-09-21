@@ -4,7 +4,15 @@ import {createModelSnapshotter, disposeModelObjects} from './model-test.ts';
 
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {bezier, box, circle, group, line, point} from '../bld/node/index.js';
+import {
+  align,
+  bezier,
+  box,
+  circle,
+  group,
+  line,
+  point,
+} from '../bld/node/index.js';
 import {
   modelElementReference,
   modelTopologyReference,
@@ -113,13 +121,13 @@ test('nested exposure and chained constraints move the containing assembly', () 
   const body = box(10, 20, 30);
   const inner = group([body]).expose({body});
   const target = point([40, 50, 60]);
-  const moved = inner.relate(self => self.body.center.align(target));
+  const moved = inner.relate(self => align(self.body.center, target));
   const outer = group([moved]).expose({
     mount: moved.body.surface(1),
     component: moved,
   });
   const anchor = point([10, 0, 0]);
-  const placed = outer.relate(self => self.mount.center.align(anchor));
+  const placed = outer.relate(self => align(self.mount.center, anchor));
   try {
     near(position(outer.mount.center), [-5, 0, 0]);
     near(position(outer.component.body.center), [0, 0, 0]);
@@ -140,8 +148,8 @@ test('the same geometry retains independent placement in two exposed occurrences
   const part = group([body]).expose({body});
   const leftTarget = point([-20, 0, 0]);
   const rightTarget = point([20, 0, 0]);
-  const left = part.relate(self => self.body.center.align(leftTarget));
-  const right = part.relate(self => self.body.center.align(rightTarget));
+  const left = part.relate(self => align(self.body.center, leftTarget));
+  const right = part.relate(self => align(self.body.center, rightTarget));
   const assembly = group([left, right]).expose({
     leftBody: left.body,
     rightBody: right.body,

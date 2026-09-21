@@ -118,6 +118,8 @@ export type PreviewValue =
 export type InspectResult = Readonly<{
   ambient?: readonly PreviewValue[];
   target?: readonly PreviewValue[];
+  /** Target identities to emphasize; omitted uses the actual source selection. */
+  focused?: readonly PreviewValue[];
 }>;
 
 export type InspectCall = Readonly<{

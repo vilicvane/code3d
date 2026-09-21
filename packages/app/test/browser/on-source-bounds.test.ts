@@ -47,29 +47,29 @@ test(
       const cases = [
         {
           geometry: 'box(8, 6, 4).rotate(0, 0, 30)',
-          relation: 'self.on(base.up)',
+          relation: 'on(base.up)',
           edges: 12,
         },
         {
           geometry: 'group([box(8, 6, 4).rotate(0, 0, 30)])',
-          relation: 'self.on(base.up)',
+          relation: 'on(self, base.up)',
           edges: 12,
         },
         {
           geometry: 'group([box(8, 6, 4).rotate(0, 0, 30)])',
-          relation: 'base.on(self.up)',
+          relation: 'on(base, self.up)',
           edges: 12,
         },
         {
           geometry: 'box(8, 6, 4).rotate(0, 0, 30)',
-          relation: 'self.center.on(base.up)',
+          relation: 'on(self.center, base.up)',
           edges: 0,
         },
       ];
       const results = [];
       try {
         for (const spec of cases) {
-          const source = `import {box, group, rotate} from '@code3d/core'; const base = box(20, 10, 30).rotate(0, 0, 15); const part = ${spec.geometry}.relate(self => [${spec.relation}, rotate(0, 0, 25)]); export default group([base, part]);`;
+          const source = `import {on, align, box, group, rotate} from '@code3d/core'; const base = box(20, 10, 30).rotate(0, 0, 15); const part = ${spec.geometry}.relate(${spec.relation === 'on(base.up)' ? '()' : 'self'} => [${spec.relation}, rotate(0, 0, 25)]); export default group([base, part]);`;
           const module = await client.compile(
             {files: [{path: '/main.ts', source}]},
             '/main.ts',
@@ -82,7 +82,7 @@ test(
             viewport,
             module,
             '/main.ts',
-            source.indexOf('.on(') + 2,
+            source.indexOf('on(') + 2,
           );
           const evaluation = viewport.sourceContext!.evaluation;
           const constraint = evaluation.relationPreview!.constraints.find(
@@ -157,7 +157,10 @@ test(
           .filter(part => part.kind !== 'selection')
           .every(part => part.color === 'd8ff3e'),
       );
-      assert.equal(source.find(part => part.kind === 'surface')!.opacity, 0.18);
+      assert.equal(
+        source.find(part => part.kind === 'surface')!.opacity,
+        0.18 * (spec.relation === 'on(base, self.up)' ? 0.7 : 1),
+      );
     }
   },
 );

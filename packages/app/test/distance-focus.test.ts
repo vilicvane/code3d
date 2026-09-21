@@ -75,8 +75,8 @@ function dimension(scene: InspectionSnapshot) {
 }
 
 test('distance preserves its measured frame and keeps parameter focus separate from scalar consumers', async () => {
-  const source = `import {box,distance,group,offset} from '@code3d/core';
-    const a=box(8,30,32); const b=box(8,30,32).relate(self=>[self.on(a.right),offset(60,0,0)]);
+  const source = `import {on, box,distance,group,offset} from '@code3d/core';
+    const a=box(8,30,32); const b=box(8,30,32).relate(self=>[on(self, a.right),offset(60,0,0)]);
     const gap=distance(a.right, /* second */ b.left, 'x');
     export default group([a,b,box(gap,2,2)]);`;
   const module = await compile(source);
@@ -250,9 +250,9 @@ test('failed calls retain an inspect target without inventing measurements and l
 });
 
 test('axis references and transitive solve participants remain in the captured distance scene', async () => {
-  const source = `import {box,distance,offset} from '@code3d/core';
-    const base=box(2,2,2); const a=box(2,2,2).relate(self=>[self.on(base.up),offset(0,3,0)]);
-    const b=box(2,2,2).relate(self=>[self.on(a.up),offset(0,7,0)]);
+  const source = `import {on, box,distance,offset} from '@code3d/core';
+    const base=box(2,2,2); const a=box(2,2,2).relate(self=>[on(self, base.up),offset(0,3,0)]);
+    const b=box(2,2,2).relate(self=>[on(self, a.up),offset(0,7,0)]);
     const axis=box(1,1,1); distance(a.up,b.down,axis.axis); export default b;`;
   const module = await compile(source);
   const scene = await inspect(module, source, 'distance(a.up');

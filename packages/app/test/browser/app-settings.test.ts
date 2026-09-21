@@ -318,7 +318,7 @@ test(
             diskCacheGiB: budget,
             cachePersistenceThresholdMs: index ? 0 : 1000,
           });
-          const source = `import {box, cache} from '@code3d/core';
+          const source = `import {on, align, box, cache} from '@code3d/core';
           import {kernelOperationCacheStats} from '@code3d/core/tooling';
           if (kernelOperationCacheStats().maximumBytes !== ${budget * 1024 ** 3}) throw new Error('Memory budget was not applied: ' + kernelOperationCacheStats().maximumBytes + ', expected ${budget * 1024 ** 3}');
           const before = kernelOperationCacheStats().persistentWrites;
@@ -339,7 +339,7 @@ test(
               if (!data.phase) resolve(data);
             };
             cacheWorker.postMessage({
-              source: `import {box} from '@code3d/core'; export default box(${8 + index}, 4, 5);`,
+              source: `import {on, align, box} from '@code3d/core'; export default box(${8 + index}, 4, 5);`,
               concurrency: 1,
             });
           });

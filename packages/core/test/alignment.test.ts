@@ -5,6 +5,8 @@ import type {Model, Anchor} from '@code3d/core';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  align,
+  on,
   offset,
   rotate,
   axisLine,
@@ -48,8 +50,8 @@ test('point coincidence translates self on either written side and preserves ori
   const original = point([1, 2, 3]),
     target = point([10, 20, 30]);
   for (const build of [
-    (s: typeof original) => s.align(target),
-    (s: typeof original) => target.align(s),
+    (s: typeof original) => align(s, target),
+    (s: typeof original) => align(target, s),
   ]) {
     const placed = original.relate(build);
     near(position(placed), [9, 18, 27]);
@@ -57,7 +59,7 @@ test('point coincidence translates self on either written side and preserves ori
   }
   near(position(original), [0, 0, 0]);
   assert.throws(
-    () => original.relate(() => original.align(target)),
+    () => original.relate(() => align(original, target)),
     /must involve self/,
   );
 });
@@ -67,14 +69,14 @@ test('point on a supporting line ignores trims and direction without introducing
     line([20, 0, 0], [30, 0, 0]),
     line([200, 0, 0], [300, 0, 0]).reverse(),
   ]) {
-    const placed = point([4, 7, 9]).relate(s => s.align(target));
+    const placed = point([4, 7, 9]).relate(s => align(s, target));
     near(position(placed), [0, -7, -9]);
     near(pose(placed).quaternion, [0, 0, 0, 1]);
   }
 });
 
 test('point to face uses the supporting plane beyond its boundary', () => {
-  const placed = point([100, 30, 200]).relate(s => s.align(rectangle(2, 2)));
+  const placed = point([100, 30, 200]).relate(s => align(s, rectangle(2, 2)));
   near(position(placed), [0, -30, 0]);
 });
 
@@ -84,10 +86,10 @@ test('directed line coincidence is independent of parameter origins and reverse 
     line([10, 5, 0], [10, 8, 0]),
     line([10, 50, 0], [10, 80, 0]),
   ]) {
-    const placed = source.relate(s => s.align(target));
+    const placed = source.relate(s => align(s, target));
     near(position(placed), [0, 10, 0]);
     near(direction(placed, placed.edge(1)), [1, 0, 0]);
-    const reversed = source.relate(s => s.align(target.reverse()));
+    const reversed = source.relate(s => align(s, target.reverse()));
     near(direction(reversed, reversed.edge(1)), [-1, 0, 0]);
   }
   const edge = target.edge(1),
@@ -99,28 +101,30 @@ test('directed line coincidence is independent of parameter origins and reverse 
 
 test('antipodal directed lines and planes solve without becoming stationary', () => {
   const placed = line([0, 0, 0], [0, -10, 0]).relate(s =>
-    s.align(line([0, 0, 0], [0, 10, 0])),
+    align(s, line([0, 0, 0], [0, 10, 0])),
   );
   near(direction(placed, placed.edge(1)), [0, 1, 0]);
-  const face = rectangle(10, 10).relate(s => s.align(rectangle(20, 20).flip()));
+  const face = rectangle(10, 10).relate(s =>
+    align(s, rectangle(20, 20).flip()),
+  );
   near(rotateVector([0, 1, 0], pose(face).quaternion), [0, -1, 0]);
 });
 
 test('whole line lies in plane and retains its in-plane heading', () => {
   const placed = line([4, 8, 2], [14, 8, 12]).relate(s =>
-    s.align(rectangle(2, 2)),
+    align(s, rectangle(2, 2)),
   );
   near(position(placed), [0, -8, 0]);
   near(pose(placed).quaternion, [0, 0, 0, 1]);
   const vertical = line([2, 0, 3], [2, 10, 3]).relate(s =>
-    s.align(rectangle(2, 2)),
+    align(s, rectangle(2, 2)),
   );
   assert.ok(Math.abs(direction(vertical, vertical.edge(1))[1]) < 1e-6);
 });
 
 test('directed plane coincidence leaves tangential position and in-plane rotation free', () => {
   const source = rectangle(10, 20).rotate(0, 32, 0);
-  const placed = source.relate(s => s.align(rectangle(2, 2)));
+  const placed = source.relate(s => align(s, rectangle(2, 2)));
   near(position(placed), [0, 0, 0]);
   near(pose(placed).quaternion, [0, 0, 0, 1]);
 });
@@ -128,17 +132,17 @@ test('directed plane coincidence leaves tangential position and in-plane rotatio
 test('circular arcs with different trimmed ranges share the same underlying circle', () => {
   const source = arc([10, 0, 0], [0, 10, 0], [-10, 0, 0]);
   const target = arc([20, 10, 0], [10, 0, 0], [20, -10, 0]);
-  const placed = source.relate(s => s.align(target));
+  const placed = source.relate(s => align(s, target));
   near(position(placed), [20, 0, 0]);
   near(pose(placed).quaternion, [0, 0, 0, 1]);
-  const extension = point([0, -20, 0]).relate(s => s.align(source));
+  const extension = point([0, -20, 0]).relate(s => align(s, source));
   near(position(extension), [0, 10, 0]);
 });
 
 test('ellipse edges use the complete locus and its major axis without endpoint pairing', () => {
   const source = ellipse(20, 10).rotate(0, 45, 0),
     target = ellipse(20, 10);
-  const placed = source.relate(s => s.edge(1).align(target.edge(1)));
+  const placed = source.relate(s => align(s.edge(1), target.edge(1)));
   const p = pose(placed);
   assert.ok(p.quaternion.every(Number.isFinite));
   near(position(placed), [0, 0, 0]);
@@ -151,28 +155,28 @@ test('point, circle, line and surface constraints use true cylinder and sphere g
   const tube = cylinder(10, 40),
     ball = sphere(10);
   near(
-    position(point([20, 80, 0]).relate(s => s.align(tube.surface(1)))),
+    position(point([20, 80, 0]).relate(s => align(s, tube.surface(1)))),
     [-10, 0, 0],
   );
   near(
-    position(point([20, 0, 0]).relate(s => s.align(ball.surface(1)))),
+    position(point([20, 0, 0]).relate(s => align(s, ball.surface(1)))),
     [-10, 0, 0],
   );
   const generator = line([0, 70, 0], [0, 80, 0]).relate(s =>
-    s.align(tube.surface(1)),
+    align(s, tube.surface(1)),
   );
   assert.ok(
     Math.abs(Math.hypot(position(generator)[0], position(generator)[2]) - 10) <
       1e-6,
   );
-  const equator = circle(10).relate(s => s.edge(1).align(ball.surface(1)));
+  const equator = circle(10).relate(s => align(s.edge(1), ball.surface(1)));
   near(position(equator), [0, 0, 0]);
   near(
-    position(cylinder(10, 5).relate(s => s.surface(1).align(tube.surface(1)))),
+    position(cylinder(10, 5).relate(s => align(s.surface(1), tube.surface(1)))),
     [0, 0, 0],
   );
   near(
-    position(sphere(10).relate(s => s.surface(1).align(ball.surface(1)))),
+    position(sphere(10).relate(s => align(s.surface(1), ball.surface(1)))),
     [0, 0, 0],
   );
 });
@@ -180,12 +184,12 @@ test('point, circle, line and surface constraints use true cylinder and sphere g
 test('an offset after align moves self in composition axes and zero does not pin a trim center', () => {
   const target = line([100, 0, 0], [200, 0, 0]);
   const original = point([3, 7, 9]);
-  const plain = original.relate(s => s.align(target));
-  const zero = original.relate(s => [s.align(target), offset(0, 0, 0)]);
+  const plain = original.relate(s => align(s, target));
+  const zero = original.relate(s => [align(s, target), offset(0, 0, 0)]);
   near(position(plain), position(zero));
   for (const reverse of [false, true]) {
     const placed = original.relate(s => [
-      reverse ? target.align(s) : s.align(target),
+      reverse ? align(target, s) : align(s, target),
       offset(0, 5, 0),
     ]);
     near(
@@ -199,10 +203,10 @@ test('elliptic cylinder sections and spherical latitude circles constrain the wh
   const tube = cylinder(10, 40),
     ball = sphere(10);
   const ellipseOnCylinder = ellipse(20, 10).relate(s =>
-    s.edge(1).align(tube.surface(1)),
+    align(s.edge(1), tube.surface(1)),
   );
   const circleOnSphere = circle(5).relate(s =>
-    s.edge(1).align(ball.surface(1)),
+    align(s.edge(1), ball.surface(1)),
   );
   for (const [model, radial] of [
     [ellipseOnCylinder, (p: readonly number[]) => Math.hypot(p[0], p[2])],
@@ -226,18 +230,18 @@ test('elliptic cylinder sections and spherical latitude circles constrain the wh
 test('rotation, pivot and reversed rotation axes remain authored after alignment', () => {
   const target = point([10, 0, 0]);
   const rotated = line([0, 0, 0], [0, 10, 0]).relate(s => [
-    s.start.align(target),
+    align(s.start, target),
     rotate(0, 0, 90),
   ]);
   near(world(rotated, rotated.start).position, [10, 0, 0]);
   near(direction(rotated, rotated.edge(1)), [-1, 0, 0]);
   const axis = box(1, 1, 1).axis;
   const a = point([10, 0, 0]).relate(s => [
-    s.align(target),
+    align(s, target),
     axisLine(axis).rotate(90),
   ]);
   const b = point([10, 0, 0]).relate(s => [
-    s.align(target),
+    align(s, target),
     axisLine(axis.reverse()).rotate(-90),
   ]);
   near(position(a), position(b));
@@ -249,8 +253,8 @@ test('multiple point relations jointly determine orientation and compose with on
   const build = (reverse: boolean) =>
     original.relate(s => {
       const conditions = [
-        s.start.align(point([20, 0, 0])),
-        s.end.align(point([30, 0, 0])),
+        align(s.start, point([20, 0, 0])),
+        align(s.end, point([30, 0, 0])),
       ];
       return reverse ? conditions.reverse() : conditions;
     });
@@ -259,7 +263,10 @@ test('multiple point relations jointly determine orientation and compose with on
     near(world(model, model.end).position, [30, 0, 0]);
   }
   const base = box(20, 10, 20),
-    placed = box(2, 2, 2).relate(s => [s.axis.align(base.axis), s.on(base.up)]);
+    placed = box(2, 2, 2).relate(s => [
+      align(s.axis, base.axis),
+      on(s, base.up),
+    ]);
   near(position(placed), [0, 6, 0]);
   const assembly = group([base, placed]);
   assert.ok(snapshot(assembly).children.length === 2);
@@ -267,13 +274,14 @@ test('multiple point relations jointly determine orientation and compose with on
 
 test('proven incompatibility, unsupported geometry and nonconvergence are distinct', () => {
   assert.throws(
-    () => snapshot(circle(10).relate(s => s.edge(1).align(circle(20).edge(1)))),
+    () =>
+      snapshot(circle(10).relate(s => align(s.edge(1), circle(20).edge(1)))),
     /Geometrically incompatible.*radii/,
   );
   assert.throws(
     () =>
       snapshot(
-        line([0, 0, 0], [1, 0, 0]).relate(s => s.align(sphere(10).surface(1))),
+        line([0, 0, 0], [1, 0, 0]).relate(s => align(s, sphere(10).surface(1))),
       ),
     /whole straight line/,
   );
@@ -284,7 +292,7 @@ test('proven incompatibility, unsupported geometry and nonconvergence are distin
           [0, 0, 0],
           [5, 10, 0],
           [10, 0, 0],
-        ]).relate(s => s.align(line([0, 0, 0], [1, 0, 0]))),
+        ]).relate(s => align(s, line([0, 0, 0], [1, 0, 0]))),
       ),
     /does not yet support underlying BEZIER/,
   );
@@ -292,8 +300,8 @@ test('proven incompatibility, unsupported geometry and nonconvergence are distin
     () =>
       snapshot(
         point().relate(s => [
-          s.align(point([1, 0, 0])),
-          s.align(point([2, 0, 0])),
+          align(s, point([1, 0, 0])),
+          align(s, point([2, 0, 0])),
         ]),
       ),
     /did not converge.*does not prove/,
@@ -302,8 +310,8 @@ test('proven incompatibility, unsupported geometry and nonconvergence are distin
 
 test('duplicate constraints share one solution before one independent rotation', () => {
   const placed = box(2, 2, 2).relate(self => [
-    self.center.align(point()),
-    self.center.align(point()),
+    align(self.center, point()),
+    align(self.center, point()),
     rotate(0, 90, 0),
   ]);
   near(rotateVector([1, 0, 0], pose(placed).quaternion), [0, 0, -1]);
@@ -312,7 +320,7 @@ test('duplicate constraints share one solution before one independent rotation',
 test('an already aligned elliptic cylinder section retains its pose', () => {
   const source = ellipse(20, 10).rotate(0, 0, 60);
   const placed = source.relate(self =>
-    self.edge(1).align(cylinder(10, 20).surface(1)),
+    align(self.edge(1), cylinder(10, 20).surface(1)),
   );
   near(position(placed), [0, 0, 0]);
   near(pose(placed).quaternion, [0, 0, 0, 1]);
@@ -321,7 +329,7 @@ test('an already aligned elliptic cylinder section retains its pose', () => {
 test('rebasing a point changes its local align reference and compensates its solved placement', () => {
   const placed = point([3, 4, 5])
     .originOffset(20, 30, 40)
-    .relate(self => self.align(point([10, 20, 30])));
+    .relate(self => align(self, point([10, 20, 30])));
   near(position(placed), [27, 46, 65]);
   near(
     snapshot(placed).constraints[0].sourceElement.transform.position,
@@ -331,7 +339,7 @@ test('rebasing a point changes its local align reference and compensates its sol
 
 test('point-to-ellipse placement follows the nearest locus point, ignoring trim parameters', () => {
   const target = ellipse(20, 10).edge(1);
-  const placed = point([30, 8, 5]).relate(self => self.align(target));
+  const placed = point([30, 8, 5]).relate(self => align(self, target));
   const move = position(placed),
     p = [30 + move[0], 8 + move[1], 5 + move[2]];
   assert.ok(Math.abs((p[0] / 20) ** 2 + (p[2] / 10) ** 2 - 1) < 1e-7);
@@ -345,17 +353,17 @@ test('point alignment to a bound-placed part keeps its fixed orientation exact i
   const mast = box(12, 32, 12)
     .fillet(1)
     .relate(part => [
-      part.axis.align(base.axis),
+      align(part.axis, base.axis),
       offset(0, 0, -12),
-      part.down.on(base.up),
+      on(part.down, base.up),
     ]);
   const axle = cylinder(3, 20)
     .rotate(0, 0, 90)
-    .relate(part => part.center.align(mast.center));
+    .relate(part => align(part.center, mast.center));
   near(position(axle), [0, 16, -12]);
   near(pose(mast).quaternion, [0, 0, 0, 1]);
   const knob = box(5, 16, 16).relate(part => [
-    part.center.align(axle.center),
+    align(part.center, axle.center),
     offset(-12.5, 0, 0),
   ]);
   near(position(knob), [-12.5, 16, -12]);

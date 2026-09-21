@@ -1,4 +1,4 @@
-import {offset, group} from '@code3d/core';
+import {align, on, offset, group} from '@code3d/core';
 import {plastic, steel} from '@code3d/materials';
 import {ISO4762} from '@code3d/screws';
 import {makeBox} from './box.ts';
@@ -15,8 +15,8 @@ export function screwBox(gap = 14) {
   const lid = makeLid()
     .material(plastic('#353535'))
     .relate(part => [
-      part.axis.align(body.axis),
-      part.mountingFace.on(body.lidSeat),
+      align(part.axis, body.axis),
+      on(part.mountingFace, body.lidSeat),
       offset(0, gap, 0),
     ]);
   const screw = ISO4762.screw('M4', 12).material(
@@ -29,8 +29,8 @@ export function screwBox(gap = 14) {
     lid.backRight,
   ].map(hole =>
     screw.relate(part => [
-      part.shankAxis.align(hole.shaftAxis),
-      part.headBottom.on(hole.counterboreBottom.flip()),
+      align(part.shankAxis, hole.shaftAxis),
+      on(part.headBottom, hole.counterboreBottom.flip()),
     ]),
   );
   return group([body, lid, ...screws], 'Screw-fastened box');

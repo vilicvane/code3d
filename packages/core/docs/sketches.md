@@ -39,21 +39,21 @@ solver behavior live in [sketch.ts](../src/library/sketch.ts) and
 
 ### Relating a sketch to a model plane
 
-`s.relate(self => self.plane.align(target))` returns a new sketch with spatial
+`s.relate(self => align(self.plane, target))` returns a new sketch with spatial
 relations, leaving its shared 2D definition and the original sketch unchanged.
 It works before a face exists, including `sketch()` and open contours.
 
 ```ts
-import {box, sketch} from '@code3d/core';
+import {align, box, sketch} from '@code3d/core';
 
 const host = box(40, 20, 30).rotate(0, 0, 25);
 const profile = sketch([
   ['point', 1, [0, 0]],
   ['circle', 2, [1, 4]],
 ]);
-const opening = profile.relate(s => s.plane.align(host.surface(4)));
+const opening = profile.relate(s => align(s.plane, host.surface(4)));
 const result = host.cut([opening.face().extrude(-20)]);
-const draft = sketch().relate(s => s.plane.align(host.surface(2)));
+const draft = sketch().relate(s => align(s.plane, host.surface(2)));
 ```
 
 The target may be a named plane or a planar `host.surface(id)`. The sketch plane

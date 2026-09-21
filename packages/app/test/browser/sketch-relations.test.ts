@@ -3,10 +3,10 @@ import {test} from 'node:test';
 import {open, point, text, waitForSource} from './sketch-test.ts';
 
 test('a related sketch shows read-only context, edits local data and undoes without losing the relation', async t => {
-  const source = `import {sketch, rectangle} from '@code3d/core';
+  const source = `import {align, sketch, rectangle} from '@code3d/core';
 const host = rectangle(40, 30).rotate(0, 0, 90).originOffset(-15, 0, 0);
 const profile = sketch([['point', 1, [0, 0]], ['point', 2, [10, 0]], ['line', 3, [1, 2]]]);
-const placed = profile.relate(s => s.plane.align(host.plane));
+const placed = profile.relate(s => align(s.plane, host.plane));
 placed;`;
   const page = await open(t, source);
   await page.getByText('Ready', {exact: true}).waitFor();
@@ -53,7 +53,7 @@ placed;`;
   assert.ok(await page.locator('.sketch-context-edge').count());
   assert.match(
     await text(page),
-    /profile\.relate\(s => s\.plane\.align\(host\.plane\)\)/,
+    /profile\.relate\(s => align\(s\.plane, host\.plane\)\)/,
   );
   await page.keyboard.press('Control+z');
   await waitForSource(page, /'point',\s*2,\s*\[10,\s*0\]/);
@@ -64,9 +64,9 @@ placed;`;
 test('empty related sketches can draw without an array and keep the host relation', async t => {
   const page = await open(
     t,
-    `import {sketch, rectangle} from '@code3d/core';
+    `import {align, sketch, rectangle} from '@code3d/core';
 const host = rectangle(40, 30).originOffset(0, -10, 0);
-const profile = sketch().relate(s => s.plane.align(host.plane));
+const profile = sketch().relate(s => align(s.plane, host.plane));
 profile;`,
   );
   await page
@@ -85,21 +85,21 @@ profile;`,
   assert.match(await text(page), /'length',\s*3,\s*10/);
   assert.match(
     await text(page),
-    /\.relate\(s => s\.plane\.align\(host\.plane\)\)/,
+    /\.relate\(s => align\(s\.plane, host\.plane\)\)/,
   );
   assert.equal(await point(page, 1).count(), 1);
   assert.equal(await point(page, 2).count(), 1);
 });
 
 test('a related sketch keeps blurred source marks without reflowing the line', async t => {
-  const source = `import {rectangle, sketch} from '@code3d/core';
+  const source = `import {align, rectangle, sketch} from '@code3d/core';
 const host = rectangle(40, 30).originOffset(0, -10, 0);
 const base = sketch([
   ['point', 1, [0, 0]],
   ['point', 2, [10, 0]],
   ['line', 3, [1, 2]],
 ]);
-const placed = base.relate(s => s.plane.align(host.plane));
+const placed = base.relate(s => align(s.plane, host.plane));
 placed;`;
   const page = await open(t, source);
   // Monaco re-indents inserted source, so read offsets and columns from the model.

@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {getOC, measureShapeVolumeProperties} from 'replicad';
 import {
+  on,
   pivot,
   box,
   circle,
@@ -174,11 +175,11 @@ test('curved walls and connected boolean operands can be shelled', () => {
 test('bent spline lofts can form offset walls', () => {
   const start = circle(20);
   const via = circle(20).relate(profile => [
-    profile.on(start.up),
+    on(profile, start.up),
     pivot([50, 0, 0]).rotate(0, 0, 45),
   ]);
   const end = circle(20).relate(profile => [
-    profile.on(start.up),
+    on(profile, start.up),
     pivot([50, 0, 0]).rotate(0, 0, 90),
   ]);
   const base = loft([start, via, end]);
@@ -199,11 +200,11 @@ test('bent spline lofts can form offset walls', () => {
 test('a mixed-profile loft can enclose a cavity even when its open shell produces no walls', () => {
   const start = circle(20);
   const via = regularPolygon(20, 8).relate(profile => [
-    profile.on(start.up),
+    on(profile, start.up),
     pivot([50, 0, 0]).rotate(0, 0, 45),
   ]);
   const end = rectangle(40, 40).relate(profile => [
-    profile.on(start.up),
+    on(profile, start.up),
     pivot([50, 0, 0]).rotate(0, 0, 90),
   ]);
   const base = loft([start, via, end]);

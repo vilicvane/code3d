@@ -518,7 +518,7 @@ export const sourceContextSets: Readonly<
       description:
         'At on, the part touches the base. Its complete source box is highlighted; the later offset and rotation have not happened yet.',
       focus: {
-        context: '.on(base.up), // Touch the base.',
+        context: 'on(base.up), // Touch the base.',
         token: 'on',
       },
     },
@@ -529,7 +529,7 @@ export const sourceContextSets: Readonly<
       description:
         'Inside on, base.up becomes the bright reference while the part remains visible.',
       focus: {
-        context: '.on(base.up), // Touch the base.',
+        context: 'on(base.up), // Touch the base.',
         token: 'base.up',
       },
     },

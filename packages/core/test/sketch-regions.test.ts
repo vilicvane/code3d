@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {
+  on,
   sketch,
   extrude,
   rectangle,
@@ -306,7 +307,7 @@ for (const ruled of [true, false])
         );
       const base = profile(6);
       const location = keep(point([0, 10, 0]));
-      const top = keep(profile(6).relate(f => f.on(location.up)));
+      const top = keep(profile(6).relate(f => on(f, location.up)));
       const spine = withSpine ? keep(line([0, 10, 0])) : undefined;
       const model = keep(loft([base, top], {ruled, spine}));
       near(volume(model), Math.PI * 32 * 10);

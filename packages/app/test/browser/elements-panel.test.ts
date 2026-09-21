@@ -255,9 +255,9 @@ body.center;`,
     );
     await setSource(
       page,
-      `import {loft, point, rectangle} from '@code3d/core';
+      `import {on, loft, point, rectangle} from '@code3d/core';
 const base = rectangle(28, 20);
-const top = rectangle(18, 12).relate(p => p.on(point([0, 32, 0]).up));
+const top = rectangle(18, 12).relate(p => on(p, point([0, 32, 0]).up));
 const body = loft([base, top]);
 body;`,
     );

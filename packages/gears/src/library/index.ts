@@ -1,4 +1,5 @@
 import {
+  align,
   coupleRotation,
   box,
   cut,
@@ -246,7 +247,7 @@ export function assembleGears(
       ((toothAngles[index] - ratio * toothAngles[index - 1]) * 180) / Math.PI;
 
     assembled[index] = target.relate(self => [
-      self.origin.align(source.origin),
+      align(self.origin, source.origin),
       coupleRotation(source, {ratio, phase}),
       offset(
         distance * Math.cos(directionAngle),

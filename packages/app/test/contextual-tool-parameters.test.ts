@@ -124,7 +124,8 @@ test('ellipsoid exposes three independent radii and incomplete-call defaults', a
     ['ellipsoid(7, 4, 5)', [7, 4, 5]],
     ['ellipsoid()', [5, 3, 4]],
   ] as const) {
-    const source = `import {ellipsoid} from '@code3d/core';\nexport default ${call};`;
+    const source = `import {on, align, ellipsoid} from '@code3d/core';
+export default ${call};`;
     const result = await compileParameters(source, 'ellipsoid');
     assert.equal(result.module.diagnostic, undefined);
     for (const [i, key] of ['xRadius', 'yRadius', 'zRadius'].entries()) {
@@ -170,7 +171,7 @@ test('expression replacement uses the same numeric constraints as parameter edit
 });
 
 const defaultParameterSource = [
-  "import {box} from '@code3d/core';",
+  "import { box} from '@code3d/core';",
   '/**',
   " * @code3d.param x {kind: 'length', default: 12, constraints: {exclusiveMin: 0}}",
   " * @code3d.param y {kind: 'count', default: 4, constraints: {min: 1}}",
@@ -298,7 +299,9 @@ test('annotations describe display defaults without changing interactive or ordi
   const {code} = await transform(source, {loader: 'ts', format: 'esm'});
   const native = await importTestModule(code);
   const {module, parameters} = await compileParameters(
-    `import {box} from '@code3d/core';\n${source}\nbox(1, 1, 1);`,
+    `import {on, align, box} from '@code3d/core';
+${source}
+box(1, 1, 1);`,
     'angle',
   );
   for (const [name, expected] of [
@@ -323,9 +326,9 @@ test('omitted coordinate arrays expose defaults and insert only the next compone
     ['pivot([2, /* next */])', 'y', 'pivot([2, /* next */5])'],
     ['pivot([, 2, 3])', 'x', 'pivot([5, 2, 3])'],
   ] as const) {
-    const source = `import {box, pivot} from '@code3d/core';
+    const source = `import {on, align, box, pivot} from '@code3d/core';
 const base = box(20, 30, 40);
-box(4, 6, 8).relate(self => [self.on(base.up), ${call}.rotate(0, 0, 25)]);`;
+box(4, 6, 8).relate(self => [on(self, base.up), ${call}.rotate(0, 0, 25)]);`;
     const result = await compileParameters(source, 'pivot');
     assert.equal(result.module.diagnostic, undefined);
     const parameter = defined(result.parameters.get(name));
@@ -362,10 +365,10 @@ test('coordinate defaults do not overwrite explicit undefined, opaque arrays or 
     'pivot([...coords])',
     'pivot([1, ...coords])',
   ]) {
-    const source = `import {box, pivot} from '@code3d/core';
+    const source = `import {on, align, box, pivot} from '@code3d/core';
 const coords = [1, 2, 3] as const;
 const base = box(20, 30, 40);
-box(4, 6, 8).relate(self => [self.on(base.up), ${call}.rotate(0, 0, 25)]);`;
+box(4, 6, 8).relate(self => [on(self, base.up), ${call}.rotate(0, 0, 25)]);`;
     const {parameters} = await compileParameters(source, 'pivot');
     for (const name of call === 'pivot([1, ...coords])'
       ? ['y', 'z']
@@ -382,7 +385,7 @@ test('coordinate defaults insert an array after an existing argument', async () 
     ['translated(10)', 'translated(10, [5])'],
     ['translated(10, /* next */)', 'translated(10, /* next */[5])'],
   ] as const) {
-    const source = `import {box} from '@code3d/core';
+    const source = `import {on, align, box} from '@code3d/core';
 /**
  * @code3d.param x {kind: 'length', default: 0}
  * @code3d.param y {kind: 'length', default: 0}
@@ -416,7 +419,7 @@ ${call};`;
 
 async function parametersFor(expression: string, omit = false) {
   const source = [
-    "import {box} from '@code3d/core';",
+    "import {on, align, box} from '@code3d/core';",
     'const spacing = 8;',
     'const settings = {spacing: 8};',
     'const first = 8, second = 2;',

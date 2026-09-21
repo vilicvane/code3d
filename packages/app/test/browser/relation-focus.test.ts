@@ -4,6 +4,93 @@ import {test} from 'node:test';
 import {chromium} from './browser-connection.ts';
 
 test(
+  'constraint function entries emphasize self on either side through parameter transitions and exports',
+  {timeout: 120_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/mobx/i.test(message.text())) errors.push(message.text());
+    });
+    const url = new URL(
+      '/__constraint-entry-focus-test__',
+      process.env.CODE3D_TEST_URL,
+    ).href;
+    await page.route(url, route =>
+      route.fulfill({
+        contentType: 'text/html',
+        headers: appIsolationHeaders,
+        body: '<main style="width:900px;height:700px"></main>',
+      }),
+    );
+    await page.goto(url);
+    const samples = await page.evaluate(async () => {
+      const path = '/test/browser/relation-focus-fixture.ts';
+      const fixture: typeof import('./relation-focus-fixture.ts') =
+        await import(path);
+      return fixture.measureConstraintEntryFocus();
+    });
+    assert.equal(samples.length, 16);
+    for (const sample of samples) {
+      const label = `${sample.expression}: ${sample.selection}`;
+      const parameter = sample.selection === 'parameter';
+      const primary = parameter ? 1 - sample.selfIndex : sample.selfIndex;
+      assert.deepEqual(
+        sample.models,
+        [0, 1].map(side => !parameter && side === primary),
+        label,
+      );
+      assert.deepEqual(
+        sample.anchors,
+        [0, 1].map(side => side === primary),
+        label,
+      );
+      for (const drawn of [sample.onscreen, sample.exported]) {
+        for (const side of [0, 1]) {
+          const models = drawn.filter(
+            item => item.side === side && item.kind === 'model',
+          );
+          assert.ok(models.length, label);
+          assert.ok(
+            models.every(
+              item =>
+                item.opacity === (!parameter && side === primary ? 0.68 : 0.4),
+            ),
+            label,
+          );
+          const markers = drawn.filter(
+            item => item.side === side && item.kind !== 'model',
+          );
+          assert.ok(markers.length, label);
+          const multiplier = side === primary ? 1 : 0.7;
+          for (const marker of markers) {
+            const base =
+              marker.kind === 'surface'
+                ? 0.18
+                : sample.expression.startsWith('on(')
+                  ? 0.85
+                  : 0.98;
+            assert.ok(
+              Math.abs(marker.opacity - base * multiplier) < 1e-9,
+              `${label}: ${JSON.stringify(marker)}`,
+            );
+          }
+        }
+      }
+    }
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'ordinary expression previews retain authored opacity through inspection transitions and exports',
   {timeout: 120_000},
   async t => {
@@ -291,7 +378,7 @@ test(
     assert.equal(samples.length, 4);
     for (const sample of samples) {
       assert.equal(sample.extraVisible, false, sample.token);
-      const relation = sample.token === '.on(' || sample.token === 'base.up';
+      const relation = sample.token === 'on(' || sample.token === 'base.up';
       assert.equal(sample.ambient, relation ? 0 : 1, sample.token);
       assert.equal(
         sample.targets.filter(kind => kind === 'anchor').length,

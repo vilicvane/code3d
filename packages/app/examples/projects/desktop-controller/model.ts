@@ -1,4 +1,6 @@
 import {
+  align,
+  on,
   offset,
   box,
   cylinder,
@@ -15,17 +17,17 @@ import {makePanel} from './panel.ts';
 // A modeling study; board and controls are placeholders, not verified electronics.
 const body = makeEnclosure().material(plastic({color: '#8ed5d1'}));
 const panel = makePanel().relate(part => [
-  part.axis.align(body.axis),
-  part.mountingFace.on(body.panelSeat),
+  align(part.axis, body.axis),
+  on(part.mountingFace, body.panelSeat),
 ]);
 const knob = makeKnob(12, 10, 12).relate(part => [
-  part.axis.align(panel.knobAxis),
-  part.down.on(panel.top),
+  align(part.axis, panel.knobAxis),
+  on(part.down, panel.top),
 ]);
 const key = keycap(6).relate(part => [
-  part.axis.align(panel.axis),
+  align(part.axis, panel.axis),
   offset(22, 0, 0),
-  part.down.on(panel.top),
+  on(part.down, panel.top),
 ]);
 
 export default group(

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {
+  on,
   box,
   circle,
   cylinder,
@@ -123,7 +124,7 @@ test('holes in solids and trimmed faces remain empty space for distance queries'
 test('measurement solves existing relations before any group and returns an ordinary snapshot number', () => {
   const a = keep(box(10, 10, 10));
   const b = keep(
-    box(10, 10, 10).relate(self => [self.on(a.right), offset(7, 0, 0)]),
+    box(10, 10, 10).relate(self => [on(self, a.right), offset(7, 0, 0)]),
   );
   near(distance(a, b), 7);
   near(distance(a.center, b.center), 17);
@@ -132,7 +133,7 @@ test('measurement solves existing relations before any group and returns an ordi
   near(captured, 7);
   near(distance(a.right, c.left, 'x'), 12);
   near(distance(a, b), 7);
-  const beam = keep(box(captured, 2, 2).relate(self => self.on(a.right)));
+  const beam = keep(box(captured, 2, 2).relate(self => on(self, a.right)));
   near(distance(beam.right, b.left, 'x'), 0);
   const assembly = keep(group([a, b, beam]).expose({a, b, beam}));
   near(distance(assembly.a, assembly.b), 7);

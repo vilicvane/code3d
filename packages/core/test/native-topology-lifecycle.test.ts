@@ -14,7 +14,7 @@ import {disposeModelObjects, modelGeometry} from './model-test.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {bezier, loft, rectangle, sketch} from '../bld/node/index.js';
+import {align, bezier, loft, rectangle, sketch} from '../bld/node/index.js';
 
 import {clearKernelOperationCache} from '../bld/library/kernel-cache.js';
 import * as replicad from 'replicad';
@@ -355,8 +355,8 @@ for (const failHistory of [false, true]) {
       [10, 16, 0],
       [10, 24, 0],
     ]);
-    const start = rectangle(6, 4).relate(p => p.center.align(spine.start));
-    const end = rectangle(4, 3).relate(p => p.center.align(spine.end));
+    const start = rectangle(6, 4).relate(p => align(p.center, spine.start));
+    const end = rectangle(4, 3).relate(p => align(p.center, spine.end));
     const oc = replicad.getOC();
     const handles: EmbindHandle[] = [];
     let generatedCalls = 0;

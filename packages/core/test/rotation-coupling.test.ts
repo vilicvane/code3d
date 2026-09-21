@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  align,
   axisLine,
   box,
   circle,
@@ -29,19 +30,19 @@ test('external attachments carry cumulative rotations through a ratio chain', ()
   ]) {
     const base = box(2, 2, 2);
     const crank = box(10, 2, 2).relate(self => [
-      self.frame.align(base.frame),
+      align(self.frame, base.frame),
       rotate(0, angle, 0),
     ]);
-    const driver = box(3, 2, 3).relate(self => self.frame.align(crank.frame));
+    const driver = box(3, 2, 3).relate(self => align(self.frame, crank.frame));
     const driven = box(4, 2, 4).relate(self => [
-      self.origin.align(driver.origin),
+      align(self.origin, driver.origin),
       coupleRotation(driver, {
         ratio: -2 / 3,
         phase: 6,
       }),
       offset(20, 0, 0),
     ]);
-    const output = box(8, 2, 2).relate(self => self.frame.align(driven.frame));
+    const output = box(8, 2, 2).relate(self => align(self.frame, driven.frame));
     const assembly = snapshot(group([base, crank, driver, driven, output]));
     near(
       rotateVector([1, 0, 0], assembly.children[4].transform.quaternion),
@@ -56,9 +57,9 @@ test('external attachments carry cumulative rotations through a ratio chain', ()
 test('cumulative coordinates respect constraint stages and immutable references', () => {
   const base = box(1, 1, 1);
   const original = box(2, 2, 2).relate(self => [
-    self.frame.align(base.frame),
+    align(self.frame, base.frame),
     rotate(0, 720, 0),
-    self.origin.align(base.origin),
+    align(self.origin, base.origin),
     rotate(0, 45, 0),
   ]);
   const driven = box(2, 2, 2).relate(() =>
@@ -73,7 +74,7 @@ test('cumulative coordinates respect constraint stages and immutable references'
     rotateVector([1, 0, 0], snapshot(changed).compositionTransform.quaternion),
     heading(135),
   );
-  const reset = original.relate(self => self.frame.align(base.frame));
+  const reset = original.relate(self => align(self.frame, base.frame));
   const resetDriven = box(2, 2, 2).relate(() =>
     coupleRotation(reset, {ratio: 0.4}),
   );
@@ -89,11 +90,11 @@ test('cumulative coordinates respect constraint stages and immutable references'
 test('angular constraints report conflicting drivers and unsupported axis changes', () => {
   const base = box(1, 1, 1);
   const crank = box(2, 2, 2).relate(self => [
-    self.frame.align(base.frame),
+    align(self.frame, base.frame),
     rotate(0, 60, 0),
   ]);
   const incompatible = box(2, 2, 2).relate(self => [
-    self.frame.align(base.frame),
+    align(self.frame, base.frame),
     coupleRotation(crank, {ratio: 1}),
   ]);
   assert.throws(
@@ -139,7 +140,7 @@ test('each model uses its own non-Y axis through rigid group placement', () => {
 test('cyclic driving dependencies report the supported chain boundary', () => {
   const loop = box(2, 2, 2).relate(self => {
     const feedback = box(1, 1, 1).relate(frame =>
-      frame.frame.align(self.frame),
+      align(frame.frame, self.frame),
     );
     return coupleRotation(feedback, {ratio: -1});
   });
@@ -149,15 +150,15 @@ test('cyclic driving dependencies report the supported chain boundary', () => {
 test('an unrelated articulated branch on the same support keeps its rotation freedom', () => {
   const base = box(10, 2, 10);
   const driver = box(2, 2, 2).relate(self => [
-    self.frame.align(base.frame),
+    align(self.frame, base.frame),
     rotate(0, 720, 0),
   ]);
   const follower = box(2, 2, 2).relate(() =>
     coupleRotation(driver, {ratio: 0.25}),
   );
-  const output = box(2, 2, 2).relate(self => self.frame.align(follower.frame));
+  const output = box(2, 2, 2).relate(self => align(self.frame, follower.frame));
   const unrelated = box(2, 2, 2).relate(self => [
-    self.frame.align(base.frame),
+    align(self.frame, base.frame),
     rotate(30, 0, 0),
   ]);
   const result = snapshot(group([base, driver, follower, output, unrelated]));
@@ -192,7 +193,7 @@ test('different model axes and external-axis rotations preserve complete turns',
   const original = box(2, 3, 4);
   const support = original.relate(() => offset(4, 5, 6));
   const driver = original.relate(() => axisLine(support.axis).rotate(735));
-  const attached = original.relate(self => self.frame.align(driver.frame));
+  const attached = original.relate(self => align(self.frame, driver.frame));
   const followerBase = original.rotate(90, 0, 0);
   const follower = followerBase.relate(() =>
     coupleRotation(attached, {ratio: 0.4}),

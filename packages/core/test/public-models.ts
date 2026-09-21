@@ -1,4 +1,5 @@
 import {
+  on,
   box,
   circle,
   group,
@@ -47,16 +48,16 @@ const moved: GroupModel = inner
   .originPoint(solid.center)
   .rotate(0, 90, 0)
   .material('#abcdef')
-  .relate(self => self.on(solid.up));
+  .relate(self => on(self, solid.up));
 const general: Model = erased
   .rotate(0, 90, 0)
   .material('#abcdef')
-  .relate(self => self.on(solid.up));
+  .relate(self => on(self, solid.up));
 
 const exposed = inner.expose({body: solid, mount: solid.up});
 const exposedGeneral: Model<{mount: typeof solid.up}> = exposed;
-exposedGeneral.rotate(0, 90, 0).mount.on(solid.up);
-erased.expose({mount: solid.up}).material('#abcdef').mount.on(solid.up);
+on(exposedGeneral.rotate(0, 90, 0).mount, solid.up);
+on(erased.expose({mount: solid.up}).material('#abcdef').mount, solid.up);
 group([exposed, exposedGeneral, exposed.rotate(0, 90, 0)]);
 
 // @ts-expect-error A group remains distinct from a solid.

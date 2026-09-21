@@ -12,8 +12,6 @@ export {
 /** @internal */
 export {
   relate,
-  on,
-  align,
   expose,
   inspectTopologyReference,
   inspectLength,
@@ -62,6 +60,8 @@ export {
   axisEdge,
   axisLine,
   coupleRotation,
+  on,
+  align,
   arc,
   bezier,
   box,

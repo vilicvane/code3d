@@ -1,4 +1,4 @@
-import {box, cylinder, group} from '@code3d/core';
+import {on, align, box, cylinder, group} from '@code3d/core';
 
 /**
  * A locating pin exposes its mating references to the next model.
@@ -17,10 +17,10 @@ export function locatingPin(radius = 3, height = 16) {
 const plate = box(32, 4, 24).fillet(1);
 const pin = locatingPin(3, 16)
   .material('#d8ff3e')
-  .relate(part => part.mountingFace.on(plate.up));
+  .relate(part => on(part.mountingFace, plate.up));
 const cap = cylinder(5, 3).relate(part => [
-  part.axis.align(pin.centerline),
-  part.down.on(pin.tipFace),
+  align(part.axis, pin.centerline),
+  on(part.down, pin.tipFace),
 ]);
 
 export const model = group([plate, pin, cap]);

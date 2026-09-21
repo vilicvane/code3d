@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {
+  align,
   bezier,
   circle,
   line,
@@ -74,7 +75,7 @@ test('sweep resolves the path placement into the profile frame', () => {
   const profile = keep(circle(2));
   const original = keep(line([5, 0, 0], [5, 12, 0]));
   const placed = keep(
-    original.relate(self => self.start.align(profile.origin)),
+    original.relate(self => align(self.start, profile.origin)),
   );
   const solid = keep(sweep(profile, placed));
   assert.ok(Math.abs(volume(solid) - 48 * Math.PI) < 1e-3);

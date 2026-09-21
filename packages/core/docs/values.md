@@ -54,10 +54,10 @@ Read a model's dimensions in its own frame, or query its bounds and position
 relative to another model:
 
 ```ts
-import {box, group, offset} from '@code3d/core';
+import {on, box, group, offset} from '@code3d/core';
 
 const base = box(20, 4, 20);
-const part = box(8, 12, 4).relate(self => [self.on(base.up), offset(20, 0, 0)]);
+const part = box(8, 12, 4).relate(self => [on(base.up), offset(20, 0, 0)]);
 const size = part.bounds().size; // [8, 12, 4]
 const origin = part.position(base); // [20, 8, 0]
 const minimum = part.bounds(base).minimum; // [16, 2, -2]

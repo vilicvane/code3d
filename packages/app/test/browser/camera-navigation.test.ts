@@ -1244,10 +1244,10 @@ test(
 
 test('composition grids and navigation axes stay fixed through member selection and live placement previews', async t => {
   const {page, errors} = await openNavigationPage(t);
-  const source = `import {offset, rotate, box, group} from '@code3d/core';
+  const source = `import {on, offset, rotate, box, group} from '@code3d/core';
 const base = box(24, 6, 14);
 const tilted = box(10, 4, 8).relate(self =>
-  [self.on(base.up), offset(0, 10, 0), rotate(20, 30, 45)]);
+  [on(self, base.up), offset(0, 10, 0), rotate(20, 30, 45)]);
 const members = [base, tilted];
 const inner = group(members).rotate(0, 25, 0);
 export const outer = group([inner, box(6, 12, 4)], 'Grid assembly');
@@ -1404,7 +1404,7 @@ test('the shared grid legend follows sketch zoom and restores the 3D display on 
   await page.evaluate(() => {
     const editor = window.navigationApp.codeEditor.editor;
     const source = [
-      "import {box, sketch} from '@code3d/core';",
+      "import { box, sketch} from '@code3d/core';",
       'export const solid = box(24, 6, 14);',
       "export const outline = sketch([['point', 1, [0, 0]], ['point', 2, [20, 0]], ['line', 3, [1, 2]]]);",
     ].join('\n');

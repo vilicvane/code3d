@@ -798,30 +798,6 @@ const modelNamedElements = Symbol('modelNamedElements');
 
 export interface Anchor<Kind extends ElementKind = ElementKind> {
   readonly [anchorKind]: Kind;
-  /**
-   * Translate this geometry's matching bound onto the directed target bound.
-   * @code3d.inspect on.inspect
-   * @code3d.inspect this on.inspect
-   * @code3d.inspect target on.inspect
-   */
-  on(target: Bound): Constraint;
-  /**
-   * Align the underlying geometry, retaining unconstrained position and orientation.
-   * @code3d.inspect align.inspect
-   * @code3d.inspect this align.inspect
-   * @code3d.inspect target align.inspect
-   */
-  align(
-    this: Anchor<'point' | 'line' | 'face'>,
-    target: Anchor<'point' | 'line' | 'face'>,
-  ): Constraint;
-  /**
-   * Coincide origins and all coordinate axes.
-   * @code3d.inspect align.inspect
-   * @code3d.inspect this align.inspect
-   * @code3d.inspect target align.inspect
-   */
-  align(this: FrameAnchor, target: FrameAnchor): Constraint;
 }
 
 export interface PointAnchor extends Anchor<'point'> {}
@@ -1299,21 +1275,6 @@ class ModelAnchor<
       direction: -(ref.direction ?? 1) as 1 | -1,
     }) as this;
   }
-
-  on(target: Bound): Constraint {
-    return Constraint.create(
-      this[anchorReferenceValue],
-      boundReference(target),
-    );
-  }
-
-  align(target: Anchor): Constraint {
-    return Constraint.create(
-      this[anchorReferenceValue],
-      anchorReference(target),
-      'align',
-    );
-  }
 }
 
 class ModelFrameAnchor extends ModelAnchor<'frame'> implements FrameAnchor {
@@ -1731,6 +1692,57 @@ export class Constraint extends RelationExpression {
       config: {...config},
     });
   }
+}
+
+/**
+ * Translate the whole current model onto the directed target bound.
+ * @code3d.inspect on.inspect
+ * @code3d.inspect target on.inspect
+ */
+export function on(target: Bound): Constraint;
+/**
+ * Translate the selected source geometry's matching bound onto the target bound.
+ * @code3d.inspect on.inspect
+ * @code3d.inspect source on.inspect
+ * @code3d.inspect target on.inspect
+ */
+export function on(source: Anchor, target: Bound): Constraint;
+export function on(source: Anchor, target?: Bound): Constraint {
+  if (arguments.length === 1) {
+    if (!activeRelate)
+      throw new Error('on(target) must be called inside a relate callback.');
+    target = source as Bound;
+    source = requireModelObject(
+      activeRelate.self,
+      'on(target) requires a current model with finite geometry.',
+    );
+  }
+  return Constraint.create(anchorReference(source), boundReference(target!));
+}
+
+/**
+ * Align underlying geometry while retaining unconstrained degrees of freedom.
+ * @code3d.inspect align.inspect
+ * @code3d.inspect source align.inspect
+ * @code3d.inspect target align.inspect
+ */
+export function align(
+  source: Anchor<'point' | 'line' | 'face'>,
+  target: Anchor<'point' | 'line' | 'face'>,
+): Constraint;
+/**
+ * Coincide the origins and all axes of two coordinate frames.
+ * @code3d.inspect align.inspect
+ * @code3d.inspect source align.inspect
+ * @code3d.inspect target align.inspect
+ */
+export function align(source: FrameAnchor, target: FrameAnchor): Constraint;
+export function align(source: Anchor, target: Anchor): Constraint {
+  return Constraint.create(
+    anchorReference(source),
+    anchorReference(target),
+    'align',
+  );
 }
 
 /**
@@ -3324,24 +3336,9 @@ export class ModelObject<
     return directionalBound(this.relationAnchorReference(), 'back');
   }
 
-  on(target: Bound): Constraint {
-    return Constraint.create(
-      this.relationAnchorReference(),
-      boundReference(target),
-    );
-  }
-
   /** @internal */
   relationAnchorReference(): AnchorReference {
     return {model: this, name: 'geometry', ...this.geometryAnchor, whole: true};
-  }
-
-  align(target: Anchor): Constraint {
-    return Constraint.create(
-      this.relationAnchorReference(),
-      anchorReference(target),
-      'align',
-    );
   }
 
   reverse(): Edge {
@@ -5413,6 +5410,7 @@ export class ModelObject<
     relation: RelationExpression,
     sourceValue: Anchor,
     targetValue: Anchor,
+    focusSelf = false,
   ): InspectResult | undefined {
     if (!data.owns(relation)) return undefined;
     const poses = data.poses(relation);
@@ -5479,6 +5477,13 @@ export class ModelObject<
         : undefined;
     const owners = new Set([sourceOwner, targetOwner]);
     return {
+      focused: focusSelf
+        ? [
+            frame.display(data.self)!,
+            constraint.source === data.self ? source : target,
+            ...(constraint.source === data.self && extent ? [extent] : []),
+          ]
+        : undefined,
       target: [
         ...[...new Set([constraint.source, constraint.target])].map(model =>
           frame.display(model)!,
@@ -6739,24 +6744,38 @@ export namespace expose {
 /** @internal */
 export namespace on {
   export function inspect(
-    [target]: [Anchor],
-    context: InspectContext<Constraint, Anchor>,
+    [source, target]: [Anchor, Bound?],
+    context: InspectContext<Constraint>,
+  ): InspectResult | undefined {
+    const data = relate.context(context);
+    if (!data || !context.return) return undefined;
+    return ModelObject.inspectConstraint(
+      data,
+      context.return,
+      target === undefined ? (data.self as ModelObject) : source,
+      target ?? source,
+      context.focused.parameter === undefined,
+    );
+  }
+}
+
+/** @internal */
+export namespace align {
+  export function inspect(
+    [source, target]: [Anchor, Anchor],
+    context: InspectContext<Constraint>,
   ): InspectResult | undefined {
     const data = relate.context(context);
     return data && context.return
       ? ModelObject.inspectConstraint(
           data,
           context.return,
-          context.receiver,
+          source,
           target,
+          context.focused.parameter === undefined,
         )
       : undefined;
   }
-}
-
-/** @internal */
-export namespace align {
-  export const inspect = on.inspect;
 }
 
 type CenterableModel = Model & {originCenter(): Model};
@@ -7495,6 +7514,8 @@ export const authoringApi = Object.freeze({
   axisEdge,
   axisLine,
   coupleRotation,
+  on,
+  align,
   cache,
   font,
   googleFont,

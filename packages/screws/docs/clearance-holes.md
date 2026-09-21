@@ -39,14 +39,14 @@ for the Ø8 preset.
 Use a hole model with `cut(stock, [hole])` and its named references for mounting.
 
 ```ts
-import {box, cut} from '@code3d/core';
+import {on, box, cut} from '@code3d/core';
 import * as ISO10642 from '@code3d/screws/iso10642';
 
 const stock = box(30, 10, 30);
 const hole = ISO10642.clearanceHole('M6', 10);
 const plate = cut(stock, [hole]);
 const screw = ISO10642.screw('M6', 20).relate(part =>
-  part.headTop.on(hole.countersinkTop),
+  on(part.headTop, hole.countersinkTop),
 );
 ```
 
@@ -85,6 +85,7 @@ by the screw product standards.
 ISO 7379 supports the same counterbore options as ordinary headed standards:
 
 ```ts
+import {on} from '@code3d/core';
 import * as ISO7379 from '@code3d/screws/iso7379';
 
 const hole = ISO7379.clearanceHole(8, {
@@ -93,7 +94,7 @@ const hole = ISO7379.clearanceHole(8, {
   counterbore: {diameter: 15, depth: 7},
 });
 const shoulder = ISO7379.screw(8, 20).relate(part =>
-  part.headBottom.on(hole.counterboreBottom),
+  on(part.headBottom, hole.counterboreBottom),
 );
 ```
 
@@ -104,7 +105,7 @@ overrides it. For example, `{axialClearance: 0}` seats the head flush.
 ## Reference placement
 
 Named boundaries are finite `Bound` values. For example,
-`tool.shaftBottom.on(plate.down.flip())` places a hole against the plate's lower
+`on(tool.shaftBottom, plate.down.flip())` places a hole against the plate's lower
 boundary without rotating it; `flip()` reverses facing and preserves its offset
 coordinate frame.
 

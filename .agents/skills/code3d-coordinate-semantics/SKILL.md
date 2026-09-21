@@ -15,6 +15,8 @@ description: 'code3d 的局部坐标、原点与相对位置约定。设计、�
 
 `relate()` 表达与其他元素之间的约束关系；其中的 `offset`、`rotate` 是关系求解后的后续变换。这里的“独立 Transformation”指它与 Constraint 分别作为数组项，不代表应将无约束的 relate 当作通用几何变换。独立建模与排布使用 `originOffset()`、模型 `rotate()` 等局部几何操作；先组合完整布局，再用 relate 表达整体与外部元素的关系。测试中覆盖求解器默认位姿的输入，不能作为实际建模用法的依据。
 
+`on(targetBound)` 在构造时将当前 self 转为显式 source；`on(sourceElement, targetBound)` 和 `align(sourceElement, targetElement)` 明确选择两侧，模型不隐式转换为 frame。嵌套回调使用最内层 self。
+
 `relate` 的回调参数表示返回的新模型或草图参考架，每条约束必须涉及该值。外部变量与其元素引用始终保留原值身份，即使它就是调用 relate 的原 receiver；不得自动重绑定为 self。约束存储、源码 trace、阶段预览、pivotPoint 与 axisLine 统一遵守此规则。选新值的元素用回调参数，引用旧值则保持外部变量。
 
 relate 中连续的约束共同求解位姿；初段未约束自由度采用求解器默认结果，后段继承前段姿态。Constraint 表达 on/align 或独立 coupleRotation 的固定轴角度关系，不提供 offset、rotate 或 pivot/axis 选择器。相对变换只能通过独立 Transformation 数组项表达，作用于前面同段的联合解，允许离开此前接触位置。变换严格按数组顺序执行；随后出现约束时进入新段，不把此前约束跨段收集回去。连续 relate 调用接续同一排列。零位移和零角度不增加位置或朝向条件。 混合求解收尾时，保留前段未约束的平移需让与之对齐的其他零件共同参与平移自由度；不能冻结从属零件后单独回正被引用的零件。
@@ -25,13 +27,13 @@ relate 中连续的约束共同求解位姿；初段未约束自由度采用求�
 
 所有模型（包括 group）的 `frame` 引用其局部坐标系；`frame.origin` 引用该架的零点，
 `model.origin` 直接返回同一个引用。两者不是几何模型，不生成输出几何。origin 引用可
-作点位置约束；frame.align 只接受另一个 frame，同时对齐原点及全部轴向。不能将
+作点位置约束；`align(sourceFrame, targetFrame)` 只接受两个 frame，同时对齐原点及全部轴向。不能将
 模型自身的几何 align 隐式解释成坐标系对齐。expose 的 frame.origin 从同一个已转换
 参考架派生，保留 occurrence；重新读取模型 frame 使用当前局部零点及 XYZ 轴，
 原点编辑前选定的参考则沿已有锚点重表达规则保留原含义。
 
 Layout 带 space 的 flex/grid/fillFlex/fillGrid 在其局部 bounds 中排布，并使用
-frame.align 关联目标空间的求解位姿；目标仅为引用依赖，无须加入输出几何。
+frame/frame align 关联目标空间的求解位姿；目标仅为引用依赖，无须加入输出几何。
 
 原点定义模型坐标，在自身坐标系中恒为零。`originOffset(d)` 保持轴向，使内部点的坐标变为：
 
@@ -101,6 +103,6 @@ other 必须是具有直线 axis 的模型，不接收裸轴引用或轴覆盖�
 嵌套 relate 使用最内层 self；外部变量仍保留旧模型身份，包括原 receiver。
 累计角度来自同一份 placements 的完整顺序；显式 rotate 保留整圈，不能从四元数反推圈数，
 也不能借用 App 上一帧状态。模型自己的轴方向和角度基准参与求解，轴位置不增加接触条件。
-frame.align 传递刚性连接的角度；几何 rotate 仍只改变局部几何。
+frame/frame align 传递刚性连接的角度；几何 rotate 仍只改变局部几何。
 当前支持每个刚体单一固定轴方向的无环驱动链；限制与角度零位约定见
 [Core 角度关系](../../../packages/core/docs/api.md#rotation-coupling)。

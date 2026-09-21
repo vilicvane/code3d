@@ -4,6 +4,7 @@ import type {Model} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
+  align,
   rotate,
   box,
   circle,
@@ -152,9 +153,9 @@ test('coordinate point construction equals a zero point with the opposite origin
   );
   const target = point([20, 30, 40]);
   near(
-    snapshot(a.relate(self => self.align(target))).compositionTransform
+    snapshot(a.relate(self => align(self, target))).compositionTransform
       .position,
-    snapshot(b.relate(self => self.align(target))).compositionTransform
+    snapshot(b.relate(self => align(self, target))).compositionTransform
       .position,
   );
 });
@@ -211,7 +212,7 @@ test('line coordinates retain model XYZ independently of the tangent anchor fram
   );
   const direct = segment.rotate(0, 90, 0);
   const related = segment.relate(self => [
-    self.start.align(point()),
+    align(self.start, point()),
     rotate(0, 90, 0),
   ]);
   // An explicit first reference retains the frame in which we inspect rotation.
@@ -235,7 +236,7 @@ test('line coordinates retain model XYZ independently of the tangent anchor fram
 
 test('origin edits carry existing self relation references into the result coordinates', () => {
   const target = point([20, 30, 40]);
-  const original = box(8, 6, 4).relate(self => self.center.align(target));
+  const original = box(8, 6, 4).relate(self => align(self.center, target));
   const moved = original.originOffset(3, 5, 7);
   near(center(moved), [-3, -5, -7]);
   near(snapshot(moved).compositionTransform.position, [23, 35, 47]);

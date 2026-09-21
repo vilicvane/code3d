@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import {ModelCompilerClient} from '../../src/model/compiler-client';
 import {browserPackageFiles} from '../../src/project/browser-packages';
 import {ModelViewport} from '../../src/viewport';
+import {createMaterialDrawObserver} from './material-draw-fixture';
 
 function viewport() {
   return new ModelViewport(document.querySelector<HTMLElement>('main')!, {
@@ -217,12 +218,100 @@ export default scene([a,b]);`;
   }
 }
 
+export async function measureConstraintEntryFocus() {
+  const client = new ModelCompilerClient(browserPackageFiles);
+  const view = viewport();
+  const samples = [];
+  try {
+    for (const [expression, selfIndex, parameter] of [
+      ['on(base.up)', 0, 'base.up'],
+      ['on(base.up, self.down)', 1, 'base.up'],
+      ['align(self.axis, base.axis)', 0, 'base.axis'],
+      ['align(base.axis, self.axis)', 1, 'base.axis'],
+    ] as const) {
+      const source = `import {on, align, box, group} from '@code3d/core';
+const base = box(20, 10, 20);
+const part = box(8, 18, 6).relate(self => ${expression});
+export default group([base, part]);`;
+      const module = await client.compile(
+        {files: [{path: '/main.ts', source}]},
+        '/main.ts',
+      );
+      if (module.diagnostic) throw new Error(module.diagnostic.summary);
+      for (const [selection, delta] of [
+        ['name', 1],
+        ['boundary', expression.indexOf('(')],
+        ['parameter', expression.indexOf(parameter) + parameter.length],
+        ['return', expression.indexOf('(')],
+      ] as const) {
+        await inspectSource(
+          client,
+          view,
+          module,
+          '/main.ts',
+          source.indexOf(expression) + delta,
+        );
+        const snapshot = view['inspectionScene']!;
+        const models = snapshot.target.filter(item => item.kind === 'model');
+        const drawn: {side: number; kind: string; opacity: number}[] = [];
+        const observe = createMaterialDrawObserver();
+        for (const [side, item] of models.entries()) {
+          const object = view
+            .renderedOccurrences()
+            .find(o => o.renderedNodeId === item.model.nodeId)!.object;
+          object.traverse(child => {
+            if (!(child instanceof THREE.Mesh)) return;
+            child.onBeforeRender = () => {
+              const material = Array.isArray(child.material)
+                ? child.material[0]
+                : child.material;
+              drawn.push({side, kind: 'model', opacity: material.opacity});
+            };
+          });
+        }
+        for (const instance of view['decorationLayers'].get('inspection') ??
+          []) {
+          const decoration = instance.object.children[0].userData.decoration;
+          if (!decoration) continue;
+          const side = models.findIndex(
+            item => item.model.nodeId === decoration.nodeId,
+          );
+          if (side < 0) continue;
+          observe(instance.object, draw =>
+            drawn.push({side, kind: decoration.kind, opacity: draw.opacity}),
+          );
+        }
+        view['rendering'].renderFrame();
+        const onscreen = [...drawn];
+        drawn.length = 0;
+        await view.captureImage(640, 480);
+        samples.push({
+          expression,
+          selfIndex,
+          selection,
+          models: models.map(item => item.focused),
+          anchors: snapshot.target
+            .filter(item => item.kind === 'anchor')
+            .map(item => item.focused),
+          onscreen,
+          exported: [...drawn],
+        });
+      }
+    }
+    return samples;
+  } finally {
+    view['renderer'].dispose();
+    view['controls'].dispose();
+    client.dispose();
+  }
+}
+
 export async function measureCompletedRelationFocus() {
   const client = new ModelCompilerClient(browserPackageFiles);
   const view = viewport();
-  const source = `import {box,group,offset} from '@code3d/core';
+  const source = `import {on, box,group,offset} from '@code3d/core';
 const base=box(20,10,20); const extra=box(100,100,100);
-const part=box(2,2,2).relate(self=>[self.on(base.up),offset(0,4,0)]);
+const part=box(2,2,2).relate(self=>[on(self, base.up),offset(0,4,0)]);
 export default group([base,part,extra]);`;
   try {
     const module = await client.compile(
@@ -233,7 +322,7 @@ export default group([base,part,extra]);`;
     const samples = [];
     for (const [token, delta] of [
       ['.relate(', 1],
-      ['.on(', 1],
+      ['on(', 1],
       ['base.up', 6],
       ['offset(', 1],
     ] as const) {

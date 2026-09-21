@@ -18,11 +18,11 @@ import {
 import {createAppTestServer} from './vite-test-server.ts';
 
 test('a transformation cannot repair contradictory constraints in the preceding joint segment', async () => {
-  const source = `import {box, offset, group} from '@code3d/core';
+  const source = `import {on, box, offset, group} from '@code3d/core';
     const base = box(20, 10, 20);
-    const higher = box(20, 10, 20).relate(s => s.on(base.up));
-    const original = box(2, 2, 2).relate(s => s.on(base.up));
-    const part = original.relate(s => [s.on(higher.up), offset(0, -10, 0)]);
+    const higher = box(20, 10, 20).relate(s => on(s, base.up));
+    const original = box(2, 2, 2).relate(s => on(s, base.up));
+    const part = original.relate(s => [on(s, higher.up), offset(0, -10, 0)]);
     export default group([base, higher, part]);`;
   await assert.rejects(
     compileProject({files: [{path: '/model.ts', source}]}, '/model.ts'),
@@ -93,81 +93,116 @@ test('executes function namespaces, enums and constructor parameter properties t
   assert.ok(call.evaluations[0].nodeIds.includes(module.fallback!.nodeId));
 });
 
-test('full relate source range retains its self toolbar context, including nested relations', async () => {
-  const {contextualToolScope, contextualToolActivation} =
-    await server.ssrLoadModule<
-      typeof import('../src/tools/contextual-tool-context.ts')
-    >('/src/tools/contextual-tool-context.ts');
-  const source = `import {box, group, offset} from '@code3d/core';
+for (const implicit of [false, true])
+  test(`full relate source range retains its self toolbar context, including nested relations (implicit=${implicit})`, async () => {
+    const {contextualToolScope, contextualToolActivation} =
+      await server.ssrLoadModule<
+        typeof import('../src/tools/contextual-tool-context.ts')
+      >('/src/tools/contextual-tool-context.ts');
+    const source = `import {on, align, box, group, offset} from '@code3d/core';
 const base = box(32, 14, 24);
-const cover = box(32, 3, 24).relate(self => {
-  const reference = box(4, 4, 4).relate(inner => inner.on(base.up));
-  return [self.axis.align(base.axis), self.on(reference.up), offset(3, 0, 0)];
+const cover = box(32, 3, 24).relate(${implicit ? '()' : 'self'} => {
+  const reference = box(4, 4, 4).relate(${implicit ? '()' : 'inner'} => ${implicit ? 'on(base.up)' : 'on(inner, base.up)'});
+  return [${implicit ? 'on(base.right)' : 'align(self.axis, base.axis)'}, ${implicit ? 'on(reference.up)' : 'on(self, reference.up)'}, offset(3, 0, 0)];
 });
 export default group([base, cover]);`;
-  const module = await compileProject(
-    {files: [{path: '/model.ts', source}]},
-    '/model.ts',
-  );
-  assert.equal(module.diagnostic, undefined);
-  const start = source.indexOf('relate(');
-  const end = source.indexOf('\n});') + 3;
-  const innerStart = source.indexOf('relate(inner');
-  const innerEnd =
-    source.indexOf('inner.on(base.up)') + 'inner.on(base.up))'.length;
-  const ownerAt = (offset: number) => {
-    const target = defined(
-      ModelViewport.prototype['sourceTargetAt'].call(
-        {module},
-        '/model.ts',
-        offset,
-      ),
+    const module = await compileProject(
+      {files: [{path: '/model.ts', source}]},
+      '/model.ts',
     );
-    return contextualToolScope(module, {
-      target,
-      evaluation: target.evaluations[0],
-    });
-  };
-  const outer = defined(ownerAt(start + 2).evaluation.relationOwnerNodeId);
-  const inner = defined(ownerAt(innerStart + 2).evaluation.relationOwnerNodeId);
-  assert.notEqual(inner, outer);
-  assert.equal(
-    ownerAt(source.indexOf('box(32, 3, 24)') + 4).evaluation
-      .relationOwnerNodeId,
-    undefined,
-  );
-  assert.equal(
-    ownerAt(source.indexOf('group([base, cover])') + 3).evaluation
-      .relationOwnerNodeId,
-    undefined,
-  );
-  for (let at = start; at <= end; at++) {
-    const scope = ownerAt(at);
-    const expected = at >= innerStart && at <= innerEnd ? inner : outer;
+    assert.equal(module.diagnostic, undefined);
+    const start = source.indexOf('relate(');
+    const end = source.indexOf('\n});') + 3;
+    const innerStart = source.indexOf(
+      'relate(',
+      source.indexOf('const reference'),
+    );
+    const innerEnd = source.indexOf(';', innerStart);
+    const ownerAt = (offset: number) => {
+      const target = defined(
+        ModelViewport.prototype['sourceTargetAt'].call(
+          {module},
+          '/model.ts',
+          offset,
+        ),
+      );
+      return contextualToolScope(module, {
+        target,
+        evaluation: target.evaluations[0],
+      });
+    };
+    const outer = defined(ownerAt(start + 2).evaluation.relationOwnerNodeId);
+    const inner = defined(
+      ownerAt(innerStart + 2).evaluation.relationOwnerNodeId,
+    );
+    assert.notEqual(inner, outer);
+    const activation = defined(
+      contextualToolActivation(module, ownerAt(start + 2), 'translate'),
+    );
     assert.equal(
-      scope.evaluation.relationOwnerNodeId,
-      expected,
-      JSON.stringify({
-        at,
-        near: source.slice(at - 10, at) + '|' + source.slice(at, at + 15),
-        target: scope.target,
-      }),
+      source.slice(activation.start, activation.end),
+      'offset(3, 0, 0)',
     );
-    assert.ok(
-      contextualToolActivation(module, scope, 'translate'),
-      `No activation at ${at}`,
+    assert.equal(
+      ownerAt(source.indexOf('box(32, 3, 24)') + 4).evaluation
+        .relationOwnerNodeId,
+      undefined,
     );
-  }
-});
+    assert.equal(
+      ownerAt(source.indexOf('group([base, cover])') + 3).evaluation
+        .relationOwnerNodeId,
+      undefined,
+    );
+    for (let at = start; at <= end; at++) {
+      const scope = ownerAt(at);
+      const expected = at >= innerStart && at <= innerEnd ? inner : outer;
+      assert.equal(
+        scope.evaluation.relationOwnerNodeId,
+        expected,
+        JSON.stringify({
+          at,
+          near: source.slice(at - 10, at) + '|' + source.slice(at, at + 15),
+          target: scope.target,
+        }),
+      );
+      const sourceTarget = defined(
+        ModelViewport.prototype['sourceTargetAt'].call(
+          {module},
+          '/model.ts',
+          at,
+        ),
+      );
+      assert.equal(
+        Object.getOwnPropertyDescriptor(
+          ModelViewport.prototype,
+          'positionToolContext',
+        )!.get!.call({
+          module,
+          sourceContext: {
+            target: sourceTarget,
+            evaluation: sourceTarget.evaluations[0],
+          },
+          getSelected: () => ({
+            node: {nodeId: sourceTarget.evaluations[0].nodeIds[0]},
+          }),
+        }),
+        'relation',
+      );
+      assert.ok(
+        contextualToolActivation(module, scope, 'translate'),
+        `No activation at ${at}`,
+      );
+    }
+  });
 
 test('relate toolbar scope follows the selected loop instance from an unrelated inner expression', async () => {
   const {contextualToolScope} = await server.ssrLoadModule<
     typeof import('../src/tools/contextual-tool-context.ts')
   >('/src/tools/contextual-tool-context.ts');
-  const source = `import {box, group, offset} from '@code3d/core';
+  const source = `import {on, box, group, offset} from '@code3d/core';
 const covers = [0, 10].map(x => box(8, 2, 6).relate(self => {
   const reference = box(4, 4, 4).originOffset(x, 0, 0);
-  return [self.on(reference.up), offset(3, 0, 0)];
+  return [on(self, reference.up), offset(3, 0, 0)];
 })); export default group(covers);`;
   const module = await compileProject(
     {files: [{path: '/model.ts', source}]},
@@ -211,7 +246,7 @@ test('successful programs without model output compile to an empty module', asyn
     ['comments', '// Start modeling\n/* Nothing yet */'],
     [
       'imports',
-      "import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';",
+      "import { offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';",
     ],
     ['values', 'export const size = 10; export default {size};'],
     ['helper', 'export function twice(value: number) { return value * 2; }'],
@@ -241,7 +276,7 @@ test('shell tools select input surfaces while displaying the result, including f
     ['shell(1, [99, 6])', [6], true],
     ['shell(1, [1, 2, 3, 4, 5, 6])', [1, 2, 3, 4, 5, 6], true],
   ] as const) {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';
 const stock = box(30, 20, 10);
 const hollow = stock.${call};
 export default hollow;`;
@@ -289,10 +324,10 @@ export default hollow;`;
 });
 
 test('expose references do not add unassembled peers when inspecting its group receiver', async () => {
-  const source = `import {box, group, offset} from '@code3d/core';
+  const source = `import {on, box, group, offset} from '@code3d/core';
     const left=box(8,30,32);
-    const right=box(8,30,32).relate(self=>[self.on(left.right),offset(60,0,0)]);
-    const beam=box(60,10,24).relate(self=>self.on(left.right));
+    const right=box(8,30,32).relate(self=>[on(self, left.right),offset(60,0,0)]);
+    const beam=box(60,10,24).relate(self=>on(self, left.right));
     export default group([left,right,beam]).expose({supportA:left,supportB:right,beam});`;
   const module = await compileProject(
     {files: [{path: '/model.ts', source}]},
@@ -317,9 +352,9 @@ test('expose references do not add unassembled peers when inspecting its group r
 });
 
 test('exposed topology retains its geometry, placement and child selection scope', async () => {
-  const source = `import {rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, box, group, point} from '@code3d/core';
+  const source = `import {on, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, box, group, point} from '@code3d/core';
 const part = box(10, 20, 30);
-const shifted = group([part]).expose({body: part}).relate(self => [self.body.center.on(point([40, 50, 60]).up), offset(0, 0, 0)]);
+const shifted = group([part]).expose({body: part}).relate(self => [on(self.body.center, point([40, 50, 60]).up), offset(0, 0, 0)]);
 const assembly = group([shifted]).expose({mount: shifted.body.surface(1), body: shifted.body});
 const outline = assembly.mount.edges();
 const ends = assembly.mount.edge(1).vertices();
@@ -470,9 +505,9 @@ test('a caret on range previews one map result with resolved collection placemen
   for (const count of [5, 1] as const) {
     const source = [
       "import range from 'just-range';",
-      "import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';",
+      "import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';",
       'const base = box(44, 2, 10);',
-      `const bars = range(${count}).map(i => box(4, 4 + i * 3, 4).relate(part => [part.down.on(base.up), offset((i - 2) * 8, 0, 0)]));`,
+      `const bars = range(${count}).map(i => box(4, 4 + i * 3, 4).relate(part => [on(part.down, base.up), offset((i - 2) * 8, 0, 0)]));`,
       'const first = bars[0];',
       'const singleton = [first];',
       'const set = new Set(bars);',
@@ -531,7 +566,7 @@ test('export-only edits reuse a large model including exact directional bounds',
     (...args: Parameters<typeof addOptimal>) => addOptimal(...args),
   );
   const source = [
-    'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from "@code3d/core";',
+    'import { offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from "@code3d/core";',
     'const parts = Array.from({length: 140}, (_, i) => box(i + 1, 2, 3));',
     'const assembly = group(parts);',
   ].join('\n');
@@ -633,12 +668,12 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
   );
   const source = (radius: number) =>
     [
-      'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, cut, group} from "@code3d/core";',
+      'import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, cut, group} from "@code3d/core";',
       'import {ISO4762} from "@code3d/screws";',
       `let plate = box(40, 10, 40).fillet(${radius}, [2, 3, 4, 6, 7, 8, 11, 12]).chamfer(1.2, [10]);`,
-      'const hole = ISO4762.clearanceHole("M6", 10).relate(tool => tool.shaftBottom.on(plate.down.flip()));',
+      'const hole = ISO4762.clearanceHole("M6", 10).relate(tool => on(tool.shaftBottom, plate.down.flip()));',
       'plate = cut(plate, [hole]).material("#666");',
-      'const screw = ISO4762.screw("M6", 18).material("#999").relate(part => [part.headBottom.on(hole.counterboreBottom.flip()), offset(0, -0.5, 0)]);',
+      'const screw = ISO4762.screw("M6", 18).material("#999").relate(part => [on(part.headBottom, hole.counterboreBottom.flip()), offset(0, -0.5, 0)]);',
       'export default group([plate, screw], "M6 fastener demo");',
     ].join('\n');
   let buildCount;
@@ -668,9 +703,9 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
 
 test('retains topology values at bindings, aliases, and collection results', async () => {
   const source = [
-    'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, rectangle} from "@code3d/core";',
+    'import {on, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, rectangle} from "@code3d/core";',
     'const plate = box(50, 4, 30);',
-    'let screwPoints = rectangle(40, 20).relate(plane => plane.on(plate.up)).vertices();',
+    'let screwPoints = rectangle(40, 20).relate(plane => on(plane, plate.up)).vertices();',
     'const alias = screwPoints;',
     'const subset = [screwPoints[0], screwPoints[2]];',
     'const repeated = [plate, plate];',
@@ -809,11 +844,11 @@ test('parameter previews observe bound values without changing function executio
 
 for (const compose of [true, false] as const) {
   test(`relate model values retain their relation context ${compose ? 'with' : 'without'} a loft consumer`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, circle, loft, rectangle} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, circle, loft, rectangle} from '@code3d/core';
       const model = (() => {
         const ref = box(100, 100, 100);
-        const start = circle(20).relate(circle => circle.on(ref.down));
-        const end = rectangle(40, 40).relate(circle => circle.on(ref.up));
+        const start = circle(20).relate(circle => on(circle, ref.down));
+        const end = rectangle(40, 40).relate(circle => on(circle, ref.up));
         ${compose ? 'return loft([start, end]);' : ''}
       })();`;
     const module = await compileProject(
@@ -822,19 +857,19 @@ for (const compose of [true, false] as const) {
     );
     assert.equal(module.diagnostic, undefined);
     for (const id of ['down', 'up'] as const) {
-      const callback = `circle => circle.on(ref.${id})`;
+      const callback = `circle => on(circle, ref.${id})`;
       const callbackStart = source.indexOf(callback);
       const relation = defined(
         module.sourceTargets.find(
           target =>
             target.kind === 'constraint' &&
             source.slice(target.sourceRef.start, target.sourceRef.end) ===
-              `circle.on(ref.${id})`,
+              `on(circle, ref.${id})`,
         ),
       ).evaluations[0];
       for (const offset of [
         callbackStart + 3,
-        callbackStart + 'circle => cir'.length,
+        callbackStart + 'circle => on(cir'.length,
       ] as const) {
         const target = ModelViewport.prototype['sourceTargetAt'].call(
           {module},
@@ -879,11 +914,11 @@ for (const [kind, sourceAnchor, targetAnchor] of [
   ['named', 'self.up', 'base.down'],
 ] as const) {
   test(`${kind} anchors share relation context across runtime calls and downstream consumers`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
       const base = box(10, 10, 10);
       function make(id: number) {
         const part = box(20, 20, 20).relate(self =>
-          [${sourceAnchor}.on(${targetAnchor}), offset(7, 0, 0)]);
+          [on(${sourceAnchor}, ${targetAnchor}), offset(7, 0, 0)]);
         const peer = box(2, 2, 2);
         const first = group([base, part, peer]);
         const second = group([base, part]);
@@ -899,7 +934,7 @@ for (const [kind, sourceAnchor, targetAnchor] of [
       target =>
         target.kind === 'constraint' &&
         source.slice(target.sourceRef.start, target.sourceRef.end) ===
-          `${sourceAnchor}.on(${targetAnchor})`,
+          `on(${sourceAnchor}, ${targetAnchor})`,
     );
     assert.ok(relation);
     assert.equal(relation.evaluations.length, 4);
@@ -910,7 +945,7 @@ for (const [kind, sourceAnchor, targetAnchor] of [
       const target = ModelViewport.prototype['sourceTargetAt'].call(
         {module},
         '/model.ts',
-        source.indexOf(anchor, source.indexOf(`${sourceAnchor}.on(`)) +
+        source.indexOf(anchor, source.indexOf(`on(${sourceAnchor},`)) +
           anchor.length -
           1,
       );
@@ -981,12 +1016,12 @@ for (const [kind, sourceAnchor, targetAnchor] of [
 }
 
 test('anchor context is limited to the enclosing relation in a constraint array', async () => {
-  const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
+  const source = `import {on, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
     const base = box(10, 10, 10);
     const alone = base.edge(2);
     const part = box(20, 20, 20).relate(self => [
-      self.edge(3).on(base.left),
-      self.up.on(base.down),
+      on(self.edge(3), base.left),
+      on(self.up, base.down),
     ]);
     export default group([base, part]);`;
   const module = await compileProject(
@@ -1030,15 +1065,15 @@ test('anchor context is limited to the enclosing relation in a constraint array'
 for (const composed of [false, true]) {
   for (const reverse of [false, true]) {
     test(`completed relate context includes this call's references (composition=${composed}, reverse=${reverse})`, async () => {
-      const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
+      const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
 export const old = box(20, 10, 20);
 export const base = box(20, 10, 20);
 export const front = box(20, 10, 20);
 export const other = box(2, 2, 2);
-const original = box(2, 2, 2).relate(self => ${reverse ? 'old.on(self.up)' : 'self.on(old.up)'});
+const original = box(2, 2, 2).relate(self => ${reverse ? 'on(old, self.up)' : 'on(self, old.up)'});
 export const part = original.relate( /* whole */ self => [
-  ${reverse ? 'base.on(self.up)' : 'self.on(base.up)'},
-  ${reverse ? 'front.on(self.back)' : 'self.on(front.front)'},
+  ${reverse ? 'on(base, self.up)' : 'on(self, base.up)'},
+  ${reverse ? 'on(front, self.back)' : 'on(self, front.front)'},
 ] /* completed */ );
 ${composed ? "const derived = part.material('#ff4d81'); export default group([derived, base, front, old, other]);" : ''}`;
       const module = await compileProject(
@@ -1084,7 +1119,7 @@ ${composed ? "const derived = part.material('#ff4d81'); export default group([de
         assert.equal(part.constraints.length, 3);
       }
       const stage = at(
-        source.indexOf(reverse ? 'base.on(' : 'self.on(base') + 6,
+        source.indexOf(reverse ? 'on(base, ' : 'on(self, base.') + 6,
       ).evaluations[0];
       assert.ok(stage.constraintId);
       assert.equal(stage.relationContext, undefined);
@@ -1120,7 +1155,7 @@ test('represents an offset as an independent self transformation', async () => {
 
 test('derives parameter semantics from the call rather than variable annotations', async () => {
   const source = [
-    "import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';",
+    "import { offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core';",
     '/**',
     ' * @code3d.label Wrong label',
     ' * @code3d.description Not a tool description.',
@@ -1225,7 +1260,7 @@ for (const call of [
 ] as const) {
   test(`retains the model before ${call} at its receiver source range`, async () => {
     const source = [
-      'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core";',
+      'import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core";',
       'const pivoted = box(8, 6, 4).originOffset(1, 2, 3);',
       `const direct = pivoted.${call};`,
       `const chained = pivoted.originOffset(0, 5, 0).${call};`,
@@ -1278,7 +1313,7 @@ for (const call of [
 
 test('captures computed methods and model-valued inputs without operation metadata', async () => {
   const source = [
-    'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core";',
+    'import { offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core";',
     'const pivoted = box(8, 6, 4).originOffset(1, 2, 3);',
     'const method = "originOffset";',
     'const changed = pivoted[method](0, 5, 0);',
@@ -1315,11 +1350,11 @@ test('captures computed methods and model-valued inputs without operation metada
 
 test('derives composition roles for imported aliases, namespace calls, and nested inputs', async () => {
   const source = [
-    'import * as core from "@code3d/core";',
-    'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, loft as skin, group as assemble} from "@code3d/core";',
+    'import * as core from "@code3d/core";\nimport { align} from \'@code3d/core\';',
+    'import { align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, loft as skin, group as assemble} from "@code3d/core";',
     'const spine = core.bezier([[0, 0, 0], [-12, -7, 0], [-10, -20, -9], [-4, -28, -14]]);',
-    'const start = core.circle(4).relate(p => [p.center.align(core.point()), rotate(0, 0, -Math.atan2(12, 7) * 180 / Math.PI)]);',
-    'const end = core.rectangle(7, 4).relate(p => [p.center.align(core.point([-4, -28, -14])), rotate(Math.atan2(5, 10) * 180 / Math.PI, 0, Math.atan2(6, 8) * 180 / Math.PI)]);',
+    'const start = core.circle(4).relate(p => [align(p.center, core.point()), rotate(0, 0, -Math.atan2(12, 7) * 180 / Math.PI)]);',
+    'const end = core.rectangle(7, 4).relate(p => [align(p.center, core.point([-4, -28, -14])), rotate(Math.atan2(5, 10) * 180 / Math.PI, 0, Math.atan2(6, 8) * 180 / Math.PI)]);',
     'const body = skin([...[start], end], {spine});',
     'const sections = [start, end];',
     'const options = {spine};',
@@ -1363,9 +1398,9 @@ test('derives composition roles for imported aliases, namespace calls, and neste
 
 test('batch extrusions retain every operation and map each input to its result and peers', async () => {
   for (const argument of ['[a, b]', 'faces']) {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, circle, rectangle, extrude as grow} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, circle, rectangle, extrude as grow} from '@code3d/core';
 const a = circle(10);
-const b = rectangle(12, 12).relate(s => [s.on(a.up), offset(30, 0, 0), rotate(0, 0, 30)]);
+const b = rectangle(12, 12).relate(s => [on(s, a.up), offset(30, 0, 0), rotate(0, 0, 30)]);
 const faces = [a, b];
 export default grow(${argument}, 20);`;
     const module = await compileProject(
@@ -1516,10 +1551,10 @@ test('failed loft calls retain their complete input collection and focused secti
     ['core.loft(sections)', 'sections', 3],
   ] as const) {
     const source = `import * as core from '@code3d/core';
-import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, circle, loft, loft as skin, rectangle, regularPolygon} from '@code3d/core';
+import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, circle, loft, loft as skin, rectangle, regularPolygon} from '@code3d/core';
 const start = circle(20);
-const via = regularPolygon(20, 8).relate(self => [self.on(start.up), core.pivot([50, 0, 0]).rotate(0, 0, 45), core.offset(-18, 0, 0)]);
-const end = rectangle(40, 40).relate(self => [self.on(start.up), core.pivot([50, 0, 0]).rotate(0, 0, 90)]);
+const via = regularPolygon(20, 8).relate(self => [on(self, start.up), core.pivot([50, 0, 0]).rotate(0, 0, 45), core.offset(-18, 0, 0)]);
+const end = rectangle(40, 40).relate(self => [on(self, start.up), core.pivot([50, 0, 0]).rotate(0, 0, 90)]);
 const sections = [start, via, end];
 export default ${call};`;
     const module = await compileProject(
@@ -1561,11 +1596,11 @@ export default ${call};`;
 });
 
 test('failed loft collections stay within their own invocation', async () => {
-  const source = `import {rotate, pivotVertex, pivotPoint, axisLine, axisEdge, pivot, offset, circle, loft, rectangle, regularPolygon} from '@code3d/core';
+  const source = `import {on, rotate, pivotVertex, pivotPoint, axisLine, axisEdge, pivot, offset, circle, loft, rectangle, regularPolygon} from '@code3d/core';
 function body(displacement: number) {
   const start = circle(20);
-  const via = regularPolygon(20, 8).relate(self => [self.on(start.up), pivot([50, 0, 0]).rotate(0, 0, 45), offset(displacement, 0, 0)]);
-  const end = rectangle(40, 40).relate(self => [self.on(start.up), pivot([50, 0, 0]).rotate(0, 0, 90)]);
+  const via = regularPolygon(20, 8).relate(self => [on(self, start.up), pivot([50, 0, 0]).rotate(0, 0, 45), offset(displacement, 0, 0)]);
+  const end = rectangle(40, 40).relate(self => [on(self, start.up), pivot([50, 0, 0]).rotate(0, 0, 90)]);
   return loft([start, via, end]);
 }
 export const good = body(0);
@@ -1605,7 +1640,7 @@ export default body(-18);`;
 
 test('keeps repeated and failed receiver evaluations separate', async () => {
   const source = [
-    'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core";',
+    'import { offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core";',
     'const pivoted = box(8, 6, 4).originOffset(1, 2, 3);',
     'const results = [2, 5].map(y => pivoted.originOffset(0, y, 0));',
     'const changed = results[1];',
@@ -1666,7 +1701,7 @@ test('keeps repeated and failed receiver evaluations separate', async () => {
 
 test('input observation preserves getters, this, argument order, and optional calls', async () => {
   const source = [
-    'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from "@code3d/core";',
+    'import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from "@code3d/core";',
     'const base = box(8, 6, 4);',
     'let reads = 0;',
     'const container = { get model() { reads++; return base; }, call(model) { if (this !== container) throw Error("this"); return model.originCenter(); } };',
@@ -1690,7 +1725,7 @@ test('input observation preserves getters, this, argument order, and optional ca
 
 test('a failed repetition retains its own receiver instead of the previous successful input', async () => {
   const source = [
-    'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core";',
+    'import { offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core";',
     'const base = box(8, 6, 4);',
     'for (const id of [1, 9999]) {',
     '  const current = base.originOffset(0, id, 0);',
@@ -1726,7 +1761,7 @@ test('a failed repetition retains its own receiver instead of the previous succe
 
 test('input target identities survive preceding text edits', async () => {
   const body = [
-    'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group as assemble} from "@code3d/core";',
+    'import { offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group as assemble} from "@code3d/core";',
     'const base = box(8, 6, 4);',
     'const moved = base.originOffset(0, 2, 0);',
     'export default assemble([base, moved]);',
@@ -2138,14 +2173,14 @@ export default tube(5.5, 4.5, collarHeight);`;
 
 function sharedOffsetSource() {
   return [
-    'import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from "@code3d/core";',
+    'import {on, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from "@code3d/core";',
     'const spacing = 24;',
     'const base = box(12, 4, 12);',
     'const left = box(8, 8, 8).relate(part =>',
-    '  [part.center.on(base.up), offset(-spacing, 0, 0)],',
+    '  [on(part.center, base.up), offset(-spacing, 0, 0)],',
     ');',
     'const right = box(8, 8, 8).relate(part =>',
-    '  [part.center.on(base.up), offset(spacing, 0, 0)],',
+    '  [on(part.center, base.up), offset(spacing, 0, 0)],',
     ');',
     'export const model = group([base, left, right]);',
   ].join('\n');
@@ -2163,7 +2198,7 @@ for (const composition of [
   'ops.combine(peer, final)',
 ]) {
   test(`a transform keeps its editable step and shows peers from ${composition}`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group, union, cut, intersect} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group, union, cut, intersect} from '@code3d/core';
 const peer = box(18, 6, 12);
 const moved = box(8, 10, 8).originOffset(-4, 0, 0);
 const final = moved.rotate(0, 25, 0).material('#d8ff3e');
@@ -2221,7 +2256,7 @@ for (const transform of [
   'scaled(0.8)',
 ]) {
   test(`${transform} shares downstream composition context`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
 const peer = box(18, 6, 12);
 const part = box(8, 10, 8).${transform};
 export default group([peer, part]);`;
@@ -2304,7 +2339,7 @@ function exactTargets(
 
 for (const call of ['profile.extrude(-3)', 'extrude(profile, -3)']) {
   test(`${call} exposes a signed distance tool, source face and solid output`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, rectangle, extrude} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, rectangle, extrude} from '@code3d/core';
 const profile = rectangle(8, 6).rotate(0, 0, 90).originOffset(-10, 0, 0);
 export const body = ${call};`;
     const module = await compileProject(
@@ -2351,7 +2386,7 @@ export const body = ${call};`;
 
 for (const call of ['profile.extrude(0)', 'extrude(profile, 0)']) {
   test(`${call} keeps the distance tool and face available after a failed extrusion`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, rectangle, extrude} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, rectangle, extrude} from '@code3d/core';
 const profile = rectangle(8, 6);
 export const body = ${call};`;
     const module = await compileProject(
@@ -2385,9 +2420,9 @@ export const body = ${call};`;
 }
 
 test('path IDs keep singular/list schemas, scope and failed-selection recovery', async () => {
-  const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, loft, rectangle, point} from '@code3d/core';
+  const source = `import {on, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, loft, rectangle, point} from '@code3d/core';
 const base = rectangle(8, 6);
-const top = rectangle(6, 4).relate(p => p.on(point([0, 12, 0]).up));
+const top = rectangle(6, 4).relate(p => on(p, point([0, 12, 0]).up));
 const body = loft([base, top]);
 const cap = body.surface([1, 1]);
 const rims = body.edges([[1, 1], [2, 1], 1]);
@@ -2712,9 +2747,9 @@ test('empty topology calls retain an editable selection target', async () => {
   ]) {
     const expression =
       method === 'pivotVertex'
-        ? 'part.relate(self => [self.on(base.up), pivotVertex().rotate(0,0,20)])'
+        ? 'part.relate(self => [on(self, base.up), pivotVertex().rotate(0,0,20)])'
         : `part.${method}()`;
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const base=box(20,2,20); const part=box(4,4,4); export default ${expression};`;
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const base=box(20,2,20); const part=box(4,4,4); export default ${expression};`;
     const module = await compileProject(
       {files: [{path: '/model.ts', source}]},
       '/model.ts',
@@ -2750,9 +2785,9 @@ for (const selector of [
 ])
   test(`an unfinished independent ${selector} retains self and the completed placement prefix`, async () => {
     const prefix =
-      'self.axis.align(base.axis), self.on(base.up), pivotVertex(8).rotate(0,0,49)';
+      'align(self.axis, base.axis), on(self, base.up), pivotVertex(8).rotate(0,0,49)';
     const source = (suffix: string) =>
-      `import * as core from '@code3d/core'; import {offset, rotate, pivot, pivotPoint, axisLine, axisEdge, box,pivotVertex} from '@code3d/core'; const base=box(32,14,24); export default box(32,3,24).relate(self=>[${prefix}${suffix}]);`;
+      `import * as core from '@code3d/core'; import {on, align, offset, rotate, pivot, pivotPoint, axisLine, axisEdge, box,pivotVertex} from '@code3d/core'; const base=box(32,14,24); export default box(32,3,24).relate(self=>[${prefix}${suffix}]);`;
     const complete = await compileProject(
       {files: [{path: '/model.ts', source: source('')}]},
       '/model.ts',
@@ -2824,7 +2859,7 @@ for (const selector of [
   'pivotVertex().pivotOffset(2,0,0)',
 ]) {
   test(`rotation selection ${selector} retains its entire draft and self`, async () => {
-    const text = `import * as core from '@code3d/core'; import {offset, rotate, box,axisLine,axisEdge,pivotPoint,pivot,pivotVertex} from '@code3d/core'; const base=box(32,14,24); export default box(32,3,24).relate(self=>[self.on(base.up), ${selector}]);`;
+    const text = `import * as core from '@code3d/core'; import {on, align, offset, rotate, box,axisLine,axisEdge,pivotPoint,pivot,pivotVertex} from '@code3d/core'; const base=box(32,14,24); export default box(32,3,24).relate(self=>[on(self, base.up), ${selector}]);`;
     const module = await compileProject(
       {files: [{path: '/model.ts', source: text}]},
       '/model.ts',

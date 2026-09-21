@@ -1,4 +1,6 @@
 import {
+  align,
+  on,
   arc,
   offset,
   originCenter,
@@ -95,7 +97,7 @@ const placement: readonly Relation[] = [
   axisLine(solid.axis).rotate(20),
 ];
 solid.relate(self => [
-  self.axis.align(box(20, 2, 20).axis),
+  align(self.axis, box(20, 2, 20).axis),
   ...placement,
   rotate(10, 20, 30),
 ]);
@@ -211,9 +213,9 @@ sketch([['point', 1, 0, 0]]);
 sketch([['point', 1, [0, 0]], 2]);
 // @ts-expect-error A line has exactly two point references.
 sketch([['line', 3, [1, 2, 4]]]);
-const related = solid.relate(self => self.center.on(solid.up.flip()));
+const related = solid.relate(self => on(self.center, solid.up.flip()));
 const exposed = related.expose({mount: related.down});
-const constraint: Constraint = exposed.mount.on(solid.up);
+const constraint: Constraint = on(exposed.mount, solid.up);
 const anchor: Anchor = exposed.mount;
 const vertex: Vertex = solid.vertex(1);
 const edge: Edge = solid.edge(1);
@@ -345,7 +347,7 @@ solid.edges();
 solid.surfaces();
 solid
   .expose({mount: solid.down})
-  .relate(self => self.mount.on(solid.up))
+  .relate(self => on(self.mount, solid.up))
   .fillet(1, [edgeId]);
 faceModel
   .originCenter()
@@ -353,7 +355,7 @@ faceModel
   .originOffset(0, 2, 0)
   .rotate(90, 0, 0)
   .scaled(2)
-  .relate(self => self.on(solid.up))
+  .relate(self => on(self, solid.up))
   .expose({mount: solid.down})
   .surface(1);
 faceModel.vertex(1);
@@ -364,7 +366,7 @@ edgeModel
   .originOffset(0, 0, 0)
   .rotate(0, 0, 90)
   .scaled(2)
-  .relate(self => self.start.on(solid.up))
+  .relate(self => on(self.start, solid.up))
   .expose({mount: solid.axis})
   .edge(1);
 edgeModel.vertex(1);
@@ -374,19 +376,19 @@ vertexModel
   .originOffset(0, 0, 0)
   .rotate(0, 90, 0)
   .scaled(2)
-  .relate(self => self.on(solid.up))
+  .relate(self => on(self, solid.up))
   .expose({mount: solid.center})
   .vertex(1);
 vertexModel.vertices();
 groupModel
   .material('#fff')
-  .relate(self => self.on(solid.up))
+  .relate(self => on(self, solid.up))
   .expose({mount: solid.up})
-  .relate(self => self.mount.on(solid.down));
+  .relate(self => on(self.mount, solid.down));
 union([solid, exposed]);
 cut(solid, [exposed]);
 intersect([solid, exposed]);
-loft([faceModel, faceModel.relate(self => self.on(solid.down))], {
+loft([faceModel, faceModel.relate(self => on(self, solid.down))], {
   spine: edgeModel,
 });
 // @ts-expect-error Constraints do not expose transformation methods.
@@ -429,11 +431,11 @@ pivotVertex(1).rotate();
 // @ts-expect-error Axis rotations still require one angle.
 axisLine(solid.axis).rotate();
 // @ts-expect-error on only accepts directional bounds.
-solid.on(solid.center);
+on(solid, solid.center);
 // @ts-expect-error on does not accept a whole target model.
-solid.on(solid);
+on(solid, solid);
 // @ts-expect-error unfinished pivot selection is not a Constraint.
-solid.relate(self => [self.on(solid.up), pivot([1, 2, 3])]);
+solid.relate(self => [on(self, solid.up), pivot([1, 2, 3])]);
 // @ts-expect-error Constraint no longer has flip.
 constraint.flip();
 
@@ -597,8 +599,8 @@ rebound.component.body.surface(1).center;
 geometricMembers.body.surface(1).edge(1).vertex(1).center;
 geometricMembers.mount.edges();
 geometricMembers.rim.midpoint;
-geometricMembers.body.on(solid.down);
-geometricMembers.relate(self => self.mount.center.on(solid.up));
+on(geometricMembers.body, solid.down);
+geometricMembers.relate(self => on(self.mount.center, solid.up));
 // @ts-expect-error Exposed geometry is a topology reference, not a mutable member model.
 geometricMembers.body.fillet(1);
 // @ts-expect-error Topology references do not expose model transforms.
@@ -620,22 +622,24 @@ solid.surface([1]);
 // @ts-expect-error Paths are flat numeric tuples.
 solid.surface([1, [2, 3]]);
 
-const alignPoint: Constraint = point().align(line([0, 0, 0], [1, 0, 0]));
-const alignCurve: Constraint = line([0, 0, 0], [0, 1, 0])
-  .reverse()
-  .align(box(1, 1, 1).axis.reverse());
-const alignSurface: Constraint = rectangle(2, 3)
-  .flip()
-  .align(circle(2).plane.flip());
+const alignPoint: Constraint = align(point(), line([0, 0, 0], [1, 0, 0]));
+const alignCurve: Constraint = align(
+  line([0, 0, 0], [0, 1, 0]).reverse(),
+  box(1, 1, 1).axis.reverse(),
+);
+const alignSurface: Constraint = align(
+  rectangle(2, 3).flip(),
+  circle(2).plane.flip(),
+);
 box(2, 2, 2).relate(self => [
-  self.center.align(point()),
+  align(self.center, point()),
   offset(1, 2, 3),
   pivotVertex(1).rotate(20, 30, 40),
 ]);
 // @ts-expect-error Solids do not describe one point, curve, or surface.
-box(1, 1, 1).align(point());
+align(box(1, 1, 1), point());
 // @ts-expect-error Select a solid's geometry before using it as an align target.
-point().align(box(1, 1, 1));
+align(point(), box(1, 1, 1));
 // @ts-expect-error Points have no curve direction.
 point().center.reverse();
 void [alignPoint, alignCurve, alignSurface];
@@ -645,18 +649,18 @@ const coordinateFrame: import('@code3d/core').FrameAnchor =
   coordinateModel.frame;
 const coordinateOrigin: import('@code3d/core').PointAnchor =
   coordinateFrame.origin;
-coordinateModel.relate(self => self.frame.align(coordinateFrame));
-coordinateModel.relate(self => self.origin.align(coordinateOrigin));
+coordinateModel.relate(self => align(self.frame, coordinateFrame));
+coordinateModel.relate(self => align(self.origin, coordinateOrigin));
 const coordinateExposed = coordinateModel.expose({mount: coordinateFrame});
-coordinateExposed.mount.origin.align(coordinateOrigin);
+align(coordinateExposed.mount.origin, coordinateOrigin);
 // @ts-expect-error Coordinate references are not model geometry.
 group([coordinateModel.origin]);
 // @ts-expect-error Frames align only to other coordinate frames.
-coordinateFrame.align(coordinateOrigin);
+align(coordinateFrame, coordinateOrigin);
 // @ts-expect-error Select .frame explicitly on a solid or group.
-coordinateModel.align(coordinateFrame);
+align(coordinateModel, coordinateFrame);
 // @ts-expect-error An origin is not a frame.
-coordinateOrigin.align(coordinateFrame);
+align(coordinateOrigin, coordinateFrame);
 
 // @ts-expect-error Positions use an array, not scalar coordinates.
 point(1, 2, 3);
@@ -665,7 +669,7 @@ line(10, 0, 0);
 // @ts-expect-error Model origin is always local zero and has no setter.
 box(1, 2, 3).origin(1, 2, 3);
 box(1, 2, 3).relate(self => [
-  self.on(box(4, 5, 6).up),
+  on(self, box(4, 5, 6).up),
   // @ts-expect-error Pivot coordinates use an array.
   pivot(1, 2, 3).rotate(0, 0, 90),
 ]);
@@ -796,3 +800,21 @@ axisEdge(1).coupleRotation(solid, couplingConfig);
 axisLine(solid.axis).rotate(10).coupleRotation(solid, couplingConfig);
 // @ts-expect-error The models define their own axes; there is no axis override.
 coupleRotation(solid, {ratio: 1, axis: 'y'});
+
+solid.relate(() => on(solid.up));
+solid.relate(self => [
+  align(self.origin, solid.origin),
+  align(self.frame, solid.frame),
+]);
+// @ts-expect-error Constraints are standalone functions, not model methods.
+solid.on(solid.up);
+// @ts-expect-error Selected elements have no align method.
+solid.axis.align(solid.axis);
+// @ts-expect-error Frames have no align method.
+solid.frame.align(solid.frame);
+// @ts-expect-error Alignment always requires an explicit source and target.
+align(solid.origin);
+// @ts-expect-error A model is never implicitly converted into a coordinate frame.
+align(solid, solid.frame);
+// @ts-expect-error Contact targets must be directional bounds.
+on(solid, solid.surface(1));

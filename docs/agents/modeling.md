@@ -78,12 +78,16 @@ before promising a feature.
 `part.relate(self => ...)` returns a new value. Every constraint must involve
 the callback value; external variables, including `part`, keep their original
 identity. Select the new value's elements and rotation references through `self`.
-This rule also applies to sketch frames.
+This rule also applies to sketch frames. Import `on` and `align` from Core.
+`on(targetBound)` places the whole current self; `on(sourceElement, targetBound)`
+selects a specific source. `align(sourceElement, targetElement)` always states
+both references. A callback that needs no explicit self can use
+`part.relate(() => on(base.up))`.
 
 `model.frame` references the model's coordinate system;
 `model.origin` is the same non-geometric reference as `model.frame.origin`.
-Use `self.frame.align(target.frame)` to match complete placement, or
-`self.origin.align(target.origin)` to match only origin position. Layout calls
+Use `align(self.frame, target.frame)` to match complete placement, or
+`align(self.origin, target.origin)` to match only origin position. Layout calls
 with a target space follow its frame automatically; spread the returned models
 into the final group without including the construction space.
 

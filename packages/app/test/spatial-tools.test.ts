@@ -128,9 +128,9 @@ async function placementTools(
 
 for (const mode of ['translate', 'rotate'] as const) {
   test(`a shared multi-constraint self inserts independent ${mode} for every loop instance`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
+    const source = `import {align, on, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
 const holes = [[-10,-10], [10,-10], [-10,10], [10,10]].map(([x,z]) => box(8, 4, 8).originOffset(-x,0,-z));
-const parts = holes.map(hole => box(2,2,2).relate(part => [part.axis.align(hole.axis), part.on(hole.up)]));
+const parts = holes.map(hole => box(2,2,2).relate(part => [align(part.axis, hole.axis), on(part, hole.up)]));
 export default group([...holes, ...parts]);`;
     const built = await placementTools(source, 'part.axis');
     assert.equal(built.occurrences.length, 4);
@@ -156,8 +156,8 @@ export default group([...holes, ...parts]);`;
     assert.match(
       host.source(),
       mode === 'rotate'
-        ? /part\.on\(hole\.up\), rotate\(0, 0, 30\)/
-        : /part\.on\(hole\.up\), offset\(5, 0, 0\)/,
+        ? /on\(part, hole\.up\), rotate\(0, 0, 30\)/
+        : /on\(part, hole\.up\), offset\(5, 0, 0\)/,
     );
     const next = await placementTools(host.source(), 'part.axis');
     const {composeTransforms} = await import('../../core/bld/tooling/index.js');
@@ -179,9 +179,9 @@ export default group([...holes, ...parts]);`;
 }
 
 test('self edits the nearest independent call without crossing the next constraint segment', async () => {
-  const source = `import {pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group, offset, rotate} from '@code3d/core';
+  const source = `import {align, on, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group, offset, rotate} from '@code3d/core';
 const base = box(20,4,20);
-const result = box(2,2,2).relate(part => [part.axis.align(base.axis), part.on(base.up), offset(2,0,0), rotate(0,0,20), offset(7,0,0), part.on(base.up), offset(100,0,0)]);
+const result = box(2,2,2).relate(part => [align(part.axis, base.axis), on(part, base.up), offset(2,0,0), rotate(0,0,20), offset(7,0,0), on(part, base.up), offset(100,0,0)]);
 export default group([base,result]);`;
   const built = await placementTools(
     source,
@@ -258,9 +258,9 @@ for (const [chain, selected, mode, expected] of [
   ],
 ] as const) {
   test(`independent selection ${selected} / ${mode} preserves its chain stage`, async () => {
-    const source = `import {pivotVertex, pivotPoint, axisEdge, box, group, offset, rotate, pivot, axisLine} from '@code3d/core';
+    const source = `import {align, on, pivotVertex, pivotPoint, axisEdge, box, group, offset, rotate, pivot, axisLine} from '@code3d/core';
 const base = box(20,4,20);
-const result = box(2,2,2).relate(part => [part.axis.align(base.axis), part.on(base.up), ${chain}]);
+const result = box(2,2,2).relate(part => [align(part.axis, base.axis), on(part, base.up), ${chain}]);
 export default group([base,result]);`;
     const name = selected.startsWith('offset') ? 'offset' : 'rotate';
     const built = await placementTools(
@@ -313,10 +313,10 @@ export default group([base,result]);`;
 
 for (const relation of [
   'offset(2,3,4)',
-  '[part.axis.align(base.axis),part.on(base.up),offset(2,3,4)]',
+  '[align(part.axis, base.axis),on(part, base.up),offset(2,3,4)]',
 ]) {
   test(`independent tools follow material-derived members: ${relation}`, async () => {
-    const source = `import {rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, offset} from '@code3d/core'; const base=box(20,4,20); export default box(2,2,2).relate(part=>${relation}).material('#d8ff3e');`;
+    const source = `import {on, align, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, offset} from '@code3d/core'; const base=box(20,4,20); export default box(2,2,2).relate(part=>${relation}).material('#d8ff3e');`;
     const module = await compiler.compile(
       {files: [{path: '/model.ts', source}]},
       '/model.ts',
@@ -405,28 +405,32 @@ test('independent insertion retains import comments and avoids shadowed aliases'
     >('/src/tools/source-expression.ts');
   for (const [imports, callback, name] of [
     [
-      "import {rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, offset as move} from '@code3d/core';",
+      "import { rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, offset as move} from '@code3d/core';",
       '(part)',
       'move',
     ],
-    ["import * as c3 from '@code3d/core';", '(part)', 'c3.offset'],
     [
-      "import {rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, offset} from '@code3d/core';",
+      "import * as c3 from '@code3d/core';\nimport {} from '@code3d/core';",
+      '(part)',
+      'c3.offset',
+    ],
+    [
+      "import { rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, offset} from '@code3d/core';",
       '({offset})',
       'code3dOffset',
     ],
     [
-      "import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box // keep this comment\n} from '@code3d/core';",
+      "import { offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box // keep this comment\n} from '@code3d/core';",
       '(part)',
       'offset',
     ],
     [
-      "import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, // keep this comma\n} from '@code3d/core';",
+      "import { offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, // keep this comma\n} from '@code3d/core';",
       '(part)',
       'offset',
     ],
   ]) {
-    const expression = 'part.on(base.up)';
+    const expression = 'on(part, base.up)';
     const source = `${imports}\nconst apply = ${callback} => ${expression};`;
     const ref = {
       file: '/model.ts',
@@ -448,7 +452,8 @@ test('independent insertion retains import comments and avoids shadowed aliases'
       const ts = (await import('@typescript/typescript6')).default;
       const parsed = ts.createSourceFile(
         'imports.ts',
-        `import ${updated} from '@code3d/core';`,
+        `import ${updated} from '@code3d/core';
+import {on, align} from '@code3d/core';`,
         ts.ScriptTarget.Latest,
         true,
       );
@@ -554,7 +559,7 @@ for (const [call, operation, expected, value, axis = 'z'] of [
   ['originOffset()', 'originOffset', 'originOffset(0, 0, 5)', 5],
 ] as const) {
   test(`${call} exposes every axis and completes defaults on ${axis} commit`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const angles = [20, 30, 40] as const; box(8, 6, 4).${call};`;
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const angles = [20, 30, 40] as const; box(8, 6, 4).${call};`;
     const {node, bindings} = await build(source, operation);
     assert.equal(bindings.length, 3);
     const binding = defined(bindings.find(binding => binding.axis === axis));
@@ -603,7 +608,7 @@ for (const [call, operation, expected, value, axis = 'z'] of [
 for (const call of ['rotate()', 'originOffset()']) {
   test(`group ${call} exposes all default axes`, async () => {
     const {bindings} = await build(
-      `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core'; group([box(8,6,4)]).${call};`,
+      `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core'; group([box(8,6,4)]).${call};`,
       call.split('(')[0],
     );
     assert.equal(bindings.length, 3);
@@ -616,7 +621,7 @@ for (const call of ['rotate()', 'originOffset()']) {
 
 for (const operation of ['rotate', 'originOffset'] as const) {
   test(`materializing ${operation} inputs previews every execution of the call`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core'; function part(i: number) {const coords = [i * 2, i * 3, i * 4] as const; return box(8, 6, 4).${operation}(...coords);} group([part(1), part(2)]);`;
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core'; function part(i: number) {const coords = [i * 2, i * 3, i * 4] as const; return box(8, 6, 4).${operation}(...coords);} group([part(1), part(2)]);`;
     const result = await build(source, operation);
     const occurrences = result.target.evaluations.map((evaluation, index) => ({
       key: `part/${index}`,
@@ -721,7 +726,7 @@ test('originCenter collections stay inspectable without appending model methods 
     typeof import('../src/tools/contextual-tool-context.ts')
   >('/src/tools/contextual-tool-context.ts');
   for (const input of ['first', '[first]', '[first, second]']) {
-    const source = `import {box, originCenter} from '@code3d/core';
+    const source = `import {on, align, box, originCenter} from '@code3d/core';
 const first = box(8, 6, 4).originOffset(-10, 0, 0);
 const second = box(2, 3, 4);
 const centered = originCenter(${input});
@@ -790,7 +795,7 @@ test('originVertex candidates map from input topology to the displayed result af
   ]) {
     for (const id of [3, 6]) {
       const {module, node, evaluation} = await build(
-        `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; box(8, 6, 4)${prefix}.originVertex(${id});`,
+        `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; box(8, 6, 4)${prefix}.originVertex(${id});`,
         'originVertex',
       );
       const selection = defined(evaluation.selection);
@@ -824,7 +829,7 @@ test('originVertex candidates map from input topology to the displayed result af
 
 for (const call of ['rotate(angle, 35, 10)', 'rotate(angle /* angle */)']) {
   test(`${call} edits the upstream angle, completes defaults and matches recomputed B-Rep vertices`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core"; const angle = 25; const part = box(8, 6, 4).originOffset(1, 2, 3).${call};`;
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from "@code3d/core"; const angle = 25; const part = box(8, 6, 4).originOffset(1, 2, 3).${call};`;
     const {node, bindings} = await build(source, 'rotate');
     const binding = bindings.find(binding => binding.axis === 'x');
     assert.ok(defined(binding).spatial.source.kind === 'parameter');
@@ -875,9 +880,9 @@ test('shared size and angle parameters keep the size expression while editing th
 });
 
 test('group rotation tools preview the same assembly poses as committed XYZ angle edits', async () => {
-  const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
+  const source = `import {on, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
 const base = box(10, 10, 10);
-const cap = box(2, 2, 2).relate(self => self.on(base.up));
+const cap = box(2, 2, 2).relate(self => on(self, base.up));
 const angle = 25;
 export default group([base, cap]).originPoint(cap.center).rotate(angle, 35, 10);`;
   const {node, bindings} = await build(source, 'rotate');
@@ -1152,7 +1157,7 @@ for (const [chain, name, expected, axis = 'z'] of [
   ['axisLine(base.axis).rotate()', 'rotate', 'axisLine(base.axis).rotate(7)'],
 ] as const) {
   test(`relation ${chain} provides ${axis} tools from its rendered pose`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const coords = [2, 3, 4] as const; const base = box(20, 10, 30); box(8, 6, 4).relate(self => [self.on(base.up), ${chain}]);`;
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const coords = [2, 3, 4] as const; const base = box(20, 10, 30); box(8, 6, 4).relate(self => [on(self, base.up), ${chain}]);`;
     const {node, bindings} = await relationTool(source, name);
     assert.equal(bindings.length, chain.startsWith('axisLine') ? 1 : 3);
     const binding = defined(
@@ -1185,7 +1190,7 @@ for (const [chain, name, expected, axis = 'z'] of [
 
 for (const reverse of [false, true] as const) {
   test(`relation rotation previews and edits self with ${reverse ? 'reversed' : 'forward'} on syntax`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const angle = 25; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [${reverse ? 'base.on(self.up)' : 'self.on(base.up)'}, pivot([1, 2, 3]).rotate(angle, 35, 10)]);`;
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const angle = 25; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [${reverse ? 'on(base, self.up)' : 'on(self, base.up)'}, pivot([1, 2, 3]).rotate(angle, 35, 10)]);`;
     const {node, bindings, evaluation} = await relationTool(source, 'rotate');
     assert.equal(bindings.length, 3);
     assert.equal(evaluation.relationOwnerNodeId, defined(node).nodeId);
@@ -1217,7 +1222,7 @@ for (const reverse of [false, true] as const) {
 }
 
 test('pivot coordinates have an independent drag and preserve the local frame', async () => {
-  const source = `import {offset, rotate, pivotVertex, pivotPoint, axisLine, axisEdge, pivot, box} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).originOffset(1, 2, 3).rotate(10, 20, 30).relate(self => [self.on(base.up), pivot([5, 0, 0]).rotate(25, 35, 10)]);`;
+  const source = `import {on, offset, rotate, pivotVertex, pivotPoint, axisLine, axisEdge, pivot, box} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).originOffset(1, 2, 3).rotate(10, 20, 30).relate(self => [on(self, base.up), pivot([5, 0, 0]).rotate(25, 35, 10)]);`;
   const {node, bindings} = await relationTool(source, 'pivot');
   assert.equal(bindings.length, 3);
   const intent = spatialIntent(bindings[0], 8);
@@ -1243,7 +1248,7 @@ for (const [geometry, id] of [
   ['box(8, 6, 4).cut([box(2, 2, 2)])', [1, 3]],
 ] as const) {
   test(`pivotVertex selects self topology ${JSON.stringify(id)} of ${geometry} when self is the target of on`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const base = box(20, 10, 30); const part = ${geometry}.relate(self => [base.on(self.up), pivotVertex(${JSON.stringify(id)}).rotate(0, 0, 45)]);`;
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const base = box(20, 10, 30); const part = ${geometry}.relate(self => [on(base, self.up), pivotVertex(${JSON.stringify(id)}).rotate(0, 0, 45)]);`;
     const {module, node, target, evaluation, bindings} = await relationTool(
       source,
       'pivotVertex',
@@ -1274,7 +1279,7 @@ for (const [geometry, id] of [
 }
 
 test('axis selection exposes a positioned axis and a single angle ring', async () => {
-  const source = `import {pivotVertex, pivotPoint, axisEdge, offset, axisLine, rotate, pivot, box, point} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2).relate(self => [self.center.on(point([10, 20, 30]).up), offset(0, 0, 0)]); const part = box(8, 6, 4).relate(self => [self.on(base.up), axisLine(axis.axis).rotate(25), pivot([2, 3, 4]).rotate(10, 20, 30), offset(7, 0, 0)]);`;
+  const source = `import {on, pivotVertex, pivotPoint, axisEdge, offset, axisLine, rotate, pivot, box, point} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2).relate(self => [on(self.center, point([10, 20, 30]).up), offset(0, 0, 0)]); const part = box(8, 6, 4).relate(self => [on(self, base.up), axisLine(axis.axis).rotate(25), pivot([2, 3, 4]).rotate(10, 20, 30), offset(7, 0, 0)]);`;
   const {node, bindings} = await relationTool(source, 'rotate');
   assert.equal(bindings.length, 1);
   assert.equal(bindings[0].axis, 'y');
@@ -1310,7 +1315,7 @@ test('axis selection exposes a positioned axis and a single angle ring', async (
 
 for (const reverse of [false, true] as const) {
   test(`align rotation edits self and preserves preview consistency with ${reverse ? 'reversed' : 'forward'} source`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, point} from '@code3d/core'; const base = point([20, 10, 30]); const part = box(8, 6, 4).relate(self => [${reverse ? 'base.align(self.center)' : 'self.center.align(base)'}, offset(2, 3, 4), pivot([1, 2, 3]).rotate(25, 35, 10), axisLine(box(1, 1, 1).axis).rotate(45), offset(7, 0, 0)]);`;
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, point} from '@code3d/core'; const base = point([20, 10, 30]); const part = box(8, 6, 4).relate(self => [${reverse ? 'align(base, self.center)' : 'align(self.center, base)'}, offset(2, 3, 4), pivot([1, 2, 3]).rotate(25, 35, 10), axisLine(box(1, 1, 1).axis).rotate(45), offset(7, 0, 0)]);`;
     const {node, bindings} = await relationTool(source, 'rotate');
     const intent = spatialIntent(bindings[0], 55),
       host = hostFor(source);
@@ -1331,7 +1336,7 @@ for (const reverse of [false, true] as const) {
 }
 
 test('a reversed rotation axis previews the authored signed angle', async () => {
-  const source = `import {offset, pivot, pivotVertex, pivotPoint, axisEdge, axisLine, rotate, box, point} from '@code3d/core'; const base=point([20,10,30]); const axis=box(1,1,1).axis.reverse(); const part=box(8,6,4).relate(self=>[self.center.align(base), axisLine(axis).rotate(25)]);`;
+  const source = `import {align, offset, pivot, pivotVertex, pivotPoint, axisEdge, axisLine, rotate, box, point} from '@code3d/core'; const base=point([20,10,30]); const axis=box(1,1,1).axis.reverse(); const part=box(8,6,4).relate(self=>[align(self.center, base), axisLine(axis).rotate(25)]);`;
   const {node, bindings} = await relationTool(source, 'rotate');
   assert.equal(bindings.length, 1);
   const intent = spatialIntent(bindings[0], 55),
@@ -1348,7 +1353,7 @@ test('a reversed rotation axis previews the authored signed angle', async () => 
 });
 
 test('a bound selection renders the computed contact planes and support once through inspect', async () => {
-  const source = `import {box} from '@code3d/core'; const base=box(20,10,30); const part=box(8,6,4).rotate(0,0,30).relate(self=>self.on(base.up));`;
+  const source = `import {on, box} from '@code3d/core'; const base=box(20,10,30); const part=box(8,6,4).rotate(0,0,30).relate(self=>on(self, base.up));`;
   const module = await compiler.compile(
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
@@ -1357,7 +1362,7 @@ test('a bound selection renders the computed contact planes and support once thr
   const scene = defined(
     await compiler.executor.inspect({
       file: '/model.ts',
-      offset: source.indexOf('on(base') + 1,
+      offset: source.indexOf('on(self, base') + 1,
     }),
   );
   const {previewElementDecorations} = await server.ssrLoadModule<
@@ -1398,7 +1403,7 @@ for (const [call, kind] of [
   ['axisLine(axis.axis)', 'line'],
 ] as const) {
   test(`an unfinished ${call} retains a source reference and visible marker`, async () => {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2); const part = box(8, 6, 4).relate(self => [self.on(base.up), ${call}]);`;
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box} from '@code3d/core'; const base = box(20, 10, 30); const axis = box(2, 2, 2); const part = box(8, 6, 4).relate(self => [on(self, base.up), ${call}]);`;
     const module = await compiler.compile(
       {files: [{path: '/model.ts', source}]},
       '/model.ts',
@@ -1425,10 +1430,10 @@ for (const [call, kind] of [
 }
 
 test('completing an upstream offset preserves preceding displacements', async () => {
-  const source = `import {rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, box} from '@code3d/core';
+  const source = `import {on, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, box} from '@code3d/core';
 const amount = 2;
 const base = box(20, 10, 30);
-box(8, 6, 4).relate(self => [self.on(base.up), offset(0, 3, 4), offset(amount /* x */)]);`;
+box(8, 6, 4).relate(self => [on(self, base.up), offset(0, 3, 4), offset(amount /* x */)]);`;
   const compile = (source: string) =>
     compiler.compile({files: [{path: '/model.ts', source}]}, '/model.ts');
   const module = await compile(source);
@@ -1504,9 +1509,9 @@ test('originPoint on geometry and groups appends an offset and preserves point r
     'base.originPoint(base.vertex(3))',
     'group([base, cap]).originPoint(cap.center)',
   ]) {
-    const source = `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group} from '@code3d/core';
 const base = box(10, 10, 10);
-const cap = box(2, 2, 2).relate(self => self.on(base.up));
+const cap = box(2, 2, 2).relate(self => on(self, base.up));
 export default ${expression};`;
     const {node, bindings} = await build(source, 'originPoint');
     assert.equal(bindings.length, 3);
@@ -1544,9 +1549,9 @@ test('default relation tools share current material-derived instances and exclud
   const {transformationBindings} = await server.ssrLoadModule<
     typeof import('../src/tools/model-spatial-tool.ts')
   >('/src/tools/model-spatial-tool.ts');
-  const source = `import {offset, rotate, pivotVertex, pivotPoint, axisLine, axisEdge, pivot, box} from '@code3d/core';
+  const source = `import {on, offset, rotate, pivotVertex, pivotPoint, axisLine, axisEdge, pivot, box} from '@code3d/core';
 const base = box(20,10,20);
-export default box(8,6,4).relate(self => [self.on(base.up), pivot([5,0,0]).rotate(10,20,30)]).material('#d8ff3e');`;
+export default box(8,6,4).relate(self => [on(self, base.up), pivot([5,0,0]).rotate(10,20,30)]).material('#d8ff3e');`;
   const module = await compiler.compile(
     {files: [{path: '/model.ts', source}]},
     '/model.ts',
@@ -1577,8 +1582,8 @@ export default box(8,6,4).relate(self => [self.on(base.up), pivot([5,0,0]).rotat
 });
 
 test('activated relation tools edit their selected call and preserve later operations', async () => {
-  const source = `import {rotate, pivotVertex, pivotPoint, axisLine, axisEdge, offset, pivot, box} from '@code3d/core'; const base=box(20,10,20); export default box(8,6,4).relate(self=>[self.on(base.up), offset(1,2,3), pivot([3,1,0]).rotate(10,20,30), offset(4,5,6), pivot([-2,0,4]).rotate(40,50,60)]);`;
-  const moved = await placementTools(source, 'self.on', undefined, 'translate');
+  const source = `import {on, rotate, pivotVertex, pivotPoint, axisLine, axisEdge, offset, pivot, box} from '@code3d/core'; const base=box(20,10,20); export default box(8,6,4).relate(self=>[on(self, base.up), offset(1,2,3), pivot([3,1,0]).rotate(10,20,30), offset(4,5,6), pivot([-2,0,4]).rotate(40,50,60)]);`;
+  const moved = await placementTools(source, 'self, ', undefined, 'translate');
   const offset = defined(
     moved.bindings.find(
       binding => binding.mode === 'translate' && binding.axis === 'x',
@@ -1613,7 +1618,7 @@ test('activated relation tools edit their selected call and preserve later opera
   const self = module.sourceTargets.find(
     target =>
       target.kind === 'value' &&
-      target.sourceRef.start === source.indexOf('self.on'),
+      target.sourceRef.start === source.indexOf('self, '),
   );
   assert.ok(self);
   const preview = defined(self.evaluations[0].relationPreview);
@@ -1651,7 +1656,7 @@ for (const operation of ['offset', 'rotate'] as const)
       const {transformationBindings} = await server.ssrLoadModule<
         typeof import('../src/tools/model-spatial-tool.ts')
       >('/src/tools/model-spatial-tool.ts');
-      const source = `import {pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, rotate, box} from '@code3d/core'; const base=box(20,10,20); export default box(8,6,4).relate(self=>[self.on(base.up), offset(1,2,3), rotate(10,20,30), offset(4,5,6), rotate(40,50,60)]);`;
+      const source = `import {on, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, offset, rotate, box} from '@code3d/core'; const base=box(20,10,20); export default box(8,6,4).relate(self=>[on(self, base.up), offset(1,2,3), rotate(10,20,30), offset(4,5,6), rotate(40,50,60)]);`;
       const module = await compiler.compile(
         {files: [{path: '/model.ts', source}]},
         '/model.ts',
@@ -1756,12 +1761,12 @@ for (const selector of [
   'axisLine(base.axis.reverse())',
 ] as const) {
   test(`reference displacement ${selector} retains its reference and matches every instance's solved pose`, async () => {
-    const source = `import {offset, rotate, box, group, pivot, pivotVertex, pivotPoint, axisEdge, axisLine} from '@code3d/core';
+    const source = `import {on, align, offset, rotate, box, group, pivot, pivotVertex, pivotPoint, axisEdge, axisLine} from '@code3d/core';
 const base=box(40,8,30).rotate(10,20,30);
-const parts=[1,2].map(i=>box(10+i,8,6).relate(self=>[self.on(base.up),${selector}.rotate(${selector.startsWith('axis') ? '35' : '10,20,30'})])); group([base,...parts]);`;
+const parts=[1,2].map(i=>box(10+i,8,6).relate(self=>[on(self, base.up),${selector}.rotate(${selector.startsWith('axis') ? '35' : '10,20,30'})])); group([base,...parts]);`;
     const built = await placementTools(
       source,
-      'self.on',
+      'self, ',
       undefined,
       selector.startsWith('axis') ? 'rotate-axis' : 'rotate-point',
     );
@@ -1790,7 +1795,7 @@ const parts=[1,2].map(i=>box(10+i,8,6).relate(self=>[self.on(base.up),${selector
         ),
       host.source(),
     );
-    const next = await placementTools(host.source(), 'self.on');
+    const next = await placementTools(host.source(), 'self, ');
     const {composeTransforms} = await import('../../core/bld/tooling/index.js');
     built.occurrences.forEach((occurrence, i) => {
       const predicted = composeTransforms(
@@ -1994,9 +1999,9 @@ test('draft angle edits complete one rotation and retain other angles during pen
   test('toolbar activation only considers the adjacent transformation in an array', async () => {
     const point = 'pivotVertex(1).rotate(10,20,30)',
       axis = 'axisEdge(1).rotate(25)';
-    const relation = `[self.on(base.up), ${point}, ${axis}, ${point}]`;
-    const source = `import {offset, rotate, pivot, pivotPoint, axisLine, box,group,pivotVertex,axisEdge} from '@code3d/core'; const base=box(20,4,20); const part=box(8,6,4).relate(self=>${relation}); group([base,part]);`;
-    const built = await placementTools(source, 'self.on');
+    const relation = `[on(self, base.up), ${point}, ${axis}, ${point}]`;
+    const source = `import {on, align, offset, rotate, pivot, pivotPoint, axisLine, box,group,pivotVertex,axisEdge} from '@code3d/core'; const base=box(20,4,20); const part=box(8,6,4).relate(self=>${relation}); group([base,part]);`;
+    const built = await placementTools(source, 'self, ');
     const {contextualToolActivation} = await server.ssrLoadModule<
       typeof import('../src/tools/contextual-tool-context.ts')
     >('/src/tools/contextual-tool-context.ts');
@@ -2035,9 +2040,9 @@ test('draft angle edits complete one rotation and retain other angles during pen
 }
 
 test('array insertion gaps preview each loop prefix and retain inherited placement', async () => {
-  const source = `import {pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group, rotate, offset} from '@code3d/core';
+  const source = `import {on, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, box, group, rotate, offset} from '@code3d/core';
 const base=box(20,4,20);
-const parts=[3,7].map(x=>box(8,6,4).relate(self=>self.on(base.up)).relate(self=>[rotate(0,0,20),offset(x,0,0)]));
+const parts=[3,7].map(x=>box(8,6,4).relate(()=>on(base.up)).relate(()=>[rotate(0,0,20),offset(x,0,0)]));
 group([base,...parts]);`;
   const module = await compiler.compile(
     {files: [{path: '/model.ts', source}]},
@@ -2148,13 +2153,13 @@ test('tool activation uses only current or immediately following transformation 
       'offset(2,0,0)',
     ],
     [
-      'offset(1,0,0),self.axis.align(base.axis),axisEdge(1).rotate(61)',
+      'offset(1,0,0),align(self.axis, base.axis),axisEdge(1).rotate(61)',
       'offset(1,0,0)',
       'rotate-axis',
       undefined,
     ],
   ] as const) {
-    const source = `import {pivot, pivotVertex, pivotPoint, axisLine, box,group,offset,rotate,axisEdge} from '@code3d/core'; const base=box(20,4,20); const part=box(8,6,4).relate(self=>[self.on(base.up),${items}]);group([base,part]);`;
+    const source = `import {on, align, pivot, pivotVertex, pivotPoint, axisLine, box,group,offset,rotate,axisEdge} from '@code3d/core'; const base=box(20,4,20); const part=box(8,6,4).relate(self=>[on(self, base.up),${items}]);group([base,part]);`;
     const module = await compiler.compile(
       {files: [{path: '/model.ts', source}]},
       '/model.ts',

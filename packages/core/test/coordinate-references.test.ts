@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {box, group, line, offset, point, rotate} from '@code3d/core';
+import {align, box, group, line, offset, point, rotate} from '@code3d/core';
 import {
   composeTransforms,
   modelElementReference,
@@ -56,17 +56,17 @@ test('origin alignment fixes position while frame alignment also fixes orientati
     [0, 180, 0],
   ] as const) {
     const target = box(4, 6, 8).relate(self => [
-      self.origin.align(point([12, 7, -4])),
+      align(self.origin, point([12, 7, -4])),
       rotate(angles[0], angles[1], angles[2]),
     ]);
     const positioned = box(2, 3, 5).relate(self =>
-      self.origin.align(target.origin),
+      align(self.origin, target.origin),
     );
     near(pose(positioned).position, pose(target).position);
     near(pose(positioned).quaternion, [0, 0, 0, 1]);
     for (const build of [
-      (self: typeof positioned) => self.frame.align(target.frame),
-      (self: typeof positioned) => target.frame.align(self.frame),
+      (self: typeof positioned) => align(self.frame, target.frame),
+      (self: typeof positioned) => align(target.frame, self.frame),
     ]) {
       const placed = box(2, 3, 5).relate(build);
       sameFrame(pose(placed), pose(target));
@@ -77,7 +77,7 @@ test('origin alignment fixes position while frame alignment also fixes orientati
 
 test('exposed frames and their origins follow nested occurrences and local transforms', () => {
   const part = box(2, 4, 6).relate(self => [
-    self.origin.align(point([9, 8, 7])),
+    align(self.origin, point([9, 8, 7])),
     rotate(15, 30, 45),
   ]);
   const assembly = group([point(), part]).expose({mount: part.frame});
@@ -91,24 +91,24 @@ test('exposed frames and their origins follow nested occurrences and local trans
     reference.position,
   );
   const follower = group([box(1, 2, 3)]).relate(self =>
-    self.frame.align(nested.mount),
+    align(self.frame, nested.mount),
   );
   sameFrame(pose(follower), composeTransforms(pose(nested), reference));
   const originFollower = point([20, 0, 0]).relate(self =>
-    self.origin.align(nested.mount.origin),
+    align(self.origin, nested.mount.origin),
   );
   near(pose(originFollower).position, pose(follower).position);
 });
 
 test('coordinate constraints preserve selected old references across origin edits', () => {
   const target = box(4, 4, 4);
-  const original = box(2, 2, 2).relate(self => self.frame.align(target.frame));
+  const original = box(2, 2, 2).relate(self => align(self.frame, target.frame));
   const movedOrigin = original.originOffset(3, 4, 5);
   near(movedOrigin.position(target), [3, 4, 5]);
   near(movedOrigin.bounds(target).minimum, [-1, -1, -1]);
   near(original.position(target), [0, 0, 0]);
   const shifted = original.relate(self => [
-    self.frame.align(target.frame),
+    align(self.frame, target.frame),
     offset(7, 0, 0),
   ]);
   near(shifted.position(target), [7, 0, 0]);
@@ -118,16 +118,16 @@ test('frame alignment participates in joint geometric constraints and reports co
   const source = box(2, 2, 2),
     target = box(4, 4, 4);
   const placed = source.relate(self => [
-    self.frame.align(target.frame),
-    self.center.align(target.origin),
+    align(self.frame, target.frame),
+    align(self.center, target.origin),
   ]);
   sameFrame(pose(placed), pose(target));
   assert.throws(
     () =>
       snapshot(
         source.relate(self => [
-          self.frame.align(target.frame),
-          self.origin.align(point([10, 0, 0])),
+          align(self.frame, target.frame),
+          align(self.origin, point([10, 0, 0])),
         ]),
       ),
     /[Cc]onflict|incompatible/,
@@ -137,7 +137,7 @@ test('frame alignment participates in joint geometric constraints and reports co
 test('coordinate constraints keep original receivers and derived targets as external values', () => {
   const original = box(2, 4, 6);
   const derived = original.relate(self => [
-    self.origin.align(point([12, 7, -4])),
+    align(self.origin, point([12, 7, -4])),
     rotate(23, 41, 79),
   ]);
   const originalSnapshot = snapshot(original);
@@ -149,8 +149,8 @@ test('coordinate constraints keep original receivers and derived targets as exte
           const source = reverse ? target : self;
           const destination = reverse ? self : target;
           return kind === 'frame'
-            ? source.frame.align(destination.frame)
-            : source.origin.align(destination.origin);
+            ? align(source.frame, destination.frame)
+            : align(source.origin, destination.origin);
         });
         const output = snapshot(placed);
         const constraint = output.constraints[0];
@@ -175,11 +175,11 @@ test('coordinate constraints keep original receivers and derived targets as exte
   }
   assert.deepEqual(snapshot(original), originalSnapshot);
   assert.throws(
-    () => original.relate(() => original.frame.align(derived.frame)),
+    () => original.relate(() => align(original.frame, derived.frame)),
     /must involve self/,
   );
   assert.throws(
-    () => original.relate(() => original.origin.align(derived.origin)),
+    () => original.relate(() => align(original.origin, derived.origin)),
     /must involve self/,
   );
 });

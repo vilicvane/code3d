@@ -344,13 +344,15 @@ export type ToolCallSite = Readonly<{
 }>;
 
 type RelationCallSite = Readonly<{
-  receiverRef: SourceRef;
-  targetRef: SourceRef;
+  arguments: readonly Readonly<{
+    side: 'source' | 'target';
+    sourceRef: SourceRef;
+  }>[];
   transformationInsertion?: SourceTarget['transformationInsertion'];
 }>;
 
 type RelationArraySite = Readonly<{
-  parameterId: string;
+  selfId: string;
   sourceRef: SourceRef;
   gaps: readonly SourceRef[];
   elements: readonly SourceRef[];
@@ -973,7 +975,7 @@ export function createModelCompiler() {
             'body' in visited &&
             visited.body
           ) {
-            const parameters = parameterValueStatements(
+            const parameters = scopedValueStatements(
               node.parameters,
               node.body,
               sourceFile,
@@ -1073,15 +1075,21 @@ export function createModelCompiler() {
           ) {
             const siteId = stableSourceId('expression', node, sourceFile);
             const transformationInsertion = insertions(node);
-            const relationSite = relationCallSite(node, sourceFile);
+            const toolSignature = toolCalls?.get(
+              toolCallKey(node.getStart(sourceFile), node.getEnd()),
+            );
+            const relationSite = relationCallSite(
+              node,
+              sourceFile,
+              inspection.calls
+                .get(sourceFile.fileName)
+                ?.get(toolCallKey(node.getStart(sourceFile), node.end)),
+            );
             if (relationSite)
               relationCallSites.set(siteId, {
                 ...relationSite,
                 transformationInsertion,
               });
-            const toolSignature = toolCalls?.get(
-              toolCallKey(node.getStart(sourceFile), node.getEnd()),
-            );
             if (toolSignature) {
               const rotationReceivers: (SourceRef & {selectorStart: number})[] =
                 [];
@@ -1188,24 +1196,62 @@ export function createModelCompiler() {
     };
   }
 
-  function parameterValueStatements(
+  function scopedValueStatements(
     parameters: readonly ts.ParameterDeclaration[],
     body: ts.ConciseBody,
     sourceFile: ts.SourceFile,
     factory: ts.NodeFactory,
   ): ts.Statement[] {
     const statements: ts.Statement[] = [];
+    const captureValue = (
+      node: ts.Node,
+      id: string,
+      value: ts.Expression,
+      end = node.end,
+    ) => {
+      statements.push(
+        factory.createExpressionStatement(
+          factory.createCallExpression(
+            factory.createPropertyAccessExpression(
+              factory.createIdentifier('__code3d'),
+              'scopedValue',
+            ),
+            undefined,
+            [
+              factory.createStringLiteral(sourceFile.fileName),
+              factory.createNumericLiteral(node.getStart(sourceFile)),
+              factory.createNumericLiteral(end),
+              factory.createNumericLiteral(body.getStart(sourceFile)),
+              factory.createNumericLiteral(body.end),
+              factory.createStringLiteral(id),
+              value,
+            ],
+          ),
+        ),
+      );
+    };
     const callback = body.parent;
     const call = callback.parent;
-    const self = parameters[0]?.name;
     if (
-      self &&
-      ts.isIdentifier(self) &&
       ts.isCallExpression(call) &&
       ts.isPropertyAccessExpression(call.expression) &&
       call.expression.name.text === 'relate' &&
       call.arguments[0] === callback
     ) {
+      const selfId = stableSourceId('relation-self', callback, sourceFile);
+      captureValue(
+        callback,
+        selfId,
+        factory.createCallExpression(
+          factory.createPropertyAccessExpression(
+            factory.createIdentifier('__code3d'),
+            'currentRelationSelf',
+          ),
+          undefined,
+          [],
+        ),
+        body.getStart(sourceFile),
+      );
       const arrays: ts.ArrayLiteralExpression[] = [];
       const returned = (expression: ts.Expression) => {
         const value = unwrapArgument(expression);
@@ -1231,7 +1277,7 @@ export function createModelCompiler() {
         }
         gaps.push(sourceRef(sourceFile.fileName, start, array.end - 1));
         relationArraySites.push({
-          parameterId: stableSourceId('parameter', self, sourceFile),
+          selfId,
           sourceRef: sourceRef(
             sourceFile.fileName,
             array.getStart(sourceFile),
@@ -1257,27 +1303,10 @@ export function createModelCompiler() {
         return;
       }
       if (name.text === 'this') return;
-      statements.push(
-        factory.createExpressionStatement(
-          factory.createCallExpression(
-            factory.createPropertyAccessExpression(
-              factory.createIdentifier('__code3d'),
-              'parameterValue',
-            ),
-            undefined,
-            [
-              factory.createStringLiteral(sourceFile.fileName),
-              factory.createNumericLiteral(name.getStart(sourceFile)),
-              factory.createNumericLiteral(name.getEnd()),
-              factory.createNumericLiteral(body.getStart(sourceFile)),
-              factory.createNumericLiteral(body.getEnd()),
-              factory.createStringLiteral(
-                stableSourceId('parameter', name, sourceFile),
-              ),
-              factory.createIdentifier(name.text),
-            ],
-          ),
-        ),
+      captureValue(
+        name,
+        stableSourceId('parameter', name, sourceFile),
+        factory.createIdentifier(name.text),
       );
     };
     parameters.forEach(parameter => capture(parameter.name));
@@ -1502,31 +1531,36 @@ export function createModelCompiler() {
   function relationCallSite(
     call: ts.CallExpression,
     sourceFile: ts.SourceFile,
-  ) {
-    const expression = call.expression;
-    if (
-      !ts.isPropertyAccessExpression(expression) &&
-      !ts.isElementAccessExpression(expression)
-    )
-      return undefined;
-    const name = ts.isPropertyAccessExpression(expression)
-      ? expression.name.text
-      : ts.isStringLiteral(expression.argumentExpression)
-        ? expression.argumentExpression.text
-        : undefined;
-    if (name !== 'on' && name !== 'align') return undefined;
-    return {
-      receiverRef: sourceRef(
-        sourceFile.fileName,
-        expression.expression.getStart(sourceFile),
-        expression.expression.getEnd(),
-      ),
-      targetRef: sourceRef(
-        sourceFile.fileName,
-        call.arguments.pos,
-        call.getEnd() - 1,
-      ),
-    };
+    signature: InspectSignature | undefined,
+  ): RelationCallSite | undefined {
+    // Resolve declared endpoint parameters, including aliases and namespaces.
+    // These scopes only become source targets when the call returns a constraint.
+    const arguments_ = signature?.parameters.flatMap<
+      RelationCallSite['arguments'][number]
+    >(parameter => {
+      const side = parameter.name;
+      const index = parameter.path[0];
+      if (
+        (side !== 'source' && side !== 'target') ||
+        parameter.path.length !== 1 ||
+        typeof index !== 'number'
+      )
+        return [];
+      const argument = call.arguments[index];
+      if (!argument) return [];
+      const next = call.arguments[index + 1];
+      return [
+        {
+          side,
+          sourceRef: sourceRef(
+            sourceFile.fileName,
+            argument.pos,
+            next ? next.pos - 1 : call.end - 1,
+          ),
+        },
+      ];
+    });
+    return arguments_?.length ? {arguments: arguments_} : undefined;
   }
 
   function callSourceStart(

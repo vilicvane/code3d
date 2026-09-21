@@ -1,4 +1,4 @@
-import type {Model, ModelBounds, Vec3} from '@code3d/core';
+import {align, type Model, type ModelBounds, type Vec3} from '@code3d/core';
 
 export type Axis = 'x' | 'y' | 'z';
 export type Alignment = 'start' | 'center' | 'end';
@@ -106,7 +106,7 @@ function translated<T extends Model>(model: T, delta: Vec3): T {
 function placed<T extends Model>(model: T, delta: Vec3, space?: Model): T {
   const result = translated(model, delta);
   return (
-    space ? result.relate(self => self.frame.align(space.frame)) : result
+    space ? result.relate(self => align(self.frame, space.frame)) : result
   ) as T;
 }
 function axisDelta(axis: Axis, distance: number): Vec3 {

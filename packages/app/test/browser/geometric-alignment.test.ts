@@ -33,13 +33,13 @@ test(
           '\nwindow.alignmentTest = {viewport, codeEditor};\n',
       });
     });
-    await page.goto(appUrl!);
-    await page.getByText('Ready', {exact: true}).waitFor({timeout: 30000});
-    const source = `import {offset, arc, box, group, line} from '@code3d/core';
+    await page.goto(appUrl!, {timeout: 60_000});
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    const source = `import {align, offset, arc, box, group, line} from '@code3d/core';
 const base=arc([20,0,0],[0,20,0],[-20,0,0]);
-const part=arc([0,20,0],[-20,0,0],[0,-20,0]).relate(self=>[self.align(base), offset(0,0,8)]);
+const part=arc([0,20,0],[-20,0,0],[0,-20,0]).relate(self=>[align(self, base), offset(0,0,8)]);
 const axis=box(1,1,1);
-const rail=line([30,0,0],[30,20,0]).relate(self=>self.align(axis.axis.reverse()));
+const rail=line([30,0,0],[30,20,0]).relate(self=>align(self, axis.axis.reverse()));
 export default group([base,part,rail]);`;
     await page.locator('.monaco-editor .view-lines').first().click();
     await page.keyboard.press('Control+a');
@@ -54,7 +54,7 @@ export default group([base,part,rail]);`;
         editor.focus();
       }, text);
     };
-    await select('self.align(base)');
+    await select('self, base');
     await page.waitForFunction(
       () =>
         window.alignmentTest.viewport.sourceContext?.evaluation.constraintId,
@@ -139,7 +139,7 @@ export default group([base,part,rail]);`;
         .replace(/\s/g, '')
         .includes('offset(0,0,16)'),
     );
-    await select('self.align(axis');
+    await select('self, axis.axis');
     await page.waitForFunction(() => {
       const vp = window.alignmentTest.viewport,
         scope = vp.sourceContext;

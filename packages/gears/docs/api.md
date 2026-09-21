@@ -163,7 +163,7 @@ with full turns repeating the same layout. The gear's tooth rotation is
 calculated automatically:
 
 ```ts
-import {box, group} from '@code3d/core';
+import {on, box, group} from '@code3d/core';
 import {assembleGears, spurGear} from '@code3d/gears';
 
 const first = spurGear({module: 2, teeth: 24, faceWidth: 10});
@@ -174,7 +174,7 @@ const arranged = assembleGears([first, second, third], {
   pairs: [{}, {angle: 60}],
 });
 const plate = box(160, 4, 120);
-const train = group(arranged).relate(self => self.on(plate.up));
+const train = group(arranged).relate(() => on(plate.up));
 export default group([plate, train]);
 ```
 
@@ -197,7 +197,7 @@ completed `group()` afterward. A later replacement such as
 ### Drive through connected parts
 
 Attach the first gear to an input shaft or crank with
-`pinion.relate(self => self.frame.align(inputCrank.frame))`, then pass that value
+`pinion.relate(self => align(self.frame, inputCrank.frame))`, then pass that value
 to `assembleGears`. Only the external crank needs the input angle. Each adjacent
 pair receives a rotation coupling; parts aligned to a returned gear's frame
 follow its solved angle. External gears reverse direction, while an internal

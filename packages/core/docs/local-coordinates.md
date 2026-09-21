@@ -77,8 +77,8 @@ For `point([10, 0, 0])`, the geometry is at X = 10 while its frame origin is zer
 Changing local geometry with `rotate()` does not rotate the model's coordinate
 axes. Placement through `relate()` determines the frame's pose in a composition.
 
-Use `self.origin.align(other.origin)` to coincide just the origins, or
-`self.frame.align(other.frame)` to coincide both origins and all three axes.
+Use `align(self.origin, other.origin)` to coincide just the origins, or
+`align(self.frame, other.frame)` to coincide both origins and all three axes.
 Coordinate references can be named with `expose`; an exposed frame and its
 `.origin` follow the selected occurrence through nested groups and transforms.
 A newly read `model.origin` always references the current local zero. Previously

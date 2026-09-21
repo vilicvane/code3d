@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  align,
+  on,
   axisLine,
   axisEdge,
   pivotPoint,
@@ -34,8 +36,8 @@ test('independent offset moves the joint result without changing local geometry'
   const base = box(20, 4, 20);
   const original = box(2, 2, 2);
   const placed = original.relate(self => [
-    self.axis.align(base.axis),
-    self.on(base.up),
+    align(self.axis, base.axis),
+    on(self, base.up),
     offset(10, 5, 7),
   ]);
   near(snapshot(placed).compositionTransform.position, [10, 8, 7]);
@@ -47,7 +49,7 @@ test('independent offset moves the joint result without changing local geometry'
 test('offset uses composition axes while rotation defaults to the current self origin', () => {
   const base = box(20, 4, 20);
   const placed = box(2, 2, 2).relate(self => [
-    self.on(base.up),
+    on(self, base.up),
     rotate(0, 0, 90),
     offset(10, 0, 0),
   ]);
@@ -95,10 +97,10 @@ test('pivot and external axis chains preserve authored call order', () => {
 test('a later constraint segment preserves free translation and inherited orientation', () => {
   const base = box(20, 4, 20);
   const placed = box(4, 2, 2).relate(self => [
-    self.on(base.up),
+    on(self, base.up),
     offset(10, 5, 7),
     rotate(0, 0, 90),
-    self.on(base.up),
+    on(self, base.up),
   ]);
   near(snapshot(placed).compositionTransform.position, [10, 4, 7]);
   near(snapshot(placed).compositionTransform.quaternion, [
@@ -108,9 +110,9 @@ test('a later constraint segment preserves free translation and inherited orient
     Math.SQRT1_2,
   ]);
   const aligned = box(2, 2, 2).relate(self => [
-    self.on(base.up),
+    on(self, base.up),
     offset(10, 5, 7),
-    self.axis.align(line([10, 0, 7], [10, 10, 7])),
+    align(self.axis, line([10, 0, 7], [10, 10, 7])),
   ]);
   near(snapshot(aligned).compositionTransform.position, [10, 8, 7]);
 });
@@ -118,21 +120,21 @@ test('a later constraint segment preserves free translation and inherited orient
 test('successive relate calls continue the ordered placement and inherited free modes', () => {
   const base = box(20, 4, 20);
   const placed = box(2, 2, 2)
-    .relate(self => self.on(base.up))
+    .relate(self => on(self, base.up))
     .relate(() => offset(10, 5, 7))
-    .relate(self => self.on(base.up));
+    .relate(self => on(self, base.up));
   near(snapshot(placed).compositionTransform.position, [10, 3, 7]);
 });
 
 test('constraints referencing a transformed part see its final pose', () => {
   const base = box(20, 4, 20);
   const lower = box(2, 2, 2).relate(self => [
-    self.on(base.up),
+    on(self, base.up),
     offset(10, 5, 0),
   ]);
   const upper = box(2, 2, 2).relate(self => [
-    self.axis.align(lower.axis),
-    self.on(lower.up),
+    align(self.axis, lower.axis),
+    on(self, lower.up),
   ]);
   near(snapshot(upper).compositionTransform.position, [10, 10, 0]);
   const assembly = snapshot(group([base, lower, upper]));
@@ -145,14 +147,14 @@ test('stage previews keep joint siblings and stop at the selected segment', () =
   let contact: Constraint | undefined;
   let moved: ReturnType<typeof offset> | undefined;
   const placed = box(2, 2, 2).relate(self => {
-    contact = self.on(base.up);
+    contact = on(self, base.up);
     moved = offset(10, 5, 7);
     return [
-      self.axis.align(base.axis),
+      align(self.axis, base.axis),
       contact,
       moved,
       rotate(0, 0, 90),
-      self.on(base.up),
+      on(self, base.up),
     ];
   });
   assert.ok(contact && moved);
@@ -170,8 +172,8 @@ test('stage previews keep joint siblings and stop at the selected segment', () =
 test('a nested assembly keeps its composition offset axes and selected pivot frame', () => {
   const base = box(20, 4, 20).relate(() => rotate(0, 0, 90));
   const cover = box(2, 2, 2).relate(self => [
-    self.axis.align(base.axis),
-    self.on(base.up),
+    align(self.axis, base.axis),
+    on(self, base.up),
   ]);
   const lifted = cover.relate(() => [offset(12, 0, 0), rotate(0, 30, 0)]);
   const closed = snapshot(group([base, cover]));
@@ -196,8 +198,8 @@ test('external axes use their own final independent placement in mixed systems',
   const axis = line([0, 0, 10]).relate(() => offset(3, 4, 0));
   const base = box(20, 4, 20);
   const part = box(2, 2, 2).relate(self => [
-    self.axis.align(base.axis),
-    self.on(base.up),
+    align(self.axis, base.axis),
+    on(self, base.up),
     offset(10, -3, 0),
     axisLine(axis).rotate(90),
   ]);
@@ -408,7 +410,7 @@ test('constraint pivotPoint preserves an external center through joint solving a
     rotate(10, 20, 30),
   ]);
   const original = box(8, 6, 4).relate(() => rotate(15, 25, 35));
-  const contact = original.relate(self => self.on(base.up));
+  const contact = original.relate(self => on(self, base.up));
   const point = base.vertex(1);
   const local = composeTransforms(
     invertTransform(snapshot(contact).compositionTransform),
@@ -418,13 +420,13 @@ test('constraint pivotPoint preserves an external center through joint solving a
     ),
   ).position;
   const byRef = original.relate(self => [
-    self.on(base.up),
+    on(self, base.up),
     pivotPoint(point).pivotOffset(2, 3, 4).rotate(17, 23, 31),
     offset(3, 2, 1),
     rotate(5, 10, 15),
   ]);
   const byCoordinates = original.relate(self => [
-    self.on(base.up),
+    on(self, base.up),
     pivot(local).pivotOffset(2, 3, 4).rotate(17, 23, 31),
     offset(3, 2, 1),
     rotate(5, 10, 15),

@@ -1,4 +1,4 @@
-import {box, sketch} from '@code3d/core';
+import {align, box, sketch} from '@code3d/core';
 
 // Sketch coordinates are local [x,y]; the relation places that plane on the stock.
 // Select slot to edit its points/arcs. The surrounding stock is read-only context.
@@ -24,7 +24,7 @@ export function roundedSlot(radius = 4) {
   ]);
 }
 export const slot = roundedSlot(4).relate(profile =>
-  profile.plane.align(stock.surface(4)),
+  align(profile.plane, stock.surface(4)),
 );
 export const cutter = slot.face().extrude(-6);
 export const mountingPlate = stock.cut([cutter]).material('#8ed5d1');

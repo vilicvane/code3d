@@ -92,9 +92,9 @@ test(
         };
       };
       try {
-        const source = `import {offset, pivot, axisLine, rotate, box, group} from '@code3d/core';
+        const source = `import {on, offset, pivot, axisLine, rotate, box, group} from '@code3d/core';
         const base = box(20, 10, 30);
-        const part = box(8, 6, 4).relate(self => [self.on(base.up), offset(10, 0, 0), pivot([5, 0, 0]).rotate(0, 0, 90), axisLine(base.axis).rotate(30), offset(7, 0, 0)]);
+        const part = box(8, 6, 4).relate(self => [on(self, base.up), offset(10, 0, 0), pivot([5, 0, 0]).rotate(0, 0, 90), axisLine(base.axis).rotate(30), offset(7, 0, 0)]);
         export default group([base, part]);`;
         const module = await compile(source);
         // Compare in the base's frame, independently of the composition reference member.
@@ -104,7 +104,7 @@ test(
           part: part.compositionTransform,
         };
         const stages = [
-          'on(base.up)',
+          'on(self, base.up)',
           'offset(10',
           'pivot([5',
           'rotate(0',
@@ -124,10 +124,10 @@ test(
         const plain = [];
         for (const text of ['rotate(0,0,45)', 'rotate(0,0,90)'])
           plain.push(await inspect(plainSource, text));
-        const aliasSource = `import {box,group,offset,rotate} from '@code3d/core';
+        const aliasSource = `import {on, box,group,offset,rotate} from '@code3d/core';
         const base = box(20,10,30);
         const part = box(8,6,4).relate(self => {
-          const contact = self.on(base.up);
+          const contact = on(self, base.up);
           const moved = offset(10,0,0);
           const turned = rotate(0,0,90);
           return [contact, moved, turned, rotate(0,45,0)];
@@ -143,11 +143,11 @@ test(
         const aliasViews = [];
         for (const text of aliases)
           aliasViews.push(await inspect(aliasSource, text));
-        const invalidSource = `import {offset, box,group} from '@code3d/core';
+        const invalidSource = `import {on, offset, box,group} from '@code3d/core';
         const base=box(20,10,20);
-        const higher=box(20,10,20).relate(s=>s.on(base.up));
-        const original=box(2,2,2).relate(s=>s.on(base.up));
-        const part=original.relate(s=>[s.on(higher.up), offset(0,-10,0)]);
+        const higher=box(20,10,20).relate(s=>on(s, base.up));
+        const original=box(2,2,2).relate(s=>on(s, base.up));
+        const part=original.relate(s=>[on(s, higher.up), offset(0,-10,0)]);
         export default group([base,higher,part]);`;
         const retained = viewport['module'];
         let invalid = '';

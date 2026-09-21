@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  on,
+  align,
   box,
   line,
   offset,
@@ -43,7 +45,7 @@ test('independent steps and unfinished references retain their prefixes after th
   const base = box(20, 10, 30);
   const original = box(8, 6, 4).originOffset(1, 2, 3).rotate(10, 20, 30);
   const stages = (self: SolidModel) => {
-    const contact = self.on(base.up);
+    const contact = on(self, base.up);
     const shift = offset(10, 2, 3);
     const center = pivot([5, 0, 0]);
     const turn = center.rotate(25, 35, 10);
@@ -93,18 +95,21 @@ test('independent steps and unfinished references retain their prefixes after th
 test('align previews jointly solve inherited and sibling constraints before transformations', () => {
   const base = box(20, 10, 20);
   const guide = line([10, 6, 0], [10, 6, 30]);
-  const original = box(2, 2, 2).relate(s => s.on(base.up));
+  const original = box(2, 2, 2).relate(s => on(s, base.up));
   let early: Constraint | undefined;
   original.relate(self => {
-    early = self.center.align(guide);
-    return [early, self.on(base.front), rotate(0, 25, 0)];
+    early = align(self.center, guide);
+    return [early, on(self, base.front), rotate(0, 25, 0)];
   });
   const preview = previewOf(early);
   assert.equal(preview.object.constraints.length, 3);
   samePose(
     preview.object.compositionTransform,
     snapshot(
-      original.relate(self => [self.center.align(guide), self.on(base.front)]),
+      original.relate(self => [
+        align(self.center, guide),
+        on(self, base.front),
+      ]),
     ).compositionTransform,
   );
 });
@@ -116,8 +121,8 @@ for (const reverse of [false, true]) {
       second: Constraint | undefined,
       shift: Transformation | undefined;
     const model = box(20, 20, 20).relate(self => {
-      first = reverse ? base.on(self.left) : self.on(base.right);
-      second = reverse ? base.on(self.up) : self.on(base.down);
+      first = reverse ? on(base, self.left) : on(self, base.right);
+      second = reverse ? on(base, self.up) : on(self, base.down);
       shift = offset(0, 0, 6);
       return [first, second, shift];
     });
@@ -140,12 +145,16 @@ test('reverse-written align retains self as the owner of later independent rotat
   let early: Transformation | undefined;
   const placed = original.relate(self => {
     early = rotate(10, 20, 30);
-    return [base.align(self), early, axisLine(box(10, 10, 10).axis).rotate(40)];
+    return [
+      align(base, self),
+      early,
+      axisLine(box(10, 10, 10).axis).rotate(40),
+    ];
   });
   const preview = previewOf(early);
   samePose(
     preview.object.compositionTransform,
-    snapshot(original.relate(self => [base.align(self), rotate(10, 20, 30)]))
+    snapshot(original.relate(self => [align(base, self), rotate(10, 20, 30)]))
       .compositionTransform,
   );
   assert.equal(
@@ -158,14 +167,14 @@ test('reverse-written align retains self as the owner of later independent rotat
 test('insertion previews retain inherited placements without including later callback steps', () => {
   const base = box(10, 10, 10);
   const original = box(2, 2, 2).relate(self => [
-    self.center.align(base.center),
+    align(self.center, base.center),
     offset(0, 6, 0),
   ]);
   const before = snapshot(original);
   let contact!: Constraint;
   let shift!: Transformation;
   const placed = original.relate(self => {
-    contact = self.on(original.right);
+    contact = on(self, original.right);
     shift = offset(5, 0, 0);
     return [contact, shift, offset(100, 0, 0)];
   });
@@ -201,7 +210,7 @@ for (const selector of ['point', 'axis'] as const) {
     let turn!: Transformation;
     let center!: RelationExpression;
     const placed = original.relate(self => {
-      contact = self.on(original.right);
+      contact = on(self, original.right);
       shift = offset(160, 0, 0);
       if (selector === 'point') {
         const selection = pivotPoint(original.center);
@@ -243,7 +252,7 @@ for (const selector of ['point', 'axis'] as const) {
 test('constraints expose no chained transformations or rotation selectors', () => {
   const part = box(2, 2, 2),
     base = box(10, 10, 10);
-  for (const constraint of [part.on(base.up), part.axis.align(base.axis)]) {
+  for (const constraint of [on(part, base.up), align(part.axis, base.axis)]) {
     for (const method of [
       'offset',
       'rotate',

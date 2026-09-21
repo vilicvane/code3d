@@ -266,7 +266,7 @@ Without a target or external input relations, result origins coincide and
 remain constraints and must be compatible with the target frame. To repeat an
 assembled set of parts, group them first. A group captures its assembly in the
 first member's local frame; to place that new group in another assembly, relate
-the group itself, for example `self.frame.align(space.frame)`.
+the group itself, for example `align(self.frame, space.frame)`.
 
 Bounds-based tools need finite geometry; empty groups cannot be measured. Empty
 collections produce empty results. Gaps, padding and radii must be finite and

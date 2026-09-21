@@ -1,4 +1,5 @@
 import {
+  on,
   offset,
   cylinder,
   cut,
@@ -194,7 +195,7 @@ export function headedScrew(
     length,
     threadedLength,
     spec.underHeadRadius,
-  ).relate(part => part.on(head.down));
+  ).relate(part => on(part, head.down));
   return union([head, shaft]).expose({
     headTop: head.up,
     headBottom: head.down,
@@ -215,7 +216,7 @@ export function hexSocket(
   if (depth >= height)
     throw new Error('Hex socket depth must be smaller than the head height.');
   const tool = regularPrism(width / Math.sqrt(3), depth + 0.2, 6, 30).relate(
-    part => [part.down.on(head.up), offset(0, -depth, 0)],
+    part => [on(part.down, head.up), offset(0, -depth, 0)],
   );
   return cut(head, [tool]);
 }
@@ -289,7 +290,7 @@ export function crossSocket(
     ]);
     tools.push(rib.rotate(0, 45, 0), rib.rotate(0, 135, 0));
   }
-  const tool = union(tools).relate(part => part.up.on(head.up));
+  const tool = union(tools).relate(part => on(part.up, head.up));
   return cut(head, [tool]);
 }
 

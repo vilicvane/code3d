@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {after, test} from 'node:test';
 import {replicad} from '@code3d/core/replicad';
-import {group, intersect} from '@code3d/core';
+import {align, group, intersect} from '@code3d/core';
 import {
   createModelSnapshotter,
   disposeModelObjects,
@@ -187,7 +187,7 @@ test('nominal center distance covers external, internal and helical pairs', () =
   assert.equal(
     nominalCenterDistance(
       small.material('#aaa'),
-      large.relate(self => self.frame.align(small.frame)),
+      large.relate(self => align(self.frame, small.frame)),
     ),
     44,
   );
@@ -379,15 +379,15 @@ test('external crank drives meshed gears and output attachments without moving t
   let initialHeadings: number[] | undefined;
   for (const angle of [0, 17, -55, 180, 359, 360, 361, 720, -1080]) {
     const crank = box(15, 2, 3).relate(self => [
-      self.frame.align(base.frame),
+      align(self.frame, base.frame),
       rotate(0, angle, 0),
     ]);
-    const pinion = prototypes[0].relate(self => self.frame.align(crank.frame));
+    const pinion = prototypes[0].relate(self => align(self.frame, crank.frame));
     const gears = assembleGears([pinion, ...prototypes.slice(1)], {
       centerDistanceDelta: 0.2,
     });
     const output = box(20, 2, 3).relate(self =>
-      self.frame.align(gears[2].frame),
+      align(self.frame, gears[2].frame),
     );
     const assembly = snapshot(group([base, crank, ...gears, output]));
     const headings = assembly.children.slice(2, 5).map(child => {
@@ -453,7 +453,7 @@ test('internal and helical transmission remain engaged away from the initial pos
   ] as const)
     for (const angle of [-37, 53, 361]) {
       const driver = source.relate(self => [
-        self.frame.align(base.frame),
+        align(self.frame, base.frame),
         rotate(0, angle, 0),
       ]);
       assert.throws(

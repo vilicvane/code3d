@@ -135,7 +135,7 @@ test(
     const page = await open(t);
     await source(
       page,
-      "import {box,group} from '@code3d/core'; const base=box(20,2,20); const part=box(4,4,4).relate(self=>self.on(base.up)); export default group([base,part]);",
+      "import {on, box,group} from '@code3d/core'; const base=box(20,2,20); const part=box(4,4,4).relate(self=>on(self, base.up)); export default group([base,part]);",
       'part]',
     );
     await page.waitForFunction(() =>
@@ -271,7 +271,7 @@ for (const mode of ['3D', 'sketch']) {
           ? 'box(2, 3, 4)'
           : "sketch([['point',1,[0,0]],['circle',2,[1,2]]])";
       const annotation = '/** @code3d.arguments [4] */';
-      const code = `import {box, sketch} from '@code3d/core';
+      const code = `import {on, align, box, sketch} from '@code3d/core';
 ${annotation}
 export function design(size = 6) { return ${expression}; }
 const plain = ${plain};

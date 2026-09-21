@@ -22,9 +22,9 @@ after(async () => browser?.close());
 
 const sourceFor = (
   expression: string,
-) => `import {offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, loft, point, rectangle} from '@code3d/core';
+) => `import {on, align, offset, rotate, pivot, pivotVertex, pivotPoint, axisLine, axisEdge, loft, point, rectangle} from '@code3d/core';
 const base = rectangle(28, 20);
-const top = rectangle(18, 12).relate(p => p.on(point([0, 32, 0]).up));
+const top = rectangle(18, 12).relate(p => on(p, point([0, 32, 0]).up));
 const body = loft([base, top]);
 ${expression};`;
 
@@ -297,7 +297,7 @@ for (const method of [
     async t => {
       const expression =
         method === 'pivotVertex'
-          ? 'body.relate(self => [self.on(point([0,0,0]).up), pivotVertex().rotate(0,0,20)])'
+          ? 'body.relate(self => [on(self, point([0,0,0]).up), pivotVertex().rotate(0,0,20)])'
           : `body.${method}()`;
       const {page, errors} = await openApp(t, expression, `${method}()`);
       const emptyAppearance = await selectedModelAppearance(page);

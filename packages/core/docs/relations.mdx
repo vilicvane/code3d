@@ -23,12 +23,14 @@ then move that joint result.
 
 ## Touch a directional bound
 
-`part.on(base.up)` places the part above the base by translating its matching
+`part.relate(() => on(base.up))` places the part above the base by translating its matching
 bound into contact. The six target directions are `up` (+Y), `down` (−Y),
 `right` (+X), `left` (−X), `front` (+Z), and `back` (−Z), measured in the base's
 local frame. They describe its finite bounding extent, not particular faces.
 
-The source can also be a selected vertex, edge, or surface. Only that selected
+Import `on` and `align` from `@code3d/core`. `on(targetBound)` uses the whole
+current `relate` self. Use `on(sourceElement, targetBound)` to select a vertex,
+edge, surface, or named reference explicitly. Only that selected
 geometry contributes its extent. A tilted shape still has a support boundary
 in the target direction; `on` never rotates it. Without an offset, its position
 along the boundary plane stays unchanged.
@@ -70,8 +72,8 @@ Use `align` when the relationship should determine geometry and direction:
 
 ```ts
 const post = cylinder(5, 20).relate(self => [
-  self.axis.align(base.axis),
-  self.on(base.up),
+  align(self.axis, base.axis),
+  on(base.up),
 ]);
 ```
 
@@ -123,8 +125,8 @@ All models, including groups, expose `frame` and `origin` references.
 adds geometry to the result.
 
 ```ts
-const positioned = part.relate(self => self.origin.align(base.origin));
-const mounted = part.relate(self => self.frame.align(base.frame));
+const positioned = part.relate(self => align(self.origin, base.origin));
+const mounted = part.relate(self => align(self.frame, base.frame));
 ```
 
 Origin alignment leaves orientation free. Frame alignment coincides the origins
@@ -149,10 +151,10 @@ ratios and engagement phases.
 ## Choose a rotation pivot or axis
 
 ```ts
-import {pivot} from '@code3d/core';
+import {on, pivot} from '@code3d/core';
 
-const placed = part.relate(self => [
-  self.on(base.up),
+const placed = part.relate(() => [
+  on(base.up),
   pivot([50, 0, 0]).rotate(0, 0, 45),
 ]);
 ```
@@ -231,7 +233,7 @@ origin can happen to commute without changing the sequencing rule.
 ## Choose which part moves
 
 `relate` returns a new value and passes it to the callback as `self`. Every
-constraint must involve that value, even when written as `base.on(self.up)`.
+constraint must involve that value, even when written as `on(base, self.up)`.
 The parameter can have any name; it is its value that identifies the new part.
 External variables always refer to their existing model, so a part can be
 placed against the original value from which it was derived:
@@ -239,10 +241,7 @@ placed against the original value from which it was derived:
 ```ts
 const side = box(2, 250, 250);
 const leftSide = side;
-const rightSide = side.relate(self => [
-  self.on(leftSide.right),
-  offset(160, 0, 0),
-]);
+const rightSide = side.relate(() => [on(leftSide.right), offset(160, 0, 0)]);
 const assembly = group([leftSide, rightSide]);
 ```
 
@@ -303,10 +302,13 @@ its callback, related values use the same participants and the selected relation
 stage. Unrelated values use ordinary object preview; a mixed collection falls
 through as a whole so no unrelated member disappears.
 
-`on` and `align` have their own inspectors for the call, receiver and target.
-Selecting a reference emphasizes that reference. Selecting the method name shows
-the participating references without inventing a focused side. In
-`base.on(self.up)`, selecting `self.up` therefore focuses self's bound. Independent
+`on` and `align` have inspectors for the call and each explicit source or target
+argument. Selecting a reference emphasizes that reference. Selecting the function
+name or placing the caret immediately before its opening parenthesis emphasizes
+the current `relate` self and its participating reference, keeping the other side
+visible as context. This follows self’s identity even when self is the second
+argument. `on(target)` also shows self’s complete contact extent. In
+`on(base, self.up)`, selecting `self.up` therefore focuses self's bound. Independent
 `offset`, `pivot`, `pivotVertex`, `pivotPoint`, `axisEdge`, `axisLine` and `rotate`
 expressions use the relate stage; their editing handles remain separate from
 passive inspection. See [source inspection](runtime.md#source-inspection) for
@@ -374,8 +376,8 @@ gap: before the closing bracket at the end, or before the next item in the middl
 From an array gap, the same rule checks only the immediately following item;
 a mismatch keeps the insertion position.
 
-The start of a self expression, such as `|self.axis.align(...)`, also counts as
-self context. Plain rotate and pivot selectors match point rotation; axis selectors match
+The start of a constraint call, such as `|align(self.axis, base.axis)`, keeps
+the enclosing `relate` self as the spatial tool owner. Plain rotate and pivot selectors match point rotation; axis selectors match
 axis rotation. Choosing one does not activate a call of the other type.
 
 When an `offset` or `rotate` is selected, the matching tool edits that call.

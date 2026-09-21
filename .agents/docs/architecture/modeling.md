@@ -33,13 +33,15 @@ TypeScript 隐藏声明不等于 JavaScript 对象上的字段不可读；这是
 组合只在需要具体几何、查询或显示时解释相关模型的关系闭包；单独检查一个模型
 仍使用它自己的局部几何。复用同一个模型值与创建两个 `relate` 值具有不同身份。
 
+`on(targetBound)`、`on(sourceElement, targetBound)`、`align(sourceElement, targetElement)` 和 `coupleRotation(otherModel)` 是独立约束函数。省略的 source 在构造时绑定当前 self，显式引用保留原身份。
+
 `relate` 确定接受摆放的 self，约束与独立 Transformation 按顺序保存在新模型值的 placements 中。Constraint 表示 on/align 或独立 coupleRotation 条件，不提供变换或旋转选择器；独立 Transformation 只表示一次 offset 或 rotate，不提供完成后的链式方法。pivot/pivotVertex/pivotPoint 可接一次 pivotOffset，axisEdge/axisLine 可接一次 axisOffset；点与轴选择均用 rotate 返回 Transformation。选择与终结调用共用源码 trace。
 连续约束形成联合求解段；独立变换作用于该段结果，随后约束仅继承前段姿态与自由度，不继承其硬条件。求解器先联合求解条件，再执行独立 transformations；只有 Transformation 存储动作与参考，不保留约束内变换路径。引用其他零件时使用其最终姿态。连续 relate 调用接续原排列。快照的 relationStages 保存段边界、结果位姿和固定组合架；原点重表达和嵌套组合一起变换该架。
 独立 Transformation 不改变独立查看的局部几何。
 旋转选择按输入区分坐标 pivot、self 拓扑 pivotVertex/axisEdge 和直接引用 pivotPoint/axisLine。拓扑 ID 延后由 self 解析；外部点线保留所属模型，参与关系闭包并使用已求解姿态。点引用只改变中心，旋转及 pivotOffset 仍沿 self 操作前局部轴；求解器正向执行与逆向恢复共用同一旋转参考计算，避免在摆放确定前烘焙外部点。
 
 固定轴传动在既有 relation-solver 中先求累计角度，再固定对应姿态的旋转自由度并求位置。
-角度投影读取同一份 placements 的完整分段顺序，frame.align 传递角度，coupleRotation 应用
+角度投影读取同一份 placements 的完整分段顺序，frame/frame align 传递角度，coupleRotation 应用
 传动比和相位；显式 XYZ 或选轴 rotate 保留整圈。独立 `coupleRotation(other, config)` 在构造时从 relate 上下文取得 self，并读取两边模型自己的 axis，形成显式参与引用。模型轴提供局部方向和
 角度基准，frame 依赖把该局部轴映射到上游模型。角度只固定姿态，轴位置不增加接触约束。未涉及传动的装配继续既有位姿路径，不增加 App
 状态或跨帧历史。Core 拥有通用角度关系，Gears 拥有齿数、啮合相位与中心距离。
@@ -263,7 +265,7 @@ linear/radial/flex/fillFlex 显式指定 axis，grid/fillGrid 显式指定 axes�
 单行横向对齐可选；wrap 使用逐行主轴分配和行间 alignContent。Grid 先按行列归属
 测量 track minimum，再解析 auto/固定/fr 轨道，最后分别对齐轨道与格内模型。
 对应 fill 调用复用这些步骤；fillFlex 限单行，fillGrid 计算两个轴的完整网格数量。
-带目标空间的结果通过公开 `self.frame.align(space.frame)` 保留目标的完整位姿关系；
+带目标空间的结果通过公开 `align(self.frame, space.frame)` 保留目标的完整位姿关系；
 目标只参与求解依赖，不作为输出子模型。frame 是独立于几何的坐标系引用，origin
 是 frame.origin 的便捷入口。原点引用只约束位置，frame 对齐约束全部六个相对自由度。
 全部几何保持固定尺寸，显式轨道或目标空间不能容纳时报告错误。

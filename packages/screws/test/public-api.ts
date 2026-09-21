@@ -1,3 +1,4 @@
+import {on} from '@code3d/core';
 import {ISO4762} from '@code3d/screws';
 
 const spec: ISO4762.Specification = ISO4762.resolveSpecification('M6');
@@ -14,8 +15,8 @@ const counterbored: ISO4762.CounterboredHole = ISO4762.clearanceHole(input, 10);
 const counterboreElements: ISO4762.CounterboredSocketCapHoleElements =
   counterbored;
 
-screwElements.headBottom.on(counterboreElements.counterboreBottom);
-plainElements.shaftBottom.on(counterboreElements.shaftBottom);
+on(screwElements.headBottom, counterboreElements.counterboreBottom);
+on(plainElements.shaftBottom, counterboreElements.shaftBottom);
 // @ts-expect-error A plain clearance hole has no counterbore reference.
 plainElements.counterboreBottom;
 
@@ -60,7 +61,7 @@ const countersink: Direct10642.CountersunkHole = Direct10642.clearanceHole(
   'M6',
   10,
 );
-countersunk.headTop.on(countersink.countersinkTop);
+on(countersunk.headTop, countersink.countersinkTop);
 const plainCountersink = Direct10642.clearanceHole('M6', {
   depth: 10,
   countersink: false,
@@ -83,7 +84,7 @@ Direct7045.screw('M6', 20, {recess: 'T'});
 // @ts-expect-error ISO 7045 presets stop at M10.
 Direct7045.screw('M12', 20);
 const shoulder: Direct7379.Screw = Direct7379.screw(8, 20);
-shoulder.shoulderBottom.on(Direct7379.clearanceHole(8, 10).shaftBottom);
+on(shoulder.shoulderBottom, Direct7379.clearanceHole(8, 10).shaftBottom);
 shoulder.threadBottom;
 // @ts-expect-error ISO 7379 inputs name the shoulder diameter, not the thread.
 Direct7379.screw('M6', 20);
@@ -92,7 +93,7 @@ const shoulderPlain = Direct7379.clearanceHole(8, {depth: 12});
 shoulderPlain.counterboreBottom;
 const shoulderCounterbored: Direct7379.CounterboredHole =
   Direct7379.clearanceHole(8, {depth: 12, counterbore: true});
-shoulder.headBottom.on(shoulderCounterbored.counterboreBottom);
+on(shoulder.headBottom, shoulderCounterbored.counterboreBottom);
 const shoulderRecessOptions: Direct7379.CounterboreOptions = {
   diameter: 15,
   depth: 7,
@@ -134,12 +135,13 @@ import {GB70_1 as RootGB70_1, GB5281 as RootGB5281} from '@code3d/screws';
 const gbSpec: GB70_1.Specification = GB70_1.resolveSpecification('M6');
 const gbInput: RootGB70_1.ScrewInput = gbSpec;
 const gbCap: RootGB70_1.Screw = GB70_1.screw(gbInput, 20);
-gbCap.headBottom.on(GB70_1.clearanceHole('M6', 12).counterboreBottom);
+on(gbCap.headBottom, GB70_1.clearanceHole('M6', 12).counterboreBottom);
 // @ts-expect-error Disabling the counterbore removes its mounting references.
 GB70_1.clearanceHole('M6', {depth: 12, counterbore: false}).counterboreTop;
 GB70_2.screw('M6', 20).headBottom;
 GB70_2.clearanceHole('M6', {depth: 12, counterbore: true}).counterboreBottom;
-GB70_3.screw('M6', 20).headTop.on(
+on(
+  GB70_3.screw('M6', 20).headTop,
   GB70_3.clearanceHole('M6', {depth: 12, countersink: {diameter: 15}})
     .countersinkTop,
 );
@@ -156,7 +158,8 @@ GB80.screw('M6', 12).pointBottom;
 // @ts-expect-error GB/T 80 is headless and has no clearance-hole constructor.
 GB80.clearanceHole('M6', 12);
 const gbShoulder: RootGB5281.Screw = GB5281.screw(8, 20);
-gbShoulder.headBottom.on(
+on(
+  gbShoulder.headBottom,
   GB5281.clearanceHole(8, {
     depth: 12,
     diameter: 8.5,

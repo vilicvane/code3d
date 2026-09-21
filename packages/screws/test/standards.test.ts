@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as screws from '@code3d/screws';
-import {box, cut} from '@code3d/core';
+import {on, box, cut} from '@code3d/core';
 
 import {
   keep,
@@ -84,7 +84,7 @@ test('countersunk screws seat flush through named references without intersectin
   const hole = keep(screws.ISO10642.clearanceHole('M6', 10));
   const screw = keep(
     screws.ISO10642.screw('M6', 20).relate(part =>
-      part.headTop.on(hole.countersinkTop),
+      on(part.headTop, hole.countersinkTop),
     ),
   );
   const stock = keep(box(30, 10, 30));

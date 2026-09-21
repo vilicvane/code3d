@@ -40,7 +40,7 @@ description: 'code3d App 的既定三维可视化约定。USE FOR: 修改 viewpo
 - 同一个对象实例已有可见包围盒时，bound 只增加同色半透明填充；该实例没有包围盒时才补画面角线。按实际实例判断，不只看 node ID 或是否有 mesh；切换选择与重复实例各自更新。
 - 包围盒与 bound 共用角线算法：从边的两端各取不超过 18% 的短段，投影长度上限为 32px。透视下两端分别计算；线宽固定 1px。
 - 命名元素和关系 source/target 同时指向同一 bound 时去重，不叠加同一层填充。
-- `.on` 左侧显示参与求解的完整包围盒，保留接触支撑面的填充和方向；右侧显示目标 bound 面。模型/组合体取整个几何范围，指定点、边、面时只取该元素的有限范围。包围盒直接来自当前阶段的求解快照，沿目标参考系计算，不能用整个所属模型或渲染网格的世界轴包围盒替代。
+- `on` 左侧显示参与求解的完整包围盒，保留接触支撑面的填充和方向；右侧显示目标 bound 面。模型/组合体取整个几何范围，指定点、边、面时只取该元素的有限范围。包围盒直接来自当前阶段的求解快照，沿目标参考系计算，不能用整个所属模型或渲染网格的世界轴包围盒替代。
 - 关系包围盒替代同实例的普通选择框；支撑面不再重复画角线，退出关系预览后恢复普通选择框。退化为平面或线的包围盒只画不重复的有效边。
 - 真实模型面使用真实面组及其边界，保持青色面高亮语义，不套用 bound 参考面的角框。
 
@@ -49,7 +49,7 @@ description: 'code3d App 的既定三维可视化约定。USE FOR: 修改 viewpo
 - 方向头部共用 `ScreenSpaceArrowHead`，不要恢复随模型缩放的锥体箭头。
 - 普通参考轴显示双向箭头；关系中的有向轴显示单个正向箭头，`reverse()` 和面的 `flip()` 尊重已有方向元数据。
 - 曲线自身就是箭杆，只在有向端点放切向箭头头部，不另画短直线。反向曲线使用另一端及反向切线；闭合曲线使用稳定接缝点。
-- 被动预览由通用 JSDoc inspector 返回的 `target` / `ambient` 决定，renderer 不根据建模函数名或工具状态拼装画面。当前执行的输入即使未出现在返回场景中，也不能被自动补画为背景；摆放副本或新几何与原始输入的 node ID 不同不构成补画理由。循环背景只补其他执行实例。层级依次为 target 中与 `context.focused.values` 同一对象的值、其余 target、ambient；生成的新几何不继承输入 focused。没有 focused 时全部 target 保持完整强调，不因选中 on/align 方法名而人为指定 self 为主侧。
+- 被动预览由通用 JSDoc inspector 返回的 `target` / `ambient` 决定，renderer 不根据建模函数名或工具状态拼装画面。当前执行的输入即使未出现在返回场景中，也不能被自动补画为背景；摆放副本或新几何与原始输入的 node ID 不同不构成补画理由。循环背景只补其他执行实例。层级依次为 target 中与 `context.focused.values` 同一对象的值、其余 target、ambient；生成的新几何不继承输入 focused。Inspector 可用 `InspectResult.focused` 明确指定 target 焦点；省略时按当前源码值匹配。没有 focused 时全部 target 保持完整强调，renderer 不按函数名推断主侧。
 - 工具可用性由当前源码调用及其参数元数据派生，不以 inspect 返回可预览值为前提。空参数或失败调用没有检查画面时，仍发布其源码工具上下文，让候选选择与参数补入可用；不为此伪造公共 inspector 返回值。
 - 拓扑引用的空参数、无效 ID、空选择与有效选择共用所属模型的背景样式；有无已选元素只影响元素标记。缺失结果所需的被动背景由接口 inspector 声明，不在工具补画时退回普通模型材质或按方法名猜测预览层级。
 - 标记在 target:focused / target 层级分别保留基础不透明度或整组乘 0.7；没有 focused 时 target 使用基础不透明度。箭头、圆环、角线、范围框、真实边界及面填充一起变化，例如 bound 角线 85% / 59.5%、填充 18% / 12.6%。同一锚点的别名只画一次，最强层级生效；同属一个模型的不同元素仍保留各自身份。
@@ -57,12 +57,13 @@ description: 'code3d App 的既定三维可视化约定。USE FOR: 修改 viewpo
 - 普通表达式值预览保留模型材质本身的 opacity，不套用 inspect 层级上限；未指定材质的模型面仍使用默认 0.68。适用于单值、集合、组合体、普通调用结果、参数回退结果与补全预览。内部场景显式区分 preview / inspect 并随 Worker 传输、暂存恢复及截图使用，不靠 target 数量或 ambient 是否为空猜测。原始 Anchor 的所属模型仍是上下文背景。
 - inspector 场景中的模型透明度用于保证能看穿，采用 `max(材质透明度, 检查透明度)`，即 `opacity = min(材质 opacity, 层级上限)`，不与材质 opacity 相乘。focused 或无 focused 的 target 模型面上限 0.82，其余 target 模型面上限 0.4、线与点上限 0.5；主次必须在默认材质下也可辨认，不能依赖额外关系标记或只用不透明自定义材质验证。两侧保留模型颜色，外围使用淡灰上下文，面上限 0.18、线与点上限 0.28；不能把本来更透明的材质变实。点、曲线、实体和组合体子对象都遵循此规则，切换选择后重新判定。模型阈值与标记倍率各自定义。
 - cut 工具与 intersect 输入的参数 inspector 明确把选中的输入放入 target、其他输入放入 ambient；切入体积和交集也是 target，但不继承输入 focused。结果的语义颜色及前景显示由 inspector 的普通 material 值表达，不恢复按操作名分类的渲染分支。非 ambient 的 `depthTest: false` 材质须在普通半透明模型之后合成，不能只关闭深度测试却仍被透明绘制顺序遮住；辅助区域使用不受灯光与 tone mapping 改变的颜色。数组成员、整体数组和往返切换都验证实际画面及导出，不能只检查 focused 字段或材质配置。
-- source 与 target 的头部尺寸、形状一致；不以空心、放大或颜色变化表示主次。关系标记仅从当前选中的 align/on 关系生成；同段其他约束仍共同求解但不叠加轴面高亮。独立 self 表达式和 offset、pivot/pivotPoint/pivotVertex/axisEdge/axisLine/rotate 不显示无关关系标记，当前工具原点或旋转参考由工具保留。on/align 接收者或参数的显式 inspect 可显示该约束标记；不再叠加命名元素和旧拓扑预览 provider。
+- `on`、`align` 是独立函数：函数名及左括号前默认强调当前 relate self 及其参与约束的引用，另一侧次级显示；按 self 身份判断，不固定选择第一个参数。显式 source/target 参数按实际引用值聚焦；`on(target)` 的 source 是当前 self，不虚构 source 源码范围。导入别名和命名空间调用遵循相同规则。
+- source 与 target 的头部尺寸、形状一致；不以空心、放大或颜色变化表示主次。关系标记仅从当前选中的 align/on 关系生成；同段其他约束仍共同求解但不叠加轴面高亮。独立 self 表达式和 offset、pivot/pivotPoint/pivotVertex/axisEdge/axisLine/rotate 不显示无关关系标记，当前工具原点或旋转参考由工具保留。on/align 的 source/target 参数显式 inspect 可显示该约束标记；不再叠加命名元素和旧拓扑预览 provider。
 - 标记关注侧与引用值的归属分别保留；例如在 `axisLine(axis.axis)` 内强调 self 时，成员补全仍作用于 axis。未编译的成员候选预览不能混用旧关系快照；编译完成后恢复完整关系预览。
 - 面箭头沿面法向；方向元数据与 offset/旋转参考坐标架保持各自含义。
 - 整个 relate(...) 范围都显示空间工具入口，包括 self.axis、目标侧引用和回调块体；嵌套 relate 归最内层 self，循环保留当前执行实例。入口可用性与具体表达式的参数面板、轴面高亮和 gizmo 绑定分别派生；点击工具后才导航到 self 的变换，不能因正在查看目标引用就修改目标零件，也不默认激活工具。
 - relate 中显式调用显示的姿态、参考几何和工具必须来自同一个当前阶段快照；不能混入光标之后的 offset/rotate 结果。仅选择裸 self 时显示所属摆放段的完整结果；点击工具后，已有对应操作立即激活其完整表达式末尾和阶段，没有对应操作则显示实际插入位置之前的阶段。坐标架、候选和标记随该阶段同步，不能等首次拖动才切换。
-- 数组空白保留该位置的插入能力，激活工具时同样先比较紧随其后的 transformation，匹配才进入该项；否则光标留在插入空白，不借前一调用的名称高亮。预览只使用当前 relate 回调开始前的继承关系及空白前的条目；完成后的回调不能让后续条目混入前缀。数组项起点 |self.axis.align(...) 视为 self；当前调用匹配则继续编辑，否则只比较后面最近的一项 transformation，匹配就激活，不匹配就在它之前新增；不能越过其他变换或后续约束段。源码目标统一决定标记、面板、手柄与参考候选，binding 不另行查找调用。
+- 数组空白保留该位置的插入能力，激活工具时同样先比较紧随其后的 transformation，匹配才进入该项；否则光标留在插入空白，不借前一调用的名称高亮。预览只使用当前 relate 回调开始前的继承关系及空白前的条目；完成后的回调不能让后续条目混入前缀。数组项起点 `|align(self.axis, base.axis)` 保留当前 relate 的 self 工具归属；当前调用匹配则继续编辑，否则只比较后面最近的一项 transformation，匹配就激活，不匹配就在它之前新增；不能越过其他变换或后续约束段。源码目标统一决定标记、面板、手柄与参考候选，binding 不另行查找调用。
 - 关系阶段预览保留同一连续约束段的兄弟约束，联合求解；变换按当前操作截断为选中阶段，不能把各条关系拆成独立位置。独立 Transformation 截止当前操作，同一源码的循环实例各自使用对应阶段快照，不能只更新焦点实例而让其他实例混入后续操作。后续约束属于新段；选择 self 时展示所属段的完整变换结果。当前关系的高亮范围不改变该段求解范围。
 
 ## 颜色、层级与交互
@@ -91,7 +92,7 @@ description: 'code3d App 的既定三维可视化约定。USE FOR: 修改 viewpo
 
 - [辅助标记](../../../packages/app/src/rendering/anchor-decoration.ts)、[箭头头部](../../../packages/app/src/rendering/screen-space-arrow-head.ts)、[屏幕线与角线](../../../packages/app/src/rendering/screen-space-lines.ts)、[bound 样式](../../../packages/app/src/rendering/bound-appearance.ts)。
 - [元素/关系装饰](../../../packages/app/src/model/element-decorations.ts)、[空间控件](../../../packages/app/src/tools/transform-gizmo.ts)、[viewport](../../../packages/app/src/viewport.ts)。
-- `.on` 的完整源包围盒来自 [运行时](../../../packages/core/src/library/runtime.ts) 的 `ConstraintSnapshot.sourceBounds`；[浏览器回归](../../../packages/app/test/browser/on-source-bounds.test.ts) 检查实际绘制与选择框恢复。
+- `on` 的完整源包围盒来自 [运行时](../../../packages/core/src/library/runtime.ts) 的 `ConstraintSnapshot.sourceBounds`；[浏览器回归](../../../packages/app/test/browser/on-source-bounds.test.ts) 检查实际绘制与选择框恢复。
 - 主次规则见 [#46](https://github.com/vilicvane/code3d/issues/46)；[关系上下文](../../../packages/app/src/model/constraint-context.ts) 解析关注侧，[源码预览样式](../../../packages/app/src/rendering/source-appearance.ts) 定义模型各层级的不透明度上限，[焦点测试](../../../packages/app/test/relation-focus.test.ts) 覆盖源码边界与补全归属，[绘制测试](../../../packages/app/test/browser/relation-focus.test.ts) 核对多对象三级显示、材质透明度阈值、切换关系、整组标记不透明度和导出。
 - 边界与选择的完整上下文见[建模内核](../../docs/architecture/modeling.md)和[源码与交互工具](../../docs/architecture/tooling.md)，已确认需求见 [#40](https://github.com/vilicvane/code3d/issues/40)、[#43](https://github.com/vilicvane/code3d/issues/43)、[#44](https://github.com/vilicvane/code3d/issues/44)。
 - 改尺寸时验证缩放、大小模型、组合体、实例缩放、视口调整与 DPR；改 bound 时验证有/无包围盒、重复实例和切换选择；改关系时验证曲线端点、反向与阶段姿态。验证实际绘制和至少一组视觉结果，不只检查装饰数据。

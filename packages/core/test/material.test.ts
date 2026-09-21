@@ -15,7 +15,7 @@ import type {ModelSnapshotObject} from '@code3d/core/tooling';
 
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {box, circle, group, line, point} from '@code3d/core';
+import {on, box, circle, group, line, point} from '@code3d/core';
 import {
   modelElementReference,
   modelTopologyReference,
@@ -99,7 +99,7 @@ test('shared children keep independent appearance in differently colored groups'
 
 test('setting material on a related assembly preserves member identities and exposed topology', () => {
   const base = box(10, 10, 10);
-  const cap = box(4, 2, 4).relate(self => self.on(base.up));
+  const cap = box(4, 2, 4).relate(self => on(self, base.up));
   const assembly = group([base, cap]).expose({part: cap, mount: base.down});
   const colored = assembly.material('#aabbcc');
   try {

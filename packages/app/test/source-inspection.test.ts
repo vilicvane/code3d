@@ -197,7 +197,7 @@ test('failed intersection and zero extrusion retain complete original input scop
   assert.equal(scene.target[0].focused, true);
   for (const call of ['a.extrude(0)', 'extrude([a, b], 0)']) {
     const inspect = await compile(
-      `import {rectangle, extrude} from '@code3d/core';
+      `import {on, align, rectangle, extrude} from '@code3d/core';
       const a = rectangle(4, 6);
       const b = rectangle(8, 10).originOffset(-20, 0, 0);
       ${call};`,
@@ -599,12 +599,12 @@ test('serializes generated dimensions with their owner and keeps model geometry 
 
 test('distance inspection retains measured endpoints and poses when relate finishes later', async () => {
   const inspect =
-    await compile(`import {box, distance, group, offset} from '@code3d/core';
+    await compile(`import {on, box, distance, group, offset} from '@code3d/core';
     const base = box(10, 10, 10);
     const part = box(2, 2, 2).relate(self => {
       const before = distance(base.right, self.left, 'x');
       if (before !== 6) throw new Error('Wrong original measurement');
-      return [self.on(base.right), offset(3, 0, 0)];
+      return [on(self, base.right), offset(3, 0, 0)];
     });
     const after = distance(base.right, part.left, 'x');
     if (after !== 3) throw new Error('Wrong final measurement');
@@ -744,9 +744,9 @@ test('box and extrude parameter inspectors emit complete candidate segments and 
 
 test('group parameter inspection keeps each member in the actual assembly frame', async () => {
   const inspect =
-    await compile(`import {box, group, offset} from '@code3d/core';
+    await compile(`import {on, box, group, offset} from '@code3d/core';
     const a = box(10, 10, 10).relate(self => offset(20, 0, 0));
-    const b = box(2, 2, 2).relate(self => self.on(a.right));
+    const b = box(2, 2, 2).relate(self => on(self, a.right));
     const assembly = group([a, b]);
     export default group([assembly, assembly.relate(self => offset(100, 0, 0))]);`);
   const all = defined(await inspect('[a, b]', 0));
@@ -778,7 +778,7 @@ test('missing and invalid topology references inspect their owner while valid re
     for (const argument of ['', '0']) {
       const call = `body.${method}(${argument})`;
       const inspect = await compile(
-        `import {box} from '@code3d/core'; const body = box(4,6,8); ${call};`,
+        `import {on, align, box} from '@code3d/core'; const body = box(4,6,8); ${call};`,
         /IDs must be/,
       );
       const scene = defined(await inspect(call, call.length - 1));
@@ -788,7 +788,7 @@ test('missing and invalid topology references inspect their owner while valid re
     }
     const call = `body.${method}(1)`;
     const inspect = await compile(
-      `import {box} from '@code3d/core'; const body = box(4,6,8); ${call};`,
+      `import {on, align, box} from '@code3d/core'; const body = box(4,6,8); ${call};`,
     );
     const scene = defined(await inspect(call, call.length - 1));
     assert.equal(scene.target[0].kind, 'anchor');
@@ -796,7 +796,7 @@ test('missing and invalid topology references inspect their owner while valid re
   }
   for (const call of ['body.edge(1).vertex()', 'body.vertices([])']) {
     const inspect = await compile(
-      `import {box} from '@code3d/core'; const body = box(4,6,8); ${call};`,
+      `import {on, align, box} from '@code3d/core'; const body = box(4,6,8); ${call};`,
       call.endsWith('vertex()') ? /IDs must be/ : undefined,
     );
     const scene = defined(await inspect(call, call.length - 1));
@@ -808,8 +808,8 @@ test('missing and invalid topology references inspect their owner while valid re
 
 test('expose inspects recorded references in the receiving assembly without repeating getters', async () => {
   const inspect =
-    await compile(`import {box, group, offset} from '@code3d/core';
-    const body = box(4, 6, 8), other = box(2,2,2).relate(self => self.on(body.right));
+    await compile(`import {on, box, group, offset} from '@code3d/core';
+    const body = box(4, 6, 8), other = box(2,2,2).relate(self => on(self, body.right));
     let reads = 0;
     const refs = {get end() {if (++reads > 1) throw new Error('Getter repeated'); return other.right;}, center: body.center};
     const exposed = group([body, other]).expose(refs);
@@ -836,10 +836,10 @@ test('expose inspects recorded references in the receiving assembly without repe
 
 test('boolean inspectors preserve original placement and generate only the focused cut volume', async () => {
   const inspect =
-    await compile(`import {box, cut, union, intersect, group, offset} from '@code3d/core';
+    await compile(`import {align, box, cut, union, intersect, group, offset} from '@code3d/core';
     const stock = box(20,20,20).relate(self => offset(30,0,0));
-    const a = box(4,40,4).relate(self => [self.center.align(stock.center), offset(-5,0,0)]);
-    const b = box(4,40,4).relate(self => [self.center.align(stock.center), offset(5,0,0)]);
+    const a = box(4,40,4).relate(self => [align(self.center, stock.center), offset(-5,0,0)]);
+    const b = box(4,40,4).relate(self => [align(self.center, stock.center), offset(5,0,0)]);
     const result = cut(stock, [a,b]);
     stock.cut([a,b]); union([stock,a]); intersect([stock,a]);
     const far = box(2,2,2).originOffset(-100,0,0);
@@ -928,9 +928,9 @@ test('boolean inspectors preserve original placement and generate only the focus
 
 test('loft inspectors distinguish section and destructured spine parameters in the same solved frame', async () => {
   const inspect =
-    await compile(`import {circle, line, loft, offset} from '@code3d/core';
+    await compile(`import {align, circle, line, loft, offset} from '@code3d/core';
     const lower = circle(8);
-    const upper = circle(4).relate(self => [self.center.align(lower.center), offset(0,20,0)]);
+    const upper = circle(4).relate(self => [align(self.center, lower.center), offset(0,20,0)]);
     const path = line([0,20,0]);
     export default loft([lower, upper], {spine: path});`);
   const sections = defined(await inspect('[lower, upper]'));
@@ -995,14 +995,14 @@ test('sweep inspection distinguishes profile, spine and solid', async () => {
 
 test('relate call and closure inspectors use actual consumed participants and relation stages', async () => {
   const inspect =
-    await compile(`import {box, group, offset} from '@code3d/core';
+    await compile(`import {on, box, group, offset} from '@code3d/core';
     const base = box(10, 10, 10);
     const part = box(2, 2, 2).relate(self => {
       const extra = box(99, 2, 2);
       extra;
       const face = base.right;
       face;
-      const relation = self.on(face);
+      const relation = on(self, face);
       return [relation, offset(3, 0, 0)];
     });
     export default group([base, part]);`);
@@ -1042,11 +1042,11 @@ test('relate call and closure inspectors use actual consumed participants and re
 
 test('spatial relation parameters inspect their consumed stage without adopting unrelated values', async () => {
   const inspect =
-    await compile(`import {box, offset, pivotVertex, axisEdge} from '@code3d/core';
+    await compile(`import {on, box, offset, pivotVertex, axisEdge} from '@code3d/core';
     const base = box(10, 10, 10);
     export default box(2, 4, 6).relate(self => {
       const unused = pivotVertex(1);
-      return [self.on(base.up), offset(3, 0, 0), pivotVertex(6).pivotOffset(2, 0, 0).rotate(0, 0, 30), axisEdge(1).axisOffset(1, 0, 0).rotate(20)];
+      return [on(self, base.up), offset(3, 0, 0), pivotVertex(6).pivotOffset(2, 0, 0).rotate(0, 0, 30), axisEdge(1).axisOffset(1, 0, 0).rotate(20)];
     });`);
   for (const token of [
     'offset(3',
@@ -1070,7 +1070,7 @@ test('spatial relation parameters inspect their consumed stage without adopting 
 
 test('relate takes complete related collections and declines mixed collections without dropping members', async () => {
   const inspect =
-    await compile(`import {box, group, offset} from '@code3d/core';
+    await compile(`import {on, box, group, offset} from '@code3d/core';
     const base = box(10, 10, 10), extra = box(99, 2, 2);
     const part = box(2, 2, 2).relate(self => {
       const related = [self, [base.right]];
@@ -1082,7 +1082,7 @@ test('relate takes complete related collections and declines mixed collections w
       Object.defineProperty(mapped, 'values', {value() {throw new Error('Do not invoke override');}});
       const accessor = {self, get extra() {throw new Error('Do not invoke');}};
       related; mixed; named; mapped; unique; mixedMap; accessor;
-      const relations = [self.on(base.right), offset(3, 0, 0)];
+      const relations = [on(self, base.right), offset(3, 0, 0)];
       return relations;
     }); export default group([base, part]);`);
   for (const token of ['related;', 'named;', 'mapped;', 'unique;']) {
@@ -1118,11 +1118,11 @@ test('relate takes complete related collections and declines mixed collections w
 
 test('on returns the exact support bounds and operands in its joint constraint stage', async () => {
   const inspect =
-    await compile(`import {box, group, offset} from '@code3d/core';
+    await compile(`import {on, box, group, offset} from '@code3d/core';
     const base = box(10, 10, 10);
-    const part = box(2, 4, 6).relate(self => [self.on(base.right), offset(3, 0, 0)]);
+    const part = box(2, 4, 6).relate(self => [on(self, base.right), offset(3, 0, 0)]);
     export default group([base, part]);`);
-  const call = defined(await inspect('.on(', 1));
+  const call = defined(await inspect('on(', 1));
   assert.deepEqual(
     call.target.map(value => value.kind),
     ['model', 'model', 'anchor', 'anchor', 'bounds'],
@@ -1147,9 +1147,9 @@ test('on returns the exact support bounds and operands in its joint constraint s
     parameter.target.find(value => value.kind === 'bounds')?.focused,
     false,
   );
-  const receiver = defined(await inspect('self.on('));
+  const source = defined(await inspect('self, ', 1));
   assert.equal(
-    receiver.target.find(value => value.kind === 'bounds')?.focused,
+    source.target.find(value => value.kind === 'bounds')?.focused,
     true,
   );
 });
@@ -1200,11 +1200,12 @@ test('anchor annotations retain focus and both curve endpoints without changing 
 });
 
 test('align provides directed reference annotations for whole curve models', async () => {
-  const inspect = await compile(`import {line, box, group} from '@code3d/core';
+  const inspect =
+    await compile(`import {align, line, box, group} from '@code3d/core';
     const base = box(10, 10, 10);
-    const part = line([8, 0, 0]).relate(self => self.align(base.axis));
+    const part = line([8, 0, 0]).relate(self => align(self, base.axis));
     export default group([base, part]);`);
-  const scene = defined(await inspect('.align(', 1));
+  const scene = defined(await inspect('align(', 1));
   const refs = scene.target.filter(value => value.kind === 'anchor');
   assert.equal(refs.length, 2);
   assert.ok(refs.every(ref => ref.direction === 'forward'));
@@ -1296,11 +1297,12 @@ test('preserves optional-chain short circuiting and private method receivers', a
 });
 
 test('sketch inspect mixes models, independent planes, derived layers and point references', async () => {
-  const inspect = await compile(`import {box, sketch} from '@code3d/core';
+  const inspect =
+    await compile(`import {align, box, sketch} from '@code3d/core';
     const stock = box(20, 20, 20);
     const base = sketch([['point', 1, [2, 3]], ['circle', 2, [1, 4]]]);
-    const a = base.relate(s => s.plane.align(stock.up));
-    const b = base.derive([['point', 3, [5, 6]]]).relate(s => s.plane.align(stock.right));
+    const a = base.relate(s => align(s.plane, stock.up));
+    const b = base.derive([['point', 3, [5, 6]]]).relate(s => align(s.plane, stock.right));
     /** @code3d.inspect show.inspect */
     function show() { return stock; }
     namespace show { export function inspect() { return {ambient: [stock], target: [a, b, b.point(3)]}; } }
@@ -1324,13 +1326,13 @@ test('sketch inspect mixes models, independent planes, derived layers and point 
 
 test('sketch relate inspection retains each relation stage, participants and focused points', async () => {
   const inspect =
-    await compile(`import {box, sketch, offset} from '@code3d/core';
+    await compile(`import {align, box, sketch, offset} from '@code3d/core';
     const stock = box(20, 20, 20);
     const extra = sketch([['point', 9, [99, 99]]]);
     const profile = sketch([['point', 1, [2, 3]], ['point', 2, [7, 9]], ['line', 3, [1, 2]]]).relate(self => {
       const unrelated = extra;
       const selectedPoint = self.point(2);
-      return [self.plane.align(stock.up), offset(4, 0, 0)];
+      return [align(self.plane, stock.up), offset(4, 0, 0)];
     });
     export default profile;`);
   const call = defined(await inspect('.relate(', 1));
@@ -1340,7 +1342,7 @@ test('sketch relate inspection retains each relation stage, participants and foc
     Math.abs(profile.model.compositionTransform.position[0] - 4) < 1e-6,
   );
   assert.ok(call.ambient.some(item => item.kind === 'model'));
-  const relation = defined(await inspect('.align(', 1));
+  const relation = defined(await inspect('align(', 1));
   const before = relation.target.find(item => item.kind === 'sketch');
   assert.ok(before?.kind === 'sketch');
   assert.ok(Math.abs(before.model.compositionTransform.position[0]) < 1e-6);
