@@ -1,4 +1,4 @@
-import {input, timeOffset} from '@code3d/core';
+import {on, input, timeOffset} from '@code3d/core';
 import {
   box,
   anchorAnnotation,
@@ -91,9 +91,9 @@ const topologyKind: TopologyKind = body.surface(1).kind;
 const colored: typeof exposed = recolor(exposed);
 const rotated: typeof exposed = rotate(exposed);
 const rounded: typeof exposed = round(exposed);
-colored.mount.on(solid.up);
+on(colored.mount, solid.up);
 rotated.body.edges();
-rounded.mount.on(solid.down);
+on(rounded.mount, solid.down);
 // @ts-expect-error Exposed geometry is a reference, not a model value.
 body.material('#ffffff');
 

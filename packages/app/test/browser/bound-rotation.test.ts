@@ -311,7 +311,7 @@ test(
             instance.object.children[0].userData
               .decoration as import('../../src/viewport-decoration').ViewportDecoration,
         );
-        const source2 = `import {pivotVertex, rotate, box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [base.on(self.up), pivotVertex(3).rotate(0, 0, 45)]); export default group([base, part]);`;
+        const source2 = `import {on, pivotVertex, rotate, box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [on(base, self.up), pivotVertex(3).rotate(0, 0, 45)]); export default group([base, part]);`;
         const module2 = await compile(source2);
         const vertex = await inspect(module2, source2, 'pivotVertex(3)');
         const vertexIds = viewport.beginTopologySelection(
@@ -321,7 +321,7 @@ test(
           false,
           [3],
         );
-        const source3 = `import {axisLine, rotate, box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [self.on(base.up), axisLine(base.axis).rotate(35)]); export default group([base, part]);`;
+        const source3 = `import {on, axisLine, rotate, box, group} from '@code3d/core'; const base = box(20, 10, 30); const part = box(8, 6, 4).relate(self => [on(self, base.up), axisLine(base.axis).rotate(35)]); export default group([base, part]);`;
         const module3 = await compile(source3);
         await inspect(module3, source3, 'axisLine(base.axis)');
         await inspect(module3, source3, 'rotate(35)');

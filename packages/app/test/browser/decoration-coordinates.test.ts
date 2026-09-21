@@ -21,8 +21,8 @@ test(
       const {viewport, compiler} = window.decorationTest;
       const results = [];
       for (const kind of ['cut', 'union', 'intersect'] as const) {
-        const source = `import {box, point, cut, union, intersect, rotate} from '@code3d/core';
-const base = box(20, 20, 20).relate(self => [self.on(point().up), rotate(0, 0, 25)]);
+        const source = `import {on, align, box, point, cut, union, intersect, rotate} from '@code3d/core';
+const base = box(20, 20, 20).relate(self => [on(self, point().up), rotate(0, 0, 25)]);
 const cutter = box(30, 10, 30).originOffset(0, -5, 0);
 export default ${kind === 'cut' ? 'cut(base, [cutter])' : `${kind}([base, cutter])`};`;
         const module = await compiler.compile(
@@ -98,9 +98,9 @@ test(
       const {inspectSource} =
         await import('/test/browser/inspection-fixture.ts');
       const {viewport, compiler} = window.decorationTest;
-      const source = `import {rotate, offset, circle, loft, point, rectangle} from '@code3d/core';
-const start = circle(12).relate(s => [s.on(point([17, 8, -13]).up), rotate(0, 0, 25)]);
-const end = rectangle(18, 18).relate(s => [s.on(start.up), offset(0, 30, 0)]);
+      const source = `import {on, rotate, offset, circle, loft, point, rectangle} from '@code3d/core';
+const start = circle(12).relate(s => [on(s, point([17, 8, -13]).up), rotate(0, 0, 25)]);
+const end = rectangle(18, 18).relate(s => [on(s, start.up), offset(0, 30, 0)]);
 export default loft([start, end]);`;
       const module = await compiler.compile(
         {files: [{path: '/main.ts', source}]},
@@ -216,10 +216,10 @@ test(
         await import('/src/model/operation-decorations.ts');
       const results = [];
       for (const kind of ['fillet', 'chamfer'] as const) {
-        const source = `import {box, group, point} from '@code3d/core';
+        const source = `import {on, align, box, group, point} from '@code3d/core';
 const part = box(20, 10, 30).originVertex(3).rotate(10, 25, 0).${kind}(0.5, [1]);
 const assembly = group([part]);
-const moved = assembly.relate(self => self.on(point([40, 0, 0]).up));
+const moved = assembly.relate(self => on(self, point([40, 0, 0]).up));
 export default group([assembly, moved]);`;
         const module = await compiler.compile(
           {files: [{path: '/main.ts', source}]},
@@ -310,9 +310,9 @@ test(
         await import('/test/browser/inspection-fixture.ts');
       const results = [];
       for (const reversed of [false, true]) {
-        const source = `import {box, rotate, pivotVertex, offset} from '@code3d/core';
+        const source = `import {on, align, box, rotate, pivotVertex, offset} from '@code3d/core';
 const base = box(60, 2, 40);
-export default box(20, 10, 30).originVertex(3).rotate(10, 25, 15).relate(self => [${reversed ? 'base.on(self.up)' : 'self.on(base.up)'}, rotate(0, 45, 0), pivotVertex(6).rotate(0, 0, 90), offset(20, 0, 0)]);`;
+export default box(20, 10, 30).originVertex(3).rotate(10, 25, 15).relate(self => [${reversed ? 'on(base, self.up)' : 'on(self, base.up)'}, rotate(0, 45, 0), pivotVertex(6).rotate(0, 0, 90), offset(20, 0, 0)]);`;
         const module = await compiler.compile(
           {files: [{path: '/main.ts', source}]},
           '/main.ts',

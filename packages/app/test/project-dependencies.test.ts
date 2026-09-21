@@ -444,11 +444,11 @@ test('uses installed just-range ESM and types with builtin core across cached mo
               path: '/just-range.ts',
               source: [
                 'import range from "just-range";',
-                'import {offset, box, group} from "@code3d/core";',
+                'import {on, align, offset, box, group} from "@code3d/core";',
                 'const base = box(44, 2, 10);',
                 `const bars = range(${count}).map(i =>`,
                 '  box(4, 4 + i * 3, 4).relate(part =>',
-                '    [part.down.on(base.up), offset((i - 2) * 8, 0, 0)],',
+                '    [on(part.down, base.up), offset((i - 2) * 8, 0, 0)],',
                 '  ),',
                 ');',
                 'export default group([base, ...bars]);',
@@ -548,7 +548,7 @@ test('preserves top-level await, destructuring, cyclic source imports and litera
           {
             path: '/model.ts',
             source: [
-              'import {box} from "@code3d/core";',
+              'import { box} from "@code3d/core";',
               'import {height} from "./cyclic.ts";',
               'export function width() { return 12; }',
               'const {size, ...rest} = await import("./dimensions.ts");',
@@ -590,7 +590,7 @@ test('loads a static asset URL from the project and observes changed asset bytes
       {
         path: '/model.ts',
         source: [
-          'import {box} from "@code3d/core";',
+          'import { box} from "@code3d/core";',
           'const data = await fetch(new URL("./size.json", import.meta.url)).then(response => response.json());',
           'export default box(data.width, 2, 3);',
         ].join('\n'),
@@ -654,7 +654,7 @@ test('does not execute a dynamically imported source module before its branch is
       {
         path: '/model.ts',
         source: [
-          'import {box} from "@code3d/core";',
+          'import { box} from "@code3d/core";',
           'const enabled = await Promise.resolve(' + enabled + ');',
           'if (enabled) await import("./lazy.ts");',
           'export default box(4, 5, 6);',
@@ -732,7 +732,7 @@ for (const throughSource of [false, true] as const) {
         {
           path: '/model.ts',
           source: [
-            'import {box} from "@code3d/core";',
+            'import {on, align, box} from "@code3d/core";',
             'const enabled = await Promise.resolve(' + enabled + ');',
             `export default enabled ? (await import(${JSON.stringify(throughSource ? './lazy.ts' : 'template')})).default : box(1, 2, 3);`,
           ].join('\n'),

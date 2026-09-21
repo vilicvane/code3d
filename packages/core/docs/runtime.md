@@ -154,8 +154,12 @@ outward without re-entering that same call's parameter or call inspector. The ca
 receives the original argument tuple and `InspectContext`; method receivers are
 in `context.receiver`. Its `target` and `ambient` arrays own the complete scene.
 Returning `undefined` declines the scope; returning `{}` intentionally displays
-an empty scene. Target values matching `context.focused.values` receive focus;
-generated geometry does not inherit focus from its inputs.
+an empty scene. Target values matching `context.focused.values` receive focus
+by default; generated geometry does not inherit focus from its inputs. An
+inspector can return `focused` to explicitly select target identities for emphasis.
+For example, the `on` and `align` call inspectors focus the current self and its
+reference, while their parameter inspectors retain the actual source selection.
+This changes emphasis only; `target` and `ambient` still define the scene.
 
 For a function that returns related copies of input models,
 `inspectGroupMembers(result, inputs)` from `@code3d/core` renders each result

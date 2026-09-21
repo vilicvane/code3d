@@ -224,11 +224,11 @@ test(
       const {AgentObserver} = await import('/src/agent/observer.ts');
       const {browserPackageFiles} =
         await import('/src/project/browser-packages.ts');
-      const source = `import {box, sketch} from '@code3d/core';
+      const source = `import {align, box, sketch} from '@code3d/core';
 const stock = box(20,20,20);
 const base = sketch([['point', 1, [2,3]], ['point', 2, [15,0]], ['line', 3, [1,2]]]);
-const profile = base.relate(s => s.plane.align(stock.up));
-const side = base.relate(s => s.plane.align(stock.right));
+const profile = base.relate(s => align(s.plane, stock.up));
+const side = base.relate(s => align(s.plane, stock.right));
 /** @code3d.inspect show.inspect */
 function show() { return stock; }
 namespace show { export function inspect() { return {ambient: [stock], target: [box(7,3,4), profile, side]}; } }

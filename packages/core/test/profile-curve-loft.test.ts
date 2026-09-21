@@ -4,6 +4,8 @@ import {createModelSnapshotter, disposeModelObjects} from './model-test.ts';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
+  align,
+  on,
   offset,
   rotate,
   pivot,
@@ -59,10 +61,10 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
   const face = circle(5);
   const edge = line([0, 0, 0], [6, 2, 0]);
   const vertex = point([2, 3, 4]);
-  const faceRelated = circle(2).relate(self => self.surface(1).on(face.up));
-  const edgeRelated = line([1, 0, 0]).relate(self => self.edge(1).on(edge.up));
+  const faceRelated = circle(2).relate(self => on(self.surface(1), face.up));
+  const edgeRelated = line([1, 0, 0]).relate(self => on(self.edge(1), edge.up));
   const vertexRelated = point().relate(self => [
-    self.vertex(1).on(vertex.up),
+    on(self.vertex(1), vertex.up),
     offset(0, 0, 0),
   ]);
 
@@ -100,7 +102,7 @@ test('uses face, edge, and vertex topology as relation anchors', () => {
 test('resolves relation placement only inside a composition', () => {
   const snapshotModel = createModelSnapshotter();
   const target = point([2, 3, 4]);
-  const related = point().relate(self => self.align(target));
+  const related = point().relate(self => align(self, target));
   const assembly = group([target, related]);
 
   try {
@@ -127,11 +129,11 @@ test('lofts nonparallel planar profiles along a curved spine', () => {
     [4, 28, 14],
   ]);
   const start = circle(4).relate(profile => [
-    profile.center.align(point()),
+    align(profile.center, point()),
     rotate(0, 0, (-Math.atan2(12, 7) * 180) / Math.PI),
   ]);
   const end = rectangle(7, 4).relate(profile => [
-    profile.center.align(point([4, 28, 14])),
+    align(profile.center, point([4, 28, 14])),
     rotate(
       (Math.atan2(5, Math.hypot(6, 8)) * 180) / Math.PI,
       0,
@@ -167,7 +169,7 @@ test('lofts planar sections without a spine', () => {
   const snapshotModel = createModelSnapshotter();
   const base = circle(4);
   const location = point([0, 12, 0]);
-  const top = rectangle(5, 3).relate(profile => profile.on(location.up));
+  const top = rectangle(5, 3).relate(profile => on(profile, location.up));
   const result = loft([base, top]);
 
   try {
@@ -181,12 +183,12 @@ test('reports an unsuccessful loft without losing its editable sections', () => 
   const snapshotModel = createModelSnapshotter();
   const start = circle(20);
   const via = regularPolygon(20, 8).relate(self => [
-    self.on(start.up),
+    on(self, start.up),
     pivot([50, 0, 0]).rotate(0, 0, 45),
     offset(-18, 0, 0),
   ]);
   const end = rectangle(40, 40).relate(self => [
-    self.on(start.up),
+    on(self, start.up),
     pivot([50, 0, 0]).rotate(0, 0, 90),
   ]);
   const sections = group([start, via, end]);

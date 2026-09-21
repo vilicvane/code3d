@@ -1,4 +1,4 @@
-import {cylinder, frustum, union} from '@code3d/core';
+import {on, cylinder, frustum, union} from '@code3d/core';
 import {
   metric,
   headedScrew,
@@ -93,7 +93,7 @@ export function screw(input: ScrewInput, length: number): Screw {
     spec.headDiameter / 2,
     spec.headDiameter / 2 - headChamfer,
     headChamfer,
-  ).relate(part => part.on(barrel.up));
+  ).relate(part => on(part, barrel.up));
   const head = hexSocket(
     union([barrel, crown]),
     spec.hexSocketWidth,

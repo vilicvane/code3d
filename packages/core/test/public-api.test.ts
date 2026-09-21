@@ -19,6 +19,9 @@ const authoringValues = [
   'arc',
   'axisEdge',
   'axisLine',
+  'coupleRotation',
+  'on',
+  'align',
   'offset',
   'originCenter',
   'rotate',
@@ -61,8 +64,6 @@ const authoringValues = [
 
 const inspectorEntries = [
   'relate',
-  'on',
-  'align',
   'expose',
   'inspectTopologyReference',
   'inspectLength',

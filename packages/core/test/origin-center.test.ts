@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {
+  align,
+  on,
   box,
   font,
   group,
@@ -49,7 +51,7 @@ test('single values and singleton arrays match the instance operation, including
   const source = keep(
     regularPrism(6, 2, 3)
       .rotate(0, 45, 0)
-      .relate(self => self.on(base.up)),
+      .relate(self => on(self, base.up)),
   );
   const direct = keep(source.originCenter());
   for (const actual of [
@@ -113,10 +115,12 @@ test('batch centering resolves member placements and frames once without changin
   const base = keep(
     box(8, 4, 6)
       .rotate(0, 25, 0)
-      .relate(self => [self.frame.align(reference.frame), rotate(0, 40, 0)]),
+      .relate(self => [align(self.frame, reference.frame), rotate(0, 40, 0)]),
   );
-  const second = keep(rectangle(3, 5).relate(self => self.on(base.up)));
-  const third = keep(box(2, 3, 4).relate(self => self.frame.align(base.frame)));
+  const second = keep(rectangle(3, 5).relate(self => on(self, base.up)));
+  const third = keep(
+    box(2, 3, 4).relate(self => align(self.frame, base.frame)),
+  );
   const source = [base, second, third] as const;
   const assembly = keep(group(source));
   const shift = center(assembly);

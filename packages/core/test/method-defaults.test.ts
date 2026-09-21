@@ -1,4 +1,4 @@
-import {offset, rotate, pivot, pivotVertex, axisLine} from '@code3d/core';
+import {on, offset, rotate, pivot, pivotVertex, axisLine} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
@@ -185,7 +185,7 @@ for (const operation of [
     t.after(() => disposeModelObjects(models));
     const place = (args: readonly unknown[]): Model => {
       const model = source.relate(self => {
-        const constraint = self.on(base.up);
+        const constraint = on(self, base.up);
         if (operation === 'pivot') {
           const chain = Reflect.apply(pivot, undefined, args);
           return [constraint, chain.rotate(0, 0, 25)];

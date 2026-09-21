@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Anchor, Model} from '@code3d/core';
 import {
+  align,
+  on,
   rotate,
   axisLine,
   box,
@@ -83,8 +85,8 @@ test('direct assembly retains the common origin even with unequal geometry bound
 
 test('group inherits its first member frame independently of geometry bounds and later origins', () => {
   const a = point([100, 0, 0]);
-  const b = point().relate(self => self.align(point([2, 4, -8])));
-  const c = point().relate(self => self.align(point([20, -6, 2])));
+  const b = point().relate(self => align(self, point([2, 4, -8])));
+  const c = point().relate(self => align(self, point([20, -6, 2])));
   const assembly = group([a, b, c]).expose({a, b, c});
   const children = snapshot(assembly).children;
   near(children[0].transform.position, [0, 0, 0]);
@@ -97,7 +99,7 @@ test('group inherits its first member frame independently of geometry bounds and
 
 test('only the chosen reference member defines the new group frame after an origin edit', () => {
   const target = point([20, 0, 0]);
-  const original = box(2, 2, 2).relate(self => self.center.align(target));
+  const original = box(2, 2, 2).relate(self => align(self.center, target));
   const changed = original.originOffset(5, 0, 0);
   const before = snapshot(group([target, original]));
   const after = snapshot(group([target, changed]));
@@ -117,11 +119,11 @@ test('only the chosen reference member defines the new group frame after an orig
 
 test('first-member orientation and translation define the full frame and ordering preserves relative poses', () => {
   const first = box(8, 6, 4).relate(self => [
-    self.center.align(point([20, 4, 6])),
+    align(self.center, point([20, 4, 6])),
     rotate(10, 20, 30),
   ]);
   const second = box(2, 4, 6).relate(self => [
-    self.center.align(point([-5, 8, 12])),
+    align(self.center, point([-5, 8, 12])),
     rotate(-15, 25, 5),
   ]);
   const firstPose = snapshot(first).compositionTransform;
@@ -143,7 +145,7 @@ test('first-member orientation and translation define the full frame and orderin
 
 test('group rebasing preserves solved internal relations, anchors, bounds and earlier values', () => {
   const base = box(10, 10, 10);
-  const cap = box(2, 2, 2).relate(self => self.on(base.up));
+  const cap = box(2, 2, 2).relate(self => on(self, base.up));
   const assembly = group([base, cap]).expose({base, cap});
   const moved = assembly.originOffset(3, 5, 7);
   const before = snapshot(assembly),
@@ -181,7 +183,7 @@ test('group rebasing preserves solved internal relations, anchors, bounds and ea
 test('originPoint resolves a rotated member into the group frame and keeps explicit origin through copies', () => {
   const body = box(8, 6, 4);
   const instance = body.relate(self => [
-    self.center.align(point([20, 4, 6])),
+    align(self.center, point([20, 4, 6])),
     rotate(0, 0, 90),
   ]);
   const assembly = group([point(), instance]).expose({body: instance});
@@ -203,7 +205,7 @@ test('originPoint resolves a rotated member into the group frame and keeps expli
 
 test('nested groups contribute their own origin once and rebase as a rigid assembly', () => {
   const body = box(2, 2, 2).relate(self =>
-    self.center.align(point([30, 0, 0])),
+    align(self.center, point([30, 0, 0])),
   );
   const inner = group([point(), body]).expose({body}).originOffset(4, 0, 0);
   const outer = group([inner, point()]).expose({inner});
@@ -218,8 +220,8 @@ test('nested groups contribute their own origin once and rebase as a rigid assem
 test('ambiguous repeated members require a concrete occurrence reference', () => {
   const body = box(2, 2, 2);
   const part = group([body]).expose({body});
-  const left = part.relate(self => self.body.center.align(point([-10, 0, 0])));
-  const right = part.relate(self => self.body.center.align(point([30, 0, 0])));
+  const left = part.relate(self => align(self.body.center, point([-10, 0, 0])));
+  const right = part.relate(self => align(self.body.center, point([30, 0, 0])));
   const assembly = group([left, right]).expose({
     leftPart: left,
     rightPart: right,
@@ -238,7 +240,7 @@ test('group origin edits carry its existing self relation references without mov
   const body = box(2, 2, 2);
   const original = group([body])
     .expose({body})
-    .relate(self => self.body.vertex(3).align(point([20, 30, 40])));
+    .relate(self => align(self.body.vertex(3), point([20, 30, 40])));
   const moved = original
     .originPoint(original.body.center)
     .originOffset(3, 5, 7);
@@ -273,7 +275,7 @@ test('empty groups retain zero as their default and allow explicit origin edits'
 
 test('group rotation carries solved members, references and bounds around the selected origin', () => {
   const base = box(10, 10, 10);
-  const cap = box(2, 2, 2).relate(self => self.on(base.up));
+  const cap = box(2, 2, 2).relate(self => on(self, base.up));
   const original = group([base, cap])
     .expose({base, cap})
     .originPoint(cap.center);
@@ -306,7 +308,7 @@ test('group rotation carries solved members, references and bounds around the se
       Math.SQRT1_2,
     ]);
   }
-  const placed = box(2, 2, 2).relate(self => self.on(rotated.right));
+  const placed = box(2, 2, 2).relate(self => on(self, rotated.right));
   near(
     snapshot(group([rotated, placed])).children[1].transform.position,
     [12, 0, 0],
@@ -322,15 +324,15 @@ test('group rotation carries solved members, references and bounds around the se
 test('nested repeated assemblies rotate rigidly in fixed XYZ order without re-solving member relations', () => {
   const base = box(10, 4, 6);
   const cap = box(2, 2, 2).relate(self => [
-    self.on(base.up),
+    on(self, base.up),
     axisLine(base.axis).rotate(35),
   ]);
   const part = group([base, cap]).expose({base, cap});
   const left = part.relate(self => [
-    self.base.center.align(point([-10, 0, 0])),
+    align(self.base.center, point([-10, 0, 0])),
     rotate(10, 20, 30),
   ]);
-  const right = part.relate(self => self.base.center.align(point([30, 0, 0])));
+  const right = part.relate(self => align(self.base.center, point([30, 0, 0])));
   const original = group([left, right])
     .expose({leftPart: left, rightPart: right})
     .originPoint(right.base.center);
@@ -371,7 +373,7 @@ test('direct group rotation updates stored self references and preserves externa
   const target = point([20, 30, 40]);
   const original = group([body])
     .expose({body})
-    .relate(self => self.body.vertex(3).align(target));
+    .relate(self => align(self.body.vertex(3), target));
   const rotated = original.rotate(15, 25, 35);
   const result = snapshot(rotated);
   near(

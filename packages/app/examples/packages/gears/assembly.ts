@@ -1,4 +1,4 @@
-import {box, group} from '@code3d/core';
+import {on, box, group} from '@code3d/core';
 import {assembleGears, spurGear} from '@code3d/gears';
 
 const pinion = spurGear({
@@ -35,8 +35,8 @@ export const gears = assembleGears([pinion, wheel, idler], {
 const mountingPlate = box(160, 4, 120)
   .originOffset(-35, 0, -20)
   .material('#536675');
-export const train = group(gears, 'Three-gear train').relate(self =>
-  self.on(mountingPlate.up),
+export const train = group(gears, 'Three-gear train').relate(() =>
+  on(mountingPlate.up),
 );
 
 export default group([mountingPlate, train], 'Mounted gear train');

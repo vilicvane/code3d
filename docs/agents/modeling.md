@@ -78,21 +78,25 @@ before promising a feature.
 `part.relate(self => ...)` returns a new value. Every constraint must involve
 the callback value; external variables, including `part`, keep their original
 identity. Select the new value's elements and rotation references through `self`.
-This rule also applies to sketch frames.
+This rule also applies to sketch frames. Import `on` and `align` from Core.
+`on(targetBound)` places the whole current self; `on(sourceElement, targetBound)`
+selects a specific source. `align(sourceElement, targetElement)` always states
+both references. A callback that needs no explicit self can use
+`part.relate(() => on(base.up))`.
 
 `model.frame` references the model's coordinate system;
 `model.origin` is the same non-geometric reference as `model.frame.origin`.
-Use `self.frame.align(target.frame)` to match complete placement, or
-`self.origin.align(target.origin)` to match only origin position. Layout calls
+Use `align(self.frame, target.frame)` to match complete placement, or
+`align(self.origin, target.origin)` to match only origin position. Layout calls
 with a target space follow its frame automatically; spread the returned models
 into the final group without including the construction space.
 
 Use `relate` for composition placement and `originOffset` to change local
-geometry coordinates. Constraints only describe `on`/`align`; they have no
+geometry coordinates. Constraints describe `on`, `align` or fixed-axis `coupleRotation`; they have no
 chained offset, rotation or pivot/axis selectors. Consecutive constraints solve jointly. Independent Core
 `offset`/`rotate` values move that result; later constraints start a new segment
 from the preceding pose. Offset uses fixed composition axes, while rotation
-defaults to the current part origin. `pivot([x,y,z])` chooses self coordinates; `pivotVertex(id)` and `axisEdge(id)` choose self topology; `pivotPoint(pointRef)` and `axisLine(lineRef)` accept references. Each selector ends with `rotate`: XYZ angles for a point, one angle for an axis. External references follow their owning model’s solved position; point references retain self’s rotation axes.
+defaults to the current part origin. `pivot([x,y,z])` chooses self coordinates; `pivotVertex(id)` and `axisEdge(id)` choose self topology; `pivotPoint(pointRef)` and `axisLine(lineRef)` accept references. A selector can end with `rotate`: XYZ angles for a point, one angle for an axis. Inside `relate`, the standalone `coupleRotation(otherModel, {ratio, phase})` constrains self’s cumulative angle to `ratio * otherAngle + phase`, using each model’s own `.axis`. External references follow their owning model’s solved position; point references retain self’s rotation axes.
 In the App, selecting `relate()` or its callback self exposes spatial tools without
 activating one by default. Adding a transformation to a single returned constraint
 converts the return value to an array. A selector and its final rotation share one tool and parameter panel. Picking a reference on an unfinished selector appends its missing zero-angle rotation; existing rotations and reference offsets are preserved. The edit undoes as one step. Only the focused align/on relation shows its axes/faces; self and transformation tools keep their own reference markers.
@@ -140,6 +144,14 @@ state or history-dependent mechanism solving.
 
 See [time offset](../../packages/core/docs/runtime.md#time-offset) and the
 [rotating arm example](../../packages/app/examples/constraints/animation.ts).
+
+For a fixed parallel-axis gear train, attach the input gear to a driven crank's
+frame before `assembleGears()`. Returned gears carry tooth-ratio rotation
+constraints; output shafts and cranks use ordinary frame alignment. Only the input
+crank reads `input()` or `timeOffset()`. Use cumulative angles without `% 360`
+when a downstream ratio must preserve whole revolutions. See the
+[transmission example](../../packages/app/examples/packages/gears/transmission.ts)
+and [supported motion scope](../../packages/gears/docs/api.md#drive-through-connected-parts).
 
 ## Reuse expensive computations
 

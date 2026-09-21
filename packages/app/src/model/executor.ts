@@ -448,7 +448,9 @@ export function createModelExecutor(
       return result;
     },
 
-    parameterValue(
+    currentRelationSelf,
+
+    scopedValue(
       file: string,
       start: number,
       end: number,
@@ -1429,7 +1431,7 @@ export function createModelExecutor(
     const sourceInputTraces = [...sourceExecutionTraces.values()].flatMap(
       execution => execution.inputs,
     );
-    const parameterScopes = new Map<string, SourceRef>(
+    const valueScopes = new Map<string, SourceRef>(
       [...sourceValueTraces.values()].flatMap(trace =>
         trace.scopeRef
           ? [[`source:${trace.kind}:${trace.id}`, trace.scopeRef] as const]
@@ -2057,7 +2059,6 @@ export function createModelExecutor(
             toolSite?.transformationInsertion ??
             relationSite?.transformationInsertion,
           sourceRef: toolSite?.sourceRef ?? trace.sourceRef,
-          receiverRef: relationSite?.receiverRef,
           functionId: designFunctionAt(trace.sourceRef, designArguments),
           evaluations,
           tool: sourceTool(toolSite),
@@ -2066,21 +2067,21 @@ export function createModelExecutor(
         if (!relationSite) return [target];
         return [
           target,
-          {
+          ...relationSite.arguments.map(({side, sourceRef}) => ({
             ...target,
-            id: `${target.id}:argument`,
-            sourceRef: relationSite.targetRef,
+            id: `${target.id}:${side}`,
+            sourceRef,
             evaluations: evaluations.map(evaluation => {
               const constraint = evaluatedConstraint(objects, evaluation);
               return {
                 ...evaluation,
-                constraintFocus: 'target' as const,
+                constraintFocus: side,
                 focusNodeIds: constraint
-                  ? [constraint.target.nodeId]
+                  ? [constraint[side].nodeId]
                   : evaluation.focusNodeIds,
               };
             }),
-          },
+          })),
         ];
       },
     );
@@ -2196,7 +2197,7 @@ export function createModelExecutor(
         target.kind === 'transformation'
       )
         return target;
-      const scopeRef = parameterScopes.get(target.id);
+      const scopeRef = valueScopes.get(target.id);
       const containing = [
         ...constraintTargets,
         ...transformationTargets,
@@ -2204,7 +2205,8 @@ export function createModelExecutor(
         constraint =>
           constraint.sourceRef.file === target.sourceRef.file &&
           (scopeRef
-            ? constraint.evaluations[0]?.constraintFocus !== 'target' &&
+            ? (constraint.kind === 'transformation' ||
+                constraint.evaluations[0]?.constraintFocus === 'self') &&
               scopeRef.start <= constraint.sourceRef.start &&
               constraint.sourceRef.end <= scopeRef.end
             : constraint.sourceRef.start <= target.sourceRef.start &&
@@ -2328,14 +2330,7 @@ export function createModelExecutor(
                 );
                 const constraintFocus = scopeRef
                   ? 'self'
-                  : candidate.constraintFocus === 'target'
-                    ? 'target'
-                    : constraint.receiverRef &&
-                        constraint.receiverRef.start <=
-                          target.sourceRef.start &&
-                        target.sourceRef.end <= constraint.receiverRef.end
-                      ? 'source'
-                      : 'self';
+                  : (candidate.constraintFocus ?? 'self');
                 const context = {
                   ...evaluation,
                   valueNodeIds: evaluation.nodeIds,
@@ -2509,11 +2504,11 @@ export function createModelExecutor(
     // Array gaps own their insertion prefix, not the final stage of a nearby call.
     for (const site of relationArraySites) {
       const self = valueTargets.find(
-        target => target.id === `source:value:${site.parameterId}`,
+        target => target.id === `source:value:${site.selfId}`,
       );
       if (!self) continue;
       const trace = [...sourceValueTraces.values()].find(
-        trace => trace.id === site.parameterId,
+        trace => trace.id === site.selfId,
       )!;
       const relations = [...constraintTargets, ...transformationTargets]
         .filter(
@@ -2531,7 +2526,7 @@ export function createModelExecutor(
             .filter(target => target.sourceRef.end <= gap.start)
             .at(-1) ?? relations[0];
         const id = `${self.id}:array:${site.sourceRef.start}:${index}`;
-        parameterScopes.set(id, nearest?.sourceRef ?? site.sourceRef);
+        valueScopes.set(id, nearest?.sourceRef ?? site.sourceRef);
         const target = withConstraintContext({
           ...self,
           id,
@@ -2777,7 +2772,7 @@ export function createModelExecutor(
         const self = completedTargets.find(
           candidate =>
             candidate.kind === 'value' &&
-            (parameterScopes.has(candidate.id) || candidate.relationArray) &&
+            (valueScopes.has(candidate.id) || candidate.relationArray) &&
             candidate.sourceRef.file === ref.file &&
             candidate.sourceRef.start >= ref.start &&
             candidate.sourceRef.end <= ref.end &&

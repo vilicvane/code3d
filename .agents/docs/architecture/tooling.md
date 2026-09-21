@@ -66,7 +66,7 @@ Monaco 补全候选的预览把候选编辑应用到临时项目快照，再走�
 
 这些差异由用途决定：建模步骤展示操作输入与消费者，关系预览展示当前约束阶段，
 测量预览展示调用时的共同几何快照。求解闭包与高亮范围不同：参与求解的模型可以只作为
-弱化背景，当前约束 / 测量之外的元素不自动高亮。裸 self 不叠加关系标记，但显式外部模型 receiver（如 `base.on(self.up)` 的 `base`）属于当前约束源侧，仍显示两侧标记。没有 relate 时，仅以各值原点重合
+弱化背景，当前约束 / 测量之外的元素不自动高亮。`on`/`align` 的函数名及左括号前默认强调当前 self 与其参与约束的引用，另一侧保留次级显示；self 按上下文身份判断，不取固定参数位置。显式 source/target 实参各自聚焦，导入别名与命名空间调用按解析签名识别。省略 source 的 `on(target)` 使用当前 self；编译器只记录实际参数范围，空间工具的归属始终来自 enclosing relate。回调入口记录实际 current self，数组插入与完整回调的工具入口不依赖作者是否声明 self 参数；不改写函数参数或制造源码参数范围。Inspector 可通过 `InspectResult.focused` 显式指定 target 中的焦点身份；省略时仍按当前源码值匹配，渲染与导出共用检查快照。独立的裸 self 不叠加关系标记，但显式外部模型 source 参数（如 `on(base, self.up)` 的 `base`）属于当前约束源侧，仍显示两侧标记。没有 relate 时，仅以各值原点重合
 解释组合位置；预览关系不写回新的约束。多个后续消费者或重复调用保留各自执行上下文，
 默认选最近运行实例，不能按数值相等合并。
 
@@ -212,7 +212,7 @@ sourceContext 与实际 toolBinding，标记已存在的调用及统一旋转链
 激活描述使用已登记的 sourceRef，先重定位完整范围再将光标放到末尾；导航命令携带
 该 sourceRef 区分无尾逗号数组中重叠的调用末尾和插入点，重新编译沿现有语义焦点保留选择，
 不构造源码追踪表中不存在的零宽范围。数组空白只显示光标，不高亮邻接的 identifier。
-原生光标在下一条表达式起点时属于该表达式，例如 |self.axis.align(...) 仍按 self 查找工具。
+原生光标在下一条表达式起点时属于该表达式，例如 `|align(self.axis, base.axis)` 保留当前 relate 的 self 工具归属。
 `contextualToolSource` 统一提供参数、拓扑与空间工具的调用范围；`observeSourceContext`
 消费其范围并维护标记及自动滚动，范围未变化的刷新不会重置用户滚动。所有带定位信息的
 SourceTextEdit 都由编辑器源码事务定位和滚动，不在具体工具中重复实现。Monaco 失焦时
@@ -533,7 +533,7 @@ backdrop blur and shadow, and each readout row uses
 
 ### 独立 Transformation 与分段工具
 
-Core 快照的 relationStages 提供分段边界，transformations 保留动作的 sourceRef 和结果架。contextualToolActivation 是已有调用与插入位置的唯一选择入口；它读取当前完整模块，不能拿截断的阶段预览查找后项。编辑器命令提交源码目标后，源码标记、面板、参考选择和 gizmo 都消费该目标。binding 构建不做候选调用搜索。单值 return 可转数组，完成后的独立变换不允许接链。Constraint 只携带 on/align、参与引用和源码追踪，不携带变换动作或 offset/rotation 快照；工具统一使用 Transformation 快照、spatial bindings 和 model.spatial 事务。
+Core 快照的 relationStages 提供分段边界，transformations 保留动作的 sourceRef 和结果架。contextualToolActivation 是已有调用与插入位置的唯一选择入口；它读取当前完整模块，不能拿截断的阶段预览查找后项。编辑器命令提交源码目标后，源码标记、面板、参考选择和 gizmo 都消费该目标。binding 构建不做候选调用搜索。单值 return 可转数组，完成后的独立变换不允许接链。独立 coupleRotation 是完成的 Constraint，构造时解析隐含 self；源码检查通过通用关系 inspector 显示两个模型及其轴，函数名与 other 参数消费同一阶段，参数引用保留焦点身份。Constraint 携带 on/align 或 coupleRotation 参数、参与引用和源码追踪，不携带变换动作或 offset/rotation 快照；工具统一使用 Transformation 快照、spatial bindings 和 model.spatial 事务。
 
 relate 直接返回数组内的空白是 self 的插入上下文，保留实际 callback 的执行实例。编译器记录前置数组项及对应插入锚点；执行器按 callback 实例还原该前缀，Core 从该回调开始前的继承关系构造预览，不混入已完成回调的后续操作。在空白中激活工具同样只比较紧随其后的第一项；匹配则定位已有项，否则保持该插入位置；空数组也提供入口。末尾光标在 ] 前，中间在后续项前，且不高亮邻接的调用名称。
 

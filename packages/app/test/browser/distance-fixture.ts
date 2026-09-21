@@ -12,9 +12,9 @@ let viewport: ModelViewport;
 let client: ModelCompilerClient;
 let module: ModelModule;
 let inspection: InspectionSnapshot;
-const source = `import {box,distance,group,offset,point,line} from '@code3d/core';
+const source = `import {on, box,distance,group,offset,point,line} from '@code3d/core';
   const left=box(8,30,32).material('#708090');
-  const right=box(8,30,32).relate(self=>[self.on(left.right),offset(60,0,0)]).material('#708090');
+  const right=box(8,30,32).relate(self=>[on(self, left.right),offset(60,0,0)]).material('#708090');
   const gap=distance(left.right,right.left,'x');
   distance(left, right);
   const tubeA=box(5,10,80).shell(0.5,[5,6]).rotate(-90,0,0).material('#708090');
@@ -26,7 +26,7 @@ const source = `import {box,distance,group,offset,point,line} from '@code3d/core
   distance(left.up,left.up,'y');
   distance(left.left,left.right,'x');
   const corner=point([-4,-15,-16]); distance(corner,left.front,'z');
-  const beam=box(gap,10,24).relate(self=>self.on(left.right));
+  const beam=box(gap,10,24).relate(self=>on(self, left.right));
   export default group([left,right,beam]).expose({supportA:left,supportB:right,beam});`;
 
 export async function startDistanceFixture() {

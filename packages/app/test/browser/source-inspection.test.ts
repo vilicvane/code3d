@@ -155,7 +155,7 @@ test(
     });
     for (const displaced of [true, false]) {
       await page.evaluate(displaced => {
-        const source = `import {box, intersect} from '@code3d/core';
+        const source = `import {on, align, box, intersect} from '@code3d/core';
         const a = box(4,4,4), b = box(6,6,6)${displaced ? '.originOffset(-20,0,0)' : ''};
         export default intersect([a,b]);`;
         const editor = window.inspectionApp.codeEditor.editor;
@@ -495,11 +495,11 @@ test(
         onPositionTool() {},
         onTopologySelection() {},
       });
-      const source = `import {box, distance, offset, group} from '@code3d/core';
+      const source = `import {on, box, distance, offset, group} from '@code3d/core';
       const base = box(10, 10, 10);
       const part = box(2, 2, 2).relate(self => {
         distance(base.right, self.left, 'x');
-        return [self.on(base.right), offset(3, 0, 0)];
+        return [on(self, base.right), offset(3, 0, 0)];
       });
       distance(base.right, part.left, 'x');
       export default group([base, part]);`;
@@ -552,7 +552,7 @@ test(
         const after = await render('distance(base.right, part.left');
         const selection = {
           file: '/model.ts',
-          offset: source.indexOf('.on(') + 1,
+          offset: source.indexOf('on(') + 1,
         };
         const onScene = await client.inspect(module, selection);
         if (!onScene) throw new Error('Missing on inspection');
@@ -763,11 +763,11 @@ test(
     });
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
     await page.evaluate(() => {
-      const source = `import {box, sketch} from '@code3d/core';
+      const source = `import {align, box, sketch} from '@code3d/core';
 const stock = box(20,20,20);
 const base = sketch([['point', 1, [0,0]], ['point', 2, [15,0]], ['line', 3, [1,2]], ['circle', 4, [1,5]]]);
-const profile = base.relate(s => s.plane.align(stock.up));
-const side = base.relate(s => s.plane.align(stock.right));
+const profile = base.relate(s => align(s.plane, stock.up));
+const side = base.relate(s => align(s.plane, stock.right));
 /** @code3d.inspect show.inspect */
 function show() { return stock; }
 namespace show { export function inspect() { return {ambient: [stock], target: [profile, side]}; } }
@@ -950,6 +950,8 @@ export default group([straight, curve, sheet, pipe]);`);
         const before = pixels();
         camera.zoom *= 1.5;
         camera.updateProjectionMatrix();
+        // Native camera edits must publish a navigation change to the idle viewport.
+        viewport['controls'].syncCamera();
         await new Promise<void>(resolve =>
           requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
         );
@@ -957,7 +959,7 @@ export default group([straight, curve, sheet, pipe]);`);
         const png = await viewport.captureImage(1200, 800);
         camera.zoom /= 1.5;
         camera.updateProjectionMatrix();
-        viewport['rendering'].renderFrame();
+        viewport['controls'].syncCamera();
         return {
           text: label.userData.text,
           line: !!measurement.getObjectByName('distance-line'),

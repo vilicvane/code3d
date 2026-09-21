@@ -79,7 +79,7 @@ Inspectors can retain the pose at the selected operation, so later transformatio
 do not replace its geometry or stage. See [source inspection](runtime.md#source-inspection)
 for the common rules and custom JSDoc callbacks.
 
-A relation such as `companion.relate(part => part.on(rotated.up))` can place
+A relation such as `companion.relate(part => on(part, rotated.up))` can place
 a companion against a rotated part before grouping them. Inspecting the companion by itself uses its local
 frame, without its assembly placement.
 

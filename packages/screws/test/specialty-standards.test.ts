@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import * as screws from '@code3d/screws';
-import {box, cut, cylinder, intersect} from '@code3d/core';
+import {on, box, cut, cylinder, intersect} from '@code3d/core';
 
 import {
   keep,
@@ -70,7 +70,7 @@ test('ISO 7379 counterbores keep shoulder clearance and seat the head inside the
   near(y(hole.counterboreTop) - y(hole.counterboreBottom), 6);
   const screw = keep(
     ISO7379.screw(8, 20).relate(part =>
-      part.headBottom.on(hole.counterboreBottom),
+      on(part.headBottom, hole.counterboreBottom),
     ),
   );
   const stock = keep(box(30, 12, 30));

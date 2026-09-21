@@ -1151,6 +1151,12 @@ export class ModelViewport {
 
   get positionToolContext(): 'model' | 'relation' {
     const source = this.sourceContext;
+    if (
+      source &&
+      this.module &&
+      contextualToolScope(this.module, source).evaluation.relationOwnerNodeId
+    )
+      return 'relation';
     const occurrence = this.getSelected();
     if (
       source &&
@@ -2871,8 +2877,10 @@ function sourceTargetPriority(target: SourceTarget): number {
   if (target.kind === 'operation-selection') return -2;
   if (target.kind === 'tool') return -1;
   if (target.kind === 'element') return -1;
-  if (target.kind === 'constraint' || target.kind === 'transformation')
-    return 0;
+  // Argument scopes cover whitespace; the actual value wins an equal span.
+  if (target.kind === 'constraint')
+    return target.evaluations[0]?.constraintFocus === 'self' ? 0 : 4;
+  if (target.kind === 'transformation') return 0;
   if (target.kind === 'operation-input') return 1;
   if (target.kind === 'operation-output') return 2;
   return 3;

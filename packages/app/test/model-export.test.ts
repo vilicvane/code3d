@@ -1,5 +1,5 @@
 import type {Model} from '@code3d/core';
-import {box, circle, cylinder, group, line, sphere} from '@code3d/core';
+import {on, box, circle, cylinder, group, line, sphere} from '@code3d/core';
 import {
   retainModelGeometry as retainGeometry,
   type ModelSnapshotObject,
@@ -150,9 +150,9 @@ function closedMesh(mesh: ReturnType<typeof read3mf>['meshes'][number]) {
 
 test('project runtime retains export geometry and preserves STEP placements, names and colors', async () => {
   const compiler = await createTestModelPipeline(server);
-  const source = `import {box, group} from '@code3d/core';
+  const source = `import {on, box, group} from '@code3d/core';
 const base = box(10, 20, 30).material('#123456');
-const top = box(2, 4, 6).relate(self => self.down.on(base.up));
+const top = box(2, 4, 6).relate(self => on(self.down, base.up));
 export default group([base, top], 'Assembly');`;
   try {
     const module = await compiler.compile(
@@ -203,10 +203,10 @@ export default group([base, top], 'Assembly');`;
 
 test('project compilation carries native group materials into exported materials', async () => {
   const compiler = await createTestModelPipeline(server);
-  const source = `import {box, group} from '@code3d/core';
+  const source = `import {on, box, group} from '@code3d/core';
 import {MeshPhysicalMaterial} from '@code3d/core/three';
 const base = box(10, 4, 10).material('#ff0000');
-const top = box(2, 2, 2).relate(self => self.down.on(base.up));
+const top = box(2, 2, 2).relate(self => on(self.down, base.up));
 export default group([base, group([top]).material('#00ff00')]).material(new MeshPhysicalMaterial({color: '#345678', opacity: 0.4, transparent: true}));`;
   try {
     const module = await compiler.compile(
@@ -314,7 +314,7 @@ for (const mode of ['builtin', 'installed'] as const) {
               },
               {
                 path: '/model.ts',
-                source: `import range from 'just-range'; import {box, group} from '@code3d/core'; export default group(range(${count}).map(i => box(i + 1, 2, 3)));`,
+                source: `import range from 'just-range'; import {on, align, box, group} from '@code3d/core'; export default group(range(${count}).map(i => box(i + 1, 2, 3)));`,
               },
             ],
           },
@@ -689,7 +689,7 @@ test('rebased coordinates survive STEP encoding and readback', async () => {
 
 test('nested group point origins and offsets survive rendered placement and STEP readback', async () => {
   const base = box(10, 10, 10);
-  const cap = box(2, 2, 2).relate(self => self.on(base.up));
+  const cap = box(2, 2, 2).relate(self => on(self, base.up));
   const selected = group([base, cap])
     .originPoint(cap.center)
     .originOffset(2, 4, 6);
@@ -732,7 +732,7 @@ test('nested group point origins and offsets survive rendered placement and STEP
 
 test('nested group rotation about a selected origin survives rendered placement and STEP readback', async () => {
   const base = box(10, 10, 10);
-  const cap = box(2, 2, 2).relate(self => self.on(base.up));
+  const cap = box(2, 2, 2).relate(self => on(self, base.up));
   const selected = group([base, cap])
     .originPoint(cap.center)
     .originOffset(2, 4, 6)

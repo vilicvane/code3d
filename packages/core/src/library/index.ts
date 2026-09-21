@@ -12,8 +12,6 @@ export {
 /** @internal */
 export {
   relate,
-  on,
-  align,
   expose,
   inspectTopologyReference,
   inspectLength,
@@ -61,6 +59,9 @@ export {
   pivotPoint,
   axisEdge,
   axisLine,
+  coupleRotation,
+  on,
+  align,
   arc,
   bezier,
   box,
@@ -116,6 +117,7 @@ export type {
   ExposedValue,
   FaceAnchor,
   FrameAnchor,
+  RotationCouplingConfig,
   FaceModel,
   GeometryCapabilities,
   GeometryQueryCapabilities,

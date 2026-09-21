@@ -52,10 +52,10 @@ test(
           ['self.vertex(2)', 'base.up'],
           ['self.up', 'base.down'],
         ] as const) {
-          const source = `import {offset, box, group} from '@code3d/core';
+          const source = `import {on, align, offset, box, group} from '@code3d/core';
           const base = box(10, 10, 10);
-          const part = box(20, 20, 20).relate(self => ${sourceAnchor}.on(${targetAnchor}));
-          const peer = box(3, 3, 3).relate(self => [self.down.on(base.up), offset(20, 0, 0)]);
+          const part = box(20, 20, 20).relate(self => on(${sourceAnchor}, ${targetAnchor}));
+          const peer = box(3, 3, 3).relate(self => [on(self.down, base.up), offset(20, 0, 0)]);
           export default group([base, part, peer]);`;
           const module = await client.compile(
             {files: [{path: '/main.ts', source}]},
@@ -131,11 +131,11 @@ test(
           }
         }
         for (const compose of [true, false] as const) {
-          const source = `import {box, circle, loft, rectangle} from '@code3d/core';
+          const source = `import {on, align, box, circle, loft, rectangle} from '@code3d/core';
             const model = (() => {
               const ref = box(100, 100, 100);
-              const start = circle(20).relate(circle => circle.on(ref.down));
-              const end = rectangle(40, 40).relate(circle => circle.on(ref.up));
+              const start = circle(20).relate(circle => on(circle, ref.down));
+              const end = rectangle(40, 40).relate(circle => on(circle, ref.up));
               ${compose ? 'return loft([start, end]);' : ''}
             })();`;
           const module = await client.compile(
@@ -145,12 +145,12 @@ test(
           if (module.diagnostic) throw new Error(module.diagnostic.summary);
           viewport.renderModule(module);
           for (const id of ['down', 'up'] as const) {
-            const callback = `circle => circle.on(ref.${id})`;
+            const callback = `circle => on(circle, ref.${id})`;
             const start = source.indexOf(callback);
             for (const [site, offset] of [
               ['parameter', 'cir'.length],
-              ['receiver', 'circle => cir'.length],
-              ['constraint', 'circle => circle.o'.length],
+              ['receiver', 'circle => on(cir'.length],
+              ['constraint', 'circle => o'.length],
               [
                 'anchor',
                 callback.indexOf(`ref.${id}`) + `ref.${id}`.length - 1,

@@ -33,10 +33,10 @@ const near = (a: readonly number[], b: readonly number[]) =>
   a.forEach((v, i) => assert.ok(Math.abs(v - b[i]) < 1e-6, `${a} != ${b}`));
 
 test('related sketches preserve source editability and carry their exact relation context', async () => {
-  const source = `import {sketch, box} from '@code3d/core';
+  const source = `import {align, sketch, box} from '@code3d/core';
 const host = box(40, 10, 30).rotate(0, 0, 45).originOffset(-20, -10, 0);
 const profile = sketch([['point', 1, [2, 3]], ['circle', 2, [1, 4]]]);
-const placed = profile.relate(s => s.plane.align(host.surface(6)));
+const placed = profile.relate(s => align(s.plane, host.surface(6)));
 placed;`;
   const result = await compile(source);
   const [profile, placed] = [...result.sketches.values()];
@@ -67,11 +67,11 @@ placed;`;
 });
 
 test('copying a geometry definition into multiple placements does not disable its Fix action', async () => {
-  const result = await compile(`import {sketch, box} from '@code3d/core';
+  const result = await compile(`import {align, sketch, box} from '@code3d/core';
 const host = box(40, 10, 30);
 const profile = sketch([['point', 1, [0, 0]], ['point', 2, [20, 0]], ['line', 3, [1, 2]]], {constraints: [['fixed', 1], ['horizontal', 3], ['length', 3, 30]]});
-const placed = profile.relate(s => s.plane.align(host.up));
-const another = profile.relate(s => s.plane.align(host.right));`);
+const placed = profile.relate(s => align(s.plane, host.up));
+const another = profile.relate(s => align(s.plane, host.right));`);
   assert.equal(result.warnings.length, 1);
   const warning = result.warnings[0];
   assert.equal(warning.actions?.[0].label, 'Fix');
@@ -80,18 +80,19 @@ const another = profile.relate(s => s.plane.align(host.right));`);
 });
 
 test('an unbounded sketch plane never replaces the last geometric viewport fallback', async () => {
-  const result = await compile(`import {sketch, box} from '@code3d/core';
+  const result = await compile(`import {align, sketch, box} from '@code3d/core';
 const host = box(20, 10, 20);
-const profile = sketch().relate(s => s.plane.flip().align(host.up));
+const profile = sketch().relate(s => align(s.plane.flip(), host.up));
 profile.plane.flip();`);
   assert.equal(result.fallback?.kind, 'solid');
   assert.ok(result.fallback?.mesh);
 });
 
 test('derived related sketches resolve both old and related upstream point references', async () => {
-  const result = await compile(`import {sketch, rectangle} from '@code3d/core';
+  const result =
+    await compile(`import {align, sketch, rectangle} from '@code3d/core';
 const profile = sketch([['point', 1, [0, 0]], ['point', 2, [10, 0]], ['line', 3, [1, 2]]]);
-const placed = profile.relate(s => s.plane.align(rectangle(30, 30).originOffset(0, -8, 0)));
+const placed = profile.relate(s => align(s.plane, rectangle(30, 30).originOffset(0, -8, 0)));
 const child = placed.derive([['point', 1, [0, 10]], ['line', 2, [profile.point(2), 1]], ['line', 3, [1, placed.point(1)]]]);
 export const solid = child.face().extrude(2);`);
   const [, placed, child] = [...result.sketches.values()];
@@ -106,9 +107,10 @@ export const solid = child.face().extrude(2);`);
 });
 
 test('a rotated target context projects into unchanged local sketch coordinates', async () => {
-  const result = await compile(`import {sketch, rectangle} from '@code3d/core';
+  const result =
+    await compile(`import {align, sketch, rectangle} from '@code3d/core';
 const host = rectangle(20, 10).rotate(0, 0, 90).originOffset(-12, 0, 0);
-const profile = sketch().relate(s => s.plane.align(host.plane));`);
+const profile = sketch().relate(s => align(s.plane, host.plane));`);
   const placed = [...result.sketches.values()].at(-1)!;
   const points = outlines(placed, result.objects).flatMap(o =>
     o.segments.flat(),
@@ -125,9 +127,10 @@ const profile = sketch().relate(s => s.plane.align(host.plane));`);
 });
 
 test('a named original remains a writable point reference through an anonymous spatial base', async () => {
-  const result = await compile(`import {sketch, rectangle} from '@code3d/core';
+  const result =
+    await compile(`import {align, sketch, rectangle} from '@code3d/core';
 const profile = sketch([['point', 1, [0, 0]]]);
-const child = profile.relate(s => s.plane.align(rectangle(20, 20))).derive([
+const child = profile.relate(s => align(s.plane, rectangle(20, 20))).derive([
   ['point', 1, [10, 0]], ['line', 2, [profile.point(1), 1]],
 ]);`);
   const child = [...result.sketches.values()].at(-1)!;
@@ -136,11 +139,11 @@ const child = profile.relate(s => s.plane.align(rectangle(20, 20))).derive([
 
 test('context projection preserves separate occurrences of the same model inside nested groups', async () => {
   const result =
-    await compile(`import {sketch, rectangle, group} from '@code3d/core';
+    await compile(`import {align, sketch, rectangle, group} from '@code3d/core';
 const tile = rectangle(10, 10);
 const frame = group([tile, tile]);
 const host = group([frame]).expose({plane: frame.up}).rotate(0, 0, 90);
-const profile = sketch().relate(s => s.plane.align(host.plane));`);
+const profile = sketch().relate(s => align(s.plane, host.plane));`);
   const placed = [...result.sketches.values()].at(-1)!;
   const context = outlines(placed, result.objects);
   assert.equal(context.length, 2);

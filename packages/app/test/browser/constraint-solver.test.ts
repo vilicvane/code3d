@@ -48,11 +48,11 @@ for (const installed of [false, true] as const) {
                 },
               },
         );
-        const source = `import {offset, rotate, box, group} from '@code3d/core';
+        const source = `import {on, offset, rotate, box, group} from '@code3d/core';
         const first = box(10, 10, 10);
         const second = box(20, 20, 20).relate(self => [
-          self.edge(3).on(first.left),
-          self.up.on(first.down),
+          on(self.edge(3), first.left),
+          on(self.up, first.down),
         ]);
         export default group([first, second]);`;
         const compile = (text: string) =>
@@ -82,22 +82,22 @@ for (const installed of [false, true] as const) {
           const first = await compile(source);
           const shifted = await compile(
             source.replace(
-              'self.up.on(first.down)',
-              'self.up.on(first.down), offset(5, 0, 7)',
+              'on(self.up, first.down)',
+              'on(self.up, first.down), offset(5, 0, 7)',
             ),
           );
           const zero = await compile(
             source.replace(
-              'self.up.on(first.down)',
-              'self.up.on(first.down), offset(0, 0, 0), rotate(0, 0, 0)',
+              'on(self.up, first.down)',
+              'on(self.up, first.down), offset(0, 0, 0), rotate(0, 0, 0)',
             ),
           );
           let conflict;
           try {
             const conflicting = await compile(
               source.replace(
-                'self.up.on(first.down)',
-                'self.up.on(first.down), self.down.on(first.up)',
+                'on(self.up, first.down)',
+                'on(self.up, first.down), on(self.down, first.up)',
               ),
             );
             conflict = conflicting.diagnostic?.summary;

@@ -262,6 +262,7 @@ export type ConstraintSnapshot = Readonly<{
         sourceBounds: Readonly<{size: Vec3; transform: Transform}>;
       }>
     | Readonly<{kind: 'align'}>
+    | Readonly<{kind: 'coupleRotation'; config: RotationCouplingConfig}>
   );
 
 export type ModelOperationKind =
@@ -540,11 +541,11 @@ export type ModelObjectRuntimeInfo = Readonly<{
 }>;
 
 type RelationDefinition =
-  | Readonly<{
-      kind: 'on' | 'align';
+  | (Readonly<{
       source: AnchorReference;
       target: AnchorReference;
-    }>
+    }> &
+      ConstraintDefinition)
   | Readonly<{
       kind: 'transformation';
       actions: readonly TransformationAction[];
@@ -577,12 +578,17 @@ export type TransformationSnapshot = Readonly<{
 }>;
 type StoredPlacement = StoredConstraint | StoredTransformation;
 
+type ConstraintDefinition =
+  | Readonly<{kind: 'on'}>
+  | Readonly<{kind: 'align'}>
+  | Readonly<{kind: 'coupleRotation'; config: RotationCouplingConfig}>;
+
 type StoredConstraint = Readonly<{
   id: string;
-  kind: 'on' | 'align';
   source: RelationReference;
   target: RelationReference;
-}>;
+}> &
+  ConstraintDefinition;
 
 // An omitted model refers to relate's self, including after immutable copies.
 type RelationReference = StoredAnchor & Readonly<{model?: RelationObject}>;
@@ -792,33 +798,16 @@ const modelNamedElements = Symbol('modelNamedElements');
 
 export interface Anchor<Kind extends ElementKind = ElementKind> {
   readonly [anchorKind]: Kind;
-  /**
-   * Translate this geometry's matching bound onto the directed target bound.
-   * @code3d.inspect on.inspect
-   * @code3d.inspect this on.inspect
-   * @code3d.inspect target on.inspect
-   */
-  on(target: Bound): Constraint;
-  /**
-   * Align the underlying geometry, retaining unconstrained position and orientation.
-   * @code3d.inspect align.inspect
-   * @code3d.inspect this align.inspect
-   * @code3d.inspect target align.inspect
-   */
-  align(
-    this: Anchor<'point' | 'line' | 'face'>,
-    target: Anchor<'point' | 'line' | 'face'>,
-  ): Constraint;
-  /**
-   * Coincide origins and all coordinate axes.
-   * @code3d.inspect align.inspect
-   * @code3d.inspect this align.inspect
-   * @code3d.inspect target align.inspect
-   */
-  align(this: FrameAnchor, target: FrameAnchor): Constraint;
 }
 
 export interface PointAnchor extends Anchor<'point'> {}
+
+/** Fixed-axis angular transmission: self angle = ratio × other angle + phase. */
+export type RotationCouplingConfig = Readonly<{
+  ratio: number;
+  /** Angular datum in degrees; defaults to zero. */
+  phase?: number;
+}>;
 
 /** A coordinate-system reference, independent of model geometry. */
 export interface FrameAnchor extends Anchor<'frame'> {
@@ -1286,21 +1275,6 @@ class ModelAnchor<
       direction: -(ref.direction ?? 1) as 1 | -1,
     }) as this;
   }
-
-  on(target: Bound): Constraint {
-    return Constraint.create(
-      this[anchorReferenceValue],
-      boundReference(target),
-    );
-  }
-
-  align(target: Anchor): Constraint {
-    return Constraint.create(
-      this[anchorReferenceValue],
-      anchorReference(target),
-      'align',
-    );
-  }
 }
 
 class ModelFrameAnchor extends ModelAnchor<'frame'> implements FrameAnchor {
@@ -1616,7 +1590,7 @@ export abstract class RelationExpression {
             }),
           }
         : {
-            kind: definition.kind,
+            ...definition,
             id: this.relationId,
             source: bind(definition.source),
             target: bind(definition.target),
@@ -1676,7 +1650,7 @@ export class Constraint extends RelationExpression {
   static create(
     source: AnchorReference,
     target: AnchorReference,
-    kind: StoredConstraint['kind'] = 'on',
+    kind: 'on' | 'align' = 'on',
   ): Constraint {
     if (kind === 'on')
       source.model[referenceBounds](source, identityRigidTransform);
@@ -1695,6 +1669,132 @@ export class Constraint extends RelationExpression {
         'align() requires compatible geometry or two coordinate frame references; select .frame on a model.',
       );
     return new Constraint({kind, source, target});
+  }
+
+  /** @internal */
+  static coupleRotation(
+    source: AnchorReference,
+    target: AnchorReference,
+    config: RotationCouplingConfig,
+  ): Constraint {
+    if (
+      !Number.isFinite(config.ratio) ||
+      config.ratio === 0 ||
+      !Number.isFinite(config.phase ?? 0)
+    )
+      throw new Error(
+        'Rotation coupling requires a finite nonzero ratio and a finite phase.',
+      );
+    return new Constraint({
+      kind: 'coupleRotation',
+      source,
+      target,
+      config: {...config},
+    });
+  }
+}
+
+/**
+ * Translate the whole current model onto the directed target bound.
+ * @code3d.inspect on.inspect
+ * @code3d.inspect target on.inspect
+ */
+export function on(target: Bound): Constraint;
+/**
+ * Translate the selected source geometry's matching bound onto the target bound.
+ * @code3d.inspect on.inspect
+ * @code3d.inspect source on.inspect
+ * @code3d.inspect target on.inspect
+ */
+export function on(source: Anchor, target: Bound): Constraint;
+export function on(source: Anchor, target?: Bound): Constraint {
+  if (arguments.length === 1) {
+    if (!activeRelate)
+      throw new Error('on(target) must be called inside a relate callback.');
+    target = source as Bound;
+    source = requireModelObject(
+      activeRelate.self,
+      'on(target) requires a current model with finite geometry.',
+    );
+  }
+  return Constraint.create(anchorReference(source), boundReference(target!));
+}
+
+/**
+ * Align underlying geometry while retaining unconstrained degrees of freedom.
+ * @code3d.inspect align.inspect
+ * @code3d.inspect source align.inspect
+ * @code3d.inspect target align.inspect
+ */
+export function align(
+  source: Anchor<'point' | 'line' | 'face'>,
+  target: Anchor<'point' | 'line' | 'face'>,
+): Constraint;
+/**
+ * Coincide the origins and all axes of two coordinate frames.
+ * @code3d.inspect align.inspect
+ * @code3d.inspect source align.inspect
+ * @code3d.inspect target align.inspect
+ */
+export function align(source: FrameAnchor, target: FrameAnchor): Constraint;
+export function align(source: Anchor, target: Anchor): Constraint {
+  return Constraint.create(
+    anchorReference(source),
+    anchorReference(target),
+    'align',
+  );
+}
+
+/**
+ * Couple relate's current model to another model using each model's own axis:
+ * selfAngle = ratio * otherAngle + phase.
+ * @code3d.tool
+ * @code3d.inspect coupleRotation.inspect
+ * @code3d.inspect other coupleRotation.inspect
+ */
+export function coupleRotation(
+  other: Model<Readonly<{axis: LineAnchor}>>,
+  config: RotationCouplingConfig,
+): Constraint {
+  if (!activeRelate)
+    throw new Error(
+      'coupleRotation() must be called inside a relate callback.',
+    );
+  return Constraint.coupleRotation(
+    straightAxisReference(
+      modelRotationAxis(activeRelate.self),
+      'coupleRotation()',
+    ),
+    straightAxisReference(modelRotationAxis(other), 'coupleRotation()'),
+    config,
+  );
+}
+
+function modelRotationAxis(value: unknown): LineAnchor {
+  const model = requireModelObject(
+    value,
+    'coupleRotation() requires a model with an axis.',
+  );
+  if (!('axis' in model))
+    throw new Error('coupleRotation() requires each model to have an axis.');
+  return model.axis as LineAnchor;
+}
+
+/** @internal */
+export namespace coupleRotation {
+  export function inspect(
+    [other]: [Model<Readonly<{axis: LineAnchor}>>],
+    context: InspectContext<Constraint>,
+  ): InspectResult | undefined {
+    const data = relate.context(context);
+    return data && context.return
+      ? ModelObject.inspectConstraint(
+          data,
+          context.return,
+          modelRotationAxis(data.self),
+          other.axis,
+        )
+      : undefined;
   }
 }
 
@@ -2298,6 +2398,8 @@ export abstract class RelationObject {
               angle: (angles as number) * (axis.direction ?? 1),
             }
           : {
+              axis: selectedAxis(axis, pivot.offset),
+              angle: (angles as number) * (axis.direction ?? 1),
               local: axisRotation(
                 selectedAxis(axis, pivot.offset),
                 (angles as number) * (axis.direction ?? 1),
@@ -2309,12 +2411,14 @@ export abstract class RelationObject {
           body: indices.get(pivot.point.model)!,
           point: pivot.point.transform.position,
           rotation: rotationAround(origin, angles as Vec3).quaternion,
+          angles: angles as Vec3,
           displacement: pivot.offset ?? origin,
         };
       const frame = translation(
         addVectors(this.rotationPoint(pivot), pivot.offset ?? origin),
       );
       return {
+        angles: angles as Vec3,
         local: composeTransforms(
           composeTransforms(frame, rotationAround(origin, angles as Vec3)),
           invertTransform(frame),
@@ -2767,63 +2871,92 @@ export abstract class RelationObject {
           .flatMap(value => model.bodyActions(value, indices)),
       };
     });
+    const bodyRelation = (
+      model: RelationObject,
+      constraint: StoredConstraint,
+    ): Body['relations'][number] =>
+      constraint.kind === 'coupleRotation'
+        ? {
+            kind: 'coupleRotation',
+            id: constraint.id,
+            ...constraint.config,
+            source: {
+              body: indices.get(constraint.source.model ?? model)!,
+              transform: constraint.source.transform,
+              direction: constraint.source.direction ?? 1,
+            },
+            target: {
+              body: indices.get(constraint.target.model ?? model)!,
+              transform: constraint.target.transform,
+              direction: constraint.target.direction ?? 1,
+            },
+          }
+        : constraint.kind === 'align'
+          ? constraint.source.kind === 'frame'
+            ? {
+                kind: 'frame',
+                id: constraint.id,
+                source: {
+                  body: indices.get(constraint.source.model ?? model)!,
+                  transform: constraint.source.transform,
+                },
+                target: {
+                  body: indices.get(constraint.target.model ?? model)!,
+                  transform: constraint.target.transform,
+                },
+              }
+            : {
+                kind: 'align',
+                id: constraint.id,
+                source: {
+                  body: indices.get(constraint.source.model ?? model)!,
+                  geometry: (
+                    constraint.source.model ?? model
+                  ).alignmentGeometry(constraint.source),
+                  transform: constraint.source.transform,
+                },
+                target: {
+                  body: indices.get(constraint.target.model ?? model)!,
+                  geometry: (
+                    constraint.target.model ?? model
+                  ).alignmentGeometry(constraint.target),
+                  transform: constraint.target.transform,
+                },
+              }
+          : {
+              kind: 'on',
+              id: constraint.id,
+              source: {
+                body: indices.get(constraint.source.model ?? model)!,
+                key: constraint.source.name,
+                bounds: (orientation: Quaternion) =>
+                  (constraint.source.model ?? model)[referenceBounds](
+                    constraint.source,
+                    rotation(orientation),
+                  ),
+              },
+              target: {
+                body: indices.get(constraint.target.model ?? model)!,
+                transform: constraint.target.transform,
+                facing: constraint.target.bound!.facing,
+              },
+            };
     const poses = solveBodies(
       models.map((model, index): Body => ({
         initial: programs[index].initial,
         transformations: programs[index].transformations,
         name: model.name,
         relations: programs[index].constraints.map(constraint =>
-          constraint.kind === 'align'
-            ? constraint.source.kind === 'frame'
-              ? {
-                  kind: 'frame',
-                  id: constraint.id,
-                  source: {
-                    body: indices.get(constraint.source.model ?? model)!,
-                    transform: constraint.source.transform,
-                  },
-                  target: {
-                    body: indices.get(constraint.target.model ?? model)!,
-                    transform: constraint.target.transform,
-                  },
-                }
-              : {
-                  kind: 'align',
-                  id: constraint.id,
-                  source: {
-                    body: indices.get(constraint.source.model ?? model)!,
-                    geometry: (
-                      constraint.source.model ?? model
-                    ).alignmentGeometry(constraint.source),
-                    transform: constraint.source.transform,
-                  },
-                  target: {
-                    body: indices.get(constraint.target.model ?? model)!,
-                    geometry: (
-                      constraint.target.model ?? model
-                    ).alignmentGeometry(constraint.target),
-                    transform: constraint.target.transform,
-                  },
-                }
-            : {
-                kind: 'on',
-                id: constraint.id,
-                source: {
-                  body: indices.get(constraint.source.model ?? model)!,
-                  key: constraint.source.name,
-                  bounds: (orientation: Quaternion) =>
-                    (constraint.source.model ?? model)[referenceBounds](
-                      constraint.source,
-                      rotation(orientation),
-                    ),
-                },
-                target: {
-                  body: indices.get(constraint.target.model ?? model)!,
-                  transform: constraint.target.transform,
-                  facing: constraint.target.bound!.facing,
-                },
-              },
+          bodyRelation(model, constraint),
         ),
+        rotationInitial: model.initialPose,
+        rotationProgram: () =>
+          (overrides.get(model) ?? model.placements).flatMap(
+            (placement): (Body['relations'][number] | BodyAction)[] =>
+              placement.kind === 'transformation'
+                ? model.bodyActions(placement, indices)
+                : [bodyRelation(model, placement)],
+          ),
       })),
     );
     return {
@@ -2843,10 +2976,10 @@ export abstract class RelationObject {
       target.solvePose(context),
       constraint.target.transform,
     );
-    if (constraint.kind === 'align') {
+    if (constraint.kind !== 'on') {
       return {
+        ...constraint,
         id: constraint.id,
-        kind: 'align',
         source: anchorSnapshot(source, constraint.source),
         target: anchorSnapshot(target, constraint.target),
         sourceElement: source.previewElement(constraint.source),
@@ -3203,24 +3336,9 @@ export class ModelObject<
     return directionalBound(this.relationAnchorReference(), 'back');
   }
 
-  on(target: Bound): Constraint {
-    return Constraint.create(
-      this.relationAnchorReference(),
-      boundReference(target),
-    );
-  }
-
   /** @internal */
   relationAnchorReference(): AnchorReference {
     return {model: this, name: 'geometry', ...this.geometryAnchor, whole: true};
-  }
-
-  align(target: Anchor): Constraint {
-    return Constraint.create(
-      this.relationAnchorReference(),
-      anchorReference(target),
-      'align',
-    );
   }
 
   reverse(): Edge {
@@ -5292,6 +5410,7 @@ export class ModelObject<
     relation: RelationExpression,
     sourceValue: Anchor,
     targetValue: Anchor,
+    focusSelf = false,
   ): InspectResult | undefined {
     if (!data.owns(relation)) return undefined;
     const poses = data.poses(relation);
@@ -5358,6 +5477,13 @@ export class ModelObject<
         : undefined;
     const owners = new Set([sourceOwner, targetOwner]);
     return {
+      focused: focusSelf
+        ? [
+            frame.display(data.self)!,
+            constraint.source === data.self ? source : target,
+            ...(constraint.source === data.self && extent ? [extent] : []),
+          ]
+        : undefined,
       target: [
         ...[...new Set([constraint.source, constraint.target])].map(model =>
           frame.display(model)!,
@@ -6618,24 +6744,38 @@ export namespace expose {
 /** @internal */
 export namespace on {
   export function inspect(
-    [target]: [Anchor],
-    context: InspectContext<Constraint, Anchor>,
+    [source, target]: [Anchor, Bound?],
+    context: InspectContext<Constraint>,
+  ): InspectResult | undefined {
+    const data = relate.context(context);
+    if (!data || !context.return) return undefined;
+    return ModelObject.inspectConstraint(
+      data,
+      context.return,
+      target === undefined ? (data.self as ModelObject) : source,
+      target ?? source,
+      context.focused.parameter === undefined,
+    );
+  }
+}
+
+/** @internal */
+export namespace align {
+  export function inspect(
+    [source, target]: [Anchor, Anchor],
+    context: InspectContext<Constraint>,
   ): InspectResult | undefined {
     const data = relate.context(context);
     return data && context.return
       ? ModelObject.inspectConstraint(
           data,
           context.return,
-          context.receiver,
+          source,
           target,
+          context.focused.parameter === undefined,
         )
       : undefined;
   }
-}
-
-/** @internal */
-export namespace align {
-  export const inspect = on.inspect;
 }
 
 type CenterableModel = Model & {originCenter(): Model};
@@ -7373,6 +7513,9 @@ export const authoringApi = Object.freeze({
   pivotPoint,
   axisEdge,
   axisLine,
+  coupleRotation,
+  on,
+  align,
   cache,
   font,
   googleFont,

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {
+  align,
+  on,
   box,
   cut,
   cylinder,
@@ -59,11 +61,11 @@ const space = (x: number, z = 20) =>
 
 test('space layouts follow a related construction frame without outputting its geometry', () => {
   const host = keep(
-    box(4, 20, 50).relate(self => self.origin.align(point([20, 30, 40]))),
+    box(4, 20, 50).relate(self => align(self.origin, point([20, 30, 40]))),
   );
   const target = keep(
     box(40, 10, 25).relate(self => [
-      self.vertex(3).align(host.vertex(7)),
+      align(self.vertex(3), host.vertex(7)),
       rotate(20, 35, 15),
     ]),
   );
@@ -107,10 +109,10 @@ test('space layouts follow a related construction frame without outputting its g
 
 test('ventilation fins use the target vertex constraint and preserve its unused end space', () => {
   const leftSide = keep(
-    box(4, 20, 50).relate(self => self.origin.align(point([20, 30, 40]))),
+    box(4, 20, 50).relate(self => align(self.origin, point([20, 30, 40]))),
   );
   const target = keep(
-    box(40, 10, 25).relate(self => self.vertex(3).align(leftSide.vertex(7))),
+    box(40, 10, 25).relate(self => align(self.vertex(3), leftSide.vertex(7))),
   );
   const fins = retain(
     fillFlex(keep(box(2, 10, 25)), target, {axis: 'x', gap: 5}),
@@ -624,7 +626,7 @@ test('fillGrid handles exact floating fits and an axis that cannot hold one item
 
 test('assembled groups retain internal relations when filled, nested and rotated', () => {
   const base = keep(box(10, 2, 6));
-  const cap = keep(box(2, 4, 2).relate(self => self.on(base.up)));
+  const cap = keep(box(2, 4, 2).relate(self => on(self, base.up)));
   const unit = keep(group([base, cap]));
   const parts = retain(fillFlex(unit, space(40), {axis: 'x', gap: 5}));
   assert.equal(parts.length, 3);

@@ -98,6 +98,7 @@ described below; **they do not implement the GB/T 152 countersink/counterbore
 tables**. Use custom dimensions when a drawing specifies a particular hole.
 
 ```ts
+import {on} from '@code3d/core';
 import * as GB5281 from '@code3d/screws/gb5281';
 
 const hole = GB5281.clearanceHole(8, {
@@ -106,7 +107,7 @@ const hole = GB5281.clearanceHole(8, {
   counterbore: {diameter: 15, depth: 7},
 });
 const shoulder = GB5281.screw(8, 20).relate(part =>
-  part.headBottom.on(hole.counterboreBottom),
+  on(part.headBottom, hole.counterboreBottom),
 );
 ```
 

@@ -1,4 +1,4 @@
-import {cut} from '@code3d/core';
+import {on, cut} from '@code3d/core';
 import {
   definePrimitive,
   replicad,
@@ -151,7 +151,7 @@ export function screw(input: ScrewInput, length: number): Screw {
     recess.diameter,
     recess.innerDiameter,
     recess.depth,
-  ).relate(part => part.up.on(head.up));
+  ).relate(part => on(part.up, head.up));
   return headedScrew(
     cut(head, [tool]),
     spec,

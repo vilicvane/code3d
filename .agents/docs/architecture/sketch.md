@@ -25,7 +25,7 @@ ID，但共享 canonical 求解点；缺失、循环及非法跨层引用明确�
 ## 空间参考架与模型上下文
 
 `Sketch.plane` 是法向为局部 `+Y` 的无界参考平面；草图 `[x,y]` 映射到参考架
-`[x,0,-y]`。`relate(self => self.plane.align(target))` 返回新的空间值，共享原始
+`[x,0,-y]`。`relate(self => align(self.plane, target))` 返回新的空间值，共享原始
 二维定义和点身份，不增加派生层、不重求二维约束或将摆放烘焙到 tuple 坐标。
 空草图和开放轮廓同样可关联，不为它们伪造 B-Rep 面或 group。
 

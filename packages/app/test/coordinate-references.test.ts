@@ -29,22 +29,21 @@ for (const [receiver, argument, kind] of [
   ['self.origin', 'space.frame.origin', 'point'],
 ] as const) {
   test(`${receiver} alignment retains coordinate references in source focus and preview`, async () => {
-    const source = `import {box, group, point, rotate} from '@code3d/core';
-const space = box(30, 20, 10).relate(base => [base.origin.align(point([20, 10, 5])), rotate(20, 30, 40)]);
-const part = group([box(2, 4, 6)]).relate(self => ${receiver}.align(/* target */ ${argument}));
+    const source = `import {align, on, box, group, point, rotate} from '@code3d/core';
+const space = box(30, 20, 10).relate(base => [align(base.origin, point([20, 10, 5])), rotate(20, 30, 40)]);
+const part = group([box(2, 4, 6)]).relate(self => align(${receiver}, /* target */ ${argument}));
 export default group([point(), part]);`;
     const module = await compiler.compile(
       {files: [{path: '/main.ts', source}]},
       '/main.ts',
     );
     assert.equal(module.diagnostic, undefined);
-    for (const token of [`${receiver}.align`, '/* target */']) {
+    for (const token of [`align(${receiver}`, '/* target */']) {
       const target = defined(
         ModelViewport.prototype['sourceTargetAt'].call(
           {module},
           '/main.ts',
-          source.indexOf(token) +
-            (token.startsWith(receiver) ? receiver.length + 2 : 1),
+          source.indexOf(token) + 1,
         ),
       );
       const evaluation = target.evaluations[0];
@@ -58,9 +57,7 @@ export default group([point(), part]);`;
       const scene = defined(
         await compiler.executor.inspect({
           file: '/main.ts',
-          offset:
-            source.indexOf(token) +
-            (token.startsWith(receiver) ? receiver.length + 2 : 1),
+          offset: source.indexOf(token) + 1,
         }),
       );
       const anchors = scene.target.filter(item => item.kind === 'anchor');

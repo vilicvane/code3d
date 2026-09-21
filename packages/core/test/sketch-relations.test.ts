@@ -2,6 +2,8 @@ import type {Transformation} from '@code3d/core';
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {
+  align,
+  on,
   offset,
   pivot,
   pivotVertex,
@@ -53,7 +55,7 @@ test('empty and open sketches relate without a B-Rep face or changed geometry', 
     ]),
   ]) {
     const before = snapshotSketch(original, () => 's');
-    const placed = original.relate(self => self.plane.align(host.plane));
+    const placed = original.relate(self => align(self.plane, host.plane));
     assert.equal(isModelObject(placed), false);
     assert.equal(sketchDefinition(placed), sketchDefinition(original));
     assert.equal(sketchSource(placed), original);
@@ -77,16 +79,16 @@ test('plane relations require callback self and accept either written side', () 
   const original = sketch();
   const target = rectangle(20, 20).originOffset(0, -7, 0);
   for (const build of [
-    (s: Sketch) => s.plane.align(target),
-    (s: Sketch) => target.align(s.plane),
+    (s: Sketch) => align(s.plane, target),
+    (s: Sketch) => align(target, s.plane),
   ])
     near(pose(original.relate(build)).position, [0, 7, 0]);
   assert.throws(
-    () => original.relate(() => target.align(rectangle(1, 1))),
+    () => original.relate(() => align(target, rectangle(1, 1))),
     /involve self/,
   );
   assert.throws(
-    () => original.relate(() => original.plane.align(target)),
+    () => original.relate(() => align(original.plane, target)),
     /involve self/,
   );
 });
@@ -95,11 +97,11 @@ test('derived sketch frames keep references to the original plane external', () 
   const original = sketch();
   const before = sketchFrame(original).toSnapshot();
   const placed = original.relate(self => [
-    self.plane.align(original.plane),
+    align(self.plane, original.plane),
     offset(0, 7, 0),
   ]);
   const reversed = original.relate(self => [
-    original.plane.align(self.plane),
+    align(original.plane, self.plane),
     offset(0, 14, 0),
   ]);
   near(pose(placed).position, [0, 7, 0]);
@@ -116,13 +118,13 @@ test('derived sketch frames keep references to the original plane external', () 
 test('directed planes, target-frame offset and pivot rotations reuse the model relation solver', () => {
   const target = rectangle(30, 30).rotate(0, 0, 45).originOffset(0, -8, 0);
   const builds = [
-    (s: {plane: typeof target.plane}) => s.plane.align(target.plane),
+    (s: {plane: typeof target.plane}) => align(s.plane, target.plane),
     (s: {plane: typeof target.plane}) => [
-      s.plane.align(target.plane.flip()),
+      align(s.plane, target.plane.flip()),
       offset(3, 4, 5),
     ],
     (s: {plane: typeof target.plane}) => [
-      s.plane.align(target.plane),
+      align(s.plane, target.plane),
       pivot([1, 2, 3]).rotate(0, 15, 0),
     ],
   ];
@@ -141,7 +143,7 @@ test('constraint stage previews operate on empty sketches and leave final data i
   let relation!: Transformation;
   const host = rectangle(10, 10).originOffset(0, -6, 0);
   const placed = sketch().relate(s => [
-    s.plane.align(host),
+    align(s.plane, host),
     (relation = offset(2, 0, 0)),
   ]);
   const preview = defined(relationPreview(relation));
@@ -152,14 +154,14 @@ test('constraint stage previews operate on empty sketches and leave final data i
     () =>
       pose(
         sketch().relate(s => [
-          s.plane.align(host),
+          align(s.plane, host),
           pivotVertex(1).rotate(0, 20, 0),
         ]),
       ),
     /requires model topology/,
   );
   assert.throws(
-    () => sketch().relate(s => s.plane.on(box(10, 10, 10).up)),
+    () => sketch().relate(s => on(s.plane, box(10, 10, 10).up)),
     /no finite geometry/,
   );
 });
@@ -167,7 +169,7 @@ test('constraint stage previews operate on empty sketches and leave final data i
 test('faces and extrusion inherit sketch relations without baking placement into geometry', () => {
   const host = box(30, 20, 30);
   const source = disk();
-  const placed = source.relate(s => s.plane.align(host.up));
+  const placed = source.relate(s => align(s.plane, host.up));
   const face = placed.face();
   const solid = face.extrude(-5);
   near(snapshot(face).compositionTransform.position, [0, 10, 0]);
@@ -193,7 +195,7 @@ test('spatial copies retain point identities and derived layers inherit relation
     ['line', 3, [1, 2]],
   ]);
   const target = rectangle(20, 20).originOffset(0, -8, 0);
-  const placed = source.relate(s => s.plane.align(target));
+  const placed = source.relate(s => align(s.plane, target));
   const child = placed.derive([
     ['point', 1, [0, 10]],
     ['line', 2, [source.point(2), 1]],
@@ -223,37 +225,37 @@ test('multiple faces and loft reuse the same frame while disconnected regions re
     ['circle', 2, [1, 2]],
     ['point', 3, [10, 0]],
     ['circle', 4, [3, 2]],
-  ]).relate(s => s.plane.align(plane));
+  ]).relate(s => align(s.plane, plane));
   assert.throws(() => placed.face(), /exactly one/);
   const faces = placed.faces();
   assert.equal(faces.length, 2);
   for (const f of faces)
     near(snapshot(f).compositionTransform.position, [0, 8, 0]);
   const lower = disk();
-  const upper = lower.relate(s => s.plane.align(plane));
+  const upper = lower.relate(s => align(s.plane, plane));
   const solid = loft([lower.face(), upper.face()]);
   near([volume(solid)], [Math.PI * 4 * 8]);
 });
 
 test('references bind immutable host values, with explicit occurrence references for assemblies', () => {
   const host = box(20, 10, 20);
-  const placed = disk().relate(s => s.plane.align(host.up));
+  const placed = disk().relate(s => align(s.plane, host.up));
   const moved = host.rotate(0, 0, 90);
   near(pose(placed).position, [0, 5, 0]);
   const hostRef = defined(modelElementReference(placed.plane));
   assert.equal(hostRef.model, sketchFrame(placed));
   assert.notEqual(host, moved);
   const first = host.relate(s => [
-    s.down.on(box(60, 10, 60).up),
+    on(s.down, box(60, 10, 60).up),
     offset(-15, 0, 0),
   ]);
   const second = host.relate(s => [
-    s.down.on(box(60, 10, 60).up),
+    on(s.down, box(60, 10, 60).up),
     offset(15, 0, 0),
   ]);
   const assembly = group([first, second]).expose({first, second});
-  const left = disk().relate(s => s.plane.align(assembly.first.up));
-  const right = disk().relate(s => s.plane.align(assembly.second.up));
+  const left = disk().relate(s => align(s.plane, assembly.first.up));
+  const right = disk().relate(s => align(s.plane, assembly.second.up));
   // Plane alignment does not silently center either sketch on the finite occurrence.
   near(pose(left).position, pose(right).position);
   near(rotateVector([0, 1, 0], pose(left).quaternion), [0, 1, 0]);

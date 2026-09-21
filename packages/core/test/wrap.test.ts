@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {getOC, type Face} from 'replicad';
 import {
+  align,
   circle,
   cut,
   cylinder,
@@ -133,8 +134,8 @@ test('source transforms and exposed target occurrences retain their common coord
   assert.ok(patches[0].bounds().minimum[0] > 36);
   const related = keep(
     keep(rectangle(6, 4)).relate(self => [
-      self.plane.align(profile.plane),
-      self.center.align(profile.center),
+      align(self.plane, profile.plane),
+      align(self.center, profile.center),
     ]),
   );
   const relatedPatches = keepAll(wrap(related, assembly.skin));

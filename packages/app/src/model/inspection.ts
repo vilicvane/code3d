@@ -332,7 +332,7 @@ export class InspectionSession {
     const selected = (result: InspectResult): InspectedValues => ({
       ...result,
       kind: 'inspect',
-      focused: this.previewValues(focus.value),
+      focused: result.focused ?? this.previewValues(focus.value),
     });
     const preview = (value: unknown): InspectedValues | undefined => {
       const values = this.previewValues(value);

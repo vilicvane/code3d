@@ -63,9 +63,9 @@ for (const method of ['on', 'align'] as const) {
           ? 'self'
           : 'self.axis';
       const argument = `${reverse ? 'self' : 'base'}.${method === 'on' ? 'up.flip()' : 'axis.reverse()'}`;
-      const source = `import {box, group, offset, axisLine} from '@code3d/core';
+      const source = `import {on, align, box, group, offset, axisLine} from '@code3d/core';
         const base = box(20,10,30); const axis = box(2,2,2);
-        const part = box(8,6,4).relate(self => [${receiver}.${method}(
+        const part = box(8,6,4).relate(self => [${method}(${receiver},
           /* target-start */ ${argument} /* target-end */
         ), offset(1,2,3), axisLine(axis.axis).rotate(20)]); export default group([base,part]);`;
       const module = await compile(source);
@@ -110,6 +110,26 @@ for (const method of ['on', 'align'] as const) {
           token,
         );
       }
+      // The function name and on|( / align|( emphasize the actual self,
+      // even when it is the second argument; returning from a parameter does too.
+      for (const delta of [1, method.length, 1]) {
+        await inspect(source, '/* target-start */');
+        const scene = await inspect(source, `${method}(`, delta);
+        for (const kind of ['model', 'anchor'] as const) {
+          assert.deepEqual(
+            scene.target
+              .filter(item => item.kind === kind)
+              .map(item => item.focused),
+            reverse ? [false, true] : [true, false],
+            `${method} at ${delta}: ${kind}`,
+          );
+        }
+        const bounds = scene.target.filter(item => item.kind === 'bounds');
+        assert.deepEqual(
+          bounds.map(item => item.focused),
+          method === 'on' ? [!reverse] : [],
+        );
+      }
       const axisScope = at(module, source, 'axis.axis');
       assert.equal(axisScope.evaluation.relationSpatial?.kind, 'rotate');
       assert.equal(
@@ -121,11 +141,11 @@ for (const method of ['on', 'align'] as const) {
 }
 
 test('relate distinguishes the new self from its original receiver alias in source focus', async () => {
-  const source = `import {box, group, offset} from '@code3d/core';
+  const source = `import {on, box, group, offset} from '@code3d/core';
     const side = box(2, 250, 250);
     const leftSide = side;
     const rightSide = side.relate(self => [
-      self.on(leftSide.right), offset(160, 0, 0)
+      on(self, leftSide.right), offset(160, 0, 0)
     ]);
     export default group([leftSide, rightSide]);`;
   const module = await compile(source);
@@ -172,27 +192,24 @@ test('relate distinguishes the new self from its original receiver alias in sour
   );
 });
 
-async function inspect(source: string, token: string) {
+async function inspect(source: string, token: string, delta?: number) {
   return defined(
     await compiler.executor.inspect({
       file: '/main.ts',
-      offset: source.indexOf(token) + (token === 'base.up' ? 6 : 1),
+      offset: source.indexOf(token) + (delta ?? (token === 'base.up' ? 6 : 1)),
     }),
   );
 }
 
 test('relation inspection declares directed references, exact bounds and explicit focus without duplicate named providers', async () => {
-  const source = `import {box,group,offset} from '@code3d/core'; const base=group([box(20,10,30)]); const part=group([box(8,6,4)]).relate(self=>[self.on(base.up), offset(2,0,0)]); export default group([base,part]);`;
+  const source = `import {on, box,group,offset} from '@code3d/core'; const base=group([box(20,10,30)]); const part=group([box(8,6,4)]).relate(self=>[on(self, base.up), offset(2,0,0)]); export default group([base,part]);`;
   const module = await compile(source);
   for (const token of ['on(', 'base.up']) {
     const scene = await inspect(source, token);
     const anchors = scene.target.filter(item => item.kind === 'anchor');
     assert.equal(anchors.length, 2);
     assert.ok(anchors.every(item => item.direction === 'forward'));
-    assert.equal(
-      anchors.filter(item => item.focused).length,
-      token === 'on(' ? 0 : 1,
-    );
+    assert.equal(anchors.filter(item => item.focused).length, 1);
     const bounds = scene.target.filter(item => item.kind === 'bounds');
     assert.equal(bounds.length, 1);
     const planes = anchors
@@ -219,17 +236,14 @@ for (const [geometry, receiver, argument] of [
   ['point()', 'self', 'base'],
 ] as const) {
   test(`align uses the public anchor annotations for ${receiver}`, async () => {
-    const source = `import {box,line,point,group} from '@code3d/core'; const base=${geometry}; const part=${geometry}.relate(self=>${receiver}.align( /* target */ ${argument} )); export default group([base,part]);`;
+    const source = `import {align, on, box,line,point,group} from '@code3d/core'; const base=${geometry}; const part=${geometry}.relate(self=>align(${receiver}, /* target */ ${argument})); export default group([base,part]);`;
     await compile(source);
     for (const token of ['align(', '/* target */']) {
       const scene = await inspect(source, token);
       const anchors = scene.target.filter(item => item.kind === 'anchor');
       assert.equal(anchors.length, 2);
       assert.ok(anchors.every(item => item.direction === 'forward'));
-      assert.equal(
-        anchors.filter(item => item.focused).length,
-        token === 'align(' ? 0 : 1,
-      );
+      assert.equal(anchors.filter(item => item.focused).length, 1);
       assert.equal(
         scene.target.filter(item => item.kind === 'bounds').length,
         0,
@@ -239,7 +253,7 @@ for (const [geometry, receiver, argument] of [
 }
 
 test('member completion uses its actual reference receiver when the tool context focuses self', async () => {
-  const source = `import {axisLine, box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>[self.on(base.up), axisLine(axis.axis).rotate(20)]);`;
+  const source = `import {on, axisLine, box} from '@code3d/core'; const base=box(20,10,30); const axis=box(2,4,6); const part=box(8,6,4).relate(self=>[on(self, base.up), axisLine(axis.axis).rotate(20)]);`;
   const module = await compile(source);
   const original = defined(
     module.sourceTargets.find(
@@ -280,7 +294,7 @@ test('member completion uses its actual reference receiver when the tool context
 });
 
 test('joint placement draws only the selected relation and keeps unrelated values out of its scene', async () => {
-  const source = `import {box,group,offset,pivot} from '@code3d/core'; const extra=box(50,50,50); const base=box(20,10,30); const part=box(8,6,4).relate(self=>[self.axis.align(base.axis),self.on(base.up),offset(3,0,0),pivot([1,0,0]).rotate(0,0,20)]); export default group([base,part,extra]);`;
+  const source = `import {align, on, box,group,offset,pivot} from '@code3d/core'; const extra=box(50,50,50); const base=box(20,10,30); const part=box(8,6,4).relate(self=>[align(self.axis, base.axis),on(self, base.up),offset(3,0,0),pivot([1,0,0]).rotate(0,0,20)]); export default group([base,part,extra]);`;
   await compile(source);
   for (const token of ['align(', 'on(', 'base.axis', 'base.up']) {
     const scene = await inspect(source, token);
@@ -300,3 +314,75 @@ test('joint placement draws only the selected relation and keeps unrelated value
     assert.equal(scene.ambient.length, 1, token);
   }
 });
+
+for (const [imports, expression, sourceToken, targetToken] of [
+  [
+    "import {on as contact, box, group} from '@code3d/core';",
+    'contact(/* target */ base.up)',
+    undefined,
+    'base.up',
+  ],
+  [
+    "import {on as contact, box, group} from '@code3d/core';",
+    'contact(/* source */ base, /* target */ self.up)',
+    '/* source */',
+    'self.up',
+  ],
+  [
+    "import * as core from '@code3d/core'; import {box, group} from '@code3d/core';",
+    'core.align(/* source */ self.frame, /* target */ base.frame)',
+    'self.frame',
+    'base.frame',
+  ],
+  [
+    "import * as core from '@code3d/core'; import {box, group} from '@code3d/core';",
+    'core.align(/* source */ base.axis, /* target */ self.axis)',
+    'base.axis',
+    'self.axis',
+  ],
+] as const) {
+  test(`standalone relation scopes and inspectors follow resolved imports: ${expression}`, async () => {
+    const source = `${imports}
+      const base = box(20, 10, 30);
+      const part = box(8, 6, 4).relate(self => ${expression});
+      export default group([base, part]);`;
+    const module = await compile(source);
+    const callToken = expression.split('(')[0].split('.').at(-1) + '(';
+    const call = at(module, source, callToken);
+    assert.equal(call.evaluation.constraintFocus, 'self');
+    const sides = sourceToken
+      ? ([
+          [sourceToken, 'source'],
+          [targetToken, 'target'],
+        ] as const)
+      : ([[targetToken, 'target']] as const);
+    for (const [token, side] of sides) {
+      const selected = at(module, source, token);
+      assert.equal(selected.evaluation.constraintFocus, side);
+      assert.deepEqual(selected.evaluation.focusNodeIds, [
+        selected.constraint[side].nodeId,
+      ]);
+      assert.equal(
+        selected.evaluation.relationOwnerNodeId,
+        call.evaluation.relationOwnerNodeId,
+      );
+    }
+    const scene = await inspect(source, callToken);
+    assert.equal(scene.target.filter(item => item.kind === 'anchor').length, 2);
+    assert.equal(
+      scene.target.filter(item => item.kind === 'model' && item.focused).length,
+      1,
+    );
+    assert.equal(
+      scene.target.filter(item => item.kind === 'anchor' && item.focused)
+        .length,
+      1,
+    );
+    const selected = await inspect(source, '/* target */');
+    assert.equal(
+      selected.target.filter(item => item.kind === 'anchor' && item.focused)
+        .length,
+      1,
+    );
+  });
+}

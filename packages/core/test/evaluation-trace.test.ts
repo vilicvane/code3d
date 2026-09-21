@@ -9,7 +9,7 @@ import type {ModelOperationInstrumentation} from '@code3d/core/tooling';
 
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {offset, box} from '../bld/node/index.js';
+import {on, offset, box} from '../bld/node/index.js';
 import {
   beginModelEvaluation,
   instrumentRelation,
@@ -87,7 +87,7 @@ test('clears cached constraint provenance without losing the stored relation or 
   const related = base.relate(copy => {
     constraint = offset(2, 3, 4);
     instrumentRelation(constraint, trace.sourceRef, trace.parameters);
-    return [copy.on(target.down), constraint];
+    return [on(copy, target.down), constraint];
   });
   try {
     const first = createModelSnapshotter()(related);

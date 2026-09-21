@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {afterEach, test} from 'node:test';
 import {
+  on,
   box,
   circle,
   cut,
@@ -89,7 +90,7 @@ test('extrusion follows the rotated plane normal and retains offset and scaled c
 test('extrusions retain source placement and color while exposing ordinary solid operations', () => {
   const stock = keep(box(20, 10, 20));
   const source = keep(keep(rectangle(8, 6)).material('#336699'));
-  const profile = keep(source.relate(self => self.down.on(stock.up)));
+  const profile = keep(source.relate(self => on(self.down, stock.up)));
   const result = keep(profile.extrude(3));
   const snapshot = createModelSnapshotter();
   const input = snapshot(profile);

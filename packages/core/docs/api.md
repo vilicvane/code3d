@@ -334,15 +334,12 @@ solved orientation. For a specific assembled occurrence, expose its geometry
 through the containing group and measure those references.
 
 ```ts
-import {box, distance, group, offset} from '@code3d/core';
+import {on, box, distance, group, offset} from '@code3d/core';
 
 const left = box(8, 30, 32);
-const right = box(8, 30, 32).relate(self => [
-  self.on(left.right),
-  offset(60, 0, 0),
-]);
+const right = box(8, 30, 32).relate(() => [on(left.right), offset(60, 0, 0)]);
 const length = distance(left.right, right.left, 'x');
-const beam = box(length, 10, 24).relate(self => self.on(left.right));
+const beam = box(length, 10, 24).relate(() => on(left.right));
 export default group([left, right, beam]);
 ```
 
@@ -386,7 +383,7 @@ chaining methods. Use an array to combine steps: `[offset(0, 8, 0), rotate(0, 25
 These five reference selectors return an unfinished selection with a
 `rotate` method; its result is again a completed transformation.
 Point selectors additionally accept one `pivotOffset(dx, dy, dz)`; axis selectors
-accept one `axisOffset(dx, dy, dz)`. The resulting selector only exposes `rotate`.
+accept one `axisOffset(dx, dy, dz)`. Both kinds of selector complete with `rotate`.
 Point offsets use self local axes. Axis offsets use the selected axis reference
 frame, retaining its direction. Both retain the original point/axis reference.
 
@@ -530,7 +527,7 @@ in the App for a plate, multiple cutting tools and a hollow loft.
 
 ### Sketch placement and model context
 
-`sketch.relate(self => self.plane.align(target))` creates an immutable spatial
+`sketch.relate(self => align(self.plane, target))` creates an immutable spatial
 copy of the same local 2D definition. Empty and open sketches can relate before
 `face()` is available. Targets include named model planes and planar
 `model.surface(id)` references.
@@ -541,7 +538,7 @@ const profile = sketch([
   ['point', 1, [0, 0]],
   ['circle', 2, [1, 4]],
 ]);
-const opening = profile.relate(s => s.plane.align(host.surface(4)));
+const opening = profile.relate(s => align(s.plane, host.surface(4)));
 const result = host.cut([opening.face().extrude(-20)]);
 ```
 
@@ -660,6 +657,68 @@ topology IDs are preserved. Groups do not provide `.scaled()`; scale their
 geometric parts before composing them. To change only an exported file's unit
 conversion, use the [export scale](../../web/src/content/docs/docs/guides/exporting.md#scale-and-orientation).
 
+## Rotation coupling
+
+`coupleRotation(other, {ratio: -2 / 3, phase: 6})` couples the current model
+from the enclosing `relate` callback to another model. It uses each model's own
+`.axis` and constrains `selfAngle = ratio * otherAngle + phase`. `ratio` must be
+finite and nonzero; `phase` is in degrees (default zero). It returns a complete
+`Constraint`, used as its own placement entry.
+
+```ts
+const crank = box(20, 3, 6).relate(self => [
+  align(self.frame, base.frame),
+  axisLine(self.axis).rotate(
+    input('Drive angle', 0, {min: -1080, max: 1080, step: 1}),
+  ),
+]);
+const output = box(30, 3, 6).relate(self => [
+  align(self.origin, crank.origin),
+  coupleRotation(crank, {ratio: -0.5}),
+  offset(40, 0, 0),
+]);
+```
+
+Call `coupleRotation` inside `relate`; helpers called by that callback use the
+same current model. Nested callbacks use their own self. Both models must
+provide a straight `.axis`; a group without an exposed axis cannot participate
+directly. The other argument is a model, not an axis reference. There is no axis
+override or separate axis-editing operation in this API.
+
+The current model is the new value produced by `relate`. Passing the original
+receiver as `other` still refers to that earlier value, with its own placement.
+Each axis retains its model's local direction and angular datum, including
+changes from geometric rotation and origin operations. Coupling leaves
+translation free: use origin alignment, `on()` and independent `offset()` steps
+to place the shafts. It does not make their axes coincident.
+
+Each axis frame's X direction supplies its angular datum. Zero is Core's
+standard frame for the axis's positive Y direction in the assembly solve frame:
+project +X perpendicular to Y, using +Z when Y is nearly parallel to +X
+(`abs(Y.x) >= 0.9`). Rotation is measured about that Y, then signed by the
+reference direction. An axis in the usual +Y orientation therefore uses +X as
+zero. `phase` relates these two datums; there is no separate XYZ axis option.
+
+Cumulative angles come from the authored placement sequence, including full
+turns, frame attachments and upstream couplings. They do not depend on previous
+App frames or playback history. A 360° driver step produces a −180° output step
+in this example. Geometric `.rotate()` changes local geometry; use a standalone
+or selected-axis `rotate()` inside `relate()` to drive a placement angle.
+
+The supported driving chain is acyclic, with one fixed material-axis direction
+per participating body. Axes may have arbitrary directions; use
+`axisLine(...).rotate(angle)` to turn about such an axis. XYZ rotations can drive
+an axis parallel to the corresponding local X, Y or Z. Frame alignment, point
+coincidence and `on()` can participate; other geometric alignments cannot drive
+this angular coordinate. Conflicting angles, rotations about other directions,
+and driving cycles report errors. Moving carriers are outside this subset;
+place a completed mechanism as a group. Constraint stages and immutable reference
+identity follow the same rules as `align()`.
+
+For automatic tooth ratios and engagement phase, use
+[Gears](../../gears/docs/api.md#drive-through-connected-parts) and its
+[connected-crank example](../../app/examples/packages/gears/transmission.ts).
+
 ## Origins and rotation
 
 Every model, including groups, has a `frame: FrameAnchor` coordinate reference.
@@ -667,8 +726,8 @@ Every model, including groups, has a `frame: FrameAnchor` coordinate reference.
 that same reference. These references have no geometry and cannot be added as
 models to a group. A point model's geometry may be away from its own origin.
 
-`self.origin.align(other.origin)` constrains only position.
-`self.frame.align(other.frame)` constrains position and all three axis directions.
+`align(self.origin, other.origin)` constrains only position.
+`align(self.frame, other.frame)` constrains position and all three axis directions.
 Use `.frame` explicitly: aligning curves or surfaces still refers to their
 underlying geometry. Frames support `expose`, including `.origin` on the exposed
 frame, and retain their occurrence and transform through composition.
@@ -747,7 +806,8 @@ Solid primitives expose `center` and `axis`; every model provides directional
 bounds: `up` (+Y), `down` (−Y), `right` (+X), `left` (−X), `front` (+Z),
 and `back` (−Z), in that model's local frame.
 
-`geometry.on(target.up)` only translates. The source may be a model, point,
+`on(target.up)` translates the whole current `relate` self.
+`on(geometry, target.up)` selects the source explicitly and also only translates. The source may be a model, point,
 edge, or surface; its own finite extent is measured along the target direction.
 Tangential position and orientation are preserved. Targets must be directional
 bounds. Infinite reference lines and planes cannot supply a finite source extent.
@@ -759,13 +819,15 @@ point or axis alignment for centering. `bound.flip()` reverses contact
 facing without changing geometry or reference axes.
 
 `relate` returns a new model, represented by its callback parameter `self`.
-Every returned constraint must involve that value, as in `self.on(base.up)`
-or `base.on(self.up)`. External variables keep their original identity, including
-the receiver of `relate`: `part.relate(self => self.on(part.right))` places a
+Every returned constraint must involve that value, as in `on(base.up)`
+or `on(base, self.up)`. External variables keep their original identity, including
+the receiver of `relate`: `part.relate(() => on(part.right))` places a
 new part against the original. Select the new part's topology and rotation
 references through `self`; references selected from `part` belong to the original.
 
-`pointOrCurveOrSurface.align(target)` solves geometric position and orientation.
+`align(source, target)` always takes two explicit references. Point, curve, and
+surface references solve geometric position and orientation; frame/frame aligns
+the complete coordinate systems. Models are never implicitly converted to frames.
 Same-dimensional references coincide; a lower-dimensional reference lies on the
 whole supporting geometry of the other. Edges use their underlying curves and
 faces their underlying surfaces, ignoring trims and parameter origins. Supported
@@ -1009,10 +1071,10 @@ kind, including groups. As model members, `bounds` and `position` are reserved
 names and cannot be used as exposed element names.
 
 ```ts
-import {box, group, offset} from '@code3d/core';
+import {on, box, group, offset} from '@code3d/core';
 
 const base = box(20, 4, 20);
-const part = box(8, 12, 4).relate(self => [self.on(base.up), offset(20, 0, 0)]);
+const part = box(8, 12, 4).relate(() => [on(base.up), offset(20, 0, 0)]);
 const size = part.bounds().size; // [8, 12, 4]
 const origin = part.position(base); // [20, 8, 0]
 const minimum = part.bounds(base).minimum; // [16, 2, -2]

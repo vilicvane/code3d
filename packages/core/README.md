@@ -19,11 +19,11 @@ and declarations instead. See [project package installation](../web/src/content/
 Place a part on a base, offset it, and rotate it around a chosen pivot.
 
 ```ts
-import {box, group, offset, pivot} from '@code3d/core';
+import {on, box, group, offset, pivot} from '@code3d/core';
 
 const base = box(40, 8, 30);
-const part = box(14, 20, 12).relate(self => [
-  self.on(base.up), // Touch the base.
+const part = box(14, 20, 12).relate(() => [
+  on(base.up), // Touch the base.
   offset(6, 0, 0),
   pivot([0, -10, 0]).rotate(0, 0, 25),
 ]);
@@ -56,6 +56,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Model values](docs/values.md): immutable values and geometry measurements.
 - [Local coordinates](docs/local-coordinates.md): frames, origins and placement conventions.
 - [Relations](docs/relations.mdx): position parts using bounds, geometry and frames.
+- [Rotation coupling](docs/api.md#rotation-coupling): transmit cumulative angles through fixed-axis connections.
 - [Origins and rotation](docs/origins-and-rotation.mdx): choose a pivot and adjust a part.
 - [Shells](docs/shells.mdx): hollow solids and choose openings.
 - [Topology](docs/topology.md): select vertices, edges and faces and expose named elements.
