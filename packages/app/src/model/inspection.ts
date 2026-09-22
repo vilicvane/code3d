@@ -395,9 +395,12 @@ export class InspectionSession {
           );
           if (result !== undefined) return selected(result);
         }
-        const inArguments = site.arguments.some(argument =>
-          within(argument.sourceRef, selection),
-        );
+        const inArguments =
+          (site.argumentInsertionRef &&
+            within(site.argumentInsertionRef, selection)) ||
+          site.arguments.some(argument =>
+            within(argument.sourceRef, selection),
+          );
         const inReceiver =
           site.receiverRef && within(site.receiverRef, selection);
         const parameter = site.signature.parameters
@@ -455,7 +458,7 @@ export class InspectionSession {
   }
 
   private focus(selection: InspectSelection): RecordedValue | undefined {
-    return this.values
+    const record = this.values
       .filter(
         value =>
           within(value.sourceRef, selection) &&
@@ -471,6 +474,11 @@ export class InspectionSession {
             Number(a.order === selection.order) ||
           b.order - a.order,
       )[0];
+    const insertion =
+      record?.call && this.sites.get(record.call.siteId)?.argumentInsertionRef;
+    return record && insertion && within(insertion, selection)
+      ? {...record, value: undefined}
+      : record;
   }
 
   /** An insertion gap focuses its array value with the preceding element count. */
@@ -536,13 +544,15 @@ export class InspectionSession {
     );
     const source = site.arguments[sourceIndex];
     const range = call.argumentRanges[sourceIndex];
-    if (!source || !range) return;
-    const member = source.members
+    const insertion =
+      site.argumentInsertionRef && within(site.argumentInsertionRef, selection);
+    if (!insertion && (!source || !range)) return;
+    const member = source?.members
       .filter(member => within(member.sourceRef, selection))
       .sort((a, b) => b.path.length - a.path.length)[0];
     let path = member?.path ?? [];
-    let argumentIndex = range.start;
-    if (source.spread) {
+    let argumentIndex = insertion ? call.argumentCount : range.start;
+    if (source?.spread) {
       if (typeof path[0] === 'number') {
         argumentIndex += path[0];
         path = path.slice(1);

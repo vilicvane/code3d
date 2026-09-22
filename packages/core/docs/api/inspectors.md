@@ -5,10 +5,9 @@ sourceReview:
   packageVersion: 0.0.1-alpha.15
   sources:
     - path: packages/app/src/model/inspection.ts
-      sha256: e3180cc24f719b9ffe7493d9b897c48c84a46df924c3e807b9fd83ab8b5f53ca
+      sha256: d7ade31710cad6fbd81b92a3c461d7d9b27c096b39d8f1ea35e561142a8c7ea2
     - path: packages/core/src/library/inspect.ts
-      sha256: 530883228cd23a27f1e13c5153669c24ce87d523f4ff1cc52202dab698063e45
-      commit: e8843e109cb86d5dcfee6e28859625a22921372d
+      sha256: 3a2b79225efc60bde43e1ed6b7fead901376689b03a190bf5884920d8c5bb870
     - path: packages/core/src/library/group.ts
       sha256: c9592b8f7ed218c81a147f1a5102592cd8b21cde0953bf0178ea0b848e0952a6
       commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
@@ -98,6 +97,11 @@ value and continues outward without re-entering that same call's parameter or
 call inspector. The callback
 receives the original argument tuple and `InspectContext`; method receivers are
 in `context.receiver`. Its `target` and `ambient` arrays own the complete scene.
+An empty argument list or a trailing comma selects the next parameter slot,
+including after spread arguments. Its `focused.parameter` identifies that
+parameter, while `focused.value` is `undefined` and `focused.values` is empty.
+The original argument tuple stays unchanged; inspectors obtain effective
+runtime defaults from the returned model or captured call data.
 Returning `undefined` declines the scope; returning `{}` intentionally displays
 an empty scene. Target values matching `context.focused.values` receive focus
 by default; generated geometry does not inherit focus from its inputs. An

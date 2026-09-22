@@ -838,6 +838,81 @@ test('distance whole-model parameter inspection directly partitions target and a
   );
 });
 
+test('omitted Box arguments inspect their actual default dimensions and preserve source slots', async () => {
+  const inspect = await compile(`import {box as makeBox} from '@code3d/core';
+    import * as core from '@code3d/core';
+    makeBox();
+    makeBox( /* x */ );
+    makeBox(12, /* y */ );
+    core.box(12,14, /* z */ );
+    makeBox(undefined, undefined, undefined);
+    const sizes = [12, 14] as const;
+    makeBox(...sizes, /* spread z */ );
+    makeBox(12,14,16, /* extra */ );`);
+  for (const [token, delta, axis, value] of [
+    ['makeBox()', 8, 'X', 10],
+    ['/* x */', 3, 'X', 10],
+    ['makeBox(12,', 9, 'X', 12],
+    ['/* y */', 3, 'Y', 10],
+    ['/* z */', 3, 'Z', 10],
+    ['undefined, undefined, undefined', 2, 'X', 10],
+    ['undefined, undefined)', 2, 'Y', 10],
+    ['undefined)', 2, 'Z', 10],
+    ['/* spread z */', 3, 'Z', 10],
+  ] as const) {
+    const scene = defined(await inspect(token, delta));
+    const guide = defined(scene.target.find(item => item.kind === 'dimension'));
+    assert.equal(guide.axisLabel, axis, token);
+    assert.equal(guide.value, value, token);
+    assert.equal(guide.style, 'edge');
+    assert.ok('candidates' in guide);
+    assert.equal(guide.candidates.length, 4);
+    for (const {start, end} of guide.candidates)
+      assert.equal(Math.hypot(...end.map((v, i) => v - start[i])), value);
+    assert.ok(scene.target.every(item => !item.focused));
+  }
+  for (const [token, delta] of [
+    ['makeBox()', 0],
+    ['makeBox()', 7],
+    ['makeBox()', 9],
+    ['/* extra */', 3],
+  ] as const)
+    assert.ok(
+      !defined(await inspect(token, delta)).target.some(
+        item => item.kind === 'dimension',
+      ),
+    );
+});
+
+test('parameter inspectors receive an empty focus at omitted slots, including rest arguments', async () => {
+  const inspect = await compile(`import {box} from '@code3d/core';
+    /**
+     * @code3d.inspect width part.inspect
+     * @code3d.inspect rest part.inspect
+     */
+    function part(width = 5, ...rest: number[]) { return box(width,2,3); }
+    namespace part {
+      export function inspect(args, context) {
+        if (context.focused.value !== undefined || context.focused.values.length)
+          throw new Error('An empty parameter must not focus the return value');
+        const n = context.focused.parameter === 'width' ? 7 : context.focused.path[0] + 10;
+        return {target: [box(n,2,3)]};
+      }
+    }
+    part();
+    part(5, /* first rest */ );
+    part(5, 9, /* second rest */ );`);
+  assert.equal(width(defined(await inspect('part()', 5)).target[0]), 7);
+  assert.equal(
+    width(defined(await inspect('/* first rest */', 3)).target[0]),
+    10,
+  );
+  assert.equal(
+    width(defined(await inspect('/* second rest */', 3)).target[0]),
+    11,
+  );
+});
+
 test('box and extrude parameter inspectors emit complete candidate segments and keep batch owners separate', async () => {
   const inspect =
     await compile(`import {box, rectangle, extrude, offset} from '@code3d/core';

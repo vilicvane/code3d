@@ -1,14 +1,64 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {Raycaster, Vector2, Vector3} from 'three';
+import {BoxGeometry, Group, Mesh, Raycaster, Vector2, Vector3} from 'three';
 import {
   cameraViewHeight,
+  cameraContainsGeometry,
   createViewCamera,
   perspectiveDistance,
   resizeViewCamera,
   setCameraViewHeight,
   updateProjectionCamera,
 } from '../src/rendering/view-camera.ts';
+
+test('viewport containment projects transformed geometry with pixel margins in both projections', () => {
+  const root = new Group();
+  const geometry = new BoxGeometry(10, 10, 10);
+  const body = new Mesh(geometry);
+  root.add(body);
+  try {
+    for (const projection of ['perspective', 'orthographic'] as const) {
+      const camera = createViewCamera(projection, 1);
+      camera.position.set(0, 0, 50);
+      camera.lookAt(0, 0, 0);
+      setCameraViewHeight(camera, 20, 50);
+      body.position.set(0, 0, 0);
+      body.scale.setScalar(1);
+      assert.equal(cameraContainsGeometry(camera, root, 800, 800, 12), true);
+      body.scale.setScalar(5);
+      assert.equal(cameraContainsGeometry(camera, root, 800, 800), false);
+      body.scale.setScalar(1);
+      body.position.set(20, 0, 0);
+      assert.equal(cameraContainsGeometry(camera, root, 800, 800), false);
+      body.visible = false;
+      assert.equal(cameraContainsGeometry(camera, root, 800, 800), true);
+      body.visible = true;
+      body.position.set(0, 0, 70);
+      assert.equal(cameraContainsGeometry(camera, root, 800, 800), false);
+    }
+    const camera = createViewCamera('orthographic', 1);
+    camera.position.z = 50;
+    setCameraViewHeight(camera, 10, 50);
+    body.position.set(0.01, 0, 0);
+    assert.equal(cameraContainsGeometry(camera, root, 800, 800, 3), false);
+    assert.equal(cameraContainsGeometry(camera, root, 800, 800, -3), true);
+    body.position.x = 0.1;
+    assert.equal(cameraContainsGeometry(camera, root, 800, 800, -3), false);
+
+    // A rotated thin model fits even when its world-axis box would be clipped.
+    const aligned = createViewCamera('orthographic', 20);
+    aligned.position.z = 50;
+    aligned.rotation.z = Math.PI / 4;
+    setCameraViewHeight(aligned, 2, 50);
+    body.position.set(0, 0, 0);
+    body.scale.set(3, 0.05, 0.05);
+    body.rotation.z = Math.PI / 4;
+    assert.equal(cameraContainsGeometry(aligned, root, 1000, 50), true);
+  } finally {
+    geometry.dispose();
+    (body.material as import('three').Material).dispose();
+  }
+});
 
 test('projection changes preserve the observation plane and orthographic depth has no scale', () => {
   for (const aspect of [0.5, 1.5, 3]) {

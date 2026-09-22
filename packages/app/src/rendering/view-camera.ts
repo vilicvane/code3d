@@ -5,6 +5,11 @@ import {
   PerspectiveCamera,
   Sphere,
   Vector3,
+  Vector4,
+  Matrix4,
+  BufferGeometry,
+  Quaternion,
+  type Object3D,
 } from 'three';
 
 export type ViewCamera = PerspectiveCamera | OrthographicCamera;
@@ -15,7 +20,76 @@ export type CameraFraming = Readonly<{
   viewHeight: number;
 }>;
 
+export type CameraPose = CameraFraming &
+  Readonly<{
+    orientation: Quaternion;
+    projection: CameraProjection;
+    /** Displayed perspective strength; 0 is orthographic, 1 is the navigation lens. */
+    projectionMix: number;
+  }>;
+
+export function transformCameraPose(
+  pose: CameraPose,
+  transform: Matrix4,
+): CameraPose {
+  return {
+    ...pose,
+    focus: pose.focus.clone().applyMatrix4(transform),
+    orientation: new Quaternion()
+      .setFromRotationMatrix(transform)
+      .multiply(pose.orientation),
+  };
+}
+
 export const defaultFieldOfView = 42;
+
+/** Test the displayed geometry, excluding decorations in separate scene layers. */
+export function cameraContainsGeometry(
+  camera: ViewCamera,
+  root: Object3D,
+  width: number,
+  height: number,
+  paddingPixels = 0,
+): boolean {
+  if (width <= 0 || height <= 0) return true;
+  camera.updateWorldMatrix(true, false);
+  root.updateWorldMatrix(true, true);
+  const projection = new Matrix4().multiplyMatrices(
+    camera.projectionMatrix,
+    camera.matrixWorldInverse,
+  );
+  const matrix = new Matrix4();
+  const point = new Vector4();
+  const xLimit = 1 - (2 * paddingPixels) / width;
+  const yLimit = 1 - (2 * paddingPixels) / height;
+  let contained = true;
+  root.traverseVisible(object => {
+    if (
+      !contained ||
+      !('geometry' in object) ||
+      !(object.geometry instanceof BufferGeometry)
+    )
+      return;
+    const positions = object.geometry.getAttribute('position');
+    if (!positions) return;
+    matrix.multiplyMatrices(projection, object.matrixWorld);
+    for (let i = 0; i < positions.count; i++) {
+      point
+        .set(positions.getX(i), positions.getY(i), positions.getZ(i), 1)
+        .applyMatrix4(matrix);
+      if (
+        point.w <= 0 ||
+        point.z < -point.w ||
+        Math.abs(point.x) > point.w * xLimit ||
+        Math.abs(point.y) > point.w * yLimit
+      ) {
+        contained = false;
+        break;
+      }
+    }
+  });
+  return contained;
+}
 
 export function cameraProjection(camera: ViewCamera): CameraProjection {
   return camera instanceof PerspectiveCamera ? 'perspective' : 'orthographic';

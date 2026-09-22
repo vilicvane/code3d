@@ -19,6 +19,10 @@ const rebased = body.rotate(20, 30, 40).originVertex(3);
 const profile = rectangle(20, 30).rotate(0, 0, 90).originOffset(4, 5, 6);
 const pulled = extrude(profile, -12);
 const round = extrude(circle(12), 20);
+const missingX = box( /* missing x */ );
+const missingY = box(24, /* missing y */ );
+const missingZ = box(24, 36, /* missing z */ );
+const defaulted = box(undefined, undefined, undefined);
 `;
 
 async function focus(page: Page, token: string, delta = 0) {
@@ -60,6 +64,8 @@ async function measure(page: Page) {
           decoration.kind === 'measurement'
             ? {
                 value: decoration.value,
+                axisLabel: decoration.axisLabel,
+                style: decoration.style,
                 start: (
                   decoration as import('../../src/viewport-decoration.ts').ViewportMeasurementDecoration &
                     import('@code3d/core').DimensionSegment
@@ -78,6 +84,7 @@ async function measure(page: Page) {
     let draws = 0;
     let exportedDraws = 0;
     const widths: number[] = [];
+    const lines: {color: string; dashed: boolean; opacity: number}[] = [];
     const restore: (() => void)[] = [];
     for (const {object} of guides)
       object.traverse(child => {
@@ -89,6 +96,12 @@ async function measure(page: Page) {
           const material =
             child.material as import('three/addons/lines/LineMaterial.js').LineMaterial;
           if (material.linewidth !== undefined) widths.push(material.linewidth);
+          if (child.name === 'distance-line')
+            lines.push({
+              color: material.color.getHexString(),
+              dashed: material.dashed,
+              opacity: material.opacity,
+            });
           before.apply(this, args);
         };
         restore.push(() => {
@@ -99,6 +112,18 @@ async function measure(page: Page) {
       viewport['rendering'].renderFrame();
       const liveDraws = draws;
       const blob = await viewport.captureImage(800, 600);
+      const bitmap = await createImageBitmap(blob);
+      const pixels = document.createElement('canvas');
+      pixels.width = bitmap.width;
+      pixels.height = bitmap.height;
+      const context = pixels.getContext('2d')!;
+      context.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      const rgba = context.getImageData(0, 0, pixels.width, pixels.height).data;
+      let greenPixels = 0;
+      for (let i = 0; i < rgba.length; i += 4)
+        if (rgba[i] > 140 && rgba[i + 1] > 200 && rgba[i + 2] < 120)
+          greenPixels++;
       return {
         guides: guides.map(({object, group, ...guide}) => ({
           ...guide,
@@ -108,10 +133,12 @@ async function measure(page: Page) {
         liveDraws,
         exportedDraws,
         bytes: blob.size,
+        greenPixels,
         widths,
+        lines,
         camera: viewport['camera'].position.toArray(),
         selectedKey: viewport.getSelected()?.key,
-        scene: viewport['activeScene']?.key,
+        scene: viewport['viewState'].scene?.key,
       };
     } finally {
       restore.forEach(restore => restore());
@@ -137,6 +164,10 @@ test(
     page.setDefaultTimeout(30_000);
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.type() === 'error' || message.text().includes('[mobx]'))
+        errors.push(message.text());
+    });
     await page.route('**/src/main.ts*', async route => {
       const response = await route.fetch();
       await route.fulfill({
@@ -166,9 +197,18 @@ test(
     const x = await measure(page);
     assert.equal(x.guides.length, 1);
     assert.equal(x.guides[0].dimension?.value, 24);
+    assert.equal(x.guides[0].dimension?.axisLabel, 'X');
+    assert.equal(x.guides[0].dimension?.style, 'edge');
+    assert.ok(x.lines.length > 0);
+    assert.ok(
+      x.lines.every(
+        line => line.color === 'd8ff3e' && !line.dashed && line.opacity === 1,
+      ),
+    );
     assert.ok(x.guides[0].dimension?.start);
     assert.ok(x.liveDraws > 0);
     assert.ok(x.exportedDraws > 0);
+    assert.ok(x.greenPixels > 10);
     assert.ok(x.widths.every(width => width === 1));
     if (process.env.CODE3D_SCREENSHOT_PATH)
       await page.screenshot({path: process.env.CODE3D_SCREENSHOT_PATH});
@@ -214,6 +254,29 @@ test(
     assert.equal(render.exportedDraws, 0);
     await page.getByRole('button', {name: 'Modeling', exact: true}).click();
     assert.ok((await measure(page)).liveDraws > 0);
+
+    for (const [token, axis] of [
+      ['/* missing x */', 'X'],
+      ['/* missing y */', 'Y'],
+      ['/* missing z */', 'Z'],
+      ['undefined, undefined, undefined', 'X'],
+      ['undefined, undefined)', 'Y'],
+      ['undefined)', 'Z'],
+    ] as const) {
+      await focus(page, token, 2);
+      const omitted = await measure(page);
+      assert.equal(omitted.guides.length, 1, token);
+      assert.equal(omitted.guides[0].dimension?.value, 10, token);
+      assert.equal(omitted.guides[0].dimension?.axisLabel, axis, token);
+      assert.ok(
+        omitted.lines.every(
+          line => line.color === 'd8ff3e' && !line.dashed && line.opacity === 1,
+        ),
+      );
+      assert.ok(omitted.liveDraws > 0, token);
+      assert.ok(omitted.exportedDraws > 0, token);
+      assert.ok(omitted.greenPixels > 10, token);
+    }
 
     await focus(page, '[1, 3]', 3);
     const fillet = await measure(page);

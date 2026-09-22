@@ -2,14 +2,16 @@
 title: inspectGroupMembers
 description: Preview derived group members at solved positions while preserving source input focus identities.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.15
   sources:
     - path: packages/core/src/library/group.ts
       sha256: c9592b8f7ed218c81a147f1a5102592cd8b21cde0953bf0178ea0b848e0952a6
+      commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
     - path: packages/core/src/library/inspect.ts
-      sha256: 530883228cd23a27f1e13c5153669c24ce87d523f4ff1cc52202dab698063e45
+      sha256: 3a2b79225efc60bde43e1ed6b7fead901376689b03a190bf5884920d8c5bb870
     - path: packages/core/src/library/runtime.ts
       sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
 sidebar:
   hidden: true
 head:

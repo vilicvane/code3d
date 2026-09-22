@@ -43,6 +43,8 @@ export type InspectCallSite = Readonly<{
   sourceRef: SourceRef;
   callRef: SourceRef;
   receiverRef?: SourceRef;
+  /** Next argument slot in an empty list or after a trailing comma. */
+  argumentInsertionRef?: SourceRef;
   arguments: readonly Readonly<{
     sourceRef: SourceRef;
     spread: boolean;

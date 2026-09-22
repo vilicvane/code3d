@@ -8,6 +8,8 @@ declare const window: Window & {
     viewport: import('../../src/viewport.ts').ModelViewport;
     contextualToolPanel: import('../../src/ui/contextual-tool-panel.ts').ContextualToolPanel;
   };
+  previousDimensionModule?:
+    import('../../src/model/compiler.ts').ModelModule | null;
 };
 
 const source = `import {box, point, pivotVertex} from '@code3d/core';
@@ -105,6 +107,68 @@ async function focusedInput(page: Page) {
     () => (document.activeElement as HTMLElement)?.dataset.parameter,
   );
 }
+
+test(
+  'committed dimension inputs fit growing geometry without zooming into smaller results',
+  {timeout: 120_000},
+  async t => {
+    const page = await openApp(t);
+    await setSource(
+      page,
+      "import {box} from '@code3d/core';\nconst body = box(20, 20, 20);",
+      '20,',
+    );
+    const initial = await page.evaluate(() => {
+      const pose = window.parameterTabApp.viewport['controls'].capturePose();
+      return {...pose, orientation: pose.orientation.toArray()};
+    });
+    let grownViewHeight = initial.viewHeight;
+    for (const [parameter, value] of [
+      ['x', 200],
+      ['y', 400],
+      ['z', 600],
+      ['z', 20],
+    ] as const) {
+      await page.evaluate(() => {
+        const viewport = window.parameterTabApp.viewport;
+        window.previousDimensionModule = viewport['module'];
+      });
+      const input = page.locator(`input[data-parameter="${parameter}"]`);
+      await input.fill(String(value));
+      await input.press('Enter');
+      await page.waitForFunction(() => {
+        const viewport = window.parameterTabApp.viewport;
+        return (
+          viewport['module'] !== window.previousDimensionModule &&
+          document
+            .querySelector('#viewport-status')
+            ?.getAttribute('data-state') !== 'busy' &&
+          viewport['geometryFits'](0)
+        );
+      });
+      const camera = await page.evaluate(() => {
+        const viewport = window.parameterTabApp.viewport;
+        const pose = viewport['controls'].capturePose();
+        return {
+          pose: {...pose, orientation: pose.orientation.toArray()},
+          local: viewport['viewState'].keepLocalView,
+        };
+      });
+      assert.equal(camera.local, false);
+      assert.ok(camera.pose.viewHeight > initial.viewHeight * 2);
+      assert.equal(camera.pose.projection, initial.projection);
+      camera.pose.orientation.forEach((value, i) =>
+        assert.ok(Math.abs(value - initial.orientation[i]) < 1e-6),
+      );
+      if (parameter === 'z') {
+        if (value === 600) grownViewHeight = camera.pose.viewHeight;
+        else
+          assert.ok(Math.abs(camera.pose.viewHeight - grownViewHeight) < 1e-6);
+      }
+    }
+    await page.screenshot({path: '/tmp/code3d-dimension-input-framing.png'});
+  },
+);
 
 test(
   'Tab focuses the exact writable argument and selects its text for editing',

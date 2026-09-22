@@ -18,7 +18,7 @@ const labelStyle = {
 
 const lineStyle = {width: 1, dash: 6, gap: 4, tick: 12} as const;
 
-/** Passive dimension: a projected pixel dash pattern, endpoint ticks and label. */
+/** Passive dimension: a measured segment or highlighted edge with a value label. */
 export class MeasurementDecorationObject extends THREE.Group {
   private readonly start: THREE.Vector3;
   private readonly end: THREE.Vector3;
@@ -57,22 +57,24 @@ export class MeasurementDecorationObject extends THREE.Group {
         30,
       );
       line.name = 'distance-line';
-      line.material.dashed = true;
-      line.material.dashSize = lineStyle.dash;
-      line.material.gapSize = lineStyle.gap;
-      line.computeLineDistances();
-      // LineMaterial's default distances are in model units. Interpolate pixel
-      // distance without perspective correction so even a receding line keeps
-      // the same dash length. gl_FragCoord.w cancels the varying's correction.
-      line.material.vertexShader = line.material.vertexShader.replace(
-        'vec3 ndcEnd = clipEnd.xyz / clipEnd.w;',
-        `vec3 ndcEnd = clipEnd.xyz / clipEnd.w;
+      line.material.dashed = decoration.style !== 'edge';
+      if (line.material.dashed) {
+        line.material.dashSize = lineStyle.dash;
+        line.material.gapSize = lineStyle.gap;
+        line.computeLineDistances();
+        // LineMaterial's default distances are in model units. Interpolate pixel
+        // distance without perspective correction so even a receding line keeps
+        // the same dash length. gl_FragCoord.w cancels the varying's correction.
+        line.material.vertexShader = line.material.vertexShader.replace(
+          'vec3 ndcEnd = clipEnd.xyz / clipEnd.w;',
+          `vec3 ndcEnd = clipEnd.xyz / clipEnd.w;
         vLineDistance = position.y < 0.5 ? 0.0 : length((ndcEnd.xy - ndcStart.xy) * resolution * 0.5) * clipEnd.w;`,
-      );
-      line.material.fragmentShader = line.material.fragmentShader.replace(
-        'vLineDistance + dashOffset',
-        'vLineDistance * gl_FragCoord.w + dashOffset',
-      );
+        );
+        line.material.fragmentShader = line.material.fragmentShader.replace(
+          'vLineDistance + dashOffset',
+          'vLineDistance * gl_FragCoord.w + dashOffset',
+        );
+      }
       this.add(line);
     }
     this.ticks = createScreenSpaceEdgeLines(
@@ -86,7 +88,11 @@ export class MeasurementDecorationObject extends THREE.Group {
     this.ticks.name = 'distance-ticks';
     this.ticks.frustumCulled = false;
     this.ticks.geometry.instanceCount =
-      'at' in decoration ? 0 : this.start.equals(this.end) ? 1 : 2;
+      'at' in decoration || decoration.style === 'edge'
+        ? 0
+        : this.start.equals(this.end)
+          ? 1
+          : 2;
     this.add(this.ticks);
     const prefix = `${Number(decoration.value.toPrecision(8))}${decoration.axisLabel ? ' · ' : ''}`;
     const text = prefix + (decoration.axisLabel ?? '');

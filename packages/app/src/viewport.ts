@@ -18,9 +18,15 @@ import {
   runInAction,
 } from 'mobx';
 import {orientImageCamera, type ImageView} from './rendering/image-camera';
-import {ViewportNavigation, type CameraPose} from './ui/viewport-navigation';
-import type {ViewCamera} from './rendering/view-camera';
-import {ViewportScenes, type ViewportScene} from './model/viewport-scene';
+import {ViewportNavigation} from './ui/viewport-navigation';
+import {
+  cameraContainsGeometry,
+  frameCameraBounds,
+  type CameraPose,
+  type ViewCamera,
+} from './rendering/view-camera';
+import {ViewportScenes} from './model/viewport-scene';
+import {ViewportViewState} from './model/viewport-view-state';
 import {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
 import type {
@@ -140,12 +146,6 @@ type TransientPreviewRestore = Readonly<{
   selectedKey: string;
   pose: CameraPose;
   mode: ModelRenderMode;
-}>;
-
-type ViewportState = Readonly<{
-  pose: CameraPose;
-  mode: ModelRenderMode;
-  savedAt: number;
 }>;
 
 type SourceViewSelection = Readonly<{
@@ -362,11 +362,8 @@ export class ModelViewport {
     parameter: ToolParameterSchema;
   }>;
   private readonly committedParameterPreviews = new Map<string, number>();
-  private hasFramedView = false;
   private scenes?: ViewportScenes;
-  private activeScene?: ViewportScene;
-  private readonly viewStates = new Map<string, ViewportState>();
-  private stateRevision = 0;
+  private readonly viewState = new ViewportViewState();
   private readonly decorationLayers = new Map<string, DecorationInstance[]>();
   private readonly transformGizmo: TransformGizmo;
   private readonly spatialPreviews = new Map<string, SpatialObjectPreview>();
@@ -454,9 +451,22 @@ export class ModelViewport {
       | 'clearTopologySelection'
       | 'renderModelView'
       | 'retainRenderedGeometry'
+      | 'transientPreviewRestore'
+      | 'saveViewportState'
+      | 'rememberFramingGesture'
+      | 'fitChangedGeometry'
+      | 'activateViewportScene'
+      | 'captureTransientPreviewRestore'
     >(this, {
       module: observableRef,
       inspectionScene: observableRef,
+      transientPreviewRestore: observableRef,
+      saveViewportState: action,
+      rememberFramingGesture: action,
+      fitChangedGeometry: action,
+      activateViewportScene: action,
+      captureTransientPreviewRestore: action,
+      fit: action,
       renderInspection: action,
       sourceParameter: observableRef,
       parameterPreviews: observableShallow,
@@ -506,6 +516,7 @@ export class ModelViewport {
         this.coordinateReference?.setCamera(camera);
         this.transformGizmo.setCamera(camera);
       },
+      () => this.rememberFramingGesture(),
     );
     this.controls.addEventListener('change', () => {
       this.rendering.updateCameraRange(
@@ -528,7 +539,7 @@ export class ModelViewport {
           onReset: () => {
             if (!this.controls.enabled) return;
             this.controls.resetView(this.cameraFraming(this.root));
-            this.hasFramedView = true;
+            this.saveViewportState(false);
           },
         },
       );
@@ -636,6 +647,19 @@ export class ModelViewport {
       },
       {fireImmediately: true},
     );
+    const stopFraming = reaction(
+      () =>
+        this.viewState.framingPending &&
+        !this.controls.navigating &&
+        !this.controls.transitioning &&
+        !this.dragPreview &&
+        !this.transientPreviewRestore &&
+        (this.renderedViewTarget.kind === 'model' ||
+          this.renderedViewTarget.kind === 'source'),
+      ready => {
+        if (ready) this.fitChangedGeometry();
+      },
+    );
     const resizeObserver = new ResizeObserver(() => this.resize());
     resizeObserver.observe(this.container);
     window.addEventListener(
@@ -647,6 +671,7 @@ export class ModelViewport {
         resizeObserver.disconnect();
         stopSourceDecorations();
         stopRenderMode();
+        stopFraming();
         this.transformGizmo.dispose();
         this.controls.dispose();
       },
@@ -709,7 +734,7 @@ export class ModelViewport {
     } else if (retainGeometry) {
       this.retainRenderedGeometry();
     } else {
-      this.activeScene = undefined;
+      this.viewState.clear();
       this.resetRenderedView();
       this.onViewChange?.();
     }
@@ -718,6 +743,16 @@ export class ModelViewport {
 
   /** Publish source focus even when inspection has no replacement scene. */
   renderInspection(
+    module: ModelModule,
+    scene: InspectionSnapshot | undefined,
+    source?: SourceViewSelection,
+    selectedKey?: string,
+  ): void {
+    this.restoreTransientPreview();
+    this.presentInspection(module, scene, source, selectedKey);
+  }
+
+  private presentInspection(
     module: ModelModule,
     scene: InspectionSnapshot | undefined,
     source?: SourceViewSelection,
@@ -782,7 +817,6 @@ export class ModelViewport {
     this.renderedViewTarget = scope
       ? this.selectedViewTarget
       : {kind: 'unfocused'};
-    this.transientPreviewRestore = undefined;
     this.awaitingToolUpdate = false;
     this.pendingSpatialTool = undefined;
   }
@@ -960,9 +994,10 @@ export class ModelViewport {
               : {start: item.start, end: item.end}),
           value: item.value,
           axisLabel: item.axisLabel,
+          style: item.style,
           appearance: {
-            color: '#c4c4c4',
-            opacity: 0.92 * opacity,
+            color: item.style === 'edge' ? boundAppearance.color : '#c4c4c4',
+            opacity: (item.style === 'edge' ? 1 : 0.92) * opacity,
             depthTest: false,
           },
         });
@@ -1297,9 +1332,7 @@ export class ModelViewport {
     source: SourceViewSelection,
   ): void {
     this.captureTransientPreviewRestore();
-    const restore = this.transientPreviewRestore;
-    this.renderInspection(module, scene, source);
-    this.transientPreviewRestore = restore;
+    this.presentInspection(module, scene, source);
     this.renderedViewTarget = {kind: 'completion'};
   }
 
@@ -1686,7 +1719,7 @@ export class ModelViewport {
 
   fit(target: THREE.Object3D = this.root): void {
     this.frame(target, true);
-    this.hasFramedView = true;
+    this.saveViewportState(false);
   }
 
   setView(view: ImageView): void {
@@ -1695,7 +1728,6 @@ export class ModelViewport {
     orientImageCamera(this.controls.object, bounds, view);
     bounds.getCenter(this.controls.focus);
     this.controls.syncCamera();
-    this.hasFramedView = true;
   }
 
   async captureImage(
@@ -1726,21 +1758,46 @@ export class ModelViewport {
     }
   }
 
-  private frameChangedView(target: THREE.Object3D = this.root): void {
-    this.frame(target, !this.hasFramedView);
-    this.hasFramedView = true;
+  private rememberFramingGesture(): void {
+    if (!this.viewState.scene || this.transientPreviewRestore) return;
+    // A small hysteresis avoids toggling modes along the viewport edge.
+    this.saveViewportState(
+      !this.geometryFits(this.viewState.keepLocalView ? 3 : -3),
+    );
   }
 
-  private saveViewportState(): void {
-    if (!this.activeScene || this.transientPreviewRestore) return;
-    this.viewStates.set(this.activeScene.key, {
-      pose: transformCameraPose(
-        this.controls.savedPose(),
-        this.activeScene.frame,
-      ),
-      mode: this.rendering.mode,
-      savedAt: ++this.stateRevision,
-    });
+  private geometryFits(paddingPixels: number): boolean {
+    return cameraContainsGeometry(
+      this.camera,
+      this.root,
+      this.renderer.domElement.clientWidth,
+      this.renderer.domElement.clientHeight,
+      paddingPixels,
+    );
+  }
+
+  private fitChangedGeometry(): void {
+    this.viewState.completeFraming();
+    if (this.viewState.keepLocalView || this.geometryFits(12)) return;
+    const bounds = new THREE.Box3().setFromObject(this.root);
+    if (bounds.isEmpty()) return;
+    this.controls.frame(
+      frameCameraBounds(this.controls.object, bounds, 0.9),
+      false,
+      this.animateViewChanges && this.isViewVisible(),
+    );
+    this.saveViewportState();
+  }
+
+  private saveViewportState(
+    keepLocalView = this.viewState.keepLocalView,
+  ): void {
+    if (this.transientPreviewRestore) return;
+    this.viewState.remember(
+      this.controls.savedPose(),
+      this.rendering.mode,
+      keepLocalView,
+    );
   }
 
   private activateViewportScene(
@@ -1748,73 +1805,47 @@ export class ModelViewport {
     placement: ModelPlacement,
   ): void {
     if (this.transientPreviewRestore) {
-      this.frameChangedView();
+      this.frame(this.root, !this.viewState.scene);
       return;
     }
+    this.saveViewportState();
     if (!this.hasRenderableGeometry()) {
-      this.saveViewportState();
-      this.activeScene = undefined;
+      this.viewState.clear();
       return;
     }
     const scene = this.scenes!.scene(nodes, placement);
-    if (scene && this.activeScene && scene.key === this.activeScene.key) {
-      const transform = scene.frame
-        .clone()
-        .invert()
-        .multiply(this.activeScene.frame);
-      this.controls.restorePose(
-        transformCameraPose(this.controls.savedPose(), transform),
-      );
-      this.activeScene = scene;
+    const previousScene = this.viewState.scene;
+    if (!scene) {
+      this.viewState.clear();
       return;
     }
-    const previousScene = this.activeScene;
-    this.saveViewportState();
-    this.activeScene = scene;
-    if (!scene) return;
-    let state = this.viewStates.get(scene.key);
-    if (!state) {
-      const source = scene.defaults
-        .flatMap(candidate => {
-          const saved = this.viewStates.get(candidate.key);
-          return saved ? [{...candidate, saved}] : [];
-        })
-        .sort((a, b) => b.saved.savedAt - a.saved.savedAt)[0];
-      if (source) {
-        state = {
-          ...source.saved,
-          pose: transformCameraPose(source.saved.pose, source.transform),
-        };
-      }
-    }
-    this.setRenderMode(state?.mode ?? 'modeling');
-    const framing = !state ? this.cameraFraming(this.root) : undefined;
-    const pose = state
-      ? transformCameraPose(state.pose, scene.frame.clone().invert())
-      : framing && this.controls.defaultPose(framing);
-    if (pose) {
+    this.viewState.accept(scene, this.module!, () =>
+      this.controls.defaultPose(this.cameraFraming(this.root)!),
+    );
+    if (scene.key === previousScene?.key) {
+      if (!scene.frame.equals(previousScene.frame))
+        this.controls.rebase(
+          scene.frame.clone().invert().multiply(previousScene.frame),
+        );
+    } else {
       const previousFrame = scene.defaults.find(
         candidate => candidate.key === previousScene?.key,
       );
-      if (previousFrame) {
-        this.controls.restorePose(
-          transformCameraPose(
-            this.controls.capturePose(),
-            scene.frame
-              .clone()
-              .invert()
-              .multiply(previousFrame.transform)
-              .multiply(previousScene!.frame),
-          ),
+      if (previousFrame)
+        this.controls.rebase(
+          scene.frame
+            .clone()
+            .invert()
+            .multiply(previousFrame.transform)
+            .multiply(previousScene!.frame),
         );
-      }
+      this.setRenderMode(this.viewState.mode);
       this.controls.restorePose(
-        pose,
+        this.viewState.pose!,
         previousScene !== undefined &&
           this.animateViewChanges &&
           this.isViewVisible(),
       );
-      this.hasFramedView = true;
     }
     this.saveViewportState();
   }
@@ -2641,7 +2672,6 @@ export class ModelViewport {
       return;
     }
     this.selectedViewTarget = {kind: 'source', targetId, evaluationIndex};
-    this.transientPreviewRestore = undefined;
     this.onNavigateSource(
       target.sourceRef,
       target.evaluations[evaluationIndex].contextId,
@@ -3445,17 +3475,4 @@ function containsNode(node: ModelSnapshotObject, nodeId: string): boolean {
     node.nodeId === nodeId ||
     node.children.some(child => containsNode(child, nodeId))
   );
-}
-
-function transformCameraPose(
-  pose: CameraPose,
-  transform: THREE.Matrix4,
-): CameraPose {
-  return {
-    ...pose,
-    focus: pose.focus.clone().applyMatrix4(transform),
-    orientation: new THREE.Quaternion()
-      .setFromRotationMatrix(transform)
-      .multiply(pose.orientation),
-  };
 }
