@@ -13,7 +13,7 @@ API 文档按批次完善时，同步将相应实现按职责拆出。八个 Sol
 `origin-center.ts` 承载单个/数组居中的作者重载与检查器，批量装配和局部变换仍由
 运行时统一维护模型身份、拓扑与约束。组合、on/align、独立变换、pivot/axis 选择器和角度耦合的作者入口分别归同名
 模块；`group.ts` 同时承载成员检查，原点居中复用该检查入口。runtime 只向这些
-模块提供内部参考解析和表达式机制，不反向依赖作者模块。`distance.ts` 承载距离查询的作者入口及检查器，实际有限几何测量、参考解析和关系求解继续共享于 runtime。`authoring-api.ts` 只汇总作者
+模块提供内部参考解析和表达式机制，不反向依赖作者模块。`distance.ts` 承载距离查询的作者入口及检查器，实际有限几何测量、参考解析和关系求解继续共享于 runtime。`text.ts` 调用 `text-geometry.ts` 的字形几何算法；`google-font.ts` 调用 `google-font-sources.ts` 的 CSS 解析与 URL 构造，字体解析和资源身份由 `font.ts` 共享。`authoring-api.ts` 只汇总作者
 入口，避免运行时反向依赖独立 API 模块。公开导出与编辑器跟踪指向实际实现，
 不保留旧模块转发入口。文档源码基准的维护方式见
 [网站维护说明](../../../packages/web/README.md#source-review-baselines)。
@@ -230,7 +230,7 @@ HarfBuzz 排版提供真实二次/三次曲线，non-zero winding 布尔合并�
 
 作者参数、支持范围和示例以[文字参考](../../../packages/core/docs/api.md#text)
 为准。实现与回归见 [font](../../../packages/core/src/library/font.ts)、
-[text](../../../packages/core/src/library/text.ts)、[text tests](../../../packages/core/test/text.test.ts)
+[text](../../../packages/core/src/library/text.ts)、[text geometry](../../../packages/core/src/library/text-geometry.ts)、[text tests](../../../packages/core/test/text.test.ts)
 和 [third-party notices](../../../packages/core/THIRD_PARTY.md)。
 
 ## 曲面包覆与增厚

@@ -19,7 +19,7 @@ model methods and reference properties are grouped by what they do.
 | Solid primitives                 | [box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil](#solid-primitives)                                                                                                                                                    |
 | Points, curves and profiles      | [point, line, arc, bezier, spline, circle, ellipse, rectangle and regularPolygon](#profiles-and-curves)                                                                                                                                        |
 | Sketches                         | [sketch](api/sketch.md), [entities](api/sketch-entities.md), [constraints](api/sketch-constraints.md), [point / derive](api/sketch-derive.md), [face / faces](api/sketch-faces.md), [plane / relate](api/sketch-relate.md)                     |
-| Text and fonts                   | [text, font and googleFont](text.md)                                                                                                                                                                                                           |
+| Text and fonts                   | [text](api/text.md), [font](api/font.md), [googleFont](api/google-font.md)                                                                                                                                                                     |
 | Shape construction               | [extrude and loft](#profiles-and-curves), [revolve](#rotational-solids), [sweep](#path-sweeps), [wrap and thicken](#curved-surface-wrapping)                                                                                                   |
 | Booleans and solid modifications | [union, cut and intersect](#composition-and-boolean-operations); [fillet, chamfer and shell](#model-operations)                                                                                                                                |
 | Origins and local transforms     | [originPoint, originVertex, originOffset, originCenter and model.rotate](#origins-and-rotation); [scaled](#scaling)                                                                                                                            |
@@ -538,103 +538,13 @@ Cancellation and exceptions retain completed entries and editing history.
 
 ## Text
 
-```ts
-import {font, text, extrude, group} from '@code3d/core';
-
-const sans = await font(new URL('./fonts/DejaVuSans.ttf', import.meta.url));
-const profiles = text('Code3D', sans, 10);
-export const lettering = group(extrude(profiles, 1));
-```
-
-`font(source)` returns a `Promise<Font>`; await it before constructing text.
-It accepts TTF, OTF or WOFF2 bytes (`ArrayBuffer` or `Uint8Array`) and URLs.
-Input bytes are captured when called. The App bundles static local references
-such as `new URL('./font.ttf', import.meta.url)` with the importing module;
-changing a local file invalidates that asset. Remote URLs are fetched at runtime
-and can be computed dynamically. Node also reads file URLs asynchronously.
-
-```ts
-const remote = await font(new URL('https://example.com/fonts/SomeFont.ttf'));
-const label = text('AV', remote, 10, {letterSpacing: 0.5, kerning: true});
-```
-
-Use a direct font-file URL whose server permits CORS access from the App.
-The font loader decodes WOFF2 before parsing; once the font is available,
-`text()` and subsequent modeling operations are synchronous.
-
-Google Fonts can instead be selected by name:
-
-```ts
-import {googleFont, text, extrude, group} from '@code3d/core';
-
-const play = await googleFont('Play');
-const medium = await googleFont('Roboto', {weight: 450, italic: true});
-export default group(extrude(text('Hello', play, 10), 1));
-```
-
-`googleFont(family, options?)` returns a `Promise<Font>`. Both `weight` and
-`italic` are optional. Omitted axes are omitted from the Google request, leaving
-the defaults to Google; explicit weights apply to variable fonts as well as static
-faces. Family and options may be calculated at runtime, including inside imported
-modules. CSS and all its Unicode subsets load when the call runs, then text selects
-the appropriate subset for each character. No stylesheet is installed.
-Large families such as Chinese fonts require downloading all returned subsets on
-first use; changing the text subsequently reuses those font resources.
-
-The App saves each Google Font selection (family, weight and italic) as a
-complete bundle of CSS and decoded font subsets. It reuses that bundle across
-edits, project refreshes and Worker/page restarts without requesting Google CSS,
-even after the original HTTP expiry. Character ranges and subset precedence
-remain those of the saved CSS. The bundle is published only after every subset
-loads successfully and remains subject to the cache budget.
-First use and evicted bundles still need network access. A saved compiled module
-need not have loaded any fonts: evaluating it later uses the same runtime loader
-and resource cache. Compilation itself does not request Google CSS or font files.
-
-Network resources use an engine-owned 64 MiB memory LRU and the shared OPFS disk
-journal, then the network. CSS, compressed font bytes and content-addressed decoded
-bytes are retained. The disk budget is the smaller of 1 GiB and 10% of the browser's
-origin quota, including compaction space, shared with geometry. Fresh resources
-need no request across edits or Worker/page restarts. Outside resolved Google
-Font bundles, expired resources revalidate
-through the browser HTTP cache; `no-store` resources are not retained. Concurrent
-requests share one download. Failed or cancelled executions preserve completed resources;
-partial downloads are discarded and can retry. Without OPFS, memory caching remains.
-The active execution's resource references are outside the historical memory limit.
-
-Parsed fonts are memory-only entries in the existing 2 GiB kernel cache budget.
-CSS interpretation, normalized glyph contours, B-Rep, bounds and meshes reuse the
-existing memory/disk artifact cache. Font contents and requested variations identify
-these artifacts; changing text position or spacing can reuse unchanged glyphs.
-HTTP resource records remain reusable when the geometry runtime changes.
-
-Outside the App, the same async APIs fetch remote resources directly. Hosts can
-install a resource loader through `@code3d/core/tooling` to supply their own cache
-and cancellation policy. Node's default loader also supports local file URLs.
-
-TTF and OTF fonts are supported, including variable fonts and Chinese characters
-when present in the font. HarfBuzz supplies glyph outlines, advances, kerning and
-ligatures. Quadratic/cubic curves are preserved, and overlapping contours within
-a glyph use the non-zero fill rule. Font collections (TTC), color glyph rendering,
-full bidirectional/multiscript paragraph layout and multiline text are outside this
-API. Missing glyphs report an error. Empty text and spaces create no faces; spaces
-still advance subsequent characters.
-
-`text(content, font, size, options?)` requires the first three arguments and returns connected planar
-regions as ordinary readonly `FaceModel[]`: `B` has one face with two holes; `i` has
-two faces. Size is the font em in model units, not the cap height. Coordinates are
-+X right, -Z up, normal +Y, with all faces retaining the same baseline origin.
-Faces are never individually centered,
-so `group(extrude(...))`, origin operations and boolean tools preserve the layout.
-Use positive/negative extrusion and `union`/`cut` for raised or engraved lettering.
-Text is currently code-defined geometry rather than an editable sketch entity.
-
-`options.letterSpacing` defaults to `0` and adds a finite distance in model units
-between laid-out glyphs, including spaces. Negative values tighten the text. The
-distance stays constant when size changes, and disconnected parts of one glyph move
-together. `options.kerning` defaults to `true`; set it to `false` to disable the
-font's pair adjustments. Extra letter spacing is added after kerning. Supported
-ligatures remain single glyphs for spacing purposes.
+[text](api/text.md) creates connected planar faces with a shared baseline, then
+ordinary extrusion, union and cut build raised or engraved lettering.
+[font](api/font.md) loads local/remote font bytes;
+[googleFont](api/google-font.md) loads a named family and style with its subsets.
+Await font loading before synchronous geometry construction. Their references
+cover signatures, all options, coordinates, supported formats and caching.
+See the [text workflow](text.md) for complete layout and curved lettering.
 
 ## Geometry measurements
 

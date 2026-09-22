@@ -2,11 +2,7 @@
 import {cachedArtifact} from './cached.js';
 import {modelResources, type ModelResource} from './resources.js';
 import type * as HarfBuzz from 'harfbuzzjs';
-import {
-  googleFontSources,
-  googleFontUrl,
-  type GoogleFontOptions,
-} from './google-font.js';
+import type {GoogleFontOptions} from './google-font-sources.js';
 import {
   kernelOperationKey,
   kernelContentId,
@@ -73,45 +69,8 @@ export async function font(
   ]);
 }
 
-/** Asynchronously resolves a Google Fonts family/style using the runtime resource cache. */
-export async function googleFont(
-  family: string,
-  options: GoogleFontOptions = {},
-): Promise<Font> {
-  options = {weight: options.weight, italic: options.italic};
-  const url = googleFontUrl(family, options);
-  const resources = await modelResources.bundle(
-    'google-font:' + url.href,
-    async () => {
-      const css = await modelResources.load(url);
-      const resources = new Map([[url.href, css]]);
-      const urls = [
-        ...new Set(googleFontSources(css.bytes).map(source => source.url)),
-      ];
-      let next = 0;
-      await Promise.all(
-        Array.from({length: Math.min(8, urls.length)}, async () => {
-          while (next < urls.length) {
-            const source = urls[next++];
-            const resource = await modelResources.load(new URL(source));
-            const bytes = await decodeFont(resource);
-            parseFont(bytes, options);
-            resources.set(source, {...resource, bytes});
-          }
-        }),
-      );
-      return resources;
-    },
-  );
-  return fontValue(
-    googleFontSources(resources.get(url.href)!).map(({url, ranges}) => ({
-      artifact: parseFont(resources.get(url)!, options),
-      ranges,
-    })),
-  );
-}
-
-async function decodeFont(resource: ModelResource): Promise<Uint8Array> {
+/** @internal Shared font resource construction. */
+export async function decodeFont(resource: ModelResource): Promise<Uint8Array> {
   const {bytes} = resource;
   if (
     bytes.length < 4 ||
@@ -130,7 +89,8 @@ async function decodeFont(resource: ModelResource): Promise<Uint8Array> {
   );
 }
 
-function parseFont(
+/** @internal Shared font resource construction. */
+export function parseFont(
   bytes: Uint8Array,
   options: GoogleFontOptions = {},
 ): KernelArtifact<ParsedFont> {
@@ -198,7 +158,8 @@ const parsedFont = cachedArtifact(
   },
 );
 
-function fontValue(parts: readonly FontPart[]): Font {
+/** @internal Shared font resource construction. */
+export function fontValue(parts: readonly FontPart[]): Font {
   const parsed = parts[0].artifact.value;
   const value: Font = Object.freeze({
     family: parsed.face.getName(1, 'en'),

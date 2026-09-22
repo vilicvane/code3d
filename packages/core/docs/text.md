@@ -22,7 +22,7 @@ also reads local file URLs asynchronously.
 Text returns ordinary planar faces with a common baseline. `originCenter(faces)`
 puts the complete visible text bounds around zero, keeping glyph spacing, holes
 and disconnected parts together. `extrude(faces, distance)` preserves their order
-and placement. See the [text reference](api.md#text),
+and placement. See the [text reference](api/text.md),
 [runnable example](../../app/examples/text.ts) and [font notices](../THIRD_PARTY.md).
 
 The App loads fonts when the model calls the async API. Compilation does not
@@ -38,6 +38,6 @@ surface, then `thicken(faces, thickness)` to raise or engrave it. Position the
 planar text first: center the full array with `originCenter(profiles)`, then move
 its plane outside the target. The operation locates the target from that finite region.
 
-See [wrapping semantics and errors](api.md#curved-surface-wrapping) and the
+See [wrapping semantics and errors](api/wrap.md) and the
 [complete curved lettering example](../../app/examples/operations/wrap.ts),
 which covers a cylinder, a sphere and a B-spline ellipsoid.

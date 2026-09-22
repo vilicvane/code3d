@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {afterEach, test} from 'node:test';
 import {installModelResourceLoader} from '../bld/library/resources.js';
-import {googleFontSources, googleFontUrl} from '../bld/library/google-font.js';
+import {
+  googleFontSources,
+  googleFontUrl,
+} from '../bld/library/google-font-sources.js';
 import {
   clearKernelOperationCache,
   kernelOperationCacheStats,

@@ -214,6 +214,14 @@ export default defineConfig({
                             {slug: 'docs/packages/core/api/sketch-relate'},
                           ],
                         },
+                        {
+                          label: 'Text and fonts',
+                          items: [
+                            {slug: 'docs/packages/core/api/text'},
+                            {slug: 'docs/packages/core/api/font'},
+                            {slug: 'docs/packages/core/api/google-font'},
+                          ],
+                        },
                       ],
                     },
                   ]

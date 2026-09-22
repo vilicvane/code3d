@@ -406,7 +406,7 @@ the implementation and tests below.
 - [Spatial values](../src/library/spatial.ts), [relation solving](../src/library/relation-solver.ts),
   and [topology](../src/library/topology.ts).
 - [Cached computations](../src/library/cached.ts), [fonts](../src/library/font.ts),
-  [text geometry](../src/library/text.ts) and their [tests](../test).
+  [text geometry](../src/library/text-geometry.ts) and their [tests](../test).
 - [Material values](../src/library/material.ts), [kernel cache](../src/library/kernel-cache.ts),
   and [Node entry](../src/node/index.ts).
 - [Executable App examples](../../app/examples) and [runtime tests](../test).

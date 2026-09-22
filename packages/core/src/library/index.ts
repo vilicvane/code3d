@@ -70,7 +70,8 @@ export type {
   InspectContext,
   Inspector,
 } from './inspect.js';
-export {font, googleFont} from './font.js';
+export {font} from './font.js';
+export {googleFont} from './google-font.js';
 export type {Font} from './font.js';
 export type {GoogleFontOptions} from './google-font.js';
 export type {TextOptions} from './text.js';
@@ -88,7 +89,8 @@ export type {
 
 export {distance} from './distance.js';
 
-export {getModelData, setModelData, text} from './runtime.js';
+export {getModelData, setModelData} from './runtime.js';
+export {text} from './text.js';
 
 export type {
   Anchor,

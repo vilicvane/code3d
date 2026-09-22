@@ -44,10 +44,11 @@ import {
   captureInspectData,
 } from './inspect.js';
 import {cache} from './cached.js';
-import {font, googleFont} from './font.js';
+import {font} from './font.js';
+import {googleFont} from './google-font.js';
 import {sketch} from './sketch.js';
 import {box} from './box.js';
-import {text} from './runtime.js';
+import {text} from './text.js';
 import {distance} from './distance.js';
 
 export const authoringApi = Object.freeze({

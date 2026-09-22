@@ -6,7 +6,10 @@ export {identifyCachedFunction} from '../library/cached.js';
 export {installFontEngine} from '../library/font.js';
 export {installModelResourceLoader} from '../library/resources.js';
 export type {ModelResource, ModelResourceLoader} from '../library/resources.js';
-export {googleFontSources, googleFontUrl} from '../library/google-font.js';
+export {
+  googleFontSources,
+  googleFontUrl,
+} from '../library/google-font-sources.js';
 export {installOpenCascade} from '../library/open-cascade.js';
 
 export {

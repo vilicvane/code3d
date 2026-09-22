@@ -62,6 +62,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Model values](docs/values.md): immutable values and geometry measurements.
 - [Geometry measurements](docs/api/distance.md): clearance, length, area, volume, bounds and model-origin position.
 - [Sketch API](docs/api/sketch.md): entity and constraint tuples, derived layers, finite regions and spatial placement.
+- [Text and fonts](docs/api/text.md): text faces, local font files and Google Font selections.
 - [Local coordinates](docs/local-coordinates.md): frames, origins and placement conventions.
 - [Relations](docs/relations.mdx): position parts using bounds, geometry and frames.
 - [Rotation coupling](docs/api.md#rotation-coupling): transmit cumulative angles through fixed-axis connections.
