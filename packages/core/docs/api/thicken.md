@@ -6,10 +6,12 @@ sourceReview:
   sources:
     - path: packages/core/src/library/thicken.ts
       sha256: 30a3ae8c82e7980dd74253a25981958f0e7a4e69e38deb8bc81127942b28ea07
+      commit: 2e2cf49d64dba98b613224b6ae39aa632d6d2eb0
     - path: packages/core/src/library/runtime.ts
-      sha256: 957417d073c77b875ca379ec076f64c54953619a2c882b00de22ac572cbdcad1
+      sha256: 200191b28c2ae7fef5793ce7e9a330476b23a0783f571225930ac52badb2ec04
     - path: packages/core/src/library/thicken-geometry.ts
       sha256: e34622c71d4ff8bd42ca7cb2b0ce0f17f653b9f76fcf9464ce3061feeccdfa1d
+      commit: 2e2cf49d64dba98b613224b6ae39aa632d6d2eb0
     - path: packages/core/src/library/surface-geometry.ts
       sha256: 4acdf96fef0a19e5b72a1798c67be423eeecee4c10f9f097e68c03d3577987ba
       commit: d80ee5dd6d20de0a0d0c31ad147bbbf902b5e4f4

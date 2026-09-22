@@ -437,12 +437,12 @@ in code; selecting a face does not automatically generate a related sketch.
 
 ## Composition and boolean operations
 
-| Function               | Result                                        |
-| ---------------------- | --------------------------------------------- |
-| `group(models, name?)` | Composition that preserves its separate parts |
-| `union(solids)`        | Fused solid                                   |
-| `cut(stock, tools)`    | Stock with the tool volumes removed           |
-| `intersect(solids)`    | Shared solid volume                           |
+| Function                                | Result                                        |
+| --------------------------------------- | --------------------------------------------- |
+| `group(models, name?)`                  | Composition that preserves its separate parts |
+| [`union(solids)`](api/union.md)         | Fused solid                                   |
+| [`cut(stock, tools)`](api/cut.md)       | Stock with the tool volumes removed           |
+| [`intersect(solids)`](api/intersect.md) | Shared solid volume                           |
 
 `group()` accepts a `readonly Model[]`, including ordinary groups, empty groups,
 and any depth of nested groups mixed with solids, faces, curves, or points. Each
@@ -452,7 +452,7 @@ helpers can use `ModelCapabilities<Elements, Kind>` and `ModelForKind<Elements, 
 to preserve the concrete model kind and exposed members through chained calls.
 
 Relations are resolved at composition and geometry evaluation boundaries.
-`stock.cut(tools)` is equivalent to `cut(stock, tools)`. Arrays in booleans and
+[`stock.cut(tools)`](api/cut.md) is equivalent to the free function. Arrays in booleans and
 loft describe the inputs of one operation; they do not automatically map it.
 `intersect()` requires a common solid volume across all inputs. Disjoint inputs
 or inputs that only touch produce a diagnostic rather than an empty solid.
@@ -462,9 +462,9 @@ or inputs that only touch produce a diagnostic rather than an empty solid.
 Available operations depend on the kind of geometry. TypeScript completion
 shows which operations are supported by the value you hold.
 
-- `.fillet(radius, edgeIds?)`: round selected edges, or all edges.
-- `.chamfer(distance, edgeIds?)`: bevel selected edges, or all edges.
-- `.shell(thickness, removedSurfaceIds?)`: hollow one connected solid. Positive
+- [`.fillet(radius, edgeIds?)`](api/fillet.md): round selected edges, or all edges.
+- [`.chamfer(distance, edgeIds?)`](api/chamfer.md): bevel selected edges, or all edges.
+- [`.shell(thickness, removedSurfaceIds?)`](api/shell.md): hollow one connected solid. Positive
   thickness offsets inward; negative thickness offsets outward. Selected surfaces
   become openings; omission or `[]` creates an enclosed cavity. See
   [making hollow parts](shells.mdx).

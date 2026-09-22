@@ -141,6 +141,17 @@ export default defineConfig({
                             {slug: 'docs/packages/core/api/thicken'},
                           ],
                         },
+                        {
+                          label: 'Booleans and solid modifications',
+                          items: [
+                            {slug: 'docs/packages/core/api/union'},
+                            {slug: 'docs/packages/core/api/cut'},
+                            {slug: 'docs/packages/core/api/intersect'},
+                            {slug: 'docs/packages/core/api/fillet'},
+                            {slug: 'docs/packages/core/api/chamfer'},
+                            {slug: 'docs/packages/core/api/shell'},
+                          ],
+                        },
                       ],
                     },
                   ]

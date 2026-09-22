@@ -755,7 +755,7 @@ const unitScale: Vec3 = [1, 1, 1];
 let nextNodeId = 1;
 let nextConstraintId = 1;
 let nextOperationId = 1;
-const combineModels = Symbol('combineModels');
+export const combineModels = Symbol('combineModels');
 export const loftModels = Symbol('loftModels');
 
 const modelElementKinds = {
@@ -4230,7 +4230,16 @@ export class ModelObject<
     this: ModelObject<Elements, 'solid'>,
     tools: readonly SolidModel<{}>[],
   ): SolidModel {
-    return cut(this as unknown as SolidModel<{}>, tools);
+    const stock = requireModelKind(
+      this,
+      'solid',
+      'The cut stock must be a solid model.',
+    );
+    if (tools.length === 0) throw new Error('cut requires at least one tool.');
+    const operands = tools.map(tool =>
+      requireModelKind(tool, 'solid', 'Every cut tool must be a solid model.'),
+    );
+    return stock[combineModels]('cut', operands);
   }
 
   fillet(
@@ -6287,12 +6296,6 @@ export namespace originCenter {
   }
 }
 
-/** @code3d.inspect operands union.inspectOperands */
-export function union(operands: readonly SolidModel<{}>[]): SolidModel {
-  const {first, others} = booleanOperands('union', operands);
-  return first[combineModels]('fuse', others);
-}
-
 /**
  * Creates connected text faces on the XZ plane: +X right, -Z up, normal +Y.
  * All faces share the baseline origin. Size is the font em in model units.
@@ -6315,34 +6318,6 @@ export function text(
       return faceModel('text', 'Text face', geometry);
     }),
   );
-}
-
-/**
- * @code3d.inspect stock cut.inspectStock
- * @code3d.inspect tools cut.inspectTools
- */
-export function cut(
-  stock: SolidModel<{}>,
-  tools: readonly SolidModel<{}>[],
-): SolidModel {
-  const runtimeStock = requireModelKind(
-    stock,
-    'solid',
-    'The cut stock must be a solid model.',
-  );
-  if (tools.length === 0) {
-    throw new Error('cut requires at least one tool.');
-  }
-  const runtimeTools = tools.map(tool =>
-    requireModelKind(tool, 'solid', 'Every cut tool must be a solid model.'),
-  );
-  return runtimeStock[combineModels]('cut', runtimeTools);
-}
-
-/** @code3d.inspect operands intersect.inspectOperands */
-export function intersect(operands: readonly SolidModel<{}>[]): SolidModel {
-  const {first, others} = booleanOperands('intersect', operands);
-  return first[combineModels]('intersect', others);
 }
 
 export function isModelObject(value: unknown): value is ModelObject {
@@ -7704,128 +7679,10 @@ export function requireModelKind<Kind extends ModelKind>(
   return object as ModelObject<{}, Kind>;
 }
 
-/** @internal */
-export namespace union {
-  export function inspectOperands(
-    [operands]: [readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(context.data, [], operands);
-  }
-}
-
-/** @internal */
-export namespace intersect {
-  export function inspectOperands(
-    [operands]: [readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    const focused = new Set(context.focused.solids);
-    const scene = ModelObject.inspectComposition(
-      context.data,
-      operands.filter(operand => !focused.has(operand)),
-      operands.filter(operand => focused.has(operand)),
-    );
-    if (!context.return) return scene;
-    const result = ModelObject.inspectComposition(
-      context.data,
-      [],
-      [context.return],
-    ).target![0] as Model;
-    return {
-      ...scene,
-      target: [
-        ...scene.target!,
-        result.material(inspectionRegionMaterial('#66c9ff')),
-      ],
-    };
-  }
-}
-
 /** Generated inspect regions remain legible through their translucent inputs. */
-function inspectionRegionMaterial(color: string): Material {
-  return new MeshBasicMaterial({color, depthTest: false, toneMapped: false});
-}
-
 /** @internal */
-export namespace cut {
-  export function inspectStock(
-    [stock, tools]: [SolidModel<{}>, readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(context.data, tools, [stock]);
-  }
-  export function inspectTools(
-    [stock, tools]: [SolidModel<{}>, readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectCutTools(
-      stock,
-      tools,
-      context.focused.solids,
-      context.data,
-    );
-  }
-  export function inspectReceiver(
-    [tools]: [readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      SolidModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectStock([context.receiver, tools], context);
-  }
-  export function inspectMethodTools(
-    [tools]: [readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      SolidModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectTools([context.receiver, tools], context);
-  }
-}
-
-function booleanOperands(
-  operation: 'union' | 'intersect',
-  operands: readonly SolidModel<{}>[],
-): Readonly<{
-  first: ModelObject<{}, 'solid'>;
-  others: readonly ModelObject<{}, 'solid'>[];
-}> {
-  if (operands.length < 2) {
-    throw new Error(`${operation} requires at least two model operands.`);
-  }
-  const runtimeOperands = operands.map(operand =>
-    requireModelKind(
-      operand,
-      'solid',
-      `Every ${operation} operand must be a solid model.`,
-    ),
-  );
-  return {first: runtimeOperands[0], others: runtimeOperands.slice(1)};
+export function inspectionRegionMaterial(color: string): Material {
+  return new MeshBasicMaterial({color, depthTest: false, toneMapped: false});
 }
 
 function appendUniqueParameters(

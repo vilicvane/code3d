@@ -51,6 +51,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/sweep.ts': ['default', 1],
   'operations/wrap.ts': ['default', 3],
   'operations/origin.ts': ['centered', 1],
+  'operations/solid-operations.ts': ['joined', 1],
   'operations/shape-construction.ts': ['plate', 1],
   'primitives/primitives.ts': ['cuboid', 1],
   'constraints/relate.ts': ['default', 2],
@@ -288,6 +289,20 @@ for (const entry of exampleEntries) {
           Math.abs(volume(exports.default) - (30 * 8 * 20 - Math.PI * 16 * 8)) <
             1e-5,
         );
+      }
+      if (entry.file === 'operations/solid-operations.ts') {
+        assert.ok(
+          Math.abs(volume(exports.joined) - (4800 + 200 * Math.PI)) < 1e-6,
+        );
+        assert.ok(
+          Math.abs(volume(exports.drilled) - (4800 - 128 * Math.PI)) < 1e-6,
+        );
+        assert.ok(
+          volume(exports.shared) > 0 && volume(exports.shared) < 18 * 12 * 18,
+        );
+        assert.ok(volume(exports.rounded) < 30 * 16 * 20);
+        assert.ok(volume(exports.beveled) < 30 * 16 * 20);
+        assert.deepEqual(exports.enclosure.bounds().size, [40, 24, 30]);
       }
       if (entry.file === 'operations/shape-construction.ts') {
         assert.ok(Math.abs(volume(exports.plate) - 288) < 1e-6);

@@ -1,3 +1,6 @@
+import {union} from './union.js';
+import {cut} from './cut.js';
+import {intersect} from './intersect.js';
 import {extrude} from './extrude.js';
 import {revolve} from './revolve.js';
 import {sweep} from './sweep.js';
@@ -47,9 +50,6 @@ import {
   text,
   group,
   distance,
-  union,
-  cut,
-  intersect,
 } from './runtime.js';
 
 export const authoringApi = Object.freeze({

@@ -4,6 +4,19 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'solid-operations',
+    title: 'Combine and finish solids',
+    description:
+      'Union, cut, intersect, fillet, chamfer and shell solid models.',
+    category: 'Profiles and solids',
+    file: 'operations/solid-operations.ts',
+    focus: {
+      context: 'export const joined = union([base, boss])',
+      token: 'union',
+    },
+    tags: ['union', 'cut', 'intersect', 'fillet', 'chamfer', 'shell'],
+  },
+  {
     id: 'shape-construction',
     title: 'Build solids and curved faces',
     description:
@@ -417,6 +430,70 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  'solid-operations': [
+    {
+      id: 'union',
+      image: 'solid-operations',
+      label: 'union',
+      description: 'A base fused with an overlapping cylindrical boss.',
+      focus: {
+        context: 'export const joined = union([base, boss])',
+        token: 'union',
+      },
+    },
+    {
+      id: 'cut',
+      image: 'solid-cut',
+      label: 'cut',
+      description: 'A cylindrical hole cut through a plate.',
+      focus: {
+        context: 'export const drilled = cut(blank, [drill])',
+        token: 'cut',
+      },
+    },
+    {
+      id: 'intersect',
+      image: 'solid-intersect',
+      label: 'intersect',
+      description: 'The common volume of a box and sphere.',
+      focus: {
+        context: 'export const shared = intersect([block, ball])',
+        token: 'intersect',
+      },
+    },
+    {
+      id: 'fillet',
+      image: 'solid-fillet',
+      label: 'fillet',
+      description: 'Four vertical edges rounded with radius 2.',
+      focus: {
+        context:
+          'export const rounded = box(30, 16, 20).fillet(2, [2, 4, 6, 8])',
+        token: 'fillet',
+      },
+    },
+    {
+      id: 'chamfer',
+      image: 'solid-chamfer',
+      label: 'chamfer',
+      description: 'Four vertical edges beveled by 2 units.',
+      focus: {
+        context:
+          'export const beveled = box(30, 16, 20).chamfer(2, [2, 4, 6, 8])',
+        token: 'chamfer',
+      },
+    },
+    {
+      id: 'shell',
+      image: 'solid-shell',
+      label: 'shell',
+      description: 'An open box with walls 1.5 units thick.',
+      focus: {
+        context: 'export const enclosure = box(40, 24, 30).shell(1.5, [4])',
+        token: 'shell',
+      },
+    },
+  ],
   'shape-construction': [
     {
       id: 'extrude',
@@ -859,6 +936,7 @@ export const exampleEntries = [
   {
     file: 'operations/rotate.ts',
   },
+  {file: 'operations/solid-operations.ts'},
   {file: 'operations/shape-construction.ts'},
   {file: 'operations/revolve.ts'},
   {file: 'operations/sweep.ts'},

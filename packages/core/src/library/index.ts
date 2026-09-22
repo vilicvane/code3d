@@ -1,3 +1,6 @@
+export {union} from './union.js';
+export {cut} from './cut.js';
+export {intersect} from './intersect.js';
 export {extrude} from './extrude.js';
 export {revolve} from './revolve.js';
 export {sweep} from './sweep.js';
@@ -85,13 +88,10 @@ export {
   coupleRotation,
   on,
   align,
-  cut,
   distance,
   text,
   group,
   inspectGroupMembers,
-  intersect,
-  union,
 } from './runtime.js';
 
 export type {
