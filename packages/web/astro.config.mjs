@@ -223,6 +223,14 @@ export default defineConfig({
                           ],
                         },
                         {
+                          label: 'Parameters, time and caching',
+                          items: [
+                            {slug: 'docs/packages/core/api/input'},
+                            {slug: 'docs/packages/core/api/time-offset'},
+                            {slug: 'docs/packages/core/api/cache'},
+                          ],
+                        },
+                        {
                           label: 'Materials and appearance',
                           items: [
                             {slug: 'docs/packages/core/api/material'},

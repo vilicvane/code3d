@@ -7,7 +7,7 @@ sidebar:
 
 ## Numeric inputs
 
-`input(name, defaultValue, options?)` declares a named numeric parameter and returns an
+[input](api/input.md) declares a named numeric parameter and returns an
 ordinary number. The App discovers calls during evaluation and displays their
 names and values in **Inputs**. Typing a valid value or dragging a slider updates
 the model immediately, while the field stays focused or the pointer stays down.
@@ -61,7 +61,7 @@ clearance while bending.
 
 ## Time offset
 
-`timeOffset(defaultValue = 0)` returns the offset from the playback origin in
+[timeOffset](api/time-offset.md) returns the offset from the playback origin in
 seconds, not the current clock time. In the App, the offset starts at zero and
 the playback controls advance it. Each execution receives one fixed value, so
 branches, loops and imported project functions can use time just like any other
@@ -94,21 +94,10 @@ or `Math.sin`.
 
 ## Cached computations and custom primitives
 
-`cache(fn)` memoizes synchronous, deterministic data computations;
-`cache(fn, args)` immediately returns the cached result for an argument tuple.
-Both forms share the same function identity and argument keys. Supply custom
-codecs in the third argument: `cache(fn, undefined, options)` for a function or
-`cache(fn, args, options)` for a value.
-Pass changing captured state as arguments and treat returned data as immutable.
-Memory hits reuse the retained result; optional `encoder` / `decoder` pairs only
-run when saving to disk or restoring it. Newly computed entries are eligible
-for disk storage when computation reaches the configured threshold (1 ms by
-default). Faster results remain in memory and are not encoded or written on later
-memory hits. Change the threshold in **Settings → Cache** in the App; it applies
-to new computations and preserves existing cache entries. Existing
-disk records can still be restored. The App fingerprints static definitions
-and their dependencies for persistent reuse; dynamic closures and ordinary Node
-calls use function identity for memory reuse. No author cache IDs are needed.
+[cache](api/cache.md) documents invocation forms, supported data, custom codecs,
+identity and persistence. Read changing inputs and time before entering a cached
+computation and pass them as explicit arguments. The App cache settings control
+disk admission and storage budgets.
 
 `definePrimitive(builder)` from `@code3d/core/replicad` also caches construction,
 normalization and geometry analysis. Each call still creates fresh model metadata
