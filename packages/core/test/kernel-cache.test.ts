@@ -2,7 +2,7 @@ import {mockComputationTime} from '../../../test/computation-clock.ts';
 import assert from 'node:assert/strict';
 import {afterEach, beforeEach, test} from 'node:test';
 import {cache as cacheValue} from '../bld/library/cached.js';
-import {googleFontSources} from '../bld/library/google-font.js';
+import {googleFontSources} from '../bld/library/google-font-sources.js';
 import {
   clearKernelOperationCache,
   createComputationCache,

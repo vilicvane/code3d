@@ -1,165 +1,99 @@
 import {
-  assembleWire,
-  getOC,
-  makeHelix,
-  makeLine,
-  measureVolume,
-  Vector,
-  type Face,
-  type Shape3D,
-} from 'replicad';
-import {castOwnedShape3D, shapeSubshapes} from './kernel-shapes.js';
-import {
-  transferShapeTopology,
-  type TopologyInput,
-  type ShapeTopology,
-} from './topology.js';
-import type {Vec3} from './spatial.js';
+  ModelObject,
+  requireModelKind,
+  type FaceModel,
+  type SolidModel,
+  type CompositionInspectData,
+} from './runtime.js';
+import type {InspectContext, InspectResult} from './inspect.js';
 
-export function extrudeWithTopology(
-  source: TopologyInput,
-  direction: Vec3,
-): {shape: Shape3D; topology: ShapeTopology} {
-  const oc = getOC();
-  const vector = new Vector([...direction]);
-  let shape: Shape3D | undefined;
+/**
+ * Extrudes each face independently, preserving array order and placement.
+ * @code3d.inspect face extrude.inspectFaces
+ * @code3d.inspect distance extrude.inspectFaces
+ * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
+ */
+export function extrude(face: FaceModel<{}>, distance: number): SolidModel;
+/**
+ * Extrudes each face independently.
+ * @code3d.inspect faces extrude.inspectFaces
+ * @code3d.inspect distance extrude.inspectFaces
+ * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
+ */
+export function extrude(
+  faces: readonly FaceModel<{}>[],
+  distance: number,
+): readonly SolidModel[];
+export function extrude(
+  face: FaceModel<{}> | readonly FaceModel<{}>[],
+  distance = 10,
+): SolidModel | readonly SolidModel[] {
+  const faces = (Array.isArray(face) ? face : [face]).map(value =>
+    requireModelKind(
+      value,
+      'face',
+      'extrude requires a face model or an array of face models.',
+    ),
+  );
+  const solids: SolidModel[] = [];
   try {
-    const builder = new oc.BRepPrimAPI_MakePrism(
-      source.shape.wrapped,
-      vector.wrapped,
-      false,
-      true,
-    );
-    try {
-      if (!builder.IsDone())
-        throw new Error('Could not extrude the face into a solid.');
-      shape = castOwnedShape3D(builder.Shape());
-      return {shape, topology: transferShapeTopology([source], shape, builder)};
-    } finally {
-      builder.delete();
-    }
-  } catch (error) {
-    shape?.delete();
-    throw error;
+    for (const value of faces) solids.push(value.extrude(distance));
+    return Array.isArray(face) ? solids : solids[0];
   } finally {
-    vector.delete();
+    // Inner method records belong to this same free-function invocation.
+    // Restore its complete input scope even when a batch member throws.
+    ModelObject.recordFaceResults(
+      faces,
+      solids as unknown as readonly ModelObject[],
+    );
   }
 }
-
-/** Sweep a face around a directed axis, optionally advancing along it. */
-export function revolveWithTopology(
-  source: TopologyInput,
-  center: Vec3,
-  direction: Vec3,
-  angle: number,
-  advance: number,
-): {shape: Shape3D; topology?: ShapeTopology} {
-  const oc = getOC();
-  if (advance === 0) {
-    const point = new oc.gp_Pnt(...center);
-    let dir: InstanceType<typeof oc.gp_Dir> | undefined;
-    let axis: InstanceType<typeof oc.gp_Ax1> | undefined;
-    let shape: Shape3D | undefined;
-    try {
-      dir = new oc.gp_Dir(...direction);
-      axis = new oc.gp_Ax1(point, dir);
-      const builder = new oc.BRepPrimAPI_MakeRevol(
-        source.shape.wrapped,
-        axis,
-        angle * (Math.PI / 180),
-        false,
-      );
-      try {
-        if (!builder.IsDone()) throw new Error('Could not revolve the face.');
-        shape = castOwnedShape3D(builder.Shape());
-        requireRevolvedVolume(shape);
-        return {
-          shape,
-          topology: transferShapeTopology([source], shape, builder),
-        };
-      } finally {
-        builder.delete();
-      }
-    } catch (error) {
-      shape?.delete();
-      throw error;
-    } finally {
-      axis?.delete();
-      dir?.delete();
-      point.delete();
-    }
-  }
-
-  const boundaries = shapeSubshapes(source.shape, 'wire');
-  try {
-    if (boundaries.length !== 1)
-      throw new Error('Helical revolution requires a face without holes.');
-  } finally {
-    boundaries.forEach(boundary => boundary.delete());
-  }
-  const end: Vec3 = [
-    center[0] + direction[0] * advance,
-    center[1] + direction[1] * advance,
-    center[2] + direction[2] * advance,
-  ];
-  let startVector: Vector | undefined;
-  let endVector: Vector | undefined;
-  let line: ReturnType<typeof makeLine> | undefined;
-  let spine: ReturnType<typeof assembleWire> | undefined;
-  let guide: ReturnType<typeof makeHelix> | undefined;
-  let wire: ReturnType<Face['outerWire']> | undefined;
-  let shape: Shape3D | undefined;
-  try {
-    startVector = new Vector([...center]);
-    endVector = new Vector([...end]);
-    line = makeLine(startVector, endVector);
-    spine = assembleWire([line]);
-    guide = makeHelix(
-      (advance * 360) / angle,
-      advance,
-      1,
-      [...center],
-      [...direction],
+/** @internal */
+export namespace extrude {
+  export function inspectFaces(
+    [face, distance]: [FaceModel<{}> | readonly FaceModel<{}>[], number],
+    context: InspectContext<
+      SolidModel | readonly SolidModel[],
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    const faces = (
+      Array.isArray(face) ? face : [face]
+    ) as readonly FaceModel<{}>[];
+    const results = (
+      Array.isArray(context.return)
+        ? context.return
+        : context.return
+          ? [context.return]
+          : []
+    ) as readonly SolidModel[];
+    return ModelObject.inspectExtrude(
+      faces,
+      results,
+      distance,
+      context.focused.parameter,
+      context.data,
     );
-    // Replicad's outerWire consumes its cloned Face wrapper.
-    wire = (source.shape as Face).clone().outerWire();
-    const builder = new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped);
-    try {
-      builder.SetMode(
-        guide.wrapped,
-        false,
-        oc.BRepFill_TypeOfContact.BRepFill_NoContact,
-      );
-      builder.Add(wire.wrapped, false, false);
-      if (!builder.IsReady())
-        throw new Error(
-          'Could not associate the profile with the rotation axis.',
-        );
-      builder.Build();
-      if (!builder.IsDone() || !builder.MakeSolid())
-        throw new Error('Could not construct a solid helical revolution.');
-      shape = castOwnedShape3D(builder.Shape());
-      requireRevolvedVolume(shape);
-      // PipeShell does not expose face-cap history for an input face. Assign
-      // stable output IDs without guessing an inherited input correspondence.
-      return {shape};
-    } finally {
-      builder.delete();
-    }
-  } catch (error) {
-    shape?.delete();
-    throw error;
-  } finally {
-    wire?.delete();
-    guide?.delete();
-    spine?.delete();
-    line?.delete();
-    endVector?.delete();
-    startVector?.delete();
   }
-}
-
-function requireRevolvedVolume(shape: Shape3D): void {
-  if (!(Math.abs(measureVolume(shape)) > 0))
-    throw new Error('Revolution did not produce a non-degenerate solid.');
+  export function inspectMethod(
+    [distance]: [number],
+    context: InspectContext<
+      SolidModel,
+      FaceModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    return (
+      context.data &&
+      ModelObject.inspectExtrude(
+        [context.receiver],
+        context.return ? [context.return] : [],
+        distance,
+        context.focused.parameter,
+        context.data,
+      )
+    );
+  }
 }

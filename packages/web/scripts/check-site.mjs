@@ -48,9 +48,9 @@ for (const document of documents) {
   if (document.package)
     assert.ok(
       markdown.includes(
-        `${document.package.name} · v${document.package.version}`,
+        `${document.package.name} · ${document.sourceReview ? 'Reviewed with ' : ''}v${document.package.version}`,
       ),
-      `${file}: missing current package version`,
+      `${file}: missing package version`,
     );
   pages.set(document.route, {
     file,
@@ -292,6 +292,7 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
   if (packageDocument) {
     const headings = [];
     let version = '';
+    let sourceReview = '';
     let description = '';
     const navigation = [];
     function textContent(node) {
@@ -308,6 +309,8 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
       if (node.tagName === 'h1') headings.push(textContent(node));
       if (attrs.class?.split(/\s+/).includes('package-version'))
         version = textContent(node);
+      if (attrs.class?.split(/\s+/).includes('source-review'))
+        sourceReview = textContent(node);
       if (node.tagName === 'meta' && attrs.name === 'description')
         description = attrs.content;
       if (node.tagName === 'nav' && attrs['aria-label'] === 'Main')
@@ -327,6 +330,18 @@ for await (const file of glob('**/*.html', {cwd: directory})) {
       version.includes(`v${packageDocument.package.version}`),
       `${file}: stale HTML package version`,
     );
+    if (packageDocument.sourceReview) {
+      assert.ok(
+        version.includes('Reviewed with'),
+        `${file}: missing review label`,
+      );
+      for (const source of packageDocument.sourceReview.sources)
+        assert.ok(
+          sourceReview.includes(source.path) &&
+            sourceReview.includes(source.sha256),
+          `${file}: missing reviewed source ${source.path}`,
+        );
+    }
     assert.ok(description, `${file}: missing search description`);
     for (const related of documents.filter(
       item => item.packageDirectory === packageDocument.packageDirectory,

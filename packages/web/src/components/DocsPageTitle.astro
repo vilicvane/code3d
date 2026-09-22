@@ -1,7 +1,11 @@
 ---
 import PageTitle from '@astrojs/starlight/components/PageTitle.astro';
 import {comparisonMetadata} from '../lib/comparisons';
+import {sourceReferences} from '../../scripts/source-review.mjs';
+import {repository} from '../../scripts/document-sources.mjs';
 
+const review = Astro.locals.starlightRoute.entry.data.sourceReview;
+const sources = review ? sourceReferences(repository, review) : [];
 const metadata = Astro.locals.starlightRoute.entry.data.package;
 const comparison = comparisonMetadata(
   Astro.locals.starlightRoute.entry,
@@ -34,12 +38,57 @@ const comparison = comparisonMetadata(
       {Astro.locals.starlightRoute.entry.data.title !== metadata.name && (
         <span>{metadata.name}</span>
       )}
-      <span>v{metadata.version}</span>
+      <span>
+        {review ? 'Reviewed with ' : ''}v{metadata.version}
+      </span>
     </p>
   )
 }
 
+{
+  sources.length > 0 && (
+    <details class="source-review" data-pagefind-ignore>
+      <summary>Reviewed source files</summary>
+      <ul>
+        {sources.map(source => (
+          <li>
+            {source.href ? (
+              <a href={source.href}>{source.path}</a>
+            ) : (
+              <code>{source.path}</code>
+            )}
+            <div>
+              SHA-256: <code>{source.sha256}</code>
+            </div>
+            <div>
+              {source.commit ? (
+                <>
+                  Commit: <code>{source.commit}</code>
+                </>
+              ) : (
+                'Commit unavailable for this content.'
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
 <style>
+  .source-review {
+    margin-top: 0.75rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-2);
+    overflow-wrap: anywhere;
+  }
+  .source-review summary {
+    cursor: pointer;
+  }
+  .source-review li + li {
+    margin-top: 0.75rem;
+  }
   .comparison-breadcrumbs {
     margin-bottom: 1rem;
     color: var(--sl-color-gray-2);

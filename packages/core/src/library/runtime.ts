@@ -1,28 +1,14 @@
-import {input} from './input.js';
-import {timeOffset} from './time-offset.js';
+import {assertPositive, assertFiniteVector} from './validation.js';
 import {
   assembleWire,
-  basicFaceExtrusion,
   BoundingBox,
-  genericSweep,
   getOC,
-  makeBezierCurve,
-  makeBSplineApproximation,
-  makeCircle,
-  makeCylinder,
   makeFace,
-  makeHelix,
   makeLine,
-  makeSphere,
-  makeThreePointArc,
   makeVertex,
   measureShapeLinearProperties,
   measureShapeSurfaceProperties,
   measureShapeVolumeProperties,
-  sketchCircle,
-  sketchEllipse,
-  sketchPolysides,
-  sketchRectangle,
   Vector,
   type AnyShape,
   type Edge as ReplicadEdge,
@@ -39,9 +25,8 @@ import {
   transformGeometry,
   type AlignmentGeometry,
 } from './alignment-geometry.js';
-import {cache, cachedArtifact} from './cached.js';
-import {extrudeWithTopology, revolveWithTopology} from './extrude.js';
-import {font, googleFont, type Font} from './font.js';
+import {cachedArtifact} from './cached.js';
+import {extrudeWithTopology, revolveWithTopology} from './extrude-geometry.js';
 import {
   anchorAnnotation,
   boundsAnnotation,
@@ -67,12 +52,10 @@ import {
 import {
   castOwnedShape,
   castOwnedShape3D,
-  centeredBoxShape,
-  ellipsoidShape,
   shapeSubshapes,
   transformShape,
 } from './kernel-shapes.js';
-import {loftWithTopology, sweepWithTopology} from './loft.js';
+import {loftWithTopology, sweepWithTopology} from './loft-geometry.js';
 import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
 import {
   axisRotation,
@@ -84,13 +67,14 @@ import {
 } from './relation-solver.js';
 import {estimateRetainedBytes} from './retained-memory.js';
 import {shellWithTopology} from './shell.js';
-import {wrapFaces, type WrapOptions} from './wrap.js';
-import {thickenWithTopology} from './thicken.js';
+import {wrapFaces, type WrapOptions} from './wrap-geometry.js';
+import {thickenWithTopology} from './thicken-geometry.js';
 import {surfaceRotation} from './surface-geometry.js';
 import {sketchRegionFace} from './sketch-face.js';
 import type {SketchRegion} from './sketch-regions.js';
 import {
   addVectors,
+  toPoint,
   composeTransforms,
   frameFromYAxis,
   identityRigidTransform,
@@ -108,7 +92,6 @@ import {
   type RigidTransform,
   type Vec3,
 } from './spatial.js';
-import {textGlyphs, textRegionFace, type TextOptions} from './text.js';
 import {MeshBasicMaterial, type Material} from 'three';
 import {formatTopologyId, type TopologyId} from './topology-id.js';
 import {
@@ -148,7 +131,6 @@ import {
 import {
   isSketch,
   isSketchPoint,
-  sketch,
   sketchFrame,
   sketchForFrame,
   retainSketchFrame,
@@ -203,7 +185,8 @@ export type ElementSnapshot = Readonly<{
     TopologySelection;
 }>;
 
-type DistanceInspectData = Readonly<{
+/** @internal */
+export type DistanceInspectData = Readonly<{
   result: DistanceResult;
   direction?: Vec3;
   axisName?: 'x' | 'y' | 'z';
@@ -211,7 +194,7 @@ type DistanceInspectData = Readonly<{
   poses: ReadonlyMap<RelationObject, RigidTransform>;
 }>;
 
-type CompositionInspectData = Readonly<{
+export type CompositionInspectData = Readonly<{
   poses: ReadonlyMap<RelationObject, RigidTransform>;
 }>;
 
@@ -775,8 +758,8 @@ const unitScale: Vec3 = [1, 1, 1];
 let nextNodeId = 1;
 let nextConstraintId = 1;
 let nextOperationId = 1;
-const combineModels = Symbol('combineModels');
-const loftModels = Symbol('loftModels');
+export const combineModels = Symbol('combineModels');
+export const loftModels = Symbol('loftModels');
 
 const modelElementKinds = {
   solid: 'frame',
@@ -1723,110 +1706,6 @@ export class Constraint extends RelationExpression {
   }
 }
 
-/**
- * Translate the whole current model onto the directed target bound.
- * @code3d.inspect on.inspect
- * @code3d.inspect target on.inspect
- */
-export function on(target: Bound): Constraint;
-/**
- * Translate the selected source geometry's matching bound onto the target bound.
- * @code3d.inspect on.inspect
- * @code3d.inspect source on.inspect
- * @code3d.inspect target on.inspect
- */
-export function on(source: Anchor, target: Bound): Constraint;
-export function on(source: Anchor, target?: Bound): Constraint {
-  if (arguments.length === 1) {
-    if (!activeRelate)
-      throw new Error('on(target) must be called inside a relate callback.');
-    target = source as Bound;
-    source = requireModelObject(
-      activeRelate.self,
-      'on(target) requires a current model with finite geometry.',
-    );
-  }
-  return Constraint.create(anchorReference(source), boundReference(target!));
-}
-
-/**
- * Align underlying geometry while retaining unconstrained degrees of freedom.
- * @code3d.inspect align.inspect
- * @code3d.inspect source align.inspect
- * @code3d.inspect target align.inspect
- */
-export function align(
-  source: Anchor<'point' | 'line' | 'face'>,
-  target: Anchor<'point' | 'line' | 'face'>,
-): Constraint;
-/**
- * Coincide the origins and all axes of two coordinate frames.
- * @code3d.inspect align.inspect
- * @code3d.inspect source align.inspect
- * @code3d.inspect target align.inspect
- */
-export function align(source: FrameAnchor, target: FrameAnchor): Constraint;
-export function align(source: Anchor, target: Anchor): Constraint {
-  return Constraint.create(
-    anchorReference(source),
-    anchorReference(target),
-    'align',
-  );
-}
-
-/**
- * Couple relate's current model to another model using each model's own axis:
- * selfAngle = ratio * otherAngle + phase.
- * @code3d.tool
- * @code3d.inspect coupleRotation.inspect
- * @code3d.inspect other coupleRotation.inspect
- */
-export function coupleRotation(
-  other: Model<Readonly<{axis: LineAnchor}>>,
-  config: RotationCouplingConfig,
-): Constraint {
-  if (!activeRelate)
-    throw new Error(
-      'coupleRotation() must be called inside a relate callback.',
-    );
-  return Constraint.coupleRotation(
-    straightAxisReference(
-      modelRotationAxis(activeRelate.self),
-      'coupleRotation()',
-    ),
-    straightAxisReference(modelRotationAxis(other), 'coupleRotation()'),
-    config,
-  );
-}
-
-function modelRotationAxis(value: unknown): LineAnchor {
-  const model = requireModelObject(
-    value,
-    'coupleRotation() requires a model with an axis.',
-  );
-  if (!('axis' in model))
-    throw new Error('coupleRotation() requires each model to have an axis.');
-  return model.axis as LineAnchor;
-}
-
-/** @internal */
-export namespace coupleRotation {
-  export function inspect(
-    [other]: [Model<Readonly<{axis: LineAnchor}>>],
-    context: InspectContext<Constraint>,
-  ): InspectResult | undefined {
-    const data = relate.context(context);
-    return data && context.return
-      ? ModelObject.inspectConstraint(
-          data,
-          context.return,
-          modelRotationAxis(data.self),
-          other.axis,
-        )
-      : undefined;
-  }
-}
-
 /** One completed relative placement step. Array order composes transformations. */
 export class Transformation extends RelationExpression {
   declare protected readonly definition: Extract<
@@ -1848,7 +1727,7 @@ export class Transformation extends RelationExpression {
 }
 
 /** Carries the reference selection until its independent rotation is complete. */
-class TransformationRotation extends RelationExpression {
+export class TransformationRotation extends RelationExpression {
   constructor() {
     super(
       {kind: 'transformation', actions: []},
@@ -1869,14 +1748,16 @@ class TransformationRotation extends RelationExpression {
   }
 }
 
-function rotationPointReference(point: PointAnchor): AnchorReference {
+/** @internal */
+export function rotationPointReference(point: PointAnchor): AnchorReference {
   const reference = anchorReference(point);
   if (reference.kind !== 'point')
     throw new Error('pivotPoint() requires a point reference.');
   return reference;
 }
 
-function straightAxisReference(
+/** @internal */
+export function straightAxisReference(
   axis: LineAnchor,
   operation = 'axisLine()',
 ): AnchorReference {
@@ -1996,93 +1877,6 @@ function selectedAxis(
   offset: Vec3 | undefined,
 ): RigidTransform {
   return composeTransforms(axis.transform, translation(offset ?? origin));
-}
-
-/**
- * Move the joint result along the fixed axes of its composition.
- * @code3d.inspect relate.inspectRelation
- * @code3d.param x {kind: 'length', default: 0, label: 'ΔX'}
- * @code3d.param y {kind: 'length', default: 0, label: 'ΔY'}
- * @code3d.param z {kind: 'length', default: 0, label: 'ΔZ'}
- */
-export function offset(x: number, y: number, z: number): Transformation;
-export function offset(x = 0, y = 0, z = 0): Transformation {
-  assertFiniteVector('offset', [x, y, z]);
-  return new Transformation({offset: [x, y, z]});
-}
-/**
- * Rotate about self's current origin and local X, Y, then Z axes.
- * @code3d.inspect relate.inspectRelation
- * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
- * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
- * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
- */
-export function rotate(x: number, y: number, z: number): Transformation;
-export function rotate(x = 0, y = 0, z = 0): Transformation {
-  assertFiniteVector('rotate', [x, y, z]);
-  return new Transformation({
-    pivot: {kind: 'pivot', point: origin, implicit: true},
-    angles: [x, y, z],
-  });
-}
-/**
- * Select a pivot in self's local coordinates for the next rotation.
- * @code3d.inspect relate.inspectRelation
- * @code3d.param x {kind: 'length', default: 0, label: 'Pivot X'}
- * @code3d.param y {kind: 'length', default: 0, label: 'Pivot Y'}
- * @code3d.param z {kind: 'length', default: 0, label: 'Pivot Z'}
- */
-export function pivot([x, y, z]: Vec3): PivotChain;
-export function pivot([x = 0, y = 0, z = 0]: Vec3 = origin): PivotChain {
-  assertFiniteVector('pivot', [x, y, z]);
-  return new PivotChain(new TransformationRotation(), {
-    kind: 'pivot',
-    point: [x, y, z],
-  });
-}
-/**
- * @code3d.inspect relate.inspectRelation
- * @code3d.param id {kind: 'vertex', label: 'Pivot vertex'}
- */
-export function pivotVertex(id: VertexId): PivotChain {
-  assertTopologyId('vertex', id);
-  return new PivotChain(new TransformationRotation(), {
-    kind: 'pivotVertex',
-    id,
-  });
-}
-/**
- * Select a point reference as the center; rotation axes remain self local.
- * @code3d.tool
- * @code3d.inspect relate.inspectRelation
- */
-export function pivotPoint(point: PointAnchor): PivotChain {
-  return new PivotChain(new TransformationRotation(), {
-    kind: 'pivotPoint',
-    point: rotationPointReference(point),
-  });
-}
-/**
- * @code3d.inspect relate.inspectRelation
- * @code3d.param id {kind: 'edge', label: 'Rotation edge'}
- */
-export function axisEdge(id: EdgeId): AxisChain {
-  assertTopologyId('edge', id);
-  return new AxisChain(new TransformationRotation(), {
-    kind: 'axisEdge',
-    id,
-  });
-}
-/**
- * Select a positioned axis in the composition for the next rotation.
- * @code3d.inspect relate.inspectRelation
- * @code3d.tool
- */
-export function axisLine(axis: LineAnchor): AxisChain {
-  return new AxisChain(new TransformationRotation(), {
-    kind: 'axisLine',
-    axis: straightAxisReference(axis),
-  });
 }
 
 const modelGeometry = Symbol('modelGeometry');
@@ -3177,7 +2971,7 @@ abstract class ReferenceObject extends RelationObject {
   ): PreviewValue;
 }
 
-class FrameObject extends ReferenceObject implements Frame {
+export class FrameObject extends ReferenceObject implements Frame {
   declare readonly [anchorKind]: 'frame';
   readonly [coordinateFrame] = true;
   readonly [anchorReferenceValue]: AnchorReference;
@@ -3218,11 +3012,6 @@ class FrameObject extends ReferenceObject implements Frame {
   inspectionValue(frame: InspectionFrame): PreviewValue {
     return frame.positioned(this)!;
   }
-}
-
-/** Create an independent coordinate frame without finite geometry. */
-export function frame(name = 'Frame'): Frame {
-  return new FrameObject(name);
 }
 
 export function isFrame(value: unknown): value is FrameObject {
@@ -4363,7 +4152,16 @@ export class ModelObject<
     this: ModelObject<Elements, 'solid'>,
     tools: readonly SolidModel<{}>[],
   ): SolidModel {
-    return cut(this as unknown as SolidModel<{}>, tools);
+    const stock = requireModelKind(
+      this,
+      'solid',
+      'The cut stock must be a solid model.',
+    );
+    if (tools.length === 0) throw new Error('cut requires at least one tool.');
+    const operands = tools.map(tool =>
+      requireModelKind(tool, 'solid', 'Every cut tool must be a solid model.'),
+    );
+    return stock[combineModels]('cut', operands);
   }
 
   fillet(
@@ -5848,531 +5646,10 @@ export class ModelObject<
   }
 }
 
-/** @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}} */
-export function circle(radius: number): FaceModel;
-export function circle(radius = 5): FaceModel {
-  assertPositive('radius', radius);
-  return planarFaceModel('circle', 'Circle', [radius], () =>
-    sketchCircle(radius, {plane: 'XZ'}),
-  );
-}
-
-/**
- * @code3d.param xRadius {kind: 'length', default: 5, label: 'X radius', constraints: {exclusiveMin: 0}}
- * @code3d.param zRadius {kind: 'length', default: 3, label: 'Z radius', constraints: {exclusiveMin: 0}}
- */
-export function ellipse(xRadius: number, zRadius: number): FaceModel;
-export function ellipse(xRadius = 5, zRadius = 3): FaceModel {
-  assertPositive('xRadius', xRadius);
-  assertPositive('zRadius', zRadius);
-  return planarFaceModel('ellipse', 'Ellipse', [xRadius, zRadius], () =>
-    sketchEllipse(xRadius, zRadius, {plane: 'XZ'}),
-  );
-}
-
-/**
- * @code3d.param x {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- * @code3d.param z {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function rectangle(x: number, z: number): FaceModel;
-export function rectangle(x = 10, z = 10): FaceModel {
-  assertPositive('x', x);
-  assertPositive('z', z);
-  return planarFaceModel('rectangle', 'Rectangle', [x, z], () =>
-    sketchRectangle(x, z, {plane: 'XZ'}),
-  );
-}
-
-/**
- * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
- * @code3d.param sides {kind: 'count', default: 6, constraints: {min: 3}}
- * @code3d.param rotation {kind: 'angle', default: 0}
- */
-export function regularPolygon(
-  radius: number,
-  sides: number,
-  rotation?: number,
-): FaceModel;
-export function regularPolygon(radius = 5, sides = 6, rotation = 0): FaceModel {
-  assertPositive('radius', radius);
-  if (!Number.isInteger(sides) || sides < 3) {
-    throw new Error('sides must be an integer greater than or equal to 3.');
-  }
-  if (!Number.isFinite(rotation)) {
-    throw new Error('rotation must be a finite number.');
-  }
-  return planarFaceModel(
-    'regularPolygon',
-    `${sides}-sided polygon`,
-    [radius, sides, rotation],
-    () => sketchPolysides(radius, sides, 0, {plane: 'XZ'}),
-    face =>
-      rotation === 0 ? face : face.rotate(rotation, toPoint(origin), [0, 1, 0]),
-  );
-}
-
-/**
- * @code3d.param x {kind: 'length', label: 'X'}
- * @code3d.param y {kind: 'length', label: 'Y'}
- * @code3d.param z {kind: 'length', label: 'Z'}
- */
-export function point([x, y, z]: Vec3 = origin): VertexModel {
-  const position: Vec3 = [x, y, z];
-  assertFiniteVector('point', position);
-  const geometry = evaluateModelGeometry('point', [position], [], () => ({
-    shape: makeVertex(toPoint(position)),
-  }));
-  return ModelObject.create<{}, 'vertex'>({
-    kind: 'vertex',
-    name: 'Point',
-    geometry,
-    geometryAnchor: {kind: 'point', transform: translation(position)},
-    operation: storedOperation('point'),
-  }) as unknown as VertexModel;
-}
-
-/**
- * @code3d.param x {kind: 'length', label: 'End X'}
- * @code3d.param y {kind: 'length', label: 'End Y'}
- * @code3d.param z {kind: 'length', label: 'End Z'}
- */
-export function line([x, y, z]: Vec3): EdgeModel;
-/**
- * @code3d.param startX {kind: 'length', label: 'Start X'}
- * @code3d.param startY {kind: 'length', label: 'Start Y'}
- * @code3d.param startZ {kind: 'length', label: 'Start Z'}
- * @code3d.param endX {kind: 'length', label: 'End X'}
- * @code3d.param endY {kind: 'length', label: 'End Y'}
- * @code3d.param endZ {kind: 'length', label: 'End Z'}
- */
-export function line(
-  [startX, startY, startZ]: Vec3,
-  [endX, endY, endZ]: Vec3,
-): EdgeModel;
-export function line(startOrEnd: Vec3, end?: Vec3): EdgeModel {
-  const start = end ? startOrEnd : origin;
-  end ??= startOrEnd;
-  assertCurvePoints('line', [start, end], 2);
-  return curveModel('line', 'Line', [start, end], () =>
-    makeLine(toPoint(start), toPoint(end)),
-  );
-}
-
-export function arc(start: Vec3, middle: Vec3, end: Vec3): EdgeModel {
-  assertCurvePoints('arc', [start, middle, end], 3);
-  return curveModel('arc', 'Arc', [start, middle, end], () =>
-    makeThreePointArc(toPoint(start), toPoint(middle), toPoint(end)),
-  );
-}
-
-export function bezier(points: readonly Vec3[]): EdgeModel {
-  assertCurvePoints('bezier', points, 2);
-  return curveModel('bezier', 'Bezier curve', points, () =>
-    makeBezierCurve(points.map(toPoint)),
-  );
-}
-
-export function spline(points: readonly Vec3[]): EdgeModel {
-  assertCurvePoints('spline', points, 2);
-  return curveModel('spline', 'Spline', points, () =>
-    makeBSplineApproximation(points.map(toPoint)),
-  );
-}
-
 export type LoftOptions = Readonly<{
   spine?: EdgeModel<{}>;
   ruled?: boolean;
 }>;
-
-/**
- * @code3d.inspect sections loft.inspectSections
- * @code3d.inspect spine loft.inspectSpine
- */
-export function loft(
-  sections: readonly FaceModel<{}>[],
-  {spine, ruled = false}: LoftOptions = {},
-): SolidModel {
-  if (sections.length < 2) {
-    throw new Error('loft requires at least two planar sections.');
-  }
-  const runtimeSections = sections.map(section =>
-    requireModelKind(
-      section,
-      'face',
-      'Every loft section must be a planar face model.',
-    ),
-  );
-  const runtimeSpine = spine
-    ? requireModelKind(spine, 'edge', 'A loft spine must be a curve model.')
-    : undefined;
-  const [first, ...others] = runtimeSections;
-  return first[loftModels](others, runtimeSpine, ruled);
-}
-
-/**
- * @code3d.inspect x box.inspectDimension
- * @code3d.inspect y box.inspectDimension
- * @code3d.inspect z box.inspectDimension
- * @code3d.param x {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- * @code3d.param z {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function box(x: number, y: number, z: number): SolidModel;
-export function box(x = 10, y = 10, z = 10): SolidModel {
-  assertPositive('x', x);
-  assertPositive('y', y);
-  assertPositive('z', z);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Box',
-    geometry: evaluateSolidGeometry('box', [x, y, z], [], () => ({
-      shape: centeredBoxShape(x, y, z),
-    })),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('box', [], {
-      dimensions: {
-        x: {origin: [-x / 2, -y / 2, -z / 2], vector: [x, 0, 0]},
-        y: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, y, 0]},
-        z: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, 0, z]},
-      },
-    }),
-  }) as unknown as SolidModel;
-}
-
-/**
- * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function cylinder(radius: number, y: number): SolidModel;
-export function cylinder(radius = 5, y = 10): SolidModel {
-  assertPositive('radius', radius);
-  assertPositive('y', y);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Cylinder',
-    geometry: evaluateSolidGeometry('cylinder', [radius, y], [], () => ({
-      shape: makeCylinder(radius, y, [0, -y / 2, 0], [0, 1, 0]),
-    })),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('cylinder'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * A concentric, constant-section tube, open at both ends and centered on Y.
- * @code3d.param outerRadius {kind: 'length', default: 5, label: 'Outer radius', constraints: {exclusiveMin: 0}}
- * @code3d.param innerRadius {kind: 'length', default: 3, label: 'Inner radius', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function tube(
-  outerRadius: number,
-  innerRadius: number,
-  y: number,
-): SolidModel;
-export function tube(outerRadius = 5, innerRadius = 3, y = 10): SolidModel {
-  assertPositive('outerRadius', outerRadius);
-  assertPositive('innerRadius', innerRadius);
-  assertPositive('y', y);
-  if (innerRadius >= outerRadius) {
-    throw new Error('innerRadius must be smaller than outerRadius.');
-  }
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Tube',
-    geometry: evaluateSolidGeometry(
-      'tube',
-      [outerRadius, innerRadius, y],
-      [],
-      () => {
-        const outer = sketchCircle(outerRadius, {
-          plane: 'XZ',
-          origin: [0, -y / 2, 0],
-        });
-        const inner = sketchCircle(innerRadius, {
-          plane: 'XZ',
-          origin: [0, -y / 2, 0],
-        });
-        // Hole wires run opposite to the outer boundary.
-        inner.wire.wrapped.Reverse();
-        const section = makeFace(outer.wire, [inner.wire]);
-        const direction = new Vector([0, y, 0]);
-        try {
-          return {shape: basicFaceExtrusion(section, direction)};
-        } finally {
-          direction.delete();
-          section.delete();
-          inner.delete();
-          outer.delete();
-        }
-      },
-    ),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('tube'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * A right-handed, constant-pitch coil with a circular wire section and plain ends.
- * coilRadius measures to the wire centerline; pitch is the Y advance per turn.
- * The centerline spans -pitch * turns / 2 to +pitch * turns / 2 on the Y axis.
- * Fractional turns are supported. No spring-specific end treatments are applied.
- * @code3d.param coilRadius {kind: 'length', default: 5, label: 'Coil radius', constraints: {exclusiveMin: 0}}
- * @code3d.param wireRadius {kind: 'length', default: 1, label: 'Wire radius', constraints: {exclusiveMin: 0}}
- * @code3d.param pitch {kind: 'length', default: 3, constraints: {exclusiveMin: 0}}
- * @code3d.param turns {kind: 'scalar', default: 3, constraints: {exclusiveMin: 0}}
- */
-export function coil(
-  coilRadius: number,
-  wireRadius: number,
-  pitch: number,
-  turns: number,
-): SolidModel;
-export function coil(
-  coilRadius = 5,
-  wireRadius = 1,
-  pitch = 3,
-  turns = 3,
-): SolidModel {
-  assertPositive('coilRadius', coilRadius);
-  assertPositive('wireRadius', wireRadius);
-  assertPositive('pitch', pitch);
-  assertPositive('turns', turns);
-  if (wireRadius >= coilRadius) {
-    throw new Error('wireRadius must be smaller than coilRadius.');
-  }
-  if (pitch <= 2 * wireRadius) {
-    throw new Error('pitch must be greater than the wire diameter.');
-  }
-  assertCoilClearance(coilRadius, wireRadius, pitch, turns);
-  const y = pitch * turns;
-  assertPositive('pitch * turns', y);
-  const geometry = evaluateSolidGeometry(
-    'coil',
-    [coilRadius, wireRadius, pitch, turns],
-    [],
-    () => {
-      const spine = makeHelix(pitch, y, coilRadius, [0, -y / 2, 0], [0, 1, 0]);
-      const start = spine.pointAt(0);
-      const tangent = spine.tangentAt(0);
-      const circle = makeCircle(wireRadius, start, tangent);
-      const section = assembleWire([circle]);
-      try {
-        return {shape: genericSweep(section, spine, {frenet: true})};
-      } finally {
-        section.delete();
-        circle.delete();
-        tangent.delete();
-        start.delete();
-        spine.delete();
-      }
-    },
-  );
-  // A fractional turn has asymmetric X/Z bounds, but its axis is still Y.
-  // The circular end sections extend beyond the centerline's Y interval.
-  const circumference = 2 * Math.PI * coilRadius;
-  const halfHeight =
-    y / 2 + wireRadius * (circumference / Math.hypot(circumference, pitch));
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Coil',
-    geometry,
-    elements: solidElements([
-      [0, -halfHeight, 0],
-      [0, halfHeight, 0],
-    ]),
-    operation: storedOperation('coil'),
-  }) as unknown as SolidModel;
-}
-
-function assertCoilClearance(
-  radius: number,
-  wireRadius: number,
-  pitch: number,
-  turns: number,
-): void {
-  // Neighboring turns approach obliquely: pitch alone overestimates clearance.
-  // For angular separation t, squared centerline distance is
-  // 2 R² (1 - cos(t)) + (pitch * t / 2π)². Its only possible minimum
-  // between half a turn and a full turn lies after the derivative's minimum.
-  // Beyond a full turn, the Y separation already exceeds the wire diameter.
-  if (turns <= 0.5) return;
-  const fullTurn = 2 * Math.PI;
-  const slopeSquared = (pitch / (fullTurn * radius)) ** 2;
-  if (slopeSquared >= 1) return;
-  let lower = fullTurn - Math.acos(-slopeSquared);
-  if (Math.sin(lower) + slopeSquared * lower >= 0) return;
-  let upper = fullTurn;
-  for (let iteration = 0; iteration < 48; iteration += 1) {
-    const middle = (lower + upper) / 2;
-    if (Math.sin(middle) + slopeSquared * middle < 0) lower = middle;
-    else upper = middle;
-  }
-  const separation = Math.min(fullTurn * turns, (lower + upper) / 2);
-  const distance = Math.hypot(
-    2 * radius * Math.sin(separation / 2),
-    (pitch * separation) / fullTurn,
-  );
-  if (distance <= 2 * wireRadius) {
-    throw new Error(
-      'Coil turns must not touch or overlap; increase pitch or decrease wireRadius.',
-    );
-  }
-}
-
-/** @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}} */
-export function sphere(radius: number): SolidModel;
-export function sphere(radius = 5): SolidModel {
-  assertPositive('radius', radius);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Sphere',
-    geometry: evaluateSolidGeometry('sphere', [radius], [], () => ({
-      shape: makeSphere(radius),
-    })),
-    elements: solidElements([
-      [0, -radius, 0],
-      [0, radius, 0],
-    ]),
-    operation: storedOperation('sphere'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * An ellipsoid centered at the local origin, with radii along X, Y and Z.
- * @code3d.param xRadius {kind: 'length', default: 5, label: 'X radius', constraints: {exclusiveMin: 0}}
- * @code3d.param yRadius {kind: 'length', default: 3, label: 'Y radius', constraints: {exclusiveMin: 0}}
- * @code3d.param zRadius {kind: 'length', default: 4, label: 'Z radius', constraints: {exclusiveMin: 0}}
- */
-export function ellipsoid(
-  xRadius: number,
-  yRadius: number,
-  zRadius: number,
-): SolidModel;
-export function ellipsoid(xRadius = 5, yRadius = 3, zRadius = 4): SolidModel {
-  assertPositive('xRadius', xRadius);
-  assertPositive('yRadius', yRadius);
-  assertPositive('zRadius', zRadius);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Ellipsoid',
-    geometry: evaluateSolidGeometry(
-      'ellipsoid',
-      [xRadius, yRadius, zRadius],
-      [],
-      () => ({shape: ellipsoidShape(xRadius, yRadius, zRadius)}),
-    ),
-    elements: solidElements([
-      [0, -yRadius, 0],
-      [0, yRadius, 0],
-    ]),
-    operation: storedOperation('ellipsoid'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * @code3d.param bottomRadius {kind: 'length', default: 5, label: 'Bottom radius', constraints: {exclusiveMin: 0}}
- * @code3d.param topRadius {kind: 'length', default: 3, label: 'Top radius', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function frustum(
-  bottomRadius: number,
-  topRadius: number,
-  y: number,
-): SolidModel;
-export function frustum(bottomRadius = 5, topRadius = 3, y = 10): SolidModel {
-  assertPositive('bottomRadius', bottomRadius);
-  assertPositive('topRadius', topRadius);
-  assertPositive('y', y);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Frustum',
-    geometry: evaluateSolidGeometry(
-      'frustum',
-      [bottomRadius, topRadius, y],
-      [],
-      () => {
-        const bottom = sketchCircle(bottomRadius, {
-          plane: 'XZ',
-          origin: [0, -y / 2, 0],
-        });
-        const top = sketchCircle(topRadius, {
-          plane: 'XZ',
-          origin: [0, y / 2, 0],
-        });
-        return {shape: bottom.loftWith(top, {ruled: true})};
-      },
-    ),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('frustum'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- * @code3d.param sides {kind: 'count', default: 6, constraints: {min: 3}}
- * @code3d.param rotation {kind: 'angle', default: 0}
- */
-export function regularPrism(
-  radius: number,
-  y: number,
-  sides: number,
-  rotation?: number,
-): SolidModel;
-export function regularPrism(
-  radius = 5,
-  y = 10,
-  sides = 6,
-  rotation = 0,
-): SolidModel {
-  assertPositive('radius', radius);
-  assertPositive('y', y);
-  if (!Number.isInteger(sides) || sides < 3) {
-    throw new Error('sides must be an integer greater than or equal to 3.');
-  }
-  if (!Number.isFinite(rotation)) {
-    throw new Error('rotation must be a finite number.');
-  }
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: `${sides}-sided prism`,
-    geometry: evaluateSolidGeometry(
-      'regular-prism',
-      [radius, y, sides, rotation],
-      [],
-      () => {
-        const sketch = sketchPolysides(radius, sides, 0, {
-          plane: 'XZ',
-          origin: [0, -y / 2, 0],
-        });
-        let shape = sketch.extrude(y, {
-          extrusionDirection: [0, 1, 0],
-        });
-        if (rotation !== 0) {
-          shape = shape.rotate(rotation, [0, 0, 0], [0, 1, 0]);
-        }
-        return {shape};
-      },
-    ),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('regularPrism'),
-  }) as unknown as SolidModel;
-}
 
 /** @internal */
 export function primitiveConstructor<Args extends unknown[]>(
@@ -6464,99 +5741,6 @@ function normalizeReplicadSolid(shape: Shape3D): Shape3D {
 
   shape.delete();
   return solid;
-}
-
-/** Compose members in an explicit frame, or the first member's frame by default. */
-/**
- * @code3d.inspect children group.inspectChildren
- * @code3d.inspect options group.inspectOptions
- */
-export function group(
-  children: readonly Model[],
-  options: GroupOptions = {},
-): GroupModel {
-  const runtimeChildren = children.map(child =>
-    requireModelObject(child, 'Every group child must be a model.'),
-  );
-  return ModelObject.create<{}, 'group'>({
-    kind: 'group',
-    name: options.name ?? 'Group',
-    children: runtimeChildren,
-    assemblyFrame: options.frame,
-    operation: storedOperation('group', [
-      ...runtimeChildren.map((model, index) => ({
-        model,
-        role: 'child' as const,
-        index,
-      })),
-      ...(options.frame
-        ? [
-            {
-              model: anchorReference(options.frame).model,
-              role: 'reference' as const,
-              index: 0,
-            },
-          ]
-        : []),
-    ]),
-  }) as unknown as GroupModel;
-}
-
-/** @internal */
-export namespace group {
-  export function inspectOptions(
-    [, options]: [readonly Model[], GroupOptions?],
-    context: InspectContext<GroupModel>,
-  ): InspectResult | undefined {
-    return context.return &&
-      options?.frame &&
-      context.focused.values.includes(options.frame)
-      ? ModelObject.inspectGroup(context.return, options.frame)
-      : undefined;
-  }
-
-  export function inspectChildren(
-    _args: [readonly Model[], GroupOptions?],
-    context: InspectContext<GroupModel>,
-  ): InspectResult | undefined {
-    return context.return && ModelObject.inspectGroup(context.return);
-  }
-}
-
-/** Inspect derived group members at solved poses while preserving input focus. */
-export function inspectGroupMembers(
-  children: readonly Model[],
-  inputs: readonly Model[],
-): InspectResult {
-  const result = ModelObject.inspectGroup(group(children));
-  result.target?.forEach((member, index) => {
-    retainInspectionIdentity(member, inputs[index]);
-  });
-  return result;
-}
-
-/**
- * Measure finite models, topology, bounds or point references in their solved placement.
- * Without axis, returns the shortest geometric distance. With axis, returns the
- * gap between projected intervals (zero when they overlap). The result is a
- * non-negative number computed now; later relations do not update it.
- * @code3d.inspect distance.inspect
- * @code3d.inspect a distance.inspect
- * @code3d.inspect b distance.inspect
- * @code3d.inspect axis distance.inspect
- */
-export function distance(a: Anchor, b: Anchor, axis?: DistanceAxis): number {
-  return ModelObject.distance(a, b, axis);
-}
-
-/** @internal */
-export namespace distance {
-  export function inspect(
-    args: [Anchor, Anchor, DistanceAxis?],
-    context: InspectContext<number, unknown, DistanceInspectData | undefined>,
-  ): InspectResult | undefined {
-    return ModelObject.inspectDistance(args, context);
-  }
 }
 
 /** @internal Runtime exports for JSDoc inspectors; not a free modeling function. */
@@ -6864,296 +6048,6 @@ export namespace expose {
       ModelObject.inspectExposed(context.receiver, context.return, context.data)
     );
   }
-}
-
-/** @internal */
-export namespace on {
-  export function inspect(
-    [source, target]: [Anchor, Bound?],
-    context: InspectContext<Constraint>,
-  ): InspectResult | undefined {
-    const data = relate.context(context);
-    if (!data || !context.return) return undefined;
-    return ModelObject.inspectConstraint(
-      data,
-      context.return,
-      target === undefined ? (data.self as ModelObject) : source,
-      target ?? source,
-      context.focused.parameter === undefined,
-    );
-  }
-}
-
-/** @internal */
-export namespace align {
-  export function inspect(
-    [source, target]: [Anchor, Anchor],
-    context: InspectContext<Constraint>,
-  ): InspectResult | undefined {
-    const data = relate.context(context);
-    return data && context.return
-      ? ModelObject.inspectConstraint(
-          data,
-          context.return,
-          source,
-          target,
-          context.focused.parameter === undefined,
-        )
-      : undefined;
-  }
-}
-
-type CenterableModel = Model & {originCenter(): Model};
-
-/**
- * Put the current local bounding-box center at zero, like model.originCenter().
- * @code3d.inspect model originCenter.inspectModels
- */
-export function originCenter<T extends CenterableModel>(model: T): T;
-/**
- * Center the complete layout, preserving order and spacing. Member placements
- * are resolved into the first member's axes before choosing the shared origin.
- * @code3d.inspect models originCenter.inspectModels
- */
-export function originCenter<const T extends readonly CenterableModel[]>(
-  models: T,
-): {readonly [Index in keyof T]: T[Index]};
-export function originCenter(
-  model: CenterableModel | readonly CenterableModel[],
-): Model | readonly Model[] {
-  const models = (Array.isArray(model) ? model : [model]).map(value =>
-    requireModelObject(
-      value,
-      'originCenter requires a geometric model or an array of geometric models.',
-    ),
-  );
-  const results = ModelObject.centerOrigins(
-    models,
-  ) as unknown as readonly Model[];
-  return Array.isArray(model) ? results : results[0];
-}
-
-/** @internal */
-export namespace originCenter {
-  export function inspectModels(
-    [models]: [Model | readonly Model[]],
-    context: InspectContext<Model | readonly Model[]>,
-  ): InspectResult | undefined {
-    if (context.return === undefined) return;
-    return inspectGroupMembers(
-      Array.isArray(context.return)
-        ? context.return
-        : [context.return as Model],
-      Array.isArray(models) ? models : [models as Model],
-    );
-  }
-}
-
-/** @code3d.inspect operands union.inspectOperands */
-export function union(operands: readonly SolidModel<{}>[]): SolidModel {
-  const {first, others} = booleanOperands('union', operands);
-  return first[combineModels]('fuse', others);
-}
-
-/**
- * Extrudes each face independently, preserving array order and placement.
- * @code3d.inspect face extrude.inspectFaces
- * @code3d.inspect distance extrude.inspectFaces
- * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
- */
-export function extrude(face: FaceModel<{}>, distance: number): SolidModel;
-/**
- * Extrudes each face independently.
- * @code3d.inspect faces extrude.inspectFaces
- * @code3d.inspect distance extrude.inspectFaces
- * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
- */
-export function extrude(
-  faces: readonly FaceModel<{}>[],
-  distance: number,
-): readonly SolidModel[];
-export function extrude(
-  face: FaceModel<{}> | readonly FaceModel<{}>[],
-  distance = 10,
-): SolidModel | readonly SolidModel[] {
-  const faces = (Array.isArray(face) ? face : [face]).map(value =>
-    requireModelKind(
-      value,
-      'face',
-      'extrude requires a face model or an array of face models.',
-    ),
-  );
-  const solids: SolidModel[] = [];
-  try {
-    for (const value of faces) solids.push(value.extrude(distance));
-    return Array.isArray(face) ? solids : solids[0];
-  } finally {
-    // Inner method records belong to this same free-function invocation.
-    // Restore its complete input scope even when a batch member throws.
-    ModelObject.recordFaceResults(
-      faces,
-      solids as unknown as readonly ModelObject[],
-    );
-  }
-}
-
-/**
- * @code3d.inspect profile revolve.inspectProfile
- * @code3d.inspect axis revolve.inspectAxis
- * @code3d.inspect config revolve.inspectProfile
- * @code3d.param config.angle {kind: 'angle', default: 360, label: 'Revolution angle'}
- * @code3d.param config.advance {kind: 'length', default: 0, label: 'Axial advance'}
- */
-export function revolve(
-  profile: FaceModel<{}>,
-  axis: LineAnchor,
-  config: RevolveConfig,
-): SolidModel;
-export function revolve(
-  profile: FaceModel<{}>,
-  axis: LineAnchor,
-  config: RevolveConfig = {angle: 360},
-): SolidModel {
-  const runtimeProfile = requireModelKind(
-    profile,
-    'face',
-    'revolve requires a face model.',
-  );
-  let result: SolidModel | undefined;
-  try {
-    result = runtimeProfile.revolve(axis, config);
-    return result;
-  } finally {
-    ModelObject.recordRevolve(
-      runtimeProfile,
-      axis,
-      result as ModelObject | undefined,
-    );
-  }
-}
-
-/**
- * Sweeps one planar profile along an open curve.
- * @code3d.inspect profile sweep.inspectProfile
- * @code3d.inspect spine sweep.inspectSpine
- */
-export function sweep(
-  profile: FaceModel<{}>,
-  spine: EdgeModel<{}>,
-): SolidModel {
-  return requireModelKind(
-    profile,
-    'face',
-    'sweep requires a face model.',
-  ).sweep(spine);
-}
-
-/**
- * Wrap coplanar profiles onto one smooth, finite target surface. The complete
- * source bounding rectangle chooses the closest correspondence. Distinct local
- * results and crossing/overlapping regions are errors. Output may split at seams.
- * @code3d.inspect profiles wrap.inspectProfiles
- * @code3d.inspect target wrap.inspectTarget
- */
-export function wrap(
-  profiles: FaceModel<{}> | readonly FaceModel<{}>[],
-  target: Surface | FaceModel<{}>,
-  options: WrapOptions = {},
-): readonly FaceModel<{}>[] {
-  return ModelObject.wrapProfiles(
-    (Array.isArray(profiles) ? profiles : [profiles]).map(profile =>
-      requireModelKind(profile, 'face', 'wrap requires planar face models.'),
-    ),
-    target,
-    options,
-  );
-}
-
-/**
- * Give each face signed thickness along its surface normals, preserving placement.
- * @code3d.inspect face thicken.inspectFaces
- * @code3d.inspect thickness thicken.inspectFaces
- * @code3d.param thickness {kind: 'length', default: 1, label: 'Thickness'}
- */
-export function thicken(face: FaceModel<{}>, thickness: number): SolidModel;
-/**
- * @code3d.inspect faces thicken.inspectFaces
- * @code3d.inspect thickness thicken.inspectFaces
- * @code3d.param thickness {kind: 'length', default: 1, label: 'Thickness'}
- */
-export function thicken(
-  faces: readonly FaceModel<{}>[],
-  thickness: number,
-): readonly SolidModel[];
-export function thicken(
-  face: FaceModel<{}> | readonly FaceModel<{}>[],
-  thickness = 1,
-): SolidModel | readonly SolidModel[] {
-  const faces = (Array.isArray(face) ? face : [face]).map(value =>
-    requireModelKind(value, 'face', 'thicken requires face models.'),
-  );
-  const results: SolidModel[] = [];
-  try {
-    for (const value of faces) results.push(value.thicken(thickness));
-    return Array.isArray(face) ? results : results[0];
-  } finally {
-    ModelObject.recordFaceResults(
-      faces,
-      results as unknown as readonly ModelObject[],
-    );
-  }
-}
-
-/**
- * Creates connected text faces on the XZ plane: +X right, -Z up, normal +Y.
- * All faces share the baseline origin. Size is the font em in model units.
- * @code3d.param size {kind: 'length', label: 'Text size'}
- */
-export function text(
-  content: string,
-  font: Font,
-  size: number,
-  options?: TextOptions,
-): readonly FaceModel[] {
-  return textGlyphs(content, font, size, options).flatMap(({regions, x, y}) =>
-    regions.value.map((region, index) => {
-      const geometry = evaluateModelGeometry(
-        'text',
-        [x, y, index],
-        [regions],
-        () => ({shape: textRegionFace(region, x, y)}),
-      );
-      return faceModel('text', 'Text face', geometry);
-    }),
-  );
-}
-
-/**
- * @code3d.inspect stock cut.inspectStock
- * @code3d.inspect tools cut.inspectTools
- */
-export function cut(
-  stock: SolidModel<{}>,
-  tools: readonly SolidModel<{}>[],
-): SolidModel {
-  const runtimeStock = requireModelKind(
-    stock,
-    'solid',
-    'The cut stock must be a solid model.',
-  );
-  if (tools.length === 0) {
-    throw new Error('cut requires at least one tool.');
-  }
-  const runtimeTools = tools.map(tool =>
-    requireModelKind(tool, 'solid', 'Every cut tool must be a solid model.'),
-  );
-  return runtimeStock[combineModels]('cut', runtimeTools);
-}
-
-/** @code3d.inspect operands intersect.inspectOperands */
-export function intersect(operands: readonly SolidModel<{}>[]): SolidModel {
-  const {first, others} = booleanOperands('intersect', operands);
-  return first[combineModels]('intersect', others);
 }
 
 export function isModelObject(value: unknown): value is ModelObject {
@@ -7634,61 +6528,8 @@ export function retainModelGeometry(
   }
 }
 
-export const authoringApi = Object.freeze({
-  frame,
-  originCenter,
-  input,
-  timeOffset,
-  dimension,
-  boundsAnnotation,
-  anchorAnnotation,
-  captureInspectData,
-  offset,
-  rotate,
-  pivot,
-  pivotVertex,
-  pivotPoint,
-  axisEdge,
-  axisLine,
-  coupleRotation,
-  on,
-  align,
-  cache,
-  font,
-  googleFont,
-  text,
-  sketch,
-  circle,
-  ellipse,
-  extrude,
-  rectangle,
-  regularPolygon,
-  point,
-  line,
-  arc,
-  bezier,
-  spline,
-  loft,
-  revolve,
-  sweep,
-  wrap,
-  thicken,
-  box,
-  cylinder,
-  tube,
-  coil,
-  sphere,
-  ellipsoid,
-  frustum,
-  regularPrism,
-  group,
-  distance,
-  union,
-  cut,
-  intersect,
-});
-
-function storedOperation(
+/** @internal */
+export function storedOperation(
   kind: ModelOperationKind,
   inputs: readonly StoredOperationInput[] = [],
   options: Readonly<{
@@ -7781,7 +6622,8 @@ function evaluateKernelShape<Shape extends AnyShape>(
   ) as KernelArtifact<Shape>;
 }
 
-const evaluateModelGeometry = cachedArtifact(
+/** @internal */
+export const evaluateModelGeometry = cachedArtifact(
   (
     _operation: string,
     _arguments: readonly KernelKeyPart[],
@@ -7821,7 +6663,8 @@ function createModelGeometryValue(
   }
 }
 
-function evaluateSolidGeometry(
+/** @internal */
+export function evaluateSolidGeometry(
   operation: string,
   arguments_: readonly KernelKeyPart[],
   inputs: readonly KernelArtifact<unknown>[],
@@ -7953,11 +6796,6 @@ function meshUVs(
   }
 }
 
-type PlanarSketch = Readonly<{
-  face(): ReplicadFace;
-  delete(): void;
-}>;
-
 /** Internal bridge from the kernel-independent sketch definition to model geometry. */
 function sketchFaceModel(
   region: SketchRegion,
@@ -7993,32 +6831,8 @@ function sketchFaceModel(
   }) as unknown as FaceModel;
 }
 
-function planarFaceModel(
-  operation: Extract<
-    ModelOperationKind,
-    'circle' | 'ellipse' | 'rectangle' | 'regularPolygon'
-  >,
-  name: string,
-  arguments_: readonly KernelKeyPart[],
-  buildSketch: () => PlanarSketch,
-  transform?: (face: ReplicadFace) => ReplicadFace,
-): FaceModel {
-  const geometry = evaluateModelGeometry(operation, arguments_, [], () => {
-    const sketch = buildSketch();
-    try {
-      const face = sketch.face();
-      // Replicad's XZ sketches face -Y. Core's planar profiles face +Y;
-      // normalize the native face before normals, offsets and sweeps consume it.
-      face.wrapped.Reverse();
-      return {shape: transform?.(face) ?? face};
-    } finally {
-      sketch.delete();
-    }
-  });
-  return faceModel(operation, name, geometry);
-}
-
-function faceModel(
+/** @internal */
+export function faceModel(
   operation: ModelOperationKind,
   name: string,
   geometry: ModelGeometry,
@@ -8039,39 +6853,11 @@ function faceModel(
   }) as unknown as FaceModel;
 }
 
-function curveModel(
-  operation: Extract<ModelOperationKind, 'line' | 'arc' | 'bezier' | 'spline'>,
-  name: string,
-  arguments_: readonly KernelKeyPart[],
-  build: () => ReplicadEdge,
-): EdgeModel {
-  const geometry = evaluateModelGeometry(operation, arguments_, [], () => ({
-    shape: build(),
-  }));
-  const elements = curveElements(geometry.value.shape as ReplicadEdge);
-  return ModelObject.create<CurveElements, 'edge'>({
-    kind: 'edge',
-    name,
-    geometry,
-    geometryAnchor: {...elements.start, kind: 'line'},
-    elements,
-    operation: storedOperation(operation),
-  }) as unknown as EdgeModel;
-}
-
-function curveElements(curve: ReplicadEdge): Readonly<{
-  start: StoredElement;
-  midpoint: StoredElement;
-  end: StoredElement;
-}> {
-  return {
-    start: curveAnchor(curve, 0),
-    midpoint: curveAnchor(curve, 0.5),
-    end: curveAnchor(curve, 1),
-  };
-}
-
-function curveAnchor(curve: ReplicadEdge, position: number): StoredElement {
+/** @internal */
+export function curveAnchor(
+  curve: ReplicadEdge,
+  position: number,
+): StoredElement {
   const point = curve.pointAt(position);
   const tangent = curve.tangentAt(position);
   try {
@@ -8155,7 +6941,8 @@ function boundsCenter(bounds: LocalBounds): Vec3 {
   return [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
 }
 
-function solidElements(bounds: LocalBounds): StoredElements {
+/** @internal */
+export function solidElements(bounds: LocalBounds): StoredElements {
   return {axis: {kind: 'line', transform: translation(boundsCenter(bounds))}};
 }
 
@@ -8519,7 +7306,8 @@ function topologyReferences(
   });
 }
 
-function boundReference(target: Bound): AnchorReference {
+/** @internal */
+export function boundReference(target: Bound): AnchorReference {
   const reference =
     target instanceof ModelAnchor ? target[anchorReferenceValue] : undefined;
   if (!reference?.bound)
@@ -8529,7 +7317,8 @@ function boundReference(target: Bound): AnchorReference {
   return reference;
 }
 
-function anchorReference(anchor: Anchor): AnchorReference {
+/** @internal */
+export function anchorReference(anchor: Anchor): AnchorReference {
   if (anchor instanceof ModelObject) {
     return anchor.relationAnchorReference();
   }
@@ -8613,14 +7402,19 @@ function shapeWithScale<Shape extends AnyShape>(
   });
 }
 
-function requireModelObject(value: unknown, message: string): ModelObject {
+/** @internal */
+export function requireModelObject(
+  value: unknown,
+  message: string,
+): ModelObject {
   if (!isModelObject(value)) {
     throw new Error(message);
   }
   return value;
 }
 
-function requireModelKind<Kind extends ModelKind>(
+/** @internal */
+export function requireModelKind<Kind extends ModelKind>(
   value: unknown,
   kind: Kind,
   message: string,
@@ -8632,414 +7426,10 @@ function requireModelKind<Kind extends ModelKind>(
   return object as ModelObject<{}, Kind>;
 }
 
-/** @internal */
-export namespace box {
-  export function inspectDimension(
-    args: [number, number, number],
-    context: InspectContext<SolidModel>,
-  ): InspectResult | undefined {
-    if (!context.return) return undefined;
-    const parameter = context.focused.parameter!;
-    const value = args[['x', 'y', 'z'].indexOf(parameter)];
-    return {
-      target: [
-        context.return,
-        ModelObject.inspectDimension(
-          context.return,
-          parameter,
-          value,
-          context.return,
-          identityRigidTransform,
-          parameter.toUpperCase(),
-        ),
-      ],
-    };
-  }
-}
-
-/** @internal */
-export namespace extrude {
-  export function inspectFaces(
-    [face, distance]: [FaceModel<{}> | readonly FaceModel<{}>[], number],
-    context: InspectContext<
-      SolidModel | readonly SolidModel[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    const faces = (
-      Array.isArray(face) ? face : [face]
-    ) as readonly FaceModel<{}>[];
-    const results = (
-      Array.isArray(context.return)
-        ? context.return
-        : context.return
-          ? [context.return]
-          : []
-    ) as readonly SolidModel[];
-    return ModelObject.inspectExtrude(
-      faces,
-      results,
-      distance,
-      context.focused.parameter,
-      context.data,
-    );
-  }
-  export function inspectMethod(
-    [distance]: [number],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectExtrude(
-        [context.receiver],
-        context.return ? [context.return] : [],
-        distance,
-        context.focused.parameter,
-        context.data,
-      )
-    );
-  }
-}
-
-/** @internal */
-export namespace revolve {
-  export function inspectProfile(
-    [profile, axis]: [FaceModel<{}>, LineAnchor, RevolveConfig],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectRevolve(
-        profile,
-        axis,
-        context.return,
-        context.data,
-        'profile',
-      )
-    );
-  }
-
-  export function inspectAxis(
-    [profile, axis]: [FaceModel<{}>, LineAnchor, RevolveConfig],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectRevolve(
-        profile,
-        axis,
-        context.return,
-        context.data,
-        'axis',
-      )
-    );
-  }
-
-  export function inspectMethodProfile(
-    [axis]: [LineAnchor, RevolveConfig],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectRevolve(
-        context.receiver,
-        axis,
-        context.return,
-        context.data,
-        'profile',
-      )
-    );
-  }
-
-  export function inspectMethodAxis(
-    [axis]: [LineAnchor, RevolveConfig],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectRevolve(
-        context.receiver,
-        axis,
-        context.return,
-        context.data,
-        'axis',
-      )
-    );
-  }
-}
-
-/** @internal */
-export namespace sweep {
-  export function inspectProfile(
-    [profile, spine]: [FaceModel<{}>, EdgeModel<{}>],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(
-      context.data,
-      [spine, ...(context.return ? [context.return] : [])],
-      [profile],
-    );
-  }
-
-  export function inspectSpine(
-    [profile, spine]: [FaceModel<{}>, EdgeModel<{}>],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(
-      context.data,
-      [profile, ...(context.return ? [context.return] : [])],
-      [spine],
-    );
-  }
-
-  export function inspectMethodProfile(
-    [spine]: [EdgeModel<{}>],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectProfile([context.receiver, spine], context);
-  }
-
-  export function inspectMethodSpine(
-    [spine]: [EdgeModel<{}>],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectSpine([context.receiver, spine], context);
-  }
-}
-
-/** @internal */
-export namespace union {
-  export function inspectOperands(
-    [operands]: [readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(context.data, [], operands);
-  }
-}
-
-/** @internal */
-export namespace intersect {
-  export function inspectOperands(
-    [operands]: [readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    const focused = new Set(context.focused.solids);
-    const scene = ModelObject.inspectComposition(
-      context.data,
-      operands.filter(operand => !focused.has(operand)),
-      operands.filter(operand => focused.has(operand)),
-    );
-    if (!context.return) return scene;
-    const result = ModelObject.inspectComposition(
-      context.data,
-      [],
-      [context.return],
-    ).target![0] as Model;
-    return {
-      ...scene,
-      target: [
-        ...scene.target!,
-        result.material(inspectionRegionMaterial('#66c9ff')),
-      ],
-    };
-  }
-}
-
 /** Generated inspect regions remain legible through their translucent inputs. */
-function inspectionRegionMaterial(color: string): Material {
+/** @internal */
+export function inspectionRegionMaterial(color: string): Material {
   return new MeshBasicMaterial({color, depthTest: false, toneMapped: false});
-}
-
-/** @internal */
-export namespace cut {
-  export function inspectStock(
-    [stock, tools]: [SolidModel<{}>, readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(context.data, tools, [stock]);
-  }
-  export function inspectTools(
-    [stock, tools]: [SolidModel<{}>, readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectCutTools(
-      stock,
-      tools,
-      context.focused.solids,
-      context.data,
-    );
-  }
-  export function inspectReceiver(
-    [tools]: [readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      SolidModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectStock([context.receiver, tools], context);
-  }
-  export function inspectMethodTools(
-    [tools]: [readonly SolidModel<{}>[]],
-    context: InspectContext<
-      SolidModel,
-      SolidModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectTools([context.receiver, tools], context);
-  }
-}
-
-/** @internal */
-export namespace loft {
-  export function inspectSections(
-    [sections, {spine} = {}]: [readonly FaceModel<{}>[], LoftOptions?],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(
-      context.data,
-      [...(context.return ? [context.return] : []), ...(spine ? [spine] : [])],
-      sections,
-    );
-  }
-  export function inspectSpine(
-    [sections, {spine} = {}]: [readonly FaceModel<{}>[], LoftOptions?],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(
-      context.data,
-      [...sections, ...(context.return ? [context.return] : [])],
-      spine ? [spine] : [],
-    );
-  }
-}
-
-function booleanOperands(
-  operation: 'union' | 'intersect',
-  operands: readonly SolidModel<{}>[],
-): Readonly<{
-  first: ModelObject<{}, 'solid'>;
-  others: readonly ModelObject<{}, 'solid'>[];
-}> {
-  if (operands.length < 2) {
-    throw new Error(`${operation} requires at least two model operands.`);
-  }
-  const runtimeOperands = operands.map(operand =>
-    requireModelKind(
-      operand,
-      'solid',
-      `Every ${operation} operand must be a solid model.`,
-    ),
-  );
-  return {first: runtimeOperands[0], others: runtimeOperands.slice(1)};
-}
-
-function assertPositive(label: string, value: number): void {
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`${label} must be a positive finite number.`);
-  }
-}
-
-function assertFiniteVector(label: string, value: Vec3): void {
-  if (value.some(component => !Number.isFinite(component))) {
-    throw new Error(`${label} must be a finite number.`);
-  }
-}
-
-function assertCurvePoints(
-  label: string,
-  points: readonly Vec3[],
-  minimum: number,
-): void {
-  if (points.length < minimum) {
-    throw new Error(`${label} requires at least ${minimum} points.`);
-  }
-  points.forEach((point, index) =>
-    assertFiniteVector(`${label} point ${index + 1}`, point),
-  );
-  const [first, ...rest] = points;
-  if (
-    rest.every(point =>
-      point.every((component, index) => component === first[index]),
-    )
-  ) {
-    throw new Error(`${label} requires at least two distinct points.`);
-  }
-}
-
-function toPoint(vector: Vec3): [number, number, number] {
-  return [vector[0], vector[1], vector[2]];
 }
 
 function appendUniqueParameters(
@@ -9077,83 +7467,4 @@ function hasParameter(
       candidate.expressionRef.end === parameter.expressionRef.end &&
       candidate.target.id === parameter.target.id,
   );
-}
-
-/** @internal */
-export namespace wrap {
-  function inspect(
-    [profiles, target]: [
-      FaceModel<{}> | readonly FaceModel<{}>[],
-      Surface | FaceModel<{}>,
-    ],
-    context: InspectContext<
-      readonly FaceModel<{}>[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-    focus: 'profiles' | 'target',
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    const faces = Array.isArray(profiles) ? profiles : [profiles];
-    return ModelObject.inspectComposition(
-      context.data,
-      focus === 'profiles'
-        ? [target, ...(context.return ?? [])]
-        : [...faces, ...(context.return ?? [])],
-      focus === 'profiles' ? faces : [target],
-    );
-  }
-  export function inspectProfiles(
-    args: [FaceModel<{}> | readonly FaceModel<{}>[], Surface | FaceModel<{}>],
-    context: InspectContext<
-      readonly FaceModel<{}>[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ) {
-    return inspect(args, context, 'profiles');
-  }
-  export function inspectTarget(
-    args: [FaceModel<{}> | readonly FaceModel<{}>[], Surface | FaceModel<{}>],
-    context: InspectContext<
-      readonly FaceModel<{}>[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ) {
-    return inspect(args, context, 'target');
-  }
-}
-/** @internal */
-export namespace thicken {
-  export function inspectFaces(
-    [face]: [FaceModel<{}> | readonly FaceModel<{}>[], number],
-    context: InspectContext<
-      SolidModel | readonly SolidModel[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    const results = context.return
-      ? Array.isArray(context.return)
-        ? context.return
-        : [context.return]
-      : [];
-    return ModelObject.inspectComposition(
-      context.data,
-      results,
-      Array.isArray(face) ? face : [face],
-    );
-  }
-  export function inspectMethod(
-    [thickness]: [number],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectFaces([context.receiver, thickness], context);
-  }
 }

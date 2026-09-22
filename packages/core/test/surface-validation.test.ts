@@ -7,8 +7,8 @@ import {castOwnedShape} from '../bld/library/kernel-shapes.js';
 import {initialShapeTopology} from '../bld/library/topology.js';
 import {SurfaceChart} from '../bld/library/wrap-mapping.js';
 import {mappedFace} from '../bld/library/wrap-face.js';
-import {wrapFaces} from '../bld/library/wrap.js';
-import {thickenWithTopology} from '../bld/library/thicken.js';
+import {wrapFaces} from '../bld/library/wrap-geometry.js';
+import {thickenWithTopology} from '../bld/library/thicken-geometry.js';
 import {
   SurfaceGeometry,
   principalCurvatures,

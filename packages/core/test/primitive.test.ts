@@ -8,7 +8,7 @@ import type {Shape3D, AnyShape} from 'replicad';
 import type {Model} from '@code3d/core';
 import * as primitives from '@code3d/core';
 import {getOC} from 'replicad';
-import {ellipsoidShape} from '../bld/library/kernel-shapes.js';
+import {ellipsoidShape} from '../src/library/ellipsoid.ts';
 
 import assert from 'node:assert/strict';
 import test from 'node:test';

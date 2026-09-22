@@ -51,6 +51,12 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/sweep.ts': ['default', 1],
   'operations/wrap.ts': ['default', 3],
   'operations/origin.ts': ['centered', 1],
+  'sketches/sketch-api.ts': ['basicPart', 1],
+  'operations/topology-api.ts': ['bodyV', 1],
+  'constraints/placement-api.ts': ['stand', 2],
+  'operations/local-transforms.ts': ['bottomZero', 1],
+  'operations/solid-operations.ts': ['joined', 1],
+  'operations/shape-construction.ts': ['plate', 1],
   'primitives/primitives.ts': ['cuboid', 1],
   'constraints/relate.ts': ['default', 2],
   'topology-paths.ts': ['default', 1],
@@ -324,6 +330,84 @@ for (const entry of exampleEntries) {
           Math.abs(volume(exports.default) - (30 * 8 * 20 - Math.PI * 16 * 8)) <
             1e-5,
         );
+      }
+      if (entry.file === 'sketches/sketch-api.ts') {
+        const near = (actual: number, expected: number) =>
+          assert.ok(Math.abs(actual - expected) < 1e-6);
+        near(exports.basicPart.volume, 192 * Math.PI);
+        near(exports.entityPart.volume, 34 * Math.PI);
+        near(exports.sleevePart.volume, 3360 * Math.PI);
+        near(exports.constrainedPart.volume, 3000);
+        assert.equal(exports.regionParts.length, 2);
+        for (const part of exports.regionParts) near(part.volume, 45 * Math.PI);
+        near(exports.drilledHost.volume, 40 * 8 * 30 - 128 * Math.PI);
+      }
+      if (entry.file === 'operations/topology-api.ts') {
+        assert.equal(exports.corner.kind, 'vertex');
+        assert.equal(exports.corner.id, 3);
+        assert.deepEqual(
+          exports.chosenCorners.map((v: {id: number}) => v.id),
+          [3, 1],
+        );
+        assert.equal(exports.upright.length, 10);
+        assert.ok(Math.abs(exports.topFace.area - 280) < 1e-8);
+        assert.equal(exports.backward.length, 10);
+        assert.ok(Math.abs(exports.downward.area - 96) < 1e-8);
+        assert.equal(
+          distance(exports.backward.start, exports.segment.start),
+          0,
+        );
+        assert.equal(distance(exports.backward.end, exports.segment.end), 0);
+        assert.equal(distance(exports.zero, exports.geometricPoint), 10);
+      }
+      if (entry.file === 'constraints/placement-api.ts') {
+        assert.deepEqual(exports.stand.bounds().size, [32, 16, 24]);
+        for (const name of ['seat', 'tip', 'shaft'])
+          assert.ok(name in exports.mountingPin);
+        assert.equal(snapshot(exports.transmission).children.length, 3);
+        assert.deepEqual(
+          snapshot(exports.transmission).children[2].transform.position,
+          [40, 0, 0],
+        );
+      }
+      if (entry.file === 'operations/local-transforms.ts') {
+        assert.deepEqual(exports.bottomZero.bounds().minimum, [-12, 0, -7]);
+        assert.deepEqual(exports.midpointZero.bounds().minimum, [-10, 0, 0]);
+        assert.deepEqual(exports.midpointZero.bounds().maximum, [10, 0, 0]);
+        assert.deepEqual(
+          exports.centeredLayout[0].bounds().minimum,
+          [-10, 0, -2],
+        );
+        assert.deepEqual(
+          exports.centeredLayout[1].bounds().maximum,
+          [10, 0, 1],
+        );
+        assert.ok(Math.abs(volume(exports.enlarged) - 3072) < 1e-6);
+        assert.deepEqual(exports.enlarged.bounds().size, [24, 8, 16]);
+        assert.ok(Math.abs(volume(exports.rotated) - 640) < 1e-6);
+      }
+      if (entry.file === 'operations/solid-operations.ts') {
+        assert.ok(
+          Math.abs(volume(exports.joined) - (4800 + 200 * Math.PI)) < 1e-6,
+        );
+        assert.ok(
+          Math.abs(volume(exports.drilled) - (4800 - 128 * Math.PI)) < 1e-6,
+        );
+        assert.ok(
+          volume(exports.shared) > 0 && volume(exports.shared) < 18 * 12 * 18,
+        );
+        assert.ok(volume(exports.rounded) < 30 * 16 * 20);
+        assert.ok(volume(exports.beveled) < 30 * 16 * 20);
+        assert.deepEqual(exports.enclosure.bounds().size, [40, 24, 30]);
+      }
+      if (entry.file === 'operations/shape-construction.ts') {
+        assert.ok(Math.abs(volume(exports.plate) - 288) < 1e-6);
+        assert.ok(Math.abs(volume(exports.ring) - 16 * Math.PI ** 2) < 1e-4);
+        for (const name of ['bentRod', 'transition'])
+          assert.ok(volume(exports[name]) > 0);
+        assert.ok(exports.curvedFaces.length > 0);
+        assert.equal(exports.curvedPlates.length, exports.curvedFaces.length);
+        for (const plate of exports.curvedPlates) assert.ok(volume(plate) > 0);
       }
       if (entry.file === 'primitives/primitives.ts') {
         const kinds = values.map(value => snapshot(value).kind);

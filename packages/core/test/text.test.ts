@@ -7,8 +7,11 @@ import {
   kernelOperationCacheStats,
   setKernelArtifactStore,
 } from '../bld/library/kernel-cache.js';
-import type {PathCommand} from '../bld/library/text.js';
-import {groupTextContours, textRegionFace} from '../bld/library/text.js';
+import type {PathCommand} from '../bld/library/text-geometry.js';
+import {
+  groupTextContours,
+  textRegionFace,
+} from '../bld/library/text-geometry.js';
 import {
   box,
   cut,

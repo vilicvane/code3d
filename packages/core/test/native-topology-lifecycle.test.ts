@@ -1,3 +1,4 @@
+import {centeredBoxShape} from '../src/library/box.ts';
 import type {
   TopoDS_Shape,
   TopoDS_Vertex,
@@ -21,10 +22,9 @@ import * as replicad from 'replicad';
 import {replicad as authorReplicad} from '../bld/node/replicad.js';
 import {
   castOwnedShape3D,
-  centeredBoxShape,
   shapeSubshapes,
 } from '../bld/library/kernel-shapes.js';
-import {extrudeWithTopology} from '../bld/library/extrude.js';
+import {extrudeWithTopology} from '../bld/library/extrude-geometry.js';
 import {
   filletEdges,
   initialShapeTopology,

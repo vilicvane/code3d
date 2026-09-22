@@ -103,7 +103,7 @@ export async function inspectIdentifierTokens() {
 
 export async function inspectWorkerFiles() {
   const declarationFile =
-    '/workspace/node_modules/@code3d/core/bld/library/runtime.d.ts';
+    '/workspace/node_modules/@code3d/core/bld/library/box.d.ts';
   const declarationResource = monaco.Uri.file(declarationFile);
   const declaration =
     monaco.editor.getModel(declarationResource) ??

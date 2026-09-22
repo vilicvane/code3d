@@ -4,6 +4,31 @@
 [Core README](../../../packages/core/README.md)、
 [公开入口](../../../packages/core/src/library/index.ts)和类型测试阅读。
 
+API 文档按批次完善时，同步将相应实现按职责拆出。八个 Solid Primitives 分别由
+`box.ts`、`cylinder.ts`、`sphere.ts`、`ellipsoid.ts`、`frustum.ts`、
+`regular-prism.ts`、`tube.ts` 和 `coil.ts` 拥有各自构造、参数标注与几何创建，
+箱体尺寸检查器和线圈净空检查也跟随对应 API。`validation.ts` 共享正数校验；通用模型构造、
+操作记录、缓存与参考元素机制保留在 `runtime.ts`。`union.ts`、`cut.ts`、`intersect.ts` 分别承载布尔作者入口与检查器，
+`boolean-model.ts` 共享操作数校验；实体实例方法仍通过运行时的组合机制求值。
+`origin-center.ts` 承载单个/数组居中的作者重载与检查器，批量装配和局部变换仍由
+运行时统一维护模型身份、拓扑与约束。组合、on/align、独立变换、pivot/axis 选择器和角度耦合的作者入口分别归同名
+模块；`group.ts` 同时承载成员检查，原点居中复用该检查入口。runtime 只向这些
+模块提供内部参考解析和表达式机制，不反向依赖作者模块。`distance.ts` 承载距离查询的作者入口及检查器，实际有限几何测量、参考解析和关系求解继续共享于 runtime。`text.ts` 调用 `text-geometry.ts` 的字形几何算法；`google-font.ts` 调用 `google-font-sources.ts` 的 CSS 解析与 URL 构造，字体解析和资源身份由 `font.ts` 共享。`authoring-api.ts` 只汇总作者
+入口，避免运行时反向依赖独立 API 模块。公开导出与编辑器跟踪指向实际实现，
+不保留旧模块转发入口。文档源码基准的维护方式见
+[网站维护说明](../../../packages/web/README.md#source-review-baselines)。
+
+点、四种曲线及四种平面轮廓也各自由同名模块拥有构造和参数定义。
+`curve-model.ts` 统一曲线模型、起止/参数中点参考的装配及点列校验；
+`planar-face-model.ts` 统一轮廓原生法向归一与资源释放。通用边参考的
+`curveAnchor`、面模型创建与几何缓存仍由 runtime 共享，避免反向依赖作者 API。
+`validation.ts` 共享标量和有限坐标校验，`spatial.ts` 负责坐标表示转换。
+
+成形 API 的自由函数与检查器归 `extrude.ts`、`revolve.ts`、`sweep.ts`、
+`loft.ts`、`wrap.ts`、`thicken.ts`；内核算法由 `*-geometry.ts` 拥有。
+实例方法、求解、模型身份及资源缓存仍由 runtime 统一管理，作者模块不被 runtime
+反向导入。复杂 API 的源码核对范围同时包含共享方法实现与相关内核模块。
+
 ## 模型值与公开边界
 
 每个模型值直接持有以 symbol 为键的只读 `metadata` 快照；`withMetadata` 浅拷贝字典并
@@ -233,7 +258,7 @@ HarfBuzz 排版提供真实二次/三次曲线，non-zero winding 布尔合并�
 
 作者参数、支持范围和示例以[文字参考](../../../packages/core/docs/api.md#text)
 为准。实现与回归见 [font](../../../packages/core/src/library/font.ts)、
-[text](../../../packages/core/src/library/text.ts)、[text tests](../../../packages/core/test/text.test.ts)
+[text](../../../packages/core/src/library/text.ts)、[text geometry](../../../packages/core/src/library/text-geometry.ts)、[text tests](../../../packages/core/test/text.test.ts)
 和 [third-party notices](../../../packages/core/THIRD_PARTY.md)。
 
 ## 曲面包覆与增厚
@@ -256,11 +281,11 @@ App 状态副本。wrap 继承首输入坐标架，thicken 逐个继承源面。
 源平面架取模型内部 `geometryAnchor`，不读取能由 expose 改写的具名 plane。
 平面包覆输出同步保存实际支撑平面架，后续原点与旋转操作继续重表达该架。
 
-内部职责分为 [wrap 区域定位](../../../packages/core/src/library/wrap.ts)、
+内部职责分为 [wrap 区域定位](../../../packages/core/src/library/wrap-geometry.ts)、
 [测地映射与布局校验](../../../packages/core/src/library/wrap-mapping.ts)、
 [边界拟合与 BRep 构面](../../../packages/core/src/library/wrap-face.ts)。
 [曲面导数与主曲率](../../../packages/core/src/library/surface-geometry.ts)由 wrap 与
-[thicken](../../../packages/core/src/library/thicken.ts)共用；布局校验按曲面上的映射
+[thicken](../../../packages/core/src/library/thicken-geometry.ts)共用；布局校验按曲面上的映射
 插值误差自适应细分，所有探测点位于有限矩形内，并检查短 B-spline 节点区间。
 增厚校验从[裁剪面的私有三角域](../../../packages/core/src/library/surface-domain.ts)
 出发，保留孔与接缝，再按节点区间及曲率裕量/偏移误差细分；不采样整个 UV 包围矩形。

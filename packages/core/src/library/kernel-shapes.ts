@@ -1,4 +1,3 @@
-import {withNativeScope} from './kernel-scope.js';
 import {
   cast,
   getOC,
@@ -14,50 +13,6 @@ import type {
   TopoDS_Shape,
   gp_Trsf,
 } from 'replicad-opencascadejs';
-
-export function centeredBoxShape(x: number, y: number, z: number): Shape3D {
-  const oc = getOC();
-  const corner = new oc.gp_Pnt(-x / 2, -y / 2, -z / 2);
-  try {
-    const builder = new oc.BRepPrimAPI_MakeBox(corner, x, y, z);
-    try {
-      return castOwnedShape3D(builder.Shape());
-    } finally {
-      builder.delete();
-    }
-  } finally {
-    corner.delete();
-  }
-}
-
-/** Scale a rational unit sphere's poles, preserving an exact ellipsoid surface. */
-export function ellipsoidShape(x: number, y: number, z: number): Shape3D {
-  return withNativeScope(scope => {
-    const oc = getOC(),
-      sphere = scope.own(new oc.gp_Sphere());
-    sphere.SetRadius(1);
-    const spherical = scope.own(new oc.Geom_SphericalSurface(sphere));
-    const surface = scope.own(
-      oc.GeomConvert.SurfaceToBSplineSurface(spherical),
-    );
-    for (let u = 1; u <= surface.NbUPoles(); u++)
-      for (let v = 1; v <= surface.NbVPoles(); v++) {
-        const point = surface.Pole(u, v);
-        try {
-          point.SetCoord(point.X() * x, point.Y() * y, point.Z() * z);
-          surface.SetPole(u, v, point);
-        } finally {
-          point.delete();
-        }
-      }
-    const shellBuilder = scope.own(
-      new oc.BRepBuilderAPI_MakeShell(surface, false),
-    );
-    const shell = scope.own(shellBuilder.Shell());
-    const solidBuilder = scope.own(new oc.BRepBuilderAPI_MakeSolid(shell));
-    return castOwnedShape3D(solidBuilder.Solid());
-  });
-}
 
 /** Consumes a raw handle; Replicad's cast creates a separate native handle. */
 export function castOwnedShape(shape: TopoDS_Shape): AnyShape {

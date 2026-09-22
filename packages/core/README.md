@@ -53,21 +53,38 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 
 ## Documentation
 
-- [Modeling API](docs/api.md): primitives, operations, materials and measurements.
+- [Modeling API by task](docs/api.md#browse-by-task): primitives, operations, placement, materials and measurements.
+- [Solid primitives](docs/api.md#solid-primitives): individual references for box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil.
+- [Points, curves and profiles](docs/api.md#profiles-and-curves): point, line, arc, bezier, spline and four filled planar profile constructors.
+- [Shape construction](docs/api/extrude.md): extrude, revolve, sweep, loft, wrap and thicken profiles.
+- [Booleans and solid modifications](docs/api/union.md): union, cut, intersect, fillet, chamfer and shell.
+- [Origins and local transforms](docs/api/origin-offset.md): choose local zero, rotate and scale geometry.
+- [Groups and placement](docs/api/group.md): groups, exposed references, relations, transforms and rotation coupling.
+- [Complete API export index](docs/api/exports.md): all public functions, types, members and integration entries.
+- [Model types and capabilities](docs/api/model-types.md): model aliases, generics and supported members.
+- [Independent frames](docs/api/frame.md): non-geometric assembly coordinate references.
+- [Model metadata](docs/api/model-data.md): symbol-keyed snapshots for package-specific data.
 - [Model values](docs/values.md): immutable values and geometry measurements.
-- [Model metadata](docs/api.md#model-metadata): symbol-keyed snapshots for package-specific data.
+- [Geometry measurements](docs/api/distance.md): clearance, length, area, volume, bounds and model-origin position.
+- [Sketch API](docs/api/sketch.md): entity and constraint tuples, derived layers, finite regions and spatial placement.
+- [Text and fonts](docs/api/text.md): text faces, local font files and Google Font selections.
+- [Parameters, time and caching](docs/api/input.md): numeric inputs, playback offsets and reusable computations.
+- [Materials and appearance](docs/api/material.md): captured colors, native materials, textures and Three.js integration.
 - [Local coordinates](docs/local-coordinates.md): frames, origins and placement conventions.
 - [Relations](docs/relations.mdx): position parts using bounds, geometry and frames.
 - [Rotation coupling](docs/api.md#rotation-coupling): transmit cumulative angles through fixed-axis connections.
 - [Origins and rotation](docs/origins-and-rotation.mdx): choose a pivot and adjust a part.
 - [Shells](docs/shells.mdx): hollow solids and choose openings.
-- [Topology](docs/topology.md): select vertices, edges and faces and expose named elements.
+- [Topology references](docs/api/vertex.md): select vertices, edges and surfaces; [reference elements](docs/api/reference-elements.md) and [directional bounds](docs/api/directional-bounds.md) define placement interfaces.
+- [Topology workflow](docs/topology.md): visual selection and stable IDs across modeling operations.
 - [Editable sketches](docs/sketches.md): draw and constrain planar geometry.
 - [Text and fonts](docs/text.md): build planar or curved lettering.
 - [Curved surface wrapping](docs/api.md#curved-surface-wrapping): wrap profiles and thicken along surface normals.
 - [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx): compose model functions.
 - [Model tools](../web/src/content/docs/docs/guides/model-tools.mdx): add editing tools and argument presets.
+- [Extension API](docs/api/define-primitive.md): native builders, package metadata, custom inspectors and annotations.
 - [Custom primitives](docs/custom-primitives.mdx): extend modeling with Replicad geometry.
+- [Tooling API](docs/api/tooling.md): host evaluation, resources, snapshots, caches, topology and inspection.
 - [Runtime integration](docs/runtime.md): numeric inputs, time offsets, resources, materials and source inspection.
 - [Current limitations](../web/src/content/docs/docs/getting-started/limitations.md): supported workflows and known boundaries.
 

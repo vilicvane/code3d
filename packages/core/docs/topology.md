@@ -5,6 +5,9 @@ sidebar:
   order: 6
 ---
 
+For complete signatures and selection rules, see [vertex / vertices](api/vertex.md),
+[edge / edges](api/edge.md) and [surface / surfaces](api/surface.md).
+
 Start with a box:
 
 ```ts

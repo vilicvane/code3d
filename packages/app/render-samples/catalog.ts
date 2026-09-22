@@ -4,6 +4,108 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'material',
+    title: 'Colors, materials and textures',
+    description:
+      'Compare a color, native physical material and loaded texture.',
+    category: 'Materials',
+    file: 'materials.ts',
+    focus: {context: 'export const plain =', token: 'plain'},
+    mode: 'render',
+    tags: ['material', 'color', 'texture', 'three'],
+  },
+  {
+    id: 'sketch-api',
+    view: {direction: [1, 2, 1], up: [0, 1, 0]},
+    title: 'Sketch definitions and regions',
+    description:
+      'Define constrained profiles, derive layers and build placed solids.',
+    category: 'Profiles and solids',
+    file: 'sketches/sketch-api.ts',
+    focus: {context: 'basicProfile.face().extrude(3)', token: 'extrude'},
+    tags: ['sketch', 'constraints', 'derive', 'regions', 'plane'],
+  },
+  {
+    id: 'topology-api',
+    title: 'Topology and references',
+    description: 'Select finite topology and compare reference directions.',
+    category: 'Topology and reuse',
+    file: 'operations/topology-api.ts',
+    focus: {context: 'bodyV.vertex(3)', token: 'vertex'},
+    tags: ['vertex', 'edge', 'surface', 'bounds', 'references'],
+  },
+  {
+    id: 'placement',
+    title: 'Groups and relative placement',
+    description:
+      'Compose models, expose references, constrain placement and select rotation axes.',
+    category: 'Placement and rotation',
+    file: 'constraints/placement-api.ts',
+    focus: {
+      context: "group([standBase, standPost], {name: 'Stand'})",
+      token: 'group',
+    },
+    tags: [
+      'group',
+      'expose',
+      'relate',
+      'on',
+      'align',
+      'offset',
+      'rotate',
+      'pivot',
+      'axis',
+      'coupleRotation',
+    ],
+  },
+  {
+    id: 'local-transforms',
+    title: 'Origins and local transforms',
+    description: 'Choose local zero, rotate geometry and scale a model.',
+    category: 'Placement and references',
+    file: 'operations/local-transforms.ts',
+    focus: {
+      context:
+        'export const bottomZero = box(24, 6, 14).originOffset(0, -3, 0)',
+      token: 'originOffset',
+    },
+    tags: [
+      'origin',
+      'originOffset',
+      'originPoint',
+      'originVertex',
+      'originCenter',
+      'rotate',
+      'scaled',
+    ],
+  },
+  {
+    id: 'solid-operations',
+    title: 'Combine and finish solids',
+    description:
+      'Union, cut, intersect, fillet, chamfer and shell solid models.',
+    category: 'Profiles and solids',
+    file: 'operations/solid-operations.ts',
+    focus: {
+      context: 'export const joined = union([base, boss])',
+      token: 'union',
+    },
+    tags: ['union', 'cut', 'intersect', 'fillet', 'chamfer', 'shell'],
+  },
+  {
+    id: 'shape-construction',
+    title: 'Build solids and curved faces',
+    description:
+      'Extrude, revolve, sweep, loft, wrap and thicken simple profiles.',
+    category: 'Profiles and solids',
+    file: 'operations/shape-construction.ts',
+    focus: {
+      context: 'export const plate = extrude(rectangle(12, 8), 3)',
+      token: 'extrude',
+    },
+    tags: ['extrude', 'revolve', 'sweep', 'loft', 'wrap', 'thicken'],
+  },
+  {
     id: 'material-presets',
     title: 'Material presets under the same light',
     description:
@@ -404,6 +506,594 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  material: [
+    {
+      id: 'color',
+      image: 'material',
+      label: 'Color',
+      description: 'A plain color selects the default material.',
+      focus: {context: 'export const plain =', token: 'plain'},
+    },
+    {
+      id: 'native',
+      image: 'material-native',
+      label: 'Native material',
+      description: 'A physical material controls lacquered surface appearance.',
+      focus: {context: 'export const lacquered =', token: 'lacquered'},
+    },
+    {
+      id: 'texture',
+      image: 'material-texture',
+      label: 'Texture',
+      description: 'A loaded checker texture repeats over native face UVs.',
+      focus: {context: 'export const textured =', token: 'textured'},
+    },
+  ],
+  'sketch-api': [
+    {
+      id: 'sketch',
+      image: 'sketch-api',
+      label: 'sketch',
+      description:
+        'Define immutable two-dimensional sketch geometry and constraints before building faces.',
+      focus: {context: 'basicProfile.face().extrude(3)', token: 'extrude'},
+    },
+    {
+      id: 'sketch-entities',
+      image: 'sketch-entities',
+      label: 'Sketch entities',
+      description:
+        'Author points, lines, circles and directed circular arcs with layer-local IDs.',
+      focus: {context: 'entityProfile.face().extrude(2)', token: 'extrude'},
+    },
+    {
+      id: 'sketch-constraints',
+      image: 'sketch-constraints',
+      label: 'Sketch constraints',
+      description:
+        'Constrain sketch points and curves while preserving explicit geometric freedom.',
+      focus: {
+        context: 'constrainedProfile.face().extrude(3)',
+        token: 'extrude',
+      },
+    },
+    {
+      id: 'sketch-derive',
+      image: 'sketch-derive',
+      label: 'Sketch point and derive',
+      description:
+        'Reference defining-layer points and add immutable local geometry over an upstream sketch.',
+      focus: {context: 'derivedProfile.face().extrude(10)', token: 'extrude'},
+    },
+    {
+      id: 'sketch-faces',
+      image: 'sketch-faces',
+      label: 'Sketch face and faces',
+      description:
+        'Extract finite faces from closed sketch boundaries, including holes and separate regions.',
+      focus: {context: 'holesProfile.faces()', token: 'faces'},
+    },
+    {
+      id: 'sketch-relate',
+      image: 'sketch-relate',
+      label: 'Sketch plane and relate',
+      description:
+        'Position an immutable sketch plane against model geometry before extracting faces.',
+      focus: {context: 'sketchHost.cut([', token: 'cut'},
+    },
+  ],
+  'topology-api': [
+    {
+      id: 'vertex',
+      image: 'topology-api',
+      label: 'vertex / vertices',
+      description: 'Select point references to existing topology vertices.',
+      focus: {context: 'bodyV.vertex(3)', token: 'vertex'},
+    },
+    {
+      id: 'edge',
+      image: 'topology-edge',
+      label: 'edge / edges',
+      description:
+        'Select finite edge references for topology, measurement and relations.',
+      focus: {context: 'bodyE.edge(2)', token: 'edge'},
+    },
+    {
+      id: 'surface',
+      image: 'topology-surface',
+      label: 'surface / surfaces',
+      description:
+        'Select finite surface references from a body or face model.',
+      focus: {context: 'bodyS.surface(4)', token: 'surface'},
+    },
+    {
+      id: 'directional-bounds',
+      image: 'topology-directional-bounds',
+      label: 'Directional bounds',
+      description:
+        'Select finite directional boundaries for contact and measurement.',
+      focus: {context: 'bodyB.up', token: 'up'},
+    },
+  ],
+  placement: [
+    {
+      id: 'group',
+      image: 'placement',
+      label: 'group',
+      description:
+        'Compose models into an assembly while preserving separate members and their hierarchy.',
+      focus: {
+        context: "group([standBase, standPost], {name: 'Stand'})",
+        token: 'group',
+      },
+    },
+    {
+      id: 'expose',
+      image: 'placement-expose',
+      label: 'expose',
+      description:
+        'Publish named geometry and reference members on a new model value.',
+      focus: {context: 'pin.expose({', token: 'expose'},
+    },
+    {
+      id: 'relate',
+      image: 'placement-relate',
+      label: 'relate',
+      description:
+        'Describe placement of a new model value using constraints and ordered transformations.',
+      focus: {context: 'box(8, 12, 8).relate(self => [', token: 'relate'},
+    },
+    {
+      id: 'on',
+      image: 'placement-on',
+      label: 'on',
+      description:
+        'Translate finite geometry into contact with a directed bound without changing its orientation.',
+      focus: {context: 'on(bed.up)', token: 'on'},
+    },
+    {
+      id: 'align',
+      image: 'placement-align',
+      label: 'align',
+      description:
+        'Align supporting geometry or coincide two complete coordinate frames.',
+      focus: {context: 'align(self.center, datum)', token: 'align'},
+    },
+    {
+      id: 'offset',
+      image: 'placement-offset',
+      label: 'offset',
+      description: 'Translate a placement result along fixed composition axes.',
+      focus: {context: 'offset(7, 0, 0)', token: 'offset'},
+    },
+    {
+      id: 'rotate',
+      image: 'placement-rotate',
+      label: 'rotate',
+      description:
+        'Rotate a placed model about its current origin and local XYZ axes.',
+      focus: {context: 'rotate(0, 0, 25)', token: 'rotate'},
+    },
+    {
+      id: 'pivot',
+      image: 'placement-pivot',
+      label: 'pivot',
+      description:
+        'Choose a self-local point as the center of a placement rotation.',
+      focus: {context: 'pivot([6, -5, 0])', token: 'pivot'},
+    },
+    {
+      id: 'pivot-vertex',
+      image: 'placement-pivot-vertex',
+      label: 'pivotVertex',
+      description:
+        'Choose one of self\u2019s vertices as a placement rotation center.',
+      focus: {context: 'pivotVertex(3)', token: 'pivotVertex'},
+    },
+    {
+      id: 'pivot-point',
+      image: 'placement-pivot-point',
+      label: 'pivotPoint',
+      description:
+        'Use a positioned point reference as a placement rotation center.',
+      focus: {context: 'pivotPoint(self.vertex(3))', token: 'pivotPoint'},
+    },
+    {
+      id: 'axis-edge',
+      image: 'placement-axis-edge',
+      label: 'axisEdge',
+      description:
+        'Rotate a placed model about one of its own straight topology edges.',
+      focus: {context: 'axisEdge(2)', token: 'axisEdge'},
+    },
+    {
+      id: 'axis-line',
+      image: 'placement-axis-line',
+      label: 'axisLine',
+      description:
+        'Rotate a placement about a self or external straight line reference.',
+      focus: {
+        context: 'axisLine(self.axis).axisOffset(3, 0, 0)',
+        token: 'axisLine',
+      },
+    },
+    {
+      id: 'couple-rotation',
+      image: 'placement-couple-rotation',
+      label: 'coupleRotation',
+      description:
+        'Drive one model\u2019s cumulative placement angle from another model\u2019s fixed axis.',
+      focus: {
+        context: 'coupleRotation(crank, {ratio: -0.5})',
+        token: 'coupleRotation',
+      },
+    },
+  ],
+  'local-transforms': [
+    {
+      id: 'origin-offset',
+      image: 'local-transforms',
+      label: 'originOffset',
+      description: 'The bottom of the box at local zero.',
+      focus: {
+        context:
+          'export const bottomZero = box(24, 6, 14).originOffset(0, -3, 0)',
+        token: 'originOffset',
+      },
+    },
+    {
+      id: 'origin-point',
+      image: 'local-origin-point',
+      label: 'originPoint',
+      description: 'A line rebased to its midpoint.',
+      focus: {
+        context: 'export const midpointZero = path.originPoint(path.midpoint)',
+        token: 'originPoint',
+      },
+    },
+    {
+      id: 'origin-vertex',
+      image: 'local-origin-vertex',
+      label: 'originVertex',
+      description: 'A box rebased to one corner.',
+      focus: {
+        context: 'export const cornerZero = box(24, 6, 14).originVertex(3)',
+        token: 'originVertex',
+      },
+    },
+    {
+      id: 'origin-center',
+      image: 'local-origin-center',
+      label: 'originCenter',
+      description: 'Two faces centered together, keeping their spacing.',
+      focus: {
+        context: 'export const centeredLayout = originCenter([left, right])',
+        token: 'originCenter',
+      },
+    },
+    {
+      id: 'model-rotate',
+      image: 'local-model-rotate',
+      label: 'model.rotate',
+      description: 'Rotation around a rebased end.',
+      focus: {
+        context: '= box(20, 4, 8).originOffset(-10, 0, 0).rotate(0, 0, 45)',
+        token: 'rotate',
+      },
+    },
+    {
+      id: 'scaled',
+      image: 'local-scaled',
+      label: 'scaled',
+      description: 'Scaling geometry about local zero.',
+      focus: {
+        context:
+          'export const enlarged = box(12, 4, 8).originOffset(-10, 0, 0).scaled(2)',
+        token: 'scaled',
+      },
+    },
+  ],
+  'solid-operations': [
+    {
+      id: 'union',
+      image: 'solid-operations',
+      label: 'union',
+      description: 'A base fused with an overlapping cylindrical boss.',
+      focus: {
+        context: 'export const joined = union([base, boss])',
+        token: 'union',
+      },
+    },
+    {
+      id: 'cut',
+      image: 'solid-cut',
+      label: 'cut',
+      description: 'A cylindrical hole cut through a plate.',
+      focus: {
+        context: 'export const drilled = cut(blank, [drill])',
+        token: 'cut',
+      },
+    },
+    {
+      id: 'intersect',
+      image: 'solid-intersect',
+      label: 'intersect',
+      description: 'The common volume of a box and sphere.',
+      focus: {
+        context: 'export const shared = intersect([block, ball])',
+        token: 'intersect',
+      },
+    },
+    {
+      id: 'fillet',
+      image: 'solid-fillet',
+      label: 'fillet',
+      description: 'Four vertical edges rounded with radius 2.',
+      focus: {
+        context:
+          'export const rounded = box(30, 16, 20).fillet(2, [2, 4, 6, 8])',
+        token: 'fillet',
+      },
+    },
+    {
+      id: 'chamfer',
+      image: 'solid-chamfer',
+      label: 'chamfer',
+      description: 'Four vertical edges beveled by 2 units.',
+      focus: {
+        context:
+          'export const beveled = box(30, 16, 20).chamfer(2, [2, 4, 6, 8])',
+        token: 'chamfer',
+      },
+    },
+    {
+      id: 'shell',
+      image: 'solid-shell',
+      label: 'shell',
+      description: 'An open box with walls 1.5 units thick.',
+      focus: {
+        context: 'export const enclosure = box(40, 24, 30).shell(1.5, [4])',
+        token: 'shell',
+      },
+    },
+  ],
+  'shape-construction': [
+    {
+      id: 'extrude',
+      image: 'shape-construction',
+      label: 'extrude',
+      description: 'A 12 by 8 plate extruded 3 units.',
+      focus: {
+        context: 'export const plate = extrude(rectangle(12, 8), 3)',
+        token: 'extrude',
+      },
+    },
+    {
+      id: 'revolve',
+      image: 'shaping-revolve',
+      label: 'revolve',
+      description: 'A circular section revolved into a ring.',
+      focus: {
+        context: 'export const ring = revolve(ringSection, axis, {angle: 360})',
+        token: 'revolve',
+      },
+    },
+    {
+      id: 'sweep',
+      image: 'shaping-sweep',
+      label: 'sweep',
+      description: 'A circular profile swept along a Bézier path.',
+      focus: {
+        context: 'export const bentRod = sweep(profile, spine)',
+        token: 'sweep',
+      },
+    },
+    {
+      id: 'loft',
+      image: 'shaping-loft',
+      label: 'loft',
+      description: 'A loft from a circular face to a rectangular face.',
+      focus: {
+        context: 'export const transition = loft([lower, upper])',
+        token: 'loft',
+      },
+    },
+    {
+      id: 'wrap',
+      image: 'shaping-wrap',
+      label: 'wrap',
+      description: 'A rectangular layout wrapped onto a spherical face.',
+      focus: {
+        context: 'export const curvedFaces = wrap(label, ball.surface(1))',
+        token: 'wrap',
+      },
+    },
+    {
+      id: 'thicken',
+      image: 'shaping-thicken',
+      label: 'thicken',
+      description: 'The wrapped face thickened by 0.8 units.',
+      focus: {
+        context: 'export const curvedPlates = thicken(curvedFaces, 0.8)',
+        token: 'thicken',
+      },
+    },
+  ],
+  primitives: [
+    {
+      id: 'point',
+      image: 'primitives-point',
+      label: 'point',
+      description: 'A vertex at the local origin.',
+      focus: {
+        context: 'export const vertex = point([0, 0, 0])',
+        token: 'point',
+      },
+    },
+    {
+      id: 'line',
+      image: 'primitives-line',
+      label: 'line',
+      description: 'A straight edge of length 12.',
+      focus: {
+        context: 'export const straightLine = line([-6, 0, 0], [6, 0, 0])',
+        token: 'line',
+      },
+    },
+    {
+      id: 'arc',
+      image: 'primitives-arc',
+      label: 'arc',
+      description: 'A radius-6 semicircular edge.',
+      focus: {
+        context:
+          'export const circularArc = arc([-6, 0, 0], [0, 0, -6], [6, 0, 0])',
+        token: 'arc',
+      },
+    },
+    {
+      id: 'bezier',
+      image: 'primitives-bezier',
+      label: 'bezier',
+      description: 'A cubic Bézier edge with four control points.',
+      focus: {
+        context: '= bezier([',
+        token: 'bezier',
+      },
+    },
+    {
+      id: 'spline',
+      image: 'primitives-spline',
+      label: 'spline',
+      description: 'A B-spline fitted to four sample positions.',
+      focus: {
+        context: 'export const fittedSpline = spline([',
+        token: 'spline',
+      },
+    },
+    {
+      id: 'circle',
+      image: 'primitives-circle',
+      label: 'circle',
+      description: 'A filled circular face with radius 6.',
+      focus: {
+        context: 'export const circularFace = circle(6)',
+        token: 'circle',
+      },
+    },
+    {
+      id: 'ellipse',
+      image: 'primitives-ellipse',
+      label: 'ellipse',
+      description: 'A filled elliptical face with X radius 7 and Z radius 4.',
+      focus: {
+        context: 'export const ellipticalFace = ellipse(7, 4)',
+        token: 'ellipse',
+      },
+    },
+    {
+      id: 'rectangle',
+      image: 'primitives-rectangle',
+      label: 'rectangle',
+      description: 'A filled rectangular face measuring 12 by 8.',
+      focus: {
+        context: 'export const rectangularFace = rectangle(12, 8)',
+        token: 'rectangle',
+      },
+    },
+    {
+      id: 'regular-polygon',
+      image: 'primitives-regular-polygon',
+      label: 'regularPolygon',
+      description: 'A filled regular pentagon with circumradius 6.',
+      focus: {
+        context: 'export const pentagonalFace = regularPolygon(6, 5)',
+        token: 'regularPolygon',
+      },
+    },
+    {
+      id: 'cylinder',
+      image: 'primitives-cylinder',
+      label: 'cylinder',
+      description: 'A cylinder with radius 5 and height 12.',
+      focus: {
+        context: 'export const roundCylinder = cylinder(5, 12)',
+        token: 'cylinder',
+      },
+    },
+    {
+      id: 'sphere',
+      image: 'primitives-sphere',
+      label: 'sphere',
+      description: 'A sphere with radius 6.',
+      focus: {
+        context: 'export const ball = sphere(6)',
+        token: 'sphere',
+      },
+    },
+    {
+      id: 'ellipsoid',
+      image: 'primitives-ellipsoid',
+      label: 'ellipsoid',
+      description: 'An ellipsoid with X, Y and Z radii of 7, 4 and 5.',
+      focus: {
+        context: 'export const oval = ellipsoid(7, 4, 5)',
+        token: 'ellipsoid',
+      },
+    },
+    {
+      id: 'frustum',
+      image: 'primitives-frustum',
+      label: 'frustum',
+      description:
+        'A tapered cylinder with bottom radius 6, top radius 3 and height 12.',
+      focus: {
+        context: 'export const taperedCylinder = frustum(6, 3, 12)',
+        token: 'frustum',
+      },
+    },
+    {
+      id: 'regular-prism',
+      image: 'primitives-regular-prism',
+      label: 'regularPrism',
+      description: 'A hexagonal prism with circumradius 6 and height 12.',
+      focus: {
+        context: 'export const hexagonalPrism = regularPrism(6, 12, 6)',
+        token: 'regularPrism',
+      },
+    },
+    {
+      id: 'tube',
+      image: 'primitives-tube',
+      label: 'tube',
+      description: 'A tube with outer radius 5, inner radius 3 and height 12.',
+      focus: {
+        context: 'export const hollowTube = tube(5, 3, 12)',
+        token: 'tube',
+      },
+    },
+    {
+      id: 'coil',
+      image: 'primitives-coil',
+      label: 'coil',
+      description:
+        'A three-turn coil with centerline radius 5, wire radius 1 and pitch 4.',
+      focus: {
+        context: 'export const helicalCoil = coil(5, 1, 4, 3)',
+        token: 'coil',
+      },
+    },
+    {
+      id: 'box',
+      image: 'primitives',
+      label: 'box',
+      description: 'A box with dimensions 12 by 10 by 8.',
+      focus: {
+        context: 'export const cuboid = box(12, 10, 8)',
+        token: 'box',
+      },
+    },
+  ],
   gears: [
     {
       id: 'bore',
@@ -609,6 +1299,12 @@ export const exampleEntries = [
   {
     file: 'operations/rotate.ts',
   },
+  {file: 'sketches/sketch-api.ts'},
+  {file: 'operations/topology-api.ts'},
+  {file: 'constraints/placement-api.ts'},
+  {file: 'operations/local-transforms.ts'},
+  {file: 'operations/solid-operations.ts'},
+  {file: 'operations/shape-construction.ts'},
   {file: 'operations/revolve.ts'},
   {file: 'operations/sweep.ts'},
   {file: 'operations/wrap.ts'},

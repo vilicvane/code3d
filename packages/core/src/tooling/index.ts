@@ -1,3 +1,4 @@
+export {authoringApi} from '../library/authoring-api.js';
 export {beginModelInputs} from '../library/input.js';
 export type {ModelInputValues, ModelInputDefinition} from '../library/input.js';
 export {beginTimeOffset} from '../library/time-offset.js';
@@ -5,7 +6,10 @@ export {identifyCachedFunction} from '../library/cached.js';
 export {installFontEngine} from '../library/font.js';
 export {installModelResourceLoader} from '../library/resources.js';
 export type {ModelResource, ModelResourceLoader} from '../library/resources.js';
-export {googleFontSources, googleFontUrl} from '../library/google-font.js';
+export {
+  googleFontSources,
+  googleFontUrl,
+} from '../library/google-font-sources.js';
 export {installOpenCascade} from '../library/open-cascade.js';
 
 export {
@@ -68,7 +72,6 @@ export type {SketchRegion} from '../library/sketch-regions.js';
 
 export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 export {
-  authoringApi,
   beginModelEvaluation,
   beginModelInspection,
   relationPreview,

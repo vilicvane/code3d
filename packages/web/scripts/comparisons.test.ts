@@ -68,26 +68,51 @@ test('overview is a collection and raw-text JSON-LD cannot terminate its script'
   assert.equal(breadcrumb.itemListElement.length, 2);
 });
 
-test('Markdown canonical headers preserve every HTML mapping and omit Markdown-only agent docs', () => {
+test('Markdown canonical headers cover a growing API inventory once, preserving base paths and Markdown-only docs', () => {
   const documents = [
     {route: '/docs/index.md', html: '/docs/'},
     {route: '/docs/comparisons/fusion.md', html: '/docs/comparisons/fusion/'},
     {route: '/docs/packages/core.md', html: '/docs/packages/core/'},
     {route: '/docs/agents.md'},
+    {route: '/docs/agents/modeling.md'},
+    ...Array.from({length: 150}, (_, index) => ({
+      route: `/docs/packages/core/api/topic-${index}.md`,
+      html: `/docs/packages/core/api/topic-${index}/`,
+    })),
   ];
   for (const base of ['', '/code3d']) {
     const site = new URL(`https://example.test${base}/`);
-    const rules = markdownHeaderRules(documents, site);
-    for (const doc of documents.slice(0, -1)) {
-      const canonical = `https://example.test${base}${doc.html}`;
+    const rules = markdownHeaderRules(documents, site).trim().split('\n\n');
+    assert.equal(rules.length, 3);
+    for (const doc of documents) {
+      const applied = rules.flatMap(rule => {
+        const [pattern, header] = rule.split('\n');
+        const [prefix, suffix] = pattern.split('*');
+        const route = base + doc.route;
+        if (suffix === undefined)
+          return route === pattern ? [header.trim()] : [];
+        if (!route.startsWith(prefix) || !route.endsWith(suffix)) return [];
+        const splat = route.slice(prefix.length, route.length - suffix.length);
+        return [header.trim().replace(':splat', splat)];
+      });
+      const canonical = doc.html
+        ? `https://example.test${base}${doc.html}`
+        : undefined;
       assert.equal(markdownCanonical(doc, site), canonical);
-      assert.ok(
-        rules.includes(
-          `${base}${doc.route}\n  Link: <${canonical}>; rel="canonical"\n`,
-        ),
+      assert.deepEqual(
+        applied,
+        canonical ? [`Link: <${canonical}>; rel="canonical"`] : [],
       );
     }
-    assert.equal(markdownCanonical(documents[3], site), undefined);
-    assert.equal(rules.includes('agents.md'), false);
   }
+});
+
+test('nonstandard package mapping retains explicit canonical rules', () => {
+  const documents = [
+    {route: '/docs/packages/core/old.md', html: '/docs/packages/core/new/'},
+  ];
+  assert.equal(
+    markdownHeaderRules(documents, new URL('https://example.test/')),
+    '/docs/packages/core/old.md\n  Link: <https://example.test/docs/packages/core/new/>; rel="canonical"\n',
+  );
 });
