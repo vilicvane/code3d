@@ -192,6 +192,17 @@ export default defineConfig({
                             {slug: 'docs/packages/core/api/flip-reverse'},
                           ],
                         },
+                        {
+                          label: 'Geometry measurements',
+                          items: [
+                            {slug: 'docs/packages/core/api/distance'},
+                            {slug: 'docs/packages/core/api/length'},
+                            {slug: 'docs/packages/core/api/area'},
+                            {slug: 'docs/packages/core/api/volume'},
+                            {slug: 'docs/packages/core/api/bounds'},
+                            {slug: 'docs/packages/core/api/position'},
+                          ],
+                        },
                       ],
                     },
                   ]

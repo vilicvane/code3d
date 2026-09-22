@@ -187,7 +187,8 @@ export type ElementSnapshot = Readonly<{
     TopologySelection;
 }>;
 
-type DistanceInspectData = Readonly<{
+/** @internal */
+export type DistanceInspectData = Readonly<{
   result: DistanceResult;
   direction?: Vec3;
   axisName?: 'x' | 'y' | 'z';
@@ -5652,30 +5653,6 @@ function normalizeReplicadSolid(shape: Shape3D): Shape3D {
 
   shape.delete();
   return solid;
-}
-
-/**
- * Measure finite models, topology, bounds or point references in their solved placement.
- * Without axis, returns the shortest geometric distance. With axis, returns the
- * gap between projected intervals (zero when they overlap). The result is a
- * non-negative number computed now; later relations do not update it.
- * @code3d.inspect distance.inspect
- * @code3d.inspect a distance.inspect
- * @code3d.inspect b distance.inspect
- * @code3d.inspect axis distance.inspect
- */
-export function distance(a: Anchor, b: Anchor, axis?: DistanceAxis): number {
-  return ModelObject.distance(a, b, axis);
-}
-
-/** @internal */
-export namespace distance {
-  export function inspect(
-    args: [Anchor, Anchor, DistanceAxis?],
-    context: InspectContext<number, unknown, DistanceInspectData | undefined>,
-  ): InspectResult | undefined {
-    return ModelObject.inspectDistance(args, context);
-  }
 }
 
 /** @internal Runtime exports for JSDoc inspectors; not a free modeling function. */

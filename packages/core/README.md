@@ -60,6 +60,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Origins and local transforms](docs/api/origin-offset.md): choose local zero, rotate and scale geometry.
 - [Groups and placement](docs/api/group.md): groups, exposed references, relations, transforms and rotation coupling.
 - [Model values](docs/values.md): immutable values and geometry measurements.
+- [Geometry measurements](docs/api/distance.md): clearance, length, area, volume, bounds and model-origin position.
 - [Local coordinates](docs/local-coordinates.md): frames, origins and placement conventions.
 - [Relations](docs/relations.mdx): position parts using bounds, geometry and frames.
 - [Rotation coupling](docs/api.md#rotation-coupling): transmit cumulative angles through fixed-axis connections.

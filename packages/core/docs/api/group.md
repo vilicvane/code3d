@@ -6,8 +6,9 @@ sourceReview:
   sources:
     - path: packages/core/src/library/group.ts
       sha256: 25a7f74c0998170569a75f520c6b28d0be85ffc4e5797419ca8067a30163a4e8
+      commit: 757c8003e4ef2c3e4b4e85561e186a82a1dd1c39
     - path: packages/core/src/library/runtime.ts
-      sha256: 308d85faa087cba7b1c91eb29fd5c36b3936914186cbb0a6493b31f7a1f39adc
+      sha256: fc22c45a8a4fd68eaf51c43b8dc100f9337fc8bcb59760e2cc2e0dcbc437b337
 sidebar:
   hidden: true
 head:
@@ -61,7 +62,7 @@ has the default frame and no finite geometric bounds.
 
 ## Group capabilities
 
-Groups provide `origin`, `frame`, directional bounds, [bounds](../api.md#geometry-measurements),
+Groups provide `origin`, `frame`, directional bounds, [bounds](bounds.md),
 `position`, [relate](relate.md), [expose](expose.md), material, originOffset,
 originPoint and [model.rotate](model-rotate.md). Origin edits and rotation act on
 the already assembled layout, preserving member relationships. Groups do not

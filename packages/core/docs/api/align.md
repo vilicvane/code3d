@@ -6,8 +6,9 @@ sourceReview:
   sources:
     - path: packages/core/src/library/align.ts
       sha256: ea171203ce58b50b86f522331e911d62cf2ee5f5c65d4b4e3e103aac3b2651f6
+      commit: 757c8003e4ef2c3e4b4e85561e186a82a1dd1c39
     - path: packages/core/src/library/runtime.ts
-      sha256: 308d85faa087cba7b1c91eb29fd5c36b3936914186cbb0a6493b31f7a1f39adc
+      sha256: fc22c45a8a4fd68eaf51c43b8dc100f9337fc8bcb59760e2cc2e0dcbc437b337
     - path: packages/core/src/library/alignment-geometry.ts
       sha256: 5d0a2bee2c0254805edb71643a44b33149a92d2d6253b3a6eb437cd6720156fc
       commit: 7f67264a5c862cdb95c408bcaedff43a3f8f46dd

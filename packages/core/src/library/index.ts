@@ -86,7 +86,9 @@ export type {
   SketchArcDirection,
 } from './sketch.js';
 
-export {getModelData, setModelData, distance, text} from './runtime.js';
+export {distance} from './distance.js';
+
+export {getModelData, setModelData, text} from './runtime.js';
 
 export type {
   Anchor,

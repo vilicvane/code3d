@@ -73,7 +73,7 @@ All are references for modeling operations, not coordinate arrays.
 `.length` measures the fitted edge. `.bounds()` measures its geometry, not merely
 the input sample box. A fit can overshoot between samples, so do not use sample
 extrema as guaranteed geometric bounds or clearance limits.
-See [geometry measurements](../api.md#geometry-measurements).
+See [geometry measurements](bounds.md).
 
 ## Validation and fitting limits
 

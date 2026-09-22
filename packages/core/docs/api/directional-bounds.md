@@ -5,8 +5,7 @@ sourceReview:
   packageVersion: 0.0.1-alpha.14
   sources:
     - path: packages/core/src/library/runtime.ts
-      sha256: 308d85faa087cba7b1c91eb29fd5c36b3936914186cbb0a6493b31f7a1f39adc
-      commit: 757c8003e4ef2c3e4b4e85561e186a82a1dd1c39
+      sha256: fc22c45a8a4fd68eaf51c43b8dc100f9337fc8bcb59760e2cc2e0dcbc437b337
     - path: packages/core/src/library/spatial.ts
       sha256: 810c4fa69352c26c32fb04a0e7867f6327698e02f3212669f17d777784322a78
       commit: 69d231fb775befdb3cd098291b4097ccd52d8966
@@ -80,7 +79,7 @@ an extreme point or edge instead of a flat top face.
 
 A bound can also participate in distance measurements as a finite boundary.
 It is not the numeric `ModelBounds` object returned by `model.bounds()` and has
-no public minimum/maximum/size properties. Use [bounds](../api.md#geometry-measurements)
+no public minimum/maximum/size properties. Use [bounds](bounds.md)
 for numeric extents.
 
 ## Reversing the contact sense

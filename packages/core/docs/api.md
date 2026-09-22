@@ -25,7 +25,7 @@ model methods and reference properties are grouped by what they do.
 | Origins and local transforms     | [originPoint, originVertex, originOffset, originCenter and model.rotate](#origins-and-rotation); [scaled](#scaling)                                                                                                                            |
 | Groups and placement             | [group and expose](#composition-and-boolean-operations); [relate, on and align](#anchors-and-relations); [offset, rotate and pivot/axis selectors](#independent-placement-transformations); [coupleRotation](#rotation-coupling)               |
 | Topology and references          | [vertex / vertices](api/vertex.md), [edge / edges](api/edge.md), [surface / surfaces](api/surface.md); [reference elements](api/reference-elements.md), [directional bounds](api/directional-bounds.md), [flip / reverse](api/flip-reverse.md) |
-| Geometry measurements            | [distance, length, area and volume](#measurements); [bounds and position](#geometry-measurements)                                                                                                                                              |
+| Geometry measurements            | [distance](api/distance.md), [length](api/length.md), [area](api/area.md), [volume](api/volume.md), [bounds](api/bounds.md), [position](api/position.md)                                                                                       |
 | Materials and appearance         | [material, CSS colors and native Three.js materials](#materials)                                                                                                                                                                               |
 | Parameters, time and caching     | [input](runtime.md#numeric-inputs), [timeOffset](runtime.md#time-offset) and [cache](#cached-computations)                                                                                                                                     |
 
@@ -134,110 +134,24 @@ See their references for localization, seams, curvature and numerical limits.
 
 ## Measurements
 
+Read numeric geometry results using these references. Results are ordinary values
+computed at the call; later model values do not update earlier measurements.
+
 ### Length and area
 
-Read `edge.length` or `line(...).length` for a finite edge's actual arc length.
-A straight edge uses its endpoint distance; a closed edge uses its circumference.
-Read `surface.area` or `faceModel.area` for a finite face's area, including curved
-surfaces and trimming holes. `solid.area` / `solidModel.area` includes every
-boundary face, including inner walls and cavity faces.
-
-These properties return ordinary numbers in model units (area in square model
-units). They are read-only. Rotation, origin changes, placement and reversing an
-edge or flipping a face preserve the result. `scaled(s)` multiplies lengths by
-`s` and areas by `s²`; exposed references use the scale of their actual geometry.
-`LineAnchor` and `FaceAnchor` can describe infinite references and have no length
-or area. Groups have no aggregate area.
-
-```ts
-import {line, rectangle, box} from '@code3d/core';
-const length = line([3, 4, 0]).length; // 5
-const area = rectangle(4, 6).area; // 24
-const surfaceArea = box(2, 3, 4).area; // 52
-```
-
-Select `.length` or `.area` in App to inspect the measured geometry and value.
-Straight lengths use a dimension line; curves highlight their actual path with an
-arc-length label. Area highlights the finite face or whole solid with an area
-label. The read-only display does not create editable size constraints.
-Try the [length example](../../app/examples/operations/length.ts) and
-[area example](../../app/examples/operations/area.ts).
+[length](api/length.md) measures finite edge arc length;
+[area](api/area.md) measures trimmed faces or every boundary face of a solid.
+See their references for units, model capabilities, scale and read-only inspection.
 
 ### Volume
 
-Read `solid.volume` or `solidModel.volume` for the space occupied by the solid's
-material. Holes and enclosed cavities are excluded. The result is a read-only
-number in cubic model units. Rotation, origin changes and placement preserve it;
-`scaled(s)` multiplies it by `s³`. Exposed solid references include the scale of
-their actual geometry. Faces, edges, infinite references and groups have no volume
-property.
-
-```ts
-import {box, tube} from '@code3d/core';
-const blockVolume = box(2, 3, 4).volume; // 24
-const pipeVolume = tube(5, 3, 7).volume; // 112 * Math.PI
-const enlargedVolume = box(2, 3, 4).scaled(2).volume; // 192
-```
-
-Select `.volume` in App to inspect the whole solid with a volume label at its
-volume centroid. This read-only display uses the getter's recorded result and
-does not create an editable size constraint.
-Try the [volume example](../../app/examples/operations/volume.ts).
+[volume](api/volume.md) measures solid material, excluding holes and cavities.
 
 ### Distance between references
 
-`distance(a, b, axis?)` returns a non-negative `number` from the models and
-relations available at the call. It accepts vertex, edge, face and solid models,
-non-empty groups, finite topology references, directional bounds, and point
-anchors such as `center`, `start` and exposed mounting points.
-
-| Axis                            | Result                                                                                      |
-| ------------------------------- | ------------------------------------------------------------------------------------------- |
-| Omitted                         | Shortest distance between the actual finite geometries                                      |
-| `'x'`, `'y'`, `'z'`             | Gap between the geometries' projection intervals along a fixed solve-frame axis             |
-| `[x, y, z]`                     | The same projection gap along a finite, non-zero direction vector, normalized automatically |
-| Straight edge or axis reference | Projection gap along that reference's solved direction                                      |
-
-Intersecting or touching geometries have zero shortest distance, including a
-point inside a solid. A face measures its trimmed surface, including holes;
-it does not represent the volume enclosed by its parent solid. Projected intervals
-that overlap have zero gap, even if the geometries do not touch in space.
-Groups measure their actual members; their projected interval spans the full
-group, including spaces between disconnected members. Exchanging operands or
-reversing an axis does not change the non-negative result. An axis's position
-does not affect the measurement.
-
-Queries solve the inputs' existing relationship closure without requiring
-`group()`. Unrelated models use coincident origins and matching axes. String
-and vector axes belong to that common solve frame, not the camera or implicitly
-the first operand's local frame. A referenced axis carries its owning model's
-solved orientation. For a specific assembled occurrence, expose its geometry
-through the containing group and measure those references.
-
-```ts
-import {on, box, distance, group, offset} from '@code3d/core';
-
-const left = box(8, 30, 32);
-const right = box(8, 30, 32).relate(() => [on(left.right), offset(60, 0, 0)]);
-const length = distance(left.right, right.left, 'x');
-const beam = box(length, 10, 24).relate(() => on(left.right));
-export default group([left, right, beam]);
-```
-
-The result is an ordinary number. Later relations and derived model values do
-not update an earlier measurement, and no reverse dependency is solved. Arrange
-measurement and construction in source order; re-running the source computes
-fresh values. Relations returned by a `relate` callback are attached only after
-that callback returns. The query does not see constraints still being built in it.
-
-Infinite reference planes and axes cannot be distance operands: select a finite
-face or edge instead. A straight infinite axis is supported as the third argument.
-An empty group, zero direction or curved axis reports an error. Geometric query
-results reuse the shared computation cache; point-to-point measurements use
-ordinary arithmetic.
-
-Try the [fitted beam example](/examples/distance/) and
-[measurement workflow](relations.mdx#measure-before-building-a-part).
+[distance](api/distance.md) measures shortest distance or projected clearance
+between finite geometry in its solved placement. Its reference explains axis
+forms, groups, finite versus infinite anchors, query timing and the fitted-beam example.
 
 ## Independent placement transformations
 
@@ -810,26 +724,7 @@ ligatures remain single glyphs for spacing purposes.
 
 ## Geometry measurements
 
-`model.bounds(relativeTo?)` returns readonly `minimum`, `maximum` and `size`
-XYZ vectors for tight finite geometry bounds. By default it uses the model's
-own local frame. An explicit reference includes solved placement and nested
-member occurrences in that reference's frame. Empty groups have no finite
-bounds; a source occurring more than once in the reference is ambiguous.
-
-`model.position(relativeTo)` returns the model origin in the explicit reference's
-local frame. A model's origin in its own frame is always `[0, 0, 0]`, including
-point models whose geometry may be offset from that origin. Neither query
-changes the model or its placement. These methods are available on every model
-kind, including groups. As model members, `bounds` and `position` are reserved
-names and cannot be used as exposed element names.
-
-```ts
-import {on, box, group, offset} from '@code3d/core';
-
-const base = box(20, 4, 20);
-const part = box(8, 12, 4).relate(() => [on(base.up), offset(20, 0, 0)]);
-const size = part.bounds().size; // [8, 12, 4]
-const origin = part.position(base); // [20, 8, 0]
-const minimum = part.bounds(base).minimum; // [16, 2, -2]
-export default group([base, part]);
-```
+[bounds](api/bounds.md) returns finite axis-aligned extents in the model's own
+frame or an explicit reference model's solved frame. [position](api/position.md)
+returns the model origin in an explicit reference frame. Both support groups;
+their references explain nested occurrences, ambiguity and value semantics.
