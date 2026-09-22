@@ -528,15 +528,9 @@ shaders and textures are rendered in PNG; STL contains geometry only.
 
 ## Scaling
 
-Solids, faces, curves, and points support `.scaled(factor)`. The factor must be
-positive and finite. For example, `box(20, 8, 12).scaled(0.5)` returns a new box
-with dimensions 10, 4, and 6, leaving the original model unchanged.
-
-Scaling uses local coordinate zero even after an origin edit. Geometry, named
-anchors and the `center` anchor scale together; the model origin stays zero;
-topology IDs are preserved. Groups do not provide `.scaled()`; scale their
-geometric parts before composing them. To change only an exported file's unit
-conversion, use the [export scale](../../web/src/content/docs/docs/guides/exporting.md#scale-and-orientation).
+[`.scaled(factor)`](api/scaled.md) uniformly scales a geometric model around local
+zero. See its reference for supported model kinds, factor validation, measurement
+scaling and placement semantics.
 
 ## Rotation coupling
 
@@ -616,20 +610,17 @@ frame, and retain their occurrence and transform through composition.
 All models provide `originPoint()`, `originOffset()` and `rotate()`. Solids, faces,
 curves and points additionally provide vertex/center selection:
 
-| Method                      | Behavior                                                      |
-| --------------------------- | ------------------------------------------------------------- |
-| `.originPoint(pointRef)`    | Set the origin to a point reference, including a group member |
-| `.originVertex(id)`         | Set the origin to an input-model vertex                       |
-| `.originCenter()`           | Set the origin to the current local bounding-box center       |
-| `.originOffset(dx, dy, dz)` | Add a local-coordinate offset to the current origin           |
-| `.rotate(x, y, z)`          | Rotate about the origin, in degrees, fixed X then Y then Z    |
+| Method                                              | Behavior                                                      |
+| --------------------------------------------------- | ------------------------------------------------------------- |
+| [`.originPoint(pointRef)`](api/origin-point.md)     | Set the origin to a point reference, including a group member |
+| [`.originVertex(id)`](api/origin-vertex.md)         | Set the origin to an input-model vertex                       |
+| [`.originCenter()`](api/origin-center.md)           | Set the origin to the current local bounding-box center       |
+| [`.originOffset(dx, dy, dz)`](api/origin-offset.md) | Add a local-coordinate offset to the current origin           |
+| [`.rotate(x, y, z)`](api/model-rotate.md)           | Rotate about the origin, in degrees, fixed X then Y then Z    |
 
-The origin is always zero in model coordinates. `originOffset(dx, dy, dz)`
-re-expresses every local point as `p - [dx, dy, dz]`; offsets accumulate and can
-cancel. `originVertex` makes the selected vertex local zero. `originCenter` measures the current local geometry bounds and makes their center zero.
-Geometry, named anchors and topology positions use the resulting coordinates;
-directions and topology IDs are preserved. Old model values remain unchanged.
-Rotation and scaling act about current local zero.
+Origin methods return new values and preserve topology IDs. Their individual
+references explain point coordinates, carried centers and group behavior.
+Rotation and [scaling](api/scaled.md) act about current local zero.
 
 Every geometric model exposes `center`: its initial local bounding-box center,
 carried along by subsequent transforms. Rotation does not recalculate it from
@@ -652,28 +643,10 @@ the vertex picker, origin arrows, and rotation rings, see
 
 ### Centering a collection
 
-`originCenter(model)` is equivalent to `model.originCenter()` and retains its type.
-`originCenter(models)` centers the complete layout and returns a readonly array
-with the same member types and order. A singleton is equivalent to the instance
-method; an empty array returns `[]`. Inputs must be geometric models, not groups
-or references.
-
-```ts
-const profiles = originCenter(text('Hello', await googleFont('Play'), 10));
-const lettering = extrude(profiles, 1);
-```
-
-For multiple members, placement is first solved in the first member's coordinate
-frame. The combined geometric bounds choose the center, and all geometry and
-references are expressed in that shared frame with the center at zero. The
-result is a completed layout: input relations are already reflected in geometry,
-and subsequent local transforms operate on the returned values. Original models
-and references remain unchanged. Letter spacing, disconnected glyph parts and
-holes are preserved. The bounds measure visible geometry; trailing spaces and
-font line metrics are not part of these bounds.
-
-See the [text example](../../app/examples/text.ts). Select `originCenter(outlines)`
-to preview the centered faces, then pass them directly to `extrude` or `wrap`.
+[`originCenter(model)`](api/origin-center.md) matches the instance method.
+[`originCenter(models)`](api/origin-center.md#an-array-is-one-layout) centers the
+entire resolved layout together, preserving spacing, order and member types.
+See the reference for empty arrays, coordinate frames and text layouts.
 
 ## Anchors and relations
 

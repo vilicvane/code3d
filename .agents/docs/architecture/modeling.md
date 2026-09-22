@@ -10,7 +10,8 @@ API 文档按批次完善时，同步将相应实现按职责拆出。八个 Sol
 箱体尺寸检查器和线圈净空检查也跟随对应 API。`validation.ts` 共享正数校验；通用模型构造、
 操作记录、缓存与参考元素机制保留在 `runtime.ts`。`union.ts`、`cut.ts`、`intersect.ts` 分别承载布尔作者入口与检查器，
 `boolean-model.ts` 共享操作数校验；实体实例方法仍通过运行时的组合机制求值。
-`authoring-api.ts` 只汇总作者
+`origin-center.ts` 承载单个/数组居中的作者重载与检查器，批量装配和局部变换仍由
+运行时统一维护模型身份、拓扑与约束。`authoring-api.ts` 只汇总作者
 入口，避免运行时反向依赖独立 API 模块。公开导出与编辑器跟踪指向实际实现，
 不保留旧模块转发入口。文档源码基准的维护方式见
 [网站维护说明](../../../packages/web/README.md#source-review-baselines)。

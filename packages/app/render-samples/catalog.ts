@@ -4,6 +4,27 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'local-transforms',
+    title: 'Origins and local transforms',
+    description: 'Choose local zero, rotate geometry and scale a model.',
+    category: 'Placement and references',
+    file: 'operations/local-transforms.ts',
+    focus: {
+      context:
+        'export const bottomZero = box(24, 6, 14).originOffset(0, -3, 0)',
+      token: 'originOffset',
+    },
+    tags: [
+      'origin',
+      'originOffset',
+      'originPoint',
+      'originVertex',
+      'originCenter',
+      'rotate',
+      'scaled',
+    ],
+  },
+  {
     id: 'solid-operations',
     title: 'Combine and finish solids',
     description:
@@ -430,6 +451,70 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  'local-transforms': [
+    {
+      id: 'origin-offset',
+      image: 'local-transforms',
+      label: 'originOffset',
+      description: 'The bottom of the box at local zero.',
+      focus: {
+        context:
+          'export const bottomZero = box(24, 6, 14).originOffset(0, -3, 0)',
+        token: 'originOffset',
+      },
+    },
+    {
+      id: 'origin-point',
+      image: 'local-origin-point',
+      label: 'originPoint',
+      description: 'A line rebased to its midpoint.',
+      focus: {
+        context: 'export const midpointZero = path.originPoint(path.midpoint)',
+        token: 'originPoint',
+      },
+    },
+    {
+      id: 'origin-vertex',
+      image: 'local-origin-vertex',
+      label: 'originVertex',
+      description: 'A box rebased to one corner.',
+      focus: {
+        context: 'export const cornerZero = box(24, 6, 14).originVertex(3)',
+        token: 'originVertex',
+      },
+    },
+    {
+      id: 'origin-center',
+      image: 'local-origin-center',
+      label: 'originCenter',
+      description: 'Two faces centered together, keeping their spacing.',
+      focus: {
+        context: 'export const centeredLayout = originCenter([left, right])',
+        token: 'originCenter',
+      },
+    },
+    {
+      id: 'model-rotate',
+      image: 'local-model-rotate',
+      label: 'model.rotate',
+      description: 'Rotation around a rebased end.',
+      focus: {
+        context: '= box(20, 4, 8).originOffset(-10, 0, 0).rotate(0, 0, 45)',
+        token: 'rotate',
+      },
+    },
+    {
+      id: 'scaled',
+      image: 'local-scaled',
+      label: 'scaled',
+      description: 'Scaling geometry about local zero.',
+      focus: {
+        context:
+          'export const enlarged = box(12, 4, 8).originOffset(-10, 0, 0).scaled(2)',
+        token: 'scaled',
+      },
+    },
+  ],
   'solid-operations': [
     {
       id: 'union',
@@ -936,6 +1021,7 @@ export const exampleEntries = [
   {
     file: 'operations/rotate.ts',
   },
+  {file: 'operations/local-transforms.ts'},
   {file: 'operations/solid-operations.ts'},
   {file: 'operations/shape-construction.ts'},
   {file: 'operations/revolve.ts'},

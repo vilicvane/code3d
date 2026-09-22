@@ -57,6 +57,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Points, curves and profiles](docs/api.md#profiles-and-curves): point, line, arc, bezier, spline and four filled planar profile constructors.
 - [Shape construction](docs/api/extrude.md): extrude, revolve, sweep, loft, wrap and thicken profiles.
 - [Booleans and solid modifications](docs/api/union.md): union, cut, intersect, fillet, chamfer and shell.
+- [Origins and local transforms](docs/api/origin-offset.md): choose local zero, rotate and scale geometry.
 - [Model values](docs/values.md): immutable values and geometry measurements.
 - [Local coordinates](docs/local-coordinates.md): frames, origins and placement conventions.
 - [Relations](docs/relations.mdx): position parts using bounds, geometry and frames.

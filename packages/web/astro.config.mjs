@@ -152,6 +152,17 @@ export default defineConfig({
                             {slug: 'docs/packages/core/api/shell'},
                           ],
                         },
+                        {
+                          label: 'Origins and local transforms',
+                          items: [
+                            {slug: 'docs/packages/core/api/origin-point'},
+                            {slug: 'docs/packages/core/api/origin-vertex'},
+                            {slug: 'docs/packages/core/api/origin-offset'},
+                            {slug: 'docs/packages/core/api/origin-center'},
+                            {slug: 'docs/packages/core/api/model-rotate'},
+                            {slug: 'docs/packages/core/api/scaled'},
+                          ],
+                        },
                       ],
                     },
                   ]

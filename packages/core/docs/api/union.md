@@ -6,10 +6,12 @@ sourceReview:
   sources:
     - path: packages/core/src/library/union.ts
       sha256: dd71a24f65badfcffdd63a2be2d9a5c426f3f2ce7acb32b1235433124e20389c
+      commit: bb707e248ef98fe97db48020a396fd20bf3265ec
     - path: packages/core/src/library/boolean-model.ts
       sha256: 18916d45eb837447a6b92b876fb045a6da7f00f8a7056071fc6e908b851e97f6
+      commit: bb707e248ef98fe97db48020a396fd20bf3265ec
     - path: packages/core/src/library/runtime.ts
-      sha256: 200191b28c2ae7fef5793ce7e9a330476b23a0783f571225930ac52badb2ec04
+      sha256: 87d6aa2865bdaf434587c6c7ff35172d8e86e34bc583a8c83261f6e4963a7566
     - path: packages/core/src/library/topology.ts
       sha256: f9f0d048fe30cc80046a25123aa8101ca51e85cdb5b2e66260c6a68f43f84715
       commit: 67228dd8559d584852df7bfbd47ed89f1d8003e9

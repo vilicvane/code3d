@@ -1,3 +1,4 @@
+export {originCenter} from './origin-center.js';
 export {union} from './union.js';
 export {cut} from './cut.js';
 export {intersect} from './intersect.js';
@@ -77,7 +78,6 @@ export type {
 export {
   getModelData,
   offset,
-  originCenter,
   rotate,
   setModelData,
   pivot,

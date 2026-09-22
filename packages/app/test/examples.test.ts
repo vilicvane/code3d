@@ -51,6 +51,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/sweep.ts': ['default', 1],
   'operations/wrap.ts': ['default', 3],
   'operations/origin.ts': ['centered', 1],
+  'operations/local-transforms.ts': ['bottomZero', 1],
   'operations/solid-operations.ts': ['joined', 1],
   'operations/shape-construction.ts': ['plate', 1],
   'primitives/primitives.ts': ['cuboid', 1],
@@ -289,6 +290,22 @@ for (const entry of exampleEntries) {
           Math.abs(volume(exports.default) - (30 * 8 * 20 - Math.PI * 16 * 8)) <
             1e-5,
         );
+      }
+      if (entry.file === 'operations/local-transforms.ts') {
+        assert.deepEqual(exports.bottomZero.bounds().minimum, [-12, 0, -7]);
+        assert.deepEqual(exports.midpointZero.bounds().minimum, [-10, 0, 0]);
+        assert.deepEqual(exports.midpointZero.bounds().maximum, [10, 0, 0]);
+        assert.deepEqual(
+          exports.centeredLayout[0].bounds().minimum,
+          [-10, 0, -2],
+        );
+        assert.deepEqual(
+          exports.centeredLayout[1].bounds().maximum,
+          [10, 0, 1],
+        );
+        assert.ok(Math.abs(volume(exports.enlarged) - 3072) < 1e-6);
+        assert.deepEqual(exports.enlarged.bounds().size, [24, 8, 16]);
+        assert.ok(Math.abs(volume(exports.rotated) - 640) < 1e-6);
       }
       if (entry.file === 'operations/solid-operations.ts') {
         assert.ok(

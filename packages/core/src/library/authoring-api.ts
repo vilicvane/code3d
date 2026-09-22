@@ -1,3 +1,4 @@
+import {originCenter} from './origin-center.js';
 import {union} from './union.js';
 import {cut} from './cut.js';
 import {intersect} from './intersect.js';
@@ -36,7 +37,6 @@ import {font, googleFont} from './font.js';
 import {sketch} from './sketch.js';
 import {box} from './box.js';
 import {
-  originCenter,
   offset,
   rotate,
   pivot,
