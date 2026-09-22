@@ -116,7 +116,7 @@
       "name": "@code3d/core",
       "version": "0.0.1-alpha.15",
       "tarball": "https://registry.npmjs.org/@code3d/core/-/core-0.0.1-alpha.15.tgz",
-      "integrity": "sha512-94hIRec6jYaQ8lBuaJqMeTSkXagWSv2zXiiQcmjXlHYiD/ymCmA6LYCCKNFtZ6N1dV/O5/YNJYvJ3nvvvwZmHA=="
+      "integrity": "sha512-Vz0fmjHPmgZ5pfXLEmFdliJk4IMIyz937i+qq0OmO0qGg9+BMcUho5ljovmraGi87ljxWUTq8nD4y0gn/c9FNQ=="
     },
     "https://registry.npmjs.org/%40code3d%2Fopencascade/0.0.1-alpha.0/": {
       "name": "@code3d/opencascade",
