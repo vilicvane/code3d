@@ -37,6 +37,9 @@ model kinds.
 
 ## Imports and types
 
+[Model types and capabilities](api/model-types.md) explains all model aliases,
+kind mappings, capability interfaces, named elements and common vectors.
+
 Import these functions from `@code3d/core`. The editor's TypeScript signatures
 provide exact overloads and inferred model interfaces.
 

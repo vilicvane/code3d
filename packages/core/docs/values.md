@@ -9,6 +9,8 @@ Build models from reusable values, then measure their geometry or relative
 placement. Queries return ordinary numbers and vectors; modeling operations
 return new model values.
 
+For exact TypeScript contracts, see [model types and capabilities](api/model-types.md).
+
 ## Model values and coordinates
 
 Operations produce new model values. Building another result must not change an

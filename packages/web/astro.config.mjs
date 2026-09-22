@@ -223,6 +223,10 @@ export default defineConfig({
                           ],
                         },
                         {
+                          label: 'Models and common types',
+                          items: [{slug: 'docs/packages/core/api/model-types'}],
+                        },
+                        {
                           label: 'Parameters, time and caching',
                           items: [
                             {slug: 'docs/packages/core/api/input'},

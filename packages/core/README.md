@@ -59,6 +59,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Booleans and solid modifications](docs/api/union.md): union, cut, intersect, fillet, chamfer and shell.
 - [Origins and local transforms](docs/api/origin-offset.md): choose local zero, rotate and scale geometry.
 - [Groups and placement](docs/api/group.md): groups, exposed references, relations, transforms and rotation coupling.
+- [Model types and capabilities](docs/api/model-types.md): model aliases, generics and supported members.
 - [Model values](docs/values.md): immutable values and geometry measurements.
 - [Geometry measurements](docs/api/distance.md): clearance, length, area, volume, bounds and model-origin position.
 - [Sketch API](docs/api/sketch.md): entity and constraint tuples, derived layers, finite regions and spatial placement.
