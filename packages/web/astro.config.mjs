@@ -223,6 +223,27 @@ export default defineConfig({
                           ],
                         },
                         {
+                          label: 'Tooling integration',
+                          collapsed: true,
+                          items: [
+                            {slug: 'docs/packages/core/api/tooling'},
+                            {slug: 'docs/packages/core/api/tooling-inputs'},
+                            {slug: 'docs/packages/core/api/tooling-resources'},
+                            {slug: 'docs/packages/core/api/tooling-cache'},
+                            {slug: 'docs/packages/core/api/tooling-sketches'},
+                            {
+                              slug: 'docs/packages/core/api/tooling-sketch-curves',
+                            },
+                            {slug: 'docs/packages/core/api/tooling-evaluation'},
+                            {slug: 'docs/packages/core/api/tooling-relations'},
+                            {slug: 'docs/packages/core/api/tooling-snapshots'},
+                            {slug: 'docs/packages/core/api/tooling-spatial'},
+                            {slug: 'docs/packages/core/api/tooling-topology'},
+                            {slug: 'docs/packages/core/api/tooling-materials'},
+                            {slug: 'docs/packages/core/api/tooling-inspection'},
+                          ],
+                        },
+                        {
                           label: 'Extension development',
                           items: [
                             {slug: 'docs/packages/core/api/define-primitive'},

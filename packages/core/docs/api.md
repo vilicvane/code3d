@@ -31,7 +31,7 @@ model methods and reference properties are grouped by what they do.
 
 For reusable library development, see [definePrimitive and Replicad](api/define-primitive.md),
 [model data](api/model-data.md) and [custom inspectors](api/inspectors.md), [group member inspection](api/inspect-group-members.md) and [annotations](api/annotations.md).
-Execution hosts use the separate [tooling entry](runtime.md#source-and-development).
+Execution hosts use the separate [tooling integration API](api/tooling.md).
 The [model values guide](values.md) explains the capabilities of different
 model kinds.
 

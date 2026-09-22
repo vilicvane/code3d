@@ -122,7 +122,8 @@ that model. The renderer supplies lighting and environment reflections.
 | `@code3d/core/replicad` | Replicad access for custom primitive builders                            |
 | `@code3d/core/tooling`  | Evaluation, inspection and resource lifetime integration used by the App |
 
-Tooling integrations own evaluation lifetimes and disposal. Follow the existing
+Tooling integrations own evaluation lifetimes and disposal. The
+[tooling API reference](api/tooling.md) documents every exported contract. Follow the existing
 [tooling entry](../src/tooling/index.ts), [evaluation tests](../test/model-test.ts), and
 [App compiler](../../app/src/model/compiler.ts) when embedding the runtime. Ordinary
 model files should stay on the authoring API.
