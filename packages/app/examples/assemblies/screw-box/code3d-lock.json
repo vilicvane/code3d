@@ -1,24 +1,24 @@
 {
   "dependencies": {
     "@code3d/core": "latest",
-    "@code3d/screws": "0.0.1-alpha.14",
-    "@code3d/materials": "0.0.1-alpha.14"
+    "@code3d/screws": "0.0.1-alpha.15",
+    "@code3d/materials": "0.0.1-alpha.15"
   },
   "optional": [],
   "resolutions": {
     "primary": {
       "@code3d/core": {
-        "installUrl": "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.14/"
+        "installUrl": "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.15/"
       },
       "@code3d/materials": {
-        "installUrl": "https://registry.npmjs.org/%40code3d%2Fmaterials/0.0.1-alpha.14/"
+        "installUrl": "https://registry.npmjs.org/%40code3d%2Fmaterials/0.0.1-alpha.15/"
       },
       "@code3d/screws": {
-        "installUrl": "https://registry.npmjs.org/%40code3d%2Fscrews/0.0.1-alpha.14/"
+        "installUrl": "https://registry.npmjs.org/%40code3d%2Fscrews/0.0.1-alpha.15/"
       }
     },
     "secondary": {
-      "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.14/": {
+      "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.15/": {
         "@code3d/opencascade": {
           "installUrl": "https://registry.npmjs.org/%40code3d%2Fopencascade/0.0.1-alpha.0/"
         },
@@ -50,14 +50,14 @@
           "installUrl": "https://registry.npmjs.org/woff2-encoder/2.0.0/"
         }
       },
-      "https://registry.npmjs.org/%40code3d%2Fmaterials/0.0.1-alpha.14/": {
+      "https://registry.npmjs.org/%40code3d%2Fmaterials/0.0.1-alpha.15/": {
         "@code3d/core": {
-          "installUrl": "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.14/"
+          "installUrl": "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.15/"
         }
       },
-      "https://registry.npmjs.org/%40code3d%2Fscrews/0.0.1-alpha.14/": {
+      "https://registry.npmjs.org/%40code3d%2Fscrews/0.0.1-alpha.15/": {
         "@code3d/core": {
-          "installUrl": "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.14/"
+          "installUrl": "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.15/"
         }
       },
       "https://registry.npmjs.org/%40code3d%2Fopencascade/0.0.1-alpha.0/": {
@@ -112,11 +112,11 @@
     }
   },
   "packages": {
-    "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.14/": {
+    "https://registry.npmjs.org/%40code3d%2Fcore/0.0.1-alpha.15/": {
       "name": "@code3d/core",
-      "version": "0.0.1-alpha.14",
-      "tarball": "https://registry.npmjs.org/@code3d/core/-/core-0.0.1-alpha.14.tgz",
-      "integrity": "sha512-5KQfUHu+e6Llgyp+6dzS4PWYDq6Bx+ezwMD0NMBy0ijKaTRGFDWLhecHVox9U5a6B18hXQ7/aRGNYax/lZ9O3A=="
+      "version": "0.0.1-alpha.15",
+      "tarball": "https://registry.npmjs.org/@code3d/core/-/core-0.0.1-alpha.15.tgz",
+      "integrity": "sha512-94hIRec6jYaQ8lBuaJqMeTSkXagWSv2zXiiQcmjXlHYiD/ymCmA6LYCCKNFtZ6N1dV/O5/YNJYvJ3nvvvwZmHA=="
     },
     "https://registry.npmjs.org/%40code3d%2Fopencascade/0.0.1-alpha.0/": {
       "name": "@code3d/opencascade",
@@ -250,17 +250,17 @@
       "tarball": "https://registry.npmjs.org/woff2-encoder/-/woff2-encoder-2.0.0.tgz",
       "integrity": "sha512-wH1rcskczCP5+BJABM88aM3hoEX1VUW6U+Ksx/7bmXvctWGqF+O/YQdC6vWQ7lJS7ny21a0MkAqcZyOP2O8CAg=="
     },
-    "https://registry.npmjs.org/%40code3d%2Fmaterials/0.0.1-alpha.14/": {
+    "https://registry.npmjs.org/%40code3d%2Fmaterials/0.0.1-alpha.15/": {
       "name": "@code3d/materials",
-      "version": "0.0.1-alpha.14",
-      "tarball": "https://registry.npmjs.org/@code3d/materials/-/materials-0.0.1-alpha.14.tgz",
-      "integrity": "sha512-YYqoQPkPY2RyVMBAq21o4YIzuDRG21GAxGF+bxIZ7yEIs+kmOiyjnniMcArr2RwrYSGGof7EPCQvZeqEU+98hw=="
+      "version": "0.0.1-alpha.15",
+      "tarball": "https://registry.npmjs.org/@code3d/materials/-/materials-0.0.1-alpha.15.tgz",
+      "integrity": "sha512-7oxNGXo66HLD3GRksCvxHmxUK25kDfttmUjhawJrP7PSobQ6nzjXuauXLal956jj3QGrrvgqWHABvVY6SDl2aQ=="
     },
-    "https://registry.npmjs.org/%40code3d%2Fscrews/0.0.1-alpha.14/": {
+    "https://registry.npmjs.org/%40code3d%2Fscrews/0.0.1-alpha.15/": {
       "name": "@code3d/screws",
-      "version": "0.0.1-alpha.14",
-      "tarball": "https://registry.npmjs.org/@code3d/screws/-/screws-0.0.1-alpha.14.tgz",
-      "integrity": "sha512-3jaR1oSQy8totkh1xqeEAzwtdDRGKZnD6/MQQ5kOmaHkfx3vr7jRr0zJotrMlkijUCRufCVKdJ8LJs5BRZ/cfg=="
+      "version": "0.0.1-alpha.15",
+      "tarball": "https://registry.npmjs.org/@code3d/screws/-/screws-0.0.1-alpha.15.tgz",
+      "integrity": "sha512-CR3jTN4ohWGYBqqtadOp1uUquUjthUCiHFqVVdlo4dILojlLLBuxtTubyEG9B/diJHOVMx455yblNsQ5RzlXGA=="
     }
   },
   "omitted": {}

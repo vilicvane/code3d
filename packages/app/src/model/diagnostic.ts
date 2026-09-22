@@ -1,5 +1,6 @@
 import type {SourceRef} from '@code3d/core/tooling';
 import type {ToolIntent} from '../tools/tool-system';
+import type {PackageCompatibilityIssue} from '../project/package-compatibility';
 
 export type FileDiagnosticCounts = Readonly<{errors: number; warnings: number}>;
 
@@ -30,6 +31,7 @@ export type ModelDiagnostic = Readonly<{
   severity?: 'error' | 'warning';
   summary: string;
   details?: string;
+  packageCompatibility?: PackageCompatibilityIssue;
   sourceRef?: SourceRef;
   /** Nodes shared by the failed evaluation inputs and rendered fallback graph. */
   relatedModelNodeIds?: readonly string[];

@@ -19,10 +19,7 @@ import {
   observableRef,
   runInAction,
 } from 'mobx';
-import {
-  PackageInstallationError,
-  type PackageInstallationProgress,
-} from '../project/browser-package-manager';
+import {PackageInstallationError} from '../project/browser-package-manager';
 import {
   isProtectedProjectPath,
   topLevelProjectPaths,
@@ -62,11 +59,6 @@ export class ProjectTree {
   private synchronizing = false;
   private busy = false;
   private runningPackageOperation = false;
-  private readonly packageProgress = new Map<
-    string,
-    {progress: PackageInstallationProgress; hideTimer?: number}
-  >();
-  private readonly packageStatus = document.createElement('div');
   private dragging = false;
   private refreshVersion = 0;
   private refreshRequested = false;
@@ -111,11 +103,7 @@ export class ProjectTree {
     this.status.className = 'project-status';
     this.setStatusMessage(undefined);
     this.status.setAttribute('role', 'status');
-    this.packageStatus.className = 'project-status package-status';
-    this.packageStatus.hidden = true;
-    this.packageStatus.setAttribute('role', 'status');
-    this.packageStatus.setAttribute('aria-label', 'Package installation');
-    container.after(this.packageStatus, this.status);
+    container.after(this.status);
     this.tree = new FileTree({
       paths: [],
       density: 'compact',
@@ -779,7 +767,6 @@ export class ProjectTree {
     if (this.runningPackageOperation) return;
     this.runningPackageOperation = true;
     this.setStatusMessage(undefined);
-    if (!this.packageProgress.size) this.packageStatus.hidden = true;
     try {
       await operation();
     } catch (error) {
@@ -788,46 +775,6 @@ export class ProjectTree {
       this.runningPackageOperation = false;
       await this.refresh();
     }
-  }
-
-  setPackageProgress(progress: PackageInstallationProgress): void {
-    window.clearTimeout(
-      this.packageProgress.get(progress.directory)?.hideTimer,
-    );
-    const hideTimer =
-      progress.state === 'ready'
-        ? window.setTimeout(() => {
-            this.packageProgress.delete(progress.directory);
-            this.renderPackageProgress();
-          }, 3000)
-        : undefined;
-    this.packageProgress.set(progress.directory, {progress, hideTimer});
-    this.renderPackageProgress();
-  }
-
-  private renderPackageProgress(): void {
-    const visible = [...this.packageProgress.values()].map(
-      entry => entry.progress,
-    );
-    this.packageStatus.hidden = visible.length === 0;
-    this.packageStatus.setAttribute(
-      'aria-busy',
-      String(visible.some(progress => progress.state === 'busy')),
-    );
-    this.packageStatus.replaceChildren(
-      ...visible.map(item => {
-        const row = document.createElement('div');
-        row.dataset.state = item.state;
-        row.title = `${item.directory}: ${item.message}`;
-        const directory = document.createElement('span');
-        directory.className = 'package-status-directory';
-        directory.textContent = item.directory;
-        const message = document.createElement('span');
-        message.textContent = item.message;
-        row.append(directory, message);
-        return row;
-      }),
-    );
   }
 
   private targetDirectory(path = this.tree.getFocusedPath() ?? '/'): string {

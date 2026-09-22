@@ -1,6 +1,6 @@
 import ts from '@typescript/typescript6';
 import type * as esbuild from 'esbuild-wasm';
-import {ModelDiagnosticError} from '../model/diagnostic';
+import {ModelDiagnosticError, diagnosticFromError} from '../model/diagnostic';
 import {
   CachedDefinitionCompiler,
   transformCachedDefinitions,
@@ -61,6 +61,10 @@ export class ProjectBuilder {
     private readonly files: ProjectFileReader,
     private readonly engine: Pick<typeof esbuild, 'build' | 'context'>,
     private readonly assets?: ProjectAssets,
+    private readonly onResolved?: (
+      path: string,
+      importer: string,
+    ) => Promise<void>,
   ) {
     this.resolver = new ProjectPackageResolver({
       readFile: async path => {
@@ -92,8 +96,14 @@ export class ProjectBuilder {
     );
   }
 
-  resolve(specifier: string, importer = '/model.ts'): Promise<string | false> {
-    return this.resolver.resolve(specifier, importer);
+  async resolve(
+    specifier: string,
+    importer = '/model.ts',
+    kind: 'import' | 'require' = 'import',
+  ): Promise<string | false> {
+    const path = await this.resolver.resolve(specifier, importer, kind);
+    if (path !== false) await this.onResolved?.(path, importer);
+    return path;
   }
 
   private readonly sessions = new Map<
@@ -195,7 +205,7 @@ export class ProjectBuilder {
                     args.path === 'code3d:cached-namespace'
                   )
                     return runtimeModule(args.pluginData, 'runtime-value');
-                  const path = await this.resolver.resolve(
+                  const path = await this.resolve(
                     args.path,
                     args.importer || '/.__code3d-entry.js',
                     args.kind === 'require-call' ? 'require' : 'import',
@@ -497,11 +507,10 @@ export class ProjectBuilder {
       }
       let resolved;
       try {
-        resolved = await this.resolver.resolve(specifier, path);
+        resolved = await this.resolve(specifier, path);
       } catch (error) {
         throw new ModelDiagnosticError({
-          kind: 'module',
-          summary: error instanceof Error ? error.message : String(error),
+          ...diagnosticFromError(error, 'module'),
           sourceRef: {
             file: path,
             start: node.getStart(parsed),

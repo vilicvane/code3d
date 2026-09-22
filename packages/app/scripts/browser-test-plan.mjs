@@ -27,6 +27,7 @@ export const exclusiveBrowserTests = new Set([
   'compiler-progress.test.ts',
   'coordinate-semantics.test.ts',
   'large-model-visibility.test.ts',
+  'package-compatibility.test.ts',
   'package-install.test.ts',
   'parallel-snapshot.test.ts',
   'persistent-cache.test.ts',

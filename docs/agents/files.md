@@ -136,6 +136,21 @@ manifest through `apply` does not make the App install packages, and the CLI
 cannot perform that installation. Browser storage has no local project directory
 in which an agent can run `npm install`.
 
+If observation fails with a diagnostic containing `packageCompatibility`, its
+`packages` list identifies installed and required versions and each owning
+`manifestPath`. Use the required versions from that diagnostic when updating
+Code3D dependencies; preserve other fields and dependencies. A `manual` entry
+identifies an undeclared import or a package loaded by another library. For a
+transitive mismatch, upgrade that library or the project dependency that provides
+it; adding a top-level Code3D version may not replace its nested installation.
+Keep existing `latest` declarations. In browser storage, choose **Update Code3D
+packages** in the Packages status view to resolve them again and replace the old
+installation. Browser preparation installs changed declarations on the next
+observation. A local project still needs its external package manager's update
+command; reinstalling an unchanged lock may keep the old version. If packages were upgraded before the App,
+reload the App first. Clearing build caches does not upgrade installed packages;
+see [the upgrade guide](../../packages/web/src/content/docs/docs/getting-started/files.md#after-a-code3d-update).
+
 ## Related reading
 
 Use [source selection](cursor.md) to choose the model to observe, [observation](observation.md) to verify it, and [recovery](recovery.md) after an uncertain result.

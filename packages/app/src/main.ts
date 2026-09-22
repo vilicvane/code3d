@@ -45,6 +45,11 @@ import {appSettings} from './app-settings';
 import {AppSettingsDialog} from './ui/app-settings';
 import {showNewBrowserProjectDialog} from './ui/new-browser-project';
 import {Submenu} from './ui/submenu';
+import {PackageStatusView} from './ui/package-status';
+import {
+  upgradeCode3dDependencies,
+  type PackageCompatibilityIssue,
+} from './project/package-compatibility';
 import {RenderScenePreference} from './rendering/render-scene';
 import {ViewportSceneSelector} from './ui/viewport-scene-selector';
 import brandMark from '../../../assets/brand/mark.svg?raw';
@@ -364,9 +369,8 @@ app.innerHTML = `
                 </section>
                 <section class="project-storage-section" role="group" aria-label="Open a project">
                   <button id="open-folder-button" type="button" role="menuitem" tabindex="-1">Open folder</button>
-                  <button id="new-browser-project-button" type="button" role="menuitem" tabindex="-1">New browser project</button>
                   <button id="reconnect-folder-button" type="button" role="menuitem" tabindex="-1" hidden>Reconnect folder</button>
-                  <button id="reload-folder-button" type="button" role="menuitem" tabindex="-1" hidden>Reload folder</button>
+                  <button id="new-browser-project-button" type="button" role="menuitem" tabindex="-1">New browser project</button>
                 </section>
               </div>
               <div class="project-actions">
@@ -497,9 +501,6 @@ const openFolderButton =
   requiredElement<HTMLButtonElement>('open-folder-button');
 const reconnectFolderButton = requiredElement<HTMLButtonElement>(
   'reconnect-folder-button',
-);
-const reloadFolderButton = requiredElement<HTMLButtonElement>(
-  'reload-folder-button',
 );
 const projectLocationBusy = observable.box(false);
 const browserProjectList = requiredElement('browser-project-list');
@@ -647,7 +648,7 @@ replaceFileRoute(codeEditor.currentFile());
 const packageManager = !directoryConnected
   ? new BrowserPackageManager(
       projectFileSystem as BrowserProjectFileSystem,
-      progress => projectDirectory.setPackageProgress(progress),
+      progress => packageStatus.setProgress(progress),
       undefined,
       async ({directory}) => {
         await codeEditor.refreshPackageInstallation(
@@ -737,10 +738,7 @@ const projectDirectory = new ProjectTree(projectTree, {
   examples: {directory: bundledExamples.directory, reset: resetExamples},
   onInstallPackage: packageManager ? installProjectPackage : undefined,
   onUpdateDependencies: packageManager ? updateProjectDependencies : undefined,
-  async onClearBuildCache() {
-    await compiler.clearBuildCache();
-    await runModel();
-  },
+  onClearBuildCache: clearProjectBuildCache,
   onBusy: busy => {
     if (busy) fileOpenVersion++;
     codeEditor.setReadOnly(busy);
@@ -779,6 +777,19 @@ const agentPanel = new AgentPanel(
   requiredElement<HTMLButtonElement>('agents-button'),
 );
 const settingsDialog = new AppSettingsDialog(appSettings);
+const packageStatus = new PackageStatusView(projectExplorer, {
+  issue: () => previewState.diagnostic?.packageCompatibility,
+  update: packageManager ? updateCompatiblePackages : undefined,
+  retry: packageManager ? updateProjectDependencies : undefined,
+  openManifest: path => activateProjectFile(path, true),
+  refresh: refreshProjectFiles,
+  clearCache: clearProjectBuildCache,
+  focusExplorer: () => projectTree.focus(),
+  async reload() {
+    await agentProject.flush();
+    window.location.reload();
+  },
+});
 requiredElement<HTMLButtonElement>('settings-button').addEventListener(
   'click',
   () => settingsDialog.open(),
@@ -798,6 +809,7 @@ window.addEventListener(
   'pagehide',
   () => {
     settingsDialog.dispose();
+    packageStatus.dispose();
     appSettings.dispose();
     dialogs.dispose();
     imageExportDialog.dispose();
@@ -875,6 +887,49 @@ async function installProjectPackage(selectedDirectory: string): Promise<void> {
 
 async function updateProjectDependencies(directory: string): Promise<void> {
   await packageManager!.update(directory, () => agentProject.flush());
+  await refreshProjectFiles();
+}
+
+async function updateCompatiblePackages(
+  issue: PackageCompatibilityIssue,
+): Promise<void> {
+  await agentProject.flush();
+  const manifests = [...new Set(issue.packages.map(pkg => pkg.manifestPath))];
+  for (const path of manifests) {
+    await packageManager!.update(parentProjectDirectory(path), async () => {
+      await agentProject.update(async () => {
+        const bytes = await projectFileSystem.readFile(path);
+        if (!bytes) throw new Error(`Project package file not found: ${path}`);
+        const manifest = parsePackageManifest(decodeProjectFile(bytes), path);
+        const updated = upgradeCode3dDependencies(
+          manifest,
+          issue.matchingVersions,
+        );
+        codeEditor.applyFiles([
+          {path, content: JSON.stringify(updated, null, 2) + '\n'},
+        ]);
+      });
+      await agentProject.flush();
+    });
+  }
+  compiler.refreshProject();
+  await runModel();
+}
+
+async function clearProjectBuildCache(): Promise<void> {
+  previewState.invalidate();
+  await compiler.clearBuildCache();
+  await runModel();
+}
+
+async function refreshProjectFiles(): Promise<void> {
+  await refreshExternalProjectFiles(undefined, true);
+  // Retire the old preview before cancellation can reject its pending build.
+  // Directory refresh yields before runModel starts the replacement request.
+  previewState.invalidate();
+  compiler.refreshProject();
+  await projectDirectory.refresh();
+  await runModel();
 }
 
 let compileTimer: number | undefined;
@@ -1775,21 +1830,13 @@ window.addEventListener(
   {once: true},
 );
 refreshFilesButton.addEventListener('click', () => {
-  void (async () => {
-    await refreshExternalProjectFiles(undefined, true);
-    compiler.refreshProject();
-    await projectDirectory.refresh();
-    await runModel();
-  })().catch(showProjectIssue);
+  void refreshProjectFiles().catch(showProjectIssue);
 });
 openFolderButton.addEventListener('click', () => {
   void openProjectDirectory();
 });
 reconnectFolderButton.addEventListener('click', () => {
   void reconnectProjectDirectory();
-});
-reloadFolderButton.addEventListener('click', () => {
-  void reloadProjectDirectory();
 });
 newBrowserProjectButton.addEventListener('click', () => {
   void createBrowserProject();
@@ -1953,26 +2000,21 @@ function renderProjectLocation(): void {
   newBrowserProjectButton.disabled = busy;
   openFolderButton.disabled = busy || !supportsProjectDirectories();
   reconnectFolderButton.disabled = busy;
-  reloadFolderButton.disabled = busy;
   if (directoryConnected) {
     projectLocation.textContent = storedDirectoryHandle.name;
     projectLocation.dataset.kind = 'local';
     projectLocation.title = `Files are stored directly in ${storedDirectoryHandle.name}`;
-    openFolderButton.textContent = 'Change folder';
     reconnectFolderButton.hidden = true;
-    reloadFolderButton.hidden = false;
     return;
   }
 
   projectLocation.textContent = browserProject!.name;
   projectLocation.dataset.kind = 'browser';
   projectLocation.title = `${browserProject!.name} · Browser storage`;
-  openFolderButton.textContent = 'Open folder';
   reconnectFolderButton.hidden = storedDirectoryHandle === undefined;
   reconnectFolderButton.textContent = storedDirectoryHandle
     ? `Reconnect ${storedDirectoryHandle.name}`
     : 'Reconnect folder';
-  reloadFolderButton.hidden = true;
 }
 
 async function openProjectDirectory(): Promise<void> {
@@ -2056,17 +2098,6 @@ async function reconnectProjectDirectory(): Promise<void> {
   } catch (error) {
     showProjectIssue(error);
   } finally {
-    setProjectLocationBusy(false);
-  }
-}
-
-async function reloadProjectDirectory(): Promise<void> {
-  setProjectLocationBusy(true);
-  try {
-    await agentProject.flush();
-    window.location.reload();
-  } catch (error) {
-    showProjectIssue(error);
     setProjectLocationBusy(false);
   }
 }
@@ -2639,7 +2670,18 @@ async function runModel(
     runInAction(() => {
       designContextState.compiling = undefined;
     });
-    const diagnostic = diagnosticFromError(error, 'project');
+    let diagnostic = diagnosticFromError(error, 'project');
+    const packageCompatibility = previewState.diagnostic?.packageCompatibility;
+    if (
+      error instanceof PackageInstallationError &&
+      packageCompatibility?.packages.some(
+        pkg => parentProjectDirectory(pkg.manifestPath) === error.directory,
+      )
+    ) {
+      // Failed installs retain their previous packages. Keep the version notice
+      // and its recovery actions while reporting the installation failure.
+      diagnostic = {...diagnostic, packageCompatibility};
+    }
     if (previewState.pendingFile || previewState.retainingView)
       clearPresentedView();
     previewState.fail(diagnostic);

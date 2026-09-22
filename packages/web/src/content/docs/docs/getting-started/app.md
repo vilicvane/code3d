@@ -174,8 +174,8 @@ directory state. A batch may have completed some entries before a storage
 failure. Unsaved text must be saved successfully before moving or deleting
 entries. Local folders automatically check opened files and source dependencies
 for external changes while the page is visible and when you return to it.
-**Refresh files** also rereads file contents and directory names. Unsaved text
-is preserved. **Reload folder** reloads the workspace after saving pending edits.
+The toolbar's **Refresh files and dependencies** rereads file contents, directory
+names and dependencies, then rebuilds the current model. Unsaved text is preserved.
 
 Deleting every file leaves an empty project. You can create a new file there;
 refreshing does not restore files you deleted. Closing every tab also leaves

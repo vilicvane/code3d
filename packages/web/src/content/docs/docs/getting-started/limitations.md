@@ -107,7 +107,8 @@ local/Git dependencies, private registry authentication and lifecycle scripts
 are not supported. Local folders continue to use your own package manager.
 
 **Local-folder access depends on the browser.** File System Access and a secure
-context are required. External edits need an explicit Reload folder.
+context are required. Source changes are checked automatically; use the toolbar's
+**Refresh files and dependencies** after external dependency changes or to force a reread.
 
 **The geometry engine has a substantial initial download.** It loads with
 App, while the website and documentation can be read independently.

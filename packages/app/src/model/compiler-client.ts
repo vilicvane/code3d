@@ -178,6 +178,7 @@ export class ModelCompilerClient {
             kind: 'restore',
             id,
             cancellation: (this.restoreCancellation = cancellation()),
+            project,
             projectIdentity: this.projectIdentity,
             rootPath,
             designContext,
@@ -596,7 +597,13 @@ export class ModelCompilerClient {
           this.startExecution();
         } else if (data.kind === 'result' && !data.ok) {
           const error = new ModelDiagnosticError(data.diagnostic);
-          if (
+          if (data.diagnostic.packageCompatibility) {
+            this.queuedExecution = undefined;
+            this.cancelExecution();
+            this.cachedResult = undefined;
+            this.restored = undefined;
+            this.fail(data.id, error);
+          } else if (
             this.runningExecution?.cached &&
             this.runningExecution.compileId === data.id
           )

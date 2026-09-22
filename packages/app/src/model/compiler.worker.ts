@@ -207,7 +207,15 @@ workerScope.onmessage = ({data}: MessageEvent<CompilerRequest>) => {
         return successful ?? cache.restore(key);
       });
       checkCancelled();
-      if (artifact) {
+      if (
+        artifact &&
+        (await compiler.canRestoreDependencies(
+          artifact.dependencies,
+          data.project,
+          data.rootPath,
+        ))
+      ) {
+        checkCancelled();
         const dependencies = compiler.restoreDependencies(
           artifact.dependencies,
         );
