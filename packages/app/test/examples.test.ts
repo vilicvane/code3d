@@ -51,6 +51,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/sweep.ts': ['default', 1],
   'operations/wrap.ts': ['default', 3],
   'operations/origin.ts': ['centered', 1],
+  'constraints/placement-api.ts': ['stand', 2],
   'operations/local-transforms.ts': ['bottomZero', 1],
   'operations/solid-operations.ts': ['joined', 1],
   'operations/shape-construction.ts': ['plate', 1],
@@ -289,6 +290,16 @@ for (const entry of exampleEntries) {
         assert.ok(
           Math.abs(volume(exports.default) - (30 * 8 * 20 - Math.PI * 16 * 8)) <
             1e-5,
+        );
+      }
+      if (entry.file === 'constraints/placement-api.ts') {
+        assert.deepEqual(exports.stand.bounds().size, [32, 16, 24]);
+        for (const name of ['seat', 'tip', 'shaft'])
+          assert.ok(name in exports.mountingPin);
+        assert.equal(snapshot(exports.transmission).children.length, 3);
+        assert.deepEqual(
+          snapshot(exports.transmission).children[2].transform.position,
+          [40, 0, 0],
         );
       }
       if (entry.file === 'operations/local-transforms.ts') {

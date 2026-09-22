@@ -11,7 +11,9 @@ API 文档按批次完善时，同步将相应实现按职责拆出。八个 Sol
 操作记录、缓存与参考元素机制保留在 `runtime.ts`。`union.ts`、`cut.ts`、`intersect.ts` 分别承载布尔作者入口与检查器，
 `boolean-model.ts` 共享操作数校验；实体实例方法仍通过运行时的组合机制求值。
 `origin-center.ts` 承载单个/数组居中的作者重载与检查器，批量装配和局部变换仍由
-运行时统一维护模型身份、拓扑与约束。`authoring-api.ts` 只汇总作者
+运行时统一维护模型身份、拓扑与约束。组合、on/align、独立变换、pivot/axis 选择器和角度耦合的作者入口分别归同名
+模块；`group.ts` 同时承载成员检查，原点居中复用该检查入口。runtime 只向这些
+模块提供内部参考解析和表达式机制，不反向依赖作者模块。`authoring-api.ts` 只汇总作者
 入口，避免运行时反向依赖独立 API 模块。公开导出与编辑器跟踪指向实际实现，
 不保留旧模块转发入口。文档源码基准的维护方式见
 [网站维护说明](../../../packages/web/README.md#source-review-baselines)。

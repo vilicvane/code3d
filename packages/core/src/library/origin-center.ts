@@ -1,9 +1,5 @@
-import {
-  ModelObject,
-  isModelObject,
-  inspectGroupMembers,
-  type Model,
-} from './runtime.js';
+import {inspectGroupMembers} from './group.js';
+import {ModelObject, isModelObject, type Model} from './runtime.js';
 import type {InspectContext, InspectResult} from './inspect.js';
 type CenterableModel = Model & {originCenter(): Model};
 /**

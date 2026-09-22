@@ -1678,110 +1678,6 @@ export class Constraint extends RelationExpression {
   }
 }
 
-/**
- * Translate the whole current model onto the directed target bound.
- * @code3d.inspect on.inspect
- * @code3d.inspect target on.inspect
- */
-export function on(target: Bound): Constraint;
-/**
- * Translate the selected source geometry's matching bound onto the target bound.
- * @code3d.inspect on.inspect
- * @code3d.inspect source on.inspect
- * @code3d.inspect target on.inspect
- */
-export function on(source: Anchor, target: Bound): Constraint;
-export function on(source: Anchor, target?: Bound): Constraint {
-  if (arguments.length === 1) {
-    if (!activeRelate)
-      throw new Error('on(target) must be called inside a relate callback.');
-    target = source as Bound;
-    source = requireModelObject(
-      activeRelate.self,
-      'on(target) requires a current model with finite geometry.',
-    );
-  }
-  return Constraint.create(anchorReference(source), boundReference(target!));
-}
-
-/**
- * Align underlying geometry while retaining unconstrained degrees of freedom.
- * @code3d.inspect align.inspect
- * @code3d.inspect source align.inspect
- * @code3d.inspect target align.inspect
- */
-export function align(
-  source: Anchor<'point' | 'line' | 'face'>,
-  target: Anchor<'point' | 'line' | 'face'>,
-): Constraint;
-/**
- * Coincide the origins and all axes of two coordinate frames.
- * @code3d.inspect align.inspect
- * @code3d.inspect source align.inspect
- * @code3d.inspect target align.inspect
- */
-export function align(source: FrameAnchor, target: FrameAnchor): Constraint;
-export function align(source: Anchor, target: Anchor): Constraint {
-  return Constraint.create(
-    anchorReference(source),
-    anchorReference(target),
-    'align',
-  );
-}
-
-/**
- * Couple relate's current model to another model using each model's own axis:
- * selfAngle = ratio * otherAngle + phase.
- * @code3d.tool
- * @code3d.inspect coupleRotation.inspect
- * @code3d.inspect other coupleRotation.inspect
- */
-export function coupleRotation(
-  other: Model<Readonly<{axis: LineAnchor}>>,
-  config: RotationCouplingConfig,
-): Constraint {
-  if (!activeRelate)
-    throw new Error(
-      'coupleRotation() must be called inside a relate callback.',
-    );
-  return Constraint.coupleRotation(
-    straightAxisReference(
-      modelRotationAxis(activeRelate.self),
-      'coupleRotation()',
-    ),
-    straightAxisReference(modelRotationAxis(other), 'coupleRotation()'),
-    config,
-  );
-}
-
-function modelRotationAxis(value: unknown): LineAnchor {
-  const model = requireModelObject(
-    value,
-    'coupleRotation() requires a model with an axis.',
-  );
-  if (!('axis' in model))
-    throw new Error('coupleRotation() requires each model to have an axis.');
-  return model.axis as LineAnchor;
-}
-
-/** @internal */
-export namespace coupleRotation {
-  export function inspect(
-    [other]: [Model<Readonly<{axis: LineAnchor}>>],
-    context: InspectContext<Constraint>,
-  ): InspectResult | undefined {
-    const data = relate.context(context);
-    return data && context.return
-      ? ModelObject.inspectConstraint(
-          data,
-          context.return,
-          modelRotationAxis(data.self),
-          other.axis,
-        )
-      : undefined;
-  }
-}
-
 /** One completed relative placement step. Array order composes transformations. */
 export class Transformation extends RelationExpression {
   declare protected readonly definition: Extract<
@@ -1803,7 +1699,7 @@ export class Transformation extends RelationExpression {
 }
 
 /** Carries the reference selection until its independent rotation is complete. */
-class TransformationRotation extends RelationExpression {
+export class TransformationRotation extends RelationExpression {
   constructor() {
     super(
       {kind: 'transformation', actions: []},
@@ -1824,14 +1720,16 @@ class TransformationRotation extends RelationExpression {
   }
 }
 
-function rotationPointReference(point: PointAnchor): AnchorReference {
+/** @internal */
+export function rotationPointReference(point: PointAnchor): AnchorReference {
   const reference = anchorReference(point);
   if (reference.kind !== 'point')
     throw new Error('pivotPoint() requires a point reference.');
   return reference;
 }
 
-function straightAxisReference(
+/** @internal */
+export function straightAxisReference(
   axis: LineAnchor,
   operation = 'axisLine()',
 ): AnchorReference {
@@ -1951,93 +1849,6 @@ function selectedAxis(
   offset: Vec3 | undefined,
 ): RigidTransform {
   return composeTransforms(axis.transform, translation(offset ?? origin));
-}
-
-/**
- * Move the joint result along the fixed axes of its composition.
- * @code3d.inspect relate.inspectRelation
- * @code3d.param x {kind: 'length', default: 0, label: 'ΔX'}
- * @code3d.param y {kind: 'length', default: 0, label: 'ΔY'}
- * @code3d.param z {kind: 'length', default: 0, label: 'ΔZ'}
- */
-export function offset(x: number, y: number, z: number): Transformation;
-export function offset(x = 0, y = 0, z = 0): Transformation {
-  assertFiniteVector('offset', [x, y, z]);
-  return new Transformation({offset: [x, y, z]});
-}
-/**
- * Rotate about self's current origin and local X, Y, then Z axes.
- * @code3d.inspect relate.inspectRelation
- * @code3d.param x {kind: 'angle', default: 0, label: 'Rotate X'}
- * @code3d.param y {kind: 'angle', default: 0, label: 'Rotate Y'}
- * @code3d.param z {kind: 'angle', default: 0, label: 'Rotate Z'}
- */
-export function rotate(x: number, y: number, z: number): Transformation;
-export function rotate(x = 0, y = 0, z = 0): Transformation {
-  assertFiniteVector('rotate', [x, y, z]);
-  return new Transformation({
-    pivot: {kind: 'pivot', point: origin, implicit: true},
-    angles: [x, y, z],
-  });
-}
-/**
- * Select a pivot in self's local coordinates for the next rotation.
- * @code3d.inspect relate.inspectRelation
- * @code3d.param x {kind: 'length', default: 0, label: 'Pivot X'}
- * @code3d.param y {kind: 'length', default: 0, label: 'Pivot Y'}
- * @code3d.param z {kind: 'length', default: 0, label: 'Pivot Z'}
- */
-export function pivot([x, y, z]: Vec3): PivotChain;
-export function pivot([x = 0, y = 0, z = 0]: Vec3 = origin): PivotChain {
-  assertFiniteVector('pivot', [x, y, z]);
-  return new PivotChain(new TransformationRotation(), {
-    kind: 'pivot',
-    point: [x, y, z],
-  });
-}
-/**
- * @code3d.inspect relate.inspectRelation
- * @code3d.param id {kind: 'vertex', label: 'Pivot vertex'}
- */
-export function pivotVertex(id: VertexId): PivotChain {
-  assertTopologyId('vertex', id);
-  return new PivotChain(new TransformationRotation(), {
-    kind: 'pivotVertex',
-    id,
-  });
-}
-/**
- * Select a point reference as the center; rotation axes remain self local.
- * @code3d.tool
- * @code3d.inspect relate.inspectRelation
- */
-export function pivotPoint(point: PointAnchor): PivotChain {
-  return new PivotChain(new TransformationRotation(), {
-    kind: 'pivotPoint',
-    point: rotationPointReference(point),
-  });
-}
-/**
- * @code3d.inspect relate.inspectRelation
- * @code3d.param id {kind: 'edge', label: 'Rotation edge'}
- */
-export function axisEdge(id: EdgeId): AxisChain {
-  assertTopologyId('edge', id);
-  return new AxisChain(new TransformationRotation(), {
-    kind: 'axisEdge',
-    id,
-  });
-}
-/**
- * Select a positioned axis in the composition for the next rotation.
- * @code3d.inspect relate.inspectRelation
- * @code3d.tool
- */
-export function axisLine(axis: LineAnchor): AxisChain {
-  return new AxisChain(new TransformationRotation(), {
-    kind: 'axisLine',
-    axis: straightAxisReference(axis),
-  });
 }
 
 const modelGeometry = Symbol('modelGeometry');
@@ -5843,49 +5654,6 @@ function normalizeReplicadSolid(shape: Shape3D): Shape3D {
   return solid;
 }
 
-/** Compose members in the first member's local frame; empty groups use the default frame. */
-/** @code3d.inspect children group.inspectChildren */
-export function group(children: readonly Model[], name = 'Group'): GroupModel {
-  const runtimeChildren = children.map(child =>
-    requireModelObject(child, 'Every group child must be a model.'),
-  );
-  return ModelObject.create<{}, 'group'>({
-    kind: 'group',
-    name,
-    children: runtimeChildren,
-    operation: storedOperation(
-      'group',
-      runtimeChildren.map((model, index) => ({
-        model,
-        role: 'child',
-        index,
-      })),
-    ),
-  }) as unknown as GroupModel;
-}
-
-/** @internal */
-export namespace group {
-  export function inspectChildren(
-    _args: [readonly Model[], string?],
-    context: InspectContext<GroupModel>,
-  ): InspectResult | undefined {
-    return context.return && ModelObject.inspectGroup(context.return);
-  }
-}
-
-/** Inspect derived group members at solved poses while preserving input focus. */
-export function inspectGroupMembers(
-  children: readonly Model[],
-  inputs: readonly Model[],
-): InspectResult {
-  const result = ModelObject.inspectGroup(group(children));
-  result.target?.forEach((member, index) => {
-    retainInspectionIdentity(member, inputs[index]);
-  });
-  return result;
-}
-
 /**
  * Measure finite models, topology, bounds or point references in their solved placement.
  * Without axis, returns the shortest geometric distance. With axis, returns the
@@ -6210,43 +5978,6 @@ export namespace expose {
       context.return &&
       ModelObject.inspectExposed(context.receiver, context.return, context.data)
     );
-  }
-}
-
-/** @internal */
-export namespace on {
-  export function inspect(
-    [source, target]: [Anchor, Bound?],
-    context: InspectContext<Constraint>,
-  ): InspectResult | undefined {
-    const data = relate.context(context);
-    if (!data || !context.return) return undefined;
-    return ModelObject.inspectConstraint(
-      data,
-      context.return,
-      target === undefined ? (data.self as ModelObject) : source,
-      target ?? source,
-      context.focused.parameter === undefined,
-    );
-  }
-}
-
-/** @internal */
-export namespace align {
-  export function inspect(
-    [source, target]: [Anchor, Anchor],
-    context: InspectContext<Constraint>,
-  ): InspectResult | undefined {
-    const data = relate.context(context);
-    return data && context.return
-      ? ModelObject.inspectConstraint(
-          data,
-          context.return,
-          source,
-          target,
-          context.focused.parameter === undefined,
-        )
-      : undefined;
   }
 }
 
@@ -7519,7 +7250,8 @@ function topologyReferences(
   });
 }
 
-function boundReference(target: Bound): AnchorReference {
+/** @internal */
+export function boundReference(target: Bound): AnchorReference {
   const reference =
     target instanceof ModelAnchor ? target[anchorReferenceValue] : undefined;
   if (!reference?.bound)
@@ -7529,7 +7261,8 @@ function boundReference(target: Bound): AnchorReference {
   return reference;
 }
 
-function anchorReference(anchor: Anchor): AnchorReference {
+/** @internal */
+export function anchorReference(anchor: Anchor): AnchorReference {
   if (anchor instanceof ModelObject) {
     return anchor.relationAnchorReference();
   }
@@ -7613,7 +7346,11 @@ function shapeWithScale<Shape extends AnyShape>(
   });
 }
 
-function requireModelObject(value: unknown, message: string): ModelObject {
+/** @internal */
+export function requireModelObject(
+  value: unknown,
+  message: string,
+): ModelObject {
   if (!isModelObject(value)) {
     throw new Error(message);
   }

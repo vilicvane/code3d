@@ -241,38 +241,12 @@ Try the [fitted beam example](/examples/distance/) and
 
 ## Independent placement transformations
 
-`relate` callbacks return a `Constraint`, a `Transformation`, or a readonly array of both.
-Independent constructors are `offset(x, y, z)`, `rotate(x, y, z)`,
-`pivot([x, y, z]).rotate(x, y, z)`, `pivotVertex(id).rotate(x, y, z)`,
-`pivotPoint(pointRef).rotate(x, y, z)`, `axisEdge(id).rotate(angle)`, and
-`axisLine(lineRef).rotate(angle)`. Values can be built in helper functions and reused.
-
-| Selector               | Reference                               |
-| ---------------------- | --------------------------------------- |
-| `pivot([x, y, z])`     | Coordinates in self                     |
-| `pivotVertex(id)`      | A vertex of self                        |
-| `pivotPoint(pointRef)` | A local or external point reference     |
-| `axisEdge(id)`         | A straight edge of self                 |
-| `axisLine(lineRef)`    | A local or external line/axis reference |
-
-Point references change the rotation center while retaining self's XYZ axes.
-External references use their owning model's solved placement in the composition.
-Curved edges do not define a rotation axis.
-
-Each independent transformation is one completed operation, with no further
-chaining methods. Use an array to combine steps: `[offset(0, 8, 0), rotate(0, 25, 0)]`.
-These five reference selectors return an unfinished selection with a
-`rotate` method; its result is again a completed transformation.
-Point selectors additionally accept one `pivotOffset(dx, dy, dz)`; axis selectors
-accept one `axisOffset(dx, dy, dz)`. Both kinds of selector complete with `rotate`.
-Point offsets use self local axes. Axis offsets use the selected axis reference
-frame, retaining its direction. Both retain the original point/axis reference.
-
-Consecutive constraints form a joint solve segment. Transformations act after
-its result; a subsequent constraint starts another segment and inherits the
-previous pose in its free directions. Independent offset uses fixed composition
-axes; rotation defaults to the current self origin and local XYZ axes. See
-[the complete placement rules](relations.mdx#transform-a-joint-result).
+Use [offset](api/offset.md) and [rotate](api/rotate.md) as separate placement steps
+inside [relate](api/relate.md). Complete a chosen rotation center or axis with
+one rotation: [pivot](api/pivot.md), [pivotVertex](api/pivot-vertex.md),
+[pivotPoint](api/pivot-point.md), [axisEdge](api/axis-edge.md) or
+[axisLine](api/axis-line.md). Their references describe frame conventions,
+pivotOffset/axisOffset and the resulting transformation types.
 
 ## Runtime defaults while editing
 
@@ -439,17 +413,13 @@ in code; selecting a face does not automatically generate a related sketch.
 
 | Function                                | Result                                        |
 | --------------------------------------- | --------------------------------------------- |
-| `group(models, name?)`                  | Composition that preserves its separate parts |
+| [`group(models, name?)`](api/group.md)  | Composition that preserves its separate parts |
 | [`union(solids)`](api/union.md)         | Fused solid                                   |
 | [`cut(stock, tools)`](api/cut.md)       | Stock with the tool volumes removed           |
 | [`intersect(solids)`](api/intersect.md) | Shared solid volume                           |
 
-`group()` accepts a `readonly Model[]`, including ordinary groups, empty groups,
-and any depth of nested groups mixed with solids, faces, curves, or points. Each
-nested group keeps its hierarchy. No type assertion or `expose()` call is needed
-to compose it; use `expose()` when callers need named member references. Generic
-helpers can use `ModelCapabilities<Elements, Kind>` and `ModelForKind<Elements, Kind>`
-to preserve the concrete model kind and exposed members through chained calls.
+See [group](api/group.md) for supported members, nested hierarchy and coordinate
+frames. [expose](api/expose.md) publishes typed member references for reuse.
 
 Relations are resolved at composition and geometry evaluation boundaries.
 [`stock.cut(tools)`](api/cut.md) is equivalent to the free function. Arrays in booleans and
@@ -471,9 +441,9 @@ shows which operations are supported by the value you hold.
 - `.scaled(factor)`: uniformly scale a geometric model about local coordinate zero.
 - `.material(value)`: replace the complete material with a native Three.js material
   or a CSS color shorthand; a group overrides every descendant's material.
-- `.relate(self => constraint)` or `.relate(self => [first, second])`: attach
+- [`.relate(self => constraint)`](api/relate.md) or `.relate(self => [first, second])`: attach
   one or more relations for placement in a composition.
-- `.expose({name: element})`: publish a typed named-element interface.
+- [`.expose({name: element})`](api/expose.md): publish a typed named-element interface.
 
 ## Materials
 
@@ -534,65 +504,10 @@ scaling and placement semantics.
 
 ## Rotation coupling
 
-`coupleRotation(other, {ratio: -2 / 3, phase: 6})` couples the current model
-from the enclosing `relate` callback to another model. It uses each model's own
-`.axis` and constrains `selfAngle = ratio * otherAngle + phase`. `ratio` must be
-finite and nonzero; `phase` is in degrees (default zero). It returns a complete
-`Constraint`, used as its own placement entry.
-
-```ts
-const crank = box(20, 3, 6).relate(self => [
-  align(self.frame, base.frame),
-  axisLine(self.axis).rotate(
-    input('Drive angle', 0, {min: -1080, max: 1080, step: 1}),
-  ),
-]);
-const output = box(30, 3, 6).relate(self => [
-  align(self.origin, crank.origin),
-  coupleRotation(crank, {ratio: -0.5}),
-  offset(40, 0, 0),
-]);
-```
-
-Call `coupleRotation` inside `relate`; helpers called by that callback use the
-same current model. Nested callbacks use their own self. Both models must
-provide a straight `.axis`; a group without an exposed axis cannot participate
-directly. The other argument is a model, not an axis reference. There is no axis
-override or separate axis-editing operation in this API.
-
-The current model is the new value produced by `relate`. Passing the original
-receiver as `other` still refers to that earlier value, with its own placement.
-Each axis retains its model's local direction and angular datum, including
-changes from geometric rotation and origin operations. Coupling leaves
-translation free: use origin alignment, `on()` and independent `offset()` steps
-to place the shafts. It does not make their axes coincident.
-
-Each axis frame's X direction supplies its angular datum. Zero is Core's
-standard frame for the axis's positive Y direction in the assembly solve frame:
-project +X perpendicular to Y, using +Z when Y is nearly parallel to +X
-(`abs(Y.x) >= 0.9`). Rotation is measured about that Y, then signed by the
-reference direction. An axis in the usual +Y orientation therefore uses +X as
-zero. `phase` relates these two datums; there is no separate XYZ axis option.
-
-Cumulative angles come from the authored placement sequence, including full
-turns, frame attachments and upstream couplings. They do not depend on previous
-App frames or playback history. A 360° driver step produces a −180° output step
-in this example. Geometric `.rotate()` changes local geometry; use a standalone
-or selected-axis `rotate()` inside `relate()` to drive a placement angle.
-
-The supported driving chain is acyclic, with one fixed material-axis direction
-per participating body. Axes may have arbitrary directions; use
-`axisLine(...).rotate(angle)` to turn about such an axis. XYZ rotations can drive
-an axis parallel to the corresponding local X, Y or Z. Frame alignment, point
-coincidence and `on()` can participate; other geometric alignments cannot drive
-this angular coordinate. Conflicting angles, rotations about other directions,
-and driving cycles report errors. Moving carriers are outside this subset;
-place a completed mechanism as a group. Constraint stages and immutable reference
-identity follow the same rules as `align()`.
-
-For automatic tooth ratios and engagement phase, use
-[Gears](../../gears/docs/api.md#drive-through-connected-parts) and its
-[connected-crank example](../../app/examples/packages/gears/transmission.ts).
+[`coupleRotation(other, {ratio, phase?})`](api/couple-rotation.md) couples the
+current model's cumulative placement angle to another model's fixed axis.
+See its reference for angular datums, full turns, translation freedom,
+configuration fields and the supported acyclic driving graph.
 
 ## Origins and rotation
 

@@ -4,6 +4,27 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'placement',
+    title: 'Groups and relative placement',
+    description:
+      'Compose models, expose references, constrain placement and select rotation axes.',
+    category: 'Placement and rotation',
+    file: 'constraints/placement-api.ts',
+    focus: {context: "group([standBase, standPost], 'Stand')", token: 'group'},
+    tags: [
+      'group',
+      'expose',
+      'relate',
+      'on',
+      'align',
+      'offset',
+      'rotate',
+      'pivot',
+      'axis',
+      'coupleRotation',
+    ],
+  },
+  {
     id: 'local-transforms',
     title: 'Origins and local transforms',
     description: 'Choose local zero, rotate geometry and scale a model.',
@@ -451,6 +472,120 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  placement: [
+    {
+      id: 'group',
+      image: 'placement',
+      label: 'group',
+      description:
+        'Compose models into an assembly while preserving separate members and their hierarchy.',
+      focus: {
+        context: "group([standBase, standPost], 'Stand')",
+        token: 'group',
+      },
+    },
+    {
+      id: 'expose',
+      image: 'placement-expose',
+      label: 'expose',
+      description:
+        'Publish named geometry and reference members on a new model value.',
+      focus: {context: 'pin.expose({', token: 'expose'},
+    },
+    {
+      id: 'relate',
+      image: 'placement-relate',
+      label: 'relate',
+      description:
+        'Describe placement of a new model value using constraints and ordered transformations.',
+      focus: {context: 'box(8, 12, 8).relate(self => [', token: 'relate'},
+    },
+    {
+      id: 'on',
+      image: 'placement-on',
+      label: 'on',
+      description:
+        'Translate finite geometry into contact with a directed bound without changing its orientation.',
+      focus: {context: 'on(bed.up)', token: 'on'},
+    },
+    {
+      id: 'align',
+      image: 'placement-align',
+      label: 'align',
+      description:
+        'Align supporting geometry or coincide two complete coordinate frames.',
+      focus: {context: 'align(self.center, datum)', token: 'align'},
+    },
+    {
+      id: 'offset',
+      image: 'placement-offset',
+      label: 'offset',
+      description: 'Translate a placement result along fixed composition axes.',
+      focus: {context: 'offset(7, 0, 0)', token: 'offset'},
+    },
+    {
+      id: 'rotate',
+      image: 'placement-rotate',
+      label: 'rotate',
+      description:
+        'Rotate a placed model about its current origin and local XYZ axes.',
+      focus: {context: 'rotate(0, 0, 25)', token: 'rotate'},
+    },
+    {
+      id: 'pivot',
+      image: 'placement-pivot',
+      label: 'pivot',
+      description:
+        'Choose a self-local point as the center of a placement rotation.',
+      focus: {context: 'pivot([6, -5, 0])', token: 'pivot'},
+    },
+    {
+      id: 'pivot-vertex',
+      image: 'placement-pivot-vertex',
+      label: 'pivotVertex',
+      description:
+        'Choose one of self\u2019s vertices as a placement rotation center.',
+      focus: {context: 'pivotVertex(3)', token: 'pivotVertex'},
+    },
+    {
+      id: 'pivot-point',
+      image: 'placement-pivot-point',
+      label: 'pivotPoint',
+      description:
+        'Use a positioned point reference as a placement rotation center.',
+      focus: {context: 'pivotPoint(self.vertex(3))', token: 'pivotPoint'},
+    },
+    {
+      id: 'axis-edge',
+      image: 'placement-axis-edge',
+      label: 'axisEdge',
+      description:
+        'Rotate a placed model about one of its own straight topology edges.',
+      focus: {context: 'axisEdge(2)', token: 'axisEdge'},
+    },
+    {
+      id: 'axis-line',
+      image: 'placement-axis-line',
+      label: 'axisLine',
+      description:
+        'Rotate a placement about a self or external straight line reference.',
+      focus: {
+        context: 'axisLine(self.axis).axisOffset(3, 0, 0)',
+        token: 'axisLine',
+      },
+    },
+    {
+      id: 'couple-rotation',
+      image: 'placement-couple-rotation',
+      label: 'coupleRotation',
+      description:
+        'Drive one model\u2019s cumulative placement angle from another model\u2019s fixed axis.',
+      focus: {
+        context: 'coupleRotation(crank, {ratio: -0.5})',
+        token: 'coupleRotation',
+      },
+    },
+  ],
   'local-transforms': [
     {
       id: 'origin-offset',
@@ -1021,6 +1156,7 @@ export const exampleEntries = [
   {
     file: 'operations/rotate.ts',
   },
+  {file: 'constraints/placement-api.ts'},
   {file: 'operations/local-transforms.ts'},
   {file: 'operations/solid-operations.ts'},
   {file: 'operations/shape-construction.ts'},

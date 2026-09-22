@@ -1,3 +1,14 @@
+export {group, inspectGroupMembers} from './group.js';
+export {on} from './on.js';
+export {align} from './align.js';
+export {coupleRotation} from './couple-rotation.js';
+export {offset} from './offset.js';
+export {rotate} from './rotate.js';
+export {pivot} from './pivot.js';
+export {pivotVertex} from './pivot-vertex.js';
+export {pivotPoint} from './pivot-point.js';
+export {axisEdge} from './axis-edge.js';
+export {axisLine} from './axis-line.js';
 export {originCenter} from './origin-center.js';
 export {union} from './union.js';
 export {cut} from './cut.js';
@@ -75,24 +86,7 @@ export type {
   SketchArcDirection,
 } from './sketch.js';
 
-export {
-  getModelData,
-  offset,
-  rotate,
-  setModelData,
-  pivot,
-  pivotVertex,
-  pivotPoint,
-  axisEdge,
-  axisLine,
-  coupleRotation,
-  on,
-  align,
-  distance,
-  text,
-  group,
-  inspectGroupMembers,
-} from './runtime.js';
+export {getModelData, setModelData, distance, text} from './runtime.js';
 
 export type {
   Anchor,
