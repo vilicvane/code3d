@@ -1,4 +1,5 @@
 import {glob, type Loader} from 'astro/loaders';
+import {reviewedPackage} from './source-review.mjs';
 import path from 'node:path';
 import {readFile} from 'node:fs/promises';
 import {fromMarkdown} from 'mdast-util-from-markdown';
@@ -73,7 +74,7 @@ export function docsLoader(): Loader {
                     sidebar: {label: 'Overview', order: 0},
                   }
                 : {}),
-              package: metadata,
+              package: reviewedPackage(metadata, data.sourceReview),
               editUrl: `https://github.com/vilicvane/code3d/edit/main/${relative}`,
             },
           });
@@ -94,7 +95,10 @@ export function docsLoader(): Loader {
               )
                 context.store.set({
                   ...entry,
-                  data: {...entry.data, package: metadata},
+                  data: {
+                    ...entry.data,
+                    package: reviewedPackage(metadata, entry.data.sourceReview),
+                  },
                   digest: generateDigest(
                     await readFile(
                       new URL(entry.filePath!, context.config.root),

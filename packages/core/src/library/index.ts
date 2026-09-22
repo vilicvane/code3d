@@ -1,3 +1,11 @@
+export {cylinder} from './cylinder.js';
+export {tube} from './tube.js';
+export {coil} from './coil.js';
+export {sphere} from './sphere.js';
+export {ellipsoid} from './ellipsoid.js';
+export {frustum} from './frustum.js';
+export {regularPrism} from './regular-prism.js';
+export {box} from './box.js';
 export {input} from './input.js';
 export type {InputOptions} from './input.js';
 export {timeOffset} from './time-offset.js';
@@ -64,17 +72,12 @@ export {
   align,
   arc,
   bezier,
-  box,
   circle,
-  coil,
   cut,
-  cylinder,
   distance,
   ellipse,
-  ellipsoid,
   extrude,
   text,
-  frustum,
   group,
   inspectGroupMembers,
   intersect,
@@ -83,14 +86,11 @@ export {
   point,
   rectangle,
   regularPolygon,
-  regularPrism,
   revolve,
   spline,
   sweep,
   wrap,
   thicken,
-  sphere,
-  tube,
   union,
 } from './runtime.js';
 

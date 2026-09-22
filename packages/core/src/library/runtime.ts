@@ -1,19 +1,12 @@
-import {input} from './input.js';
-import {timeOffset} from './time-offset.js';
+import {assertPositive} from './validation.js';
 import {
   assembleWire,
-  basicFaceExtrusion,
   BoundingBox,
-  genericSweep,
   getOC,
   makeBezierCurve,
   makeBSplineApproximation,
-  makeCircle,
-  makeCylinder,
   makeFace,
-  makeHelix,
   makeLine,
-  makeSphere,
   makeThreePointArc,
   makeVertex,
   measureShapeLinearProperties,
@@ -39,9 +32,9 @@ import {
   transformGeometry,
   type AlignmentGeometry,
 } from './alignment-geometry.js';
-import {cache, cachedArtifact} from './cached.js';
+import {cachedArtifact} from './cached.js';
 import {extrudeWithTopology, revolveWithTopology} from './extrude.js';
-import {font, googleFont, type Font} from './font.js';
+import type {Font} from './font.js';
 import {
   anchorAnnotation,
   boundsAnnotation,
@@ -67,8 +60,6 @@ import {
 import {
   castOwnedShape,
   castOwnedShape3D,
-  centeredBoxShape,
-  ellipsoidShape,
   shapeSubshapes,
   transformShape,
 } from './kernel-shapes.js';
@@ -148,7 +139,6 @@ import {
 import {
   isSketch,
   isSketchPoint,
-  sketch,
   sketchFrame,
   sketchForFrame,
   retainSketchFrame,
@@ -5914,371 +5904,6 @@ export function loft(
   return first[loftModels](others, runtimeSpine, ruled);
 }
 
-/**
- * @code3d.inspect x box.inspectDimension
- * @code3d.inspect y box.inspectDimension
- * @code3d.inspect z box.inspectDimension
- * @code3d.param x {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- * @code3d.param z {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function box(x: number, y: number, z: number): SolidModel;
-export function box(x = 10, y = 10, z = 10): SolidModel {
-  assertPositive('x', x);
-  assertPositive('y', y);
-  assertPositive('z', z);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Box',
-    geometry: evaluateSolidGeometry('box', [x, y, z], [], () => ({
-      shape: centeredBoxShape(x, y, z),
-    })),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('box', [], {
-      dimensions: {
-        x: {origin: [-x / 2, -y / 2, -z / 2], vector: [x, 0, 0]},
-        y: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, y, 0]},
-        z: {origin: [-x / 2, -y / 2, -z / 2], vector: [0, 0, z]},
-      },
-    }),
-  }) as unknown as SolidModel;
-}
-
-/**
- * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function cylinder(radius: number, y: number): SolidModel;
-export function cylinder(radius = 5, y = 10): SolidModel {
-  assertPositive('radius', radius);
-  assertPositive('y', y);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Cylinder',
-    geometry: evaluateSolidGeometry('cylinder', [radius, y], [], () => ({
-      shape: makeCylinder(radius, y, [0, -y / 2, 0], [0, 1, 0]),
-    })),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('cylinder'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * A concentric, constant-section tube, open at both ends and centered on Y.
- * @code3d.param outerRadius {kind: 'length', default: 5, label: 'Outer radius', constraints: {exclusiveMin: 0}}
- * @code3d.param innerRadius {kind: 'length', default: 3, label: 'Inner radius', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function tube(
-  outerRadius: number,
-  innerRadius: number,
-  y: number,
-): SolidModel;
-export function tube(outerRadius = 5, innerRadius = 3, y = 10): SolidModel {
-  assertPositive('outerRadius', outerRadius);
-  assertPositive('innerRadius', innerRadius);
-  assertPositive('y', y);
-  if (innerRadius >= outerRadius) {
-    throw new Error('innerRadius must be smaller than outerRadius.');
-  }
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Tube',
-    geometry: evaluateSolidGeometry(
-      'tube',
-      [outerRadius, innerRadius, y],
-      [],
-      () => {
-        const outer = sketchCircle(outerRadius, {
-          plane: 'XZ',
-          origin: [0, -y / 2, 0],
-        });
-        const inner = sketchCircle(innerRadius, {
-          plane: 'XZ',
-          origin: [0, -y / 2, 0],
-        });
-        // Hole wires run opposite to the outer boundary.
-        inner.wire.wrapped.Reverse();
-        const section = makeFace(outer.wire, [inner.wire]);
-        const direction = new Vector([0, y, 0]);
-        try {
-          return {shape: basicFaceExtrusion(section, direction)};
-        } finally {
-          direction.delete();
-          section.delete();
-          inner.delete();
-          outer.delete();
-        }
-      },
-    ),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('tube'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * A right-handed, constant-pitch coil with a circular wire section and plain ends.
- * coilRadius measures to the wire centerline; pitch is the Y advance per turn.
- * The centerline spans -pitch * turns / 2 to +pitch * turns / 2 on the Y axis.
- * Fractional turns are supported. No spring-specific end treatments are applied.
- * @code3d.param coilRadius {kind: 'length', default: 5, label: 'Coil radius', constraints: {exclusiveMin: 0}}
- * @code3d.param wireRadius {kind: 'length', default: 1, label: 'Wire radius', constraints: {exclusiveMin: 0}}
- * @code3d.param pitch {kind: 'length', default: 3, constraints: {exclusiveMin: 0}}
- * @code3d.param turns {kind: 'scalar', default: 3, constraints: {exclusiveMin: 0}}
- */
-export function coil(
-  coilRadius: number,
-  wireRadius: number,
-  pitch: number,
-  turns: number,
-): SolidModel;
-export function coil(
-  coilRadius = 5,
-  wireRadius = 1,
-  pitch = 3,
-  turns = 3,
-): SolidModel {
-  assertPositive('coilRadius', coilRadius);
-  assertPositive('wireRadius', wireRadius);
-  assertPositive('pitch', pitch);
-  assertPositive('turns', turns);
-  if (wireRadius >= coilRadius) {
-    throw new Error('wireRadius must be smaller than coilRadius.');
-  }
-  if (pitch <= 2 * wireRadius) {
-    throw new Error('pitch must be greater than the wire diameter.');
-  }
-  assertCoilClearance(coilRadius, wireRadius, pitch, turns);
-  const y = pitch * turns;
-  assertPositive('pitch * turns', y);
-  const geometry = evaluateSolidGeometry(
-    'coil',
-    [coilRadius, wireRadius, pitch, turns],
-    [],
-    () => {
-      const spine = makeHelix(pitch, y, coilRadius, [0, -y / 2, 0], [0, 1, 0]);
-      const start = spine.pointAt(0);
-      const tangent = spine.tangentAt(0);
-      const circle = makeCircle(wireRadius, start, tangent);
-      const section = assembleWire([circle]);
-      try {
-        return {shape: genericSweep(section, spine, {frenet: true})};
-      } finally {
-        section.delete();
-        circle.delete();
-        tangent.delete();
-        start.delete();
-        spine.delete();
-      }
-    },
-  );
-  // A fractional turn has asymmetric X/Z bounds, but its axis is still Y.
-  // The circular end sections extend beyond the centerline's Y interval.
-  const circumference = 2 * Math.PI * coilRadius;
-  const halfHeight =
-    y / 2 + wireRadius * (circumference / Math.hypot(circumference, pitch));
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Coil',
-    geometry,
-    elements: solidElements([
-      [0, -halfHeight, 0],
-      [0, halfHeight, 0],
-    ]),
-    operation: storedOperation('coil'),
-  }) as unknown as SolidModel;
-}
-
-function assertCoilClearance(
-  radius: number,
-  wireRadius: number,
-  pitch: number,
-  turns: number,
-): void {
-  // Neighboring turns approach obliquely: pitch alone overestimates clearance.
-  // For angular separation t, squared centerline distance is
-  // 2 R² (1 - cos(t)) + (pitch * t / 2π)². Its only possible minimum
-  // between half a turn and a full turn lies after the derivative's minimum.
-  // Beyond a full turn, the Y separation already exceeds the wire diameter.
-  if (turns <= 0.5) return;
-  const fullTurn = 2 * Math.PI;
-  const slopeSquared = (pitch / (fullTurn * radius)) ** 2;
-  if (slopeSquared >= 1) return;
-  let lower = fullTurn - Math.acos(-slopeSquared);
-  if (Math.sin(lower) + slopeSquared * lower >= 0) return;
-  let upper = fullTurn;
-  for (let iteration = 0; iteration < 48; iteration += 1) {
-    const middle = (lower + upper) / 2;
-    if (Math.sin(middle) + slopeSquared * middle < 0) lower = middle;
-    else upper = middle;
-  }
-  const separation = Math.min(fullTurn * turns, (lower + upper) / 2);
-  const distance = Math.hypot(
-    2 * radius * Math.sin(separation / 2),
-    (pitch * separation) / fullTurn,
-  );
-  if (distance <= 2 * wireRadius) {
-    throw new Error(
-      'Coil turns must not touch or overlap; increase pitch or decrease wireRadius.',
-    );
-  }
-}
-
-/** @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}} */
-export function sphere(radius: number): SolidModel;
-export function sphere(radius = 5): SolidModel {
-  assertPositive('radius', radius);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Sphere',
-    geometry: evaluateSolidGeometry('sphere', [radius], [], () => ({
-      shape: makeSphere(radius),
-    })),
-    elements: solidElements([
-      [0, -radius, 0],
-      [0, radius, 0],
-    ]),
-    operation: storedOperation('sphere'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * An ellipsoid centered at the local origin, with radii along X, Y and Z.
- * @code3d.param xRadius {kind: 'length', default: 5, label: 'X radius', constraints: {exclusiveMin: 0}}
- * @code3d.param yRadius {kind: 'length', default: 3, label: 'Y radius', constraints: {exclusiveMin: 0}}
- * @code3d.param zRadius {kind: 'length', default: 4, label: 'Z radius', constraints: {exclusiveMin: 0}}
- */
-export function ellipsoid(
-  xRadius: number,
-  yRadius: number,
-  zRadius: number,
-): SolidModel;
-export function ellipsoid(xRadius = 5, yRadius = 3, zRadius = 4): SolidModel {
-  assertPositive('xRadius', xRadius);
-  assertPositive('yRadius', yRadius);
-  assertPositive('zRadius', zRadius);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Ellipsoid',
-    geometry: evaluateSolidGeometry(
-      'ellipsoid',
-      [xRadius, yRadius, zRadius],
-      [],
-      () => ({shape: ellipsoidShape(xRadius, yRadius, zRadius)}),
-    ),
-    elements: solidElements([
-      [0, -yRadius, 0],
-      [0, yRadius, 0],
-    ]),
-    operation: storedOperation('ellipsoid'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * @code3d.param bottomRadius {kind: 'length', default: 5, label: 'Bottom radius', constraints: {exclusiveMin: 0}}
- * @code3d.param topRadius {kind: 'length', default: 3, label: 'Top radius', constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function frustum(
-  bottomRadius: number,
-  topRadius: number,
-  y: number,
-): SolidModel;
-export function frustum(bottomRadius = 5, topRadius = 3, y = 10): SolidModel {
-  assertPositive('bottomRadius', bottomRadius);
-  assertPositive('topRadius', topRadius);
-  assertPositive('y', y);
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: 'Frustum',
-    geometry: evaluateSolidGeometry(
-      'frustum',
-      [bottomRadius, topRadius, y],
-      [],
-      () => {
-        const bottom = sketchCircle(bottomRadius, {
-          plane: 'XZ',
-          origin: [0, -y / 2, 0],
-        });
-        const top = sketchCircle(topRadius, {
-          plane: 'XZ',
-          origin: [0, y / 2, 0],
-        });
-        return {shape: bottom.loftWith(top, {ruled: true})};
-      },
-    ),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('frustum'),
-  }) as unknown as SolidModel;
-}
-
-/**
- * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
- * @code3d.param y {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- * @code3d.param sides {kind: 'count', default: 6, constraints: {min: 3}}
- * @code3d.param rotation {kind: 'angle', default: 0}
- */
-export function regularPrism(
-  radius: number,
-  y: number,
-  sides: number,
-  rotation?: number,
-): SolidModel;
-export function regularPrism(
-  radius = 5,
-  y = 10,
-  sides = 6,
-  rotation = 0,
-): SolidModel {
-  assertPositive('radius', radius);
-  assertPositive('y', y);
-  if (!Number.isInteger(sides) || sides < 3) {
-    throw new Error('sides must be an integer greater than or equal to 3.');
-  }
-  if (!Number.isFinite(rotation)) {
-    throw new Error('rotation must be a finite number.');
-  }
-  return ModelObject.create<CanonicalElements, 'solid'>({
-    kind: 'solid',
-    name: `${sides}-sided prism`,
-    geometry: evaluateSolidGeometry(
-      'regular-prism',
-      [radius, y, sides, rotation],
-      [],
-      () => {
-        const sketch = sketchPolysides(radius, sides, 0, {
-          plane: 'XZ',
-          origin: [0, -y / 2, 0],
-        });
-        let shape = sketch.extrude(y, {
-          extrusionDirection: [0, 1, 0],
-        });
-        if (rotation !== 0) {
-          shape = shape.rotate(rotation, [0, 0, 0], [0, 1, 0]);
-        }
-        return {shape};
-      },
-    ),
-    elements: solidElements([
-      [0, -y / 2, 0],
-      [0, y / 2, 0],
-    ]),
-    operation: storedOperation('regularPrism'),
-  }) as unknown as SolidModel;
-}
-
 /** @internal */
 export function primitiveConstructor<Args extends unknown[]>(
   build: (...args: Args) => Shape3D,
@@ -7498,60 +7123,8 @@ export function retainModelGeometry(
   }
 }
 
-export const authoringApi = Object.freeze({
-  originCenter,
-  input,
-  timeOffset,
-  dimension,
-  boundsAnnotation,
-  anchorAnnotation,
-  captureInspectData,
-  offset,
-  rotate,
-  pivot,
-  pivotVertex,
-  pivotPoint,
-  axisEdge,
-  axisLine,
-  coupleRotation,
-  on,
-  align,
-  cache,
-  font,
-  googleFont,
-  text,
-  sketch,
-  circle,
-  ellipse,
-  extrude,
-  rectangle,
-  regularPolygon,
-  point,
-  line,
-  arc,
-  bezier,
-  spline,
-  loft,
-  revolve,
-  sweep,
-  wrap,
-  thicken,
-  box,
-  cylinder,
-  tube,
-  coil,
-  sphere,
-  ellipsoid,
-  frustum,
-  regularPrism,
-  group,
-  distance,
-  union,
-  cut,
-  intersect,
-});
-
-function storedOperation(
+/** @internal */
+export function storedOperation(
   kind: ModelOperationKind,
   inputs: readonly StoredOperationInput[] = [],
   options: Readonly<{
@@ -7684,7 +7257,8 @@ function createModelGeometryValue(
   }
 }
 
-function evaluateSolidGeometry(
+/** @internal */
+export function evaluateSolidGeometry(
   operation: string,
   arguments_: readonly KernelKeyPart[],
   inputs: readonly KernelArtifact<unknown>[],
@@ -8018,7 +7592,8 @@ function boundsCenter(bounds: LocalBounds): Vec3 {
   return [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
 }
 
-function solidElements(bounds: LocalBounds): StoredElements {
+/** @internal */
+export function solidElements(bounds: LocalBounds): StoredElements {
   return {axis: {kind: 'line', transform: translation(boundsCenter(bounds))}};
 }
 
@@ -8496,31 +8071,6 @@ function requireModelKind<Kind extends ModelKind>(
 }
 
 /** @internal */
-export namespace box {
-  export function inspectDimension(
-    args: [number, number, number],
-    context: InspectContext<SolidModel>,
-  ): InspectResult | undefined {
-    if (!context.return) return undefined;
-    const parameter = context.focused.parameter!;
-    const value = args[['x', 'y', 'z'].indexOf(parameter)];
-    return {
-      target: [
-        context.return,
-        ModelObject.inspectDimension(
-          context.return,
-          parameter,
-          value,
-          context.return,
-          identityRigidTransform,
-          parameter.toUpperCase(),
-        ),
-      ],
-    };
-  }
-}
-
-/** @internal */
 export namespace extrude {
   export function inspectFaces(
     [face, distance]: [FaceModel<{}> | readonly FaceModel<{}>[], number],
@@ -8866,12 +8416,6 @@ function booleanOperands(
     ),
   );
   return {first: runtimeOperands[0], others: runtimeOperands.slice(1)};
-}
-
-function assertPositive(label: string, value: number): void {
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`${label} must be a positive finite number.`);
-  }
 }
 
 function assertFiniteVector(label: string, value: Vec3): void {

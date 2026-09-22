@@ -94,6 +94,32 @@ export default defineConfig({
             collapsed: true,
             items: [
               {slug: `docs/packages/${name}`, label: 'Overview'},
+              ...(name === 'core'
+                ? [
+                    {
+                      label: 'API reference',
+                      items: [
+                        {
+                          slug: 'docs/packages/core/api',
+                          label: 'Browse by task',
+                        },
+                        {
+                          label: 'Solid primitives',
+                          items: [
+                            {slug: 'docs/packages/core/api/box'},
+                            {slug: 'docs/packages/core/api/cylinder'},
+                            {slug: 'docs/packages/core/api/sphere'},
+                            {slug: 'docs/packages/core/api/ellipsoid'},
+                            {slug: 'docs/packages/core/api/frustum'},
+                            {slug: 'docs/packages/core/api/regular-prism'},
+                            {slug: 'docs/packages/core/api/tube'},
+                            {slug: 'docs/packages/core/api/coil'},
+                          ],
+                        },
+                      ],
+                    },
+                  ]
+                : []),
               {autogenerate: {directory: `../${name}/docs`}},
             ],
           })),

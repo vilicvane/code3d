@@ -67,6 +67,23 @@ export const collections = {
     schema: docsSchema({
       extend: z.object({
         package: z.object({name: z.string(), version: z.string()}).optional(),
+        sourceReview: z
+          .object({
+            packageVersion: z.string().min(1),
+            sources: z
+              .array(
+                z.object({
+                  path: z.string().min(1),
+                  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+                  commit: z
+                    .string()
+                    .regex(/^[a-f0-9]{40,64}$/)
+                    .optional(),
+                }),
+              )
+              .min(1),
+          })
+          .optional(),
       }),
     }),
   }),

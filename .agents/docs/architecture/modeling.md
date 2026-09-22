@@ -4,6 +4,15 @@
 [Core README](../../../packages/core/README.md)、
 [公开入口](../../../packages/core/src/library/index.ts)和类型测试阅读。
 
+API 文档按批次完善时，同步将相应实现按职责拆出。八个 Solid Primitives 分别由
+`box.ts`、`cylinder.ts`、`sphere.ts`、`ellipsoid.ts`、`frustum.ts`、
+`regular-prism.ts`、`tube.ts` 和 `coil.ts` 拥有各自构造、参数标注与几何创建，
+箱体尺寸检查器和线圈净空检查也跟随对应 API。`validation.ts` 共享正数校验；通用模型构造、
+操作记录、缓存与参考元素机制保留在 `runtime.ts`。`authoring-api.ts` 只汇总作者
+入口，避免运行时反向依赖独立 API 模块。公开导出与编辑器跟踪指向实际实现，
+不保留旧模块转发入口。文档源码基准的维护方式见
+[网站维护说明](../../../packages/web/README.md#source-review-baselines)。
+
 ## 模型值与公开边界
 
 模型操作产生新值，原几何可共享，但旧模型及其引用的可观察行为不变。内部统一的

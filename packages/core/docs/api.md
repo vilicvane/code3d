@@ -1,12 +1,41 @@
 ---
 title: Modeling API
-description: A curated map of the public core modeling operations.
+description: Browse the Code3D TypeScript API by modeling task, from primitives and sketches to solid operations, placement, topology and measurements.
 sidebar:
   order: 1
+  hidden: true
 ---
 
 Construct geometry, combine models and query the result with the public Core
 API. For a first runnable model, see the [Core example](../README.md#example).
+
+## Browse by task
+
+Choose a starting shape, build the part, then place and measure it. Functions,
+model methods and reference properties are grouped by what they do.
+
+| Category                         | APIs and reading                                                                                                                                                                                                                 |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Solid primitives                 | [box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil](#solid-primitives)                                                                                                                                      |
+| Points, curves and profiles      | [point, line, arc, bezier, spline, circle, ellipse, rectangle and regularPolygon](#profiles-and-curves)                                                                                                                          |
+| Sketches                         | [sketch, entities, constraints, point references, derive, face and faces](sketches.md)                                                                                                                                           |
+| Text and fonts                   | [text, font and googleFont](text.md)                                                                                                                                                                                             |
+| Shape construction               | [extrude and loft](#profiles-and-curves), [revolve](#rotational-solids), [sweep](#path-sweeps), [wrap and thicken](#curved-surface-wrapping)                                                                                     |
+| Booleans and solid modifications | [union, cut and intersect](#composition-and-boolean-operations); [fillet, chamfer and shell](#model-operations)                                                                                                                  |
+| Origins and local transforms     | [originPoint, originVertex, originOffset, originCenter and model.rotate](#origins-and-rotation); [scaled](#scaling)                                                                                                              |
+| Groups and placement             | [group and expose](#composition-and-boolean-operations); [relate, on and align](#anchors-and-relations); [offset, rotate and pivot/axis selectors](#independent-placement-transformations); [coupleRotation](#rotation-coupling) |
+| Topology and references          | [Vertices, edges and surfaces](#topology); [frames, origins and centers](#origins-and-rotation); [axes, directional bounds, flip and reverse](#anchors-and-relations)                                                            |
+| Geometry measurements            | [distance, length, area and volume](#measurements); [bounds and position](#geometry-measurements)                                                                                                                                |
+| Materials and appearance         | [material, CSS colors and native Three.js materials](#materials)                                                                                                                                                                 |
+| Parameters, time and caching     | [input](runtime.md#numeric-inputs), [timeOffset](runtime.md#time-offset) and [cache](#cached-computations)                                                                                                                       |
+
+For reusable library development, see [custom primitives](custom-primitives.mdx),
+[model data](#anchors-and-relations) and [custom inspectors and annotations](runtime.md#source-inspection).
+Execution hosts use the separate [tooling entry](runtime.md#source-and-development).
+The [model values guide](values.md) explains the capabilities of different
+model kinds.
+
+## Imports and types
 
 Import these functions from `@code3d/core`. The editor's TypeScript signatures
 provide exact overloads and inferred model interfaces.
@@ -28,28 +57,23 @@ for playback and evaluation semantics.
 
 ## Solid primitives
 
-| Function                                     | Meaning                           |
-| -------------------------------------------- | --------------------------------- |
-| `box(x, y, z)`                               | Box dimensions along X, Y, and Z  |
-| `cylinder(radius, y)`                        | Cylinder with its axis along Y    |
-| `sphere(radius)`                             | Sphere of the given radius        |
-| `ellipsoid(xRadius, yRadius, zRadius)`       | Ellipsoid with three axis radii   |
-| `frustum(bottomRadius, topRadius, y)`        | Truncated cone                    |
-| `regularPrism(radius, y, sides, rotation?)`  | Regular polygonal prism           |
-| `tube(outerRadius, innerRadius, y)`          | Straight tube with a through bore |
-| `coil(coilRadius, wireRadius, pitch, turns)` | Circular-wire coil along Y        |
+| Function                                                            | Meaning                           |
+| ------------------------------------------------------------------- | --------------------------------- |
+| [`box(x, y, z)`](api/box.md)                                        | Box dimensions along X, Y, and Z  |
+| [`cylinder(radius, y)`](api/cylinder.md)                            | Cylinder with its axis along Y    |
+| [`sphere(radius)`](api/sphere.md)                                   | Sphere of the given radius        |
+| [`ellipsoid(xRadius, yRadius, zRadius)`](api/ellipsoid.md)          | Ellipsoid with three axis radii   |
+| [`frustum(bottomRadius, topRadius, y)`](api/frustum.md)             | Truncated cone                    |
+| [`regularPrism(radius, y, sides, rotation?)`](api/regular-prism.md) | Regular polygonal prism           |
+| [`tube(outerRadius, innerRadius, y)`](api/tube.md)                  | Straight tube with a through bore |
+| [`coil(coilRadius, wireRadius, pitch, turns)`](api/coil.md)         | Circular-wire coil along Y        |
 
-Ellipsoids are centered at the local origin. The three positive, finite radii
-follow local X, Y and Z; `ellipsoid(7, 4, 5)` spans 14 × 8 × 10 units. Select a
-radius in the editor and press Tab to edit it. Like other primitives, incomplete
-calls have runtime editing defaults (5, 3 and 4); TypeScript requires all three.
-See the [primitive example](../../app/examples/primitives/primitives.ts) or use
-an ellipsoid as a target in the [wrapping example](../../app/examples/operations/wrap.ts).
+Choose a constructor by its section: rectangular, circular, spherical,
+ellipsoidal, tapered, polygonal, hollow or helical. Each reference explains its
+own dimensions, local origin, reference elements, measurements and constraints.
+See the [basic shapes example](../../app/examples/primitives/primitives.ts) to
+inspect all eight solids in one source file.
 
-Tubes are centered on Y; the inner radius must be smaller than the outer
-radius. For coils, `coilRadius` is measured to the wire centerline and
-`pitch` is the advance per turn. Fractional turns are supported; the wire
-must fit inside the coil radius and neighboring turns must remain separated.
 Use [`@code3d/screws`](../../screws/docs/assembly.mdx) for standard fasteners and matching hole tools.
 Use [`@code3d/gears`](../../gears/README.md) for nominal spur, helical and internal gear parts.
 
@@ -142,7 +166,7 @@ placement is respected. A helical profile must have one outer boundary without
 holes. Intersecting turns and profiles that cross the axis may fail to produce a
 valid solid; leave clearance between turns and keep the profile off the axis.
 For a multi-turn coil with round wire and automatic pitch clearance checks,
-[`coil`](#solid-primitives) remains the shorter constructor.
+[`coil`](api/coil.md) remains the shorter constructor.
 
 ### Path sweeps
 

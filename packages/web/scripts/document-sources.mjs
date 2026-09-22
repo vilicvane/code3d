@@ -2,6 +2,7 @@ import {glob, readFile, stat} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {frontmatter, reviewedPackage} from './source-review.mjs';
 
 export const repository = fileURLToPath(new URL('../../../', import.meta.url));
 export const featuredPackages = [
@@ -90,10 +91,17 @@ export async function markdownDocuments(
         location.packageDirectory,
         await packageMetadata(location.packageDirectory, root),
       );
+    const {sourceReview} = frontmatter(
+      await readFile(path.join(root, source), 'utf8'),
+    ).data;
     documents.push({
       source,
       ...location,
-      package: packages.get(location.packageDirectory),
+      package: reviewedPackage(
+        packages.get(location.packageDirectory),
+        sourceReview,
+      ),
+      sourceReview,
       repository: root,
       sourceCommit,
     });

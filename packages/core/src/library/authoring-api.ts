@@ -1,0 +1,106 @@
+import {cylinder} from './cylinder.js';
+import {tube} from './tube.js';
+import {coil} from './coil.js';
+import {sphere} from './sphere.js';
+import {ellipsoid} from './ellipsoid.js';
+import {frustum} from './frustum.js';
+import {regularPrism} from './regular-prism.js';
+import {input} from './input.js';
+import {timeOffset} from './time-offset.js';
+import {
+  dimension,
+  boundsAnnotation,
+  anchorAnnotation,
+  captureInspectData,
+} from './inspect.js';
+import {cache} from './cached.js';
+import {font, googleFont} from './font.js';
+import {sketch} from './sketch.js';
+import {box} from './box.js';
+import {
+  originCenter,
+  offset,
+  rotate,
+  pivot,
+  pivotVertex,
+  pivotPoint,
+  axisEdge,
+  axisLine,
+  coupleRotation,
+  on,
+  align,
+  text,
+  circle,
+  ellipse,
+  extrude,
+  rectangle,
+  regularPolygon,
+  point,
+  line,
+  arc,
+  bezier,
+  spline,
+  loft,
+  revolve,
+  sweep,
+  wrap,
+  thicken,
+  group,
+  distance,
+  union,
+  cut,
+  intersect,
+} from './runtime.js';
+
+export const authoringApi = Object.freeze({
+  originCenter,
+  input,
+  timeOffset,
+  dimension,
+  boundsAnnotation,
+  anchorAnnotation,
+  captureInspectData,
+  offset,
+  rotate,
+  pivot,
+  pivotVertex,
+  pivotPoint,
+  axisEdge,
+  axisLine,
+  coupleRotation,
+  on,
+  align,
+  cache,
+  font,
+  googleFont,
+  text,
+  sketch,
+  circle,
+  ellipse,
+  extrude,
+  rectangle,
+  regularPolygon,
+  point,
+  line,
+  arc,
+  bezier,
+  spline,
+  loft,
+  revolve,
+  sweep,
+  wrap,
+  thicken,
+  box,
+  cylinder,
+  tube,
+  coil,
+  sphere,
+  ellipsoid,
+  frustum,
+  regularPrism,
+  group,
+  distance,
+  union,
+  cut,
+  intersect,
+});

@@ -404,6 +404,90 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  primitives: [
+    {
+      id: 'cylinder',
+      image: 'primitives-cylinder',
+      label: 'cylinder',
+      description: 'A cylinder with radius 5 and height 12.',
+      focus: {
+        context: 'export const roundCylinder = cylinder(5, 12)',
+        token: 'cylinder',
+      },
+    },
+    {
+      id: 'sphere',
+      image: 'primitives-sphere',
+      label: 'sphere',
+      description: 'A sphere with radius 6.',
+      focus: {
+        context: 'export const ball = sphere(6)',
+        token: 'sphere',
+      },
+    },
+    {
+      id: 'ellipsoid',
+      image: 'primitives-ellipsoid',
+      label: 'ellipsoid',
+      description: 'An ellipsoid with X, Y and Z radii of 7, 4 and 5.',
+      focus: {
+        context: 'export const oval = ellipsoid(7, 4, 5)',
+        token: 'ellipsoid',
+      },
+    },
+    {
+      id: 'frustum',
+      image: 'primitives-frustum',
+      label: 'frustum',
+      description:
+        'A tapered cylinder with bottom radius 6, top radius 3 and height 12.',
+      focus: {
+        context: 'export const taperedCylinder = frustum(6, 3, 12)',
+        token: 'frustum',
+      },
+    },
+    {
+      id: 'regular-prism',
+      image: 'primitives-regular-prism',
+      label: 'regularPrism',
+      description: 'A hexagonal prism with circumradius 6 and height 12.',
+      focus: {
+        context: 'export const hexagonalPrism = regularPrism(6, 12, 6)',
+        token: 'regularPrism',
+      },
+    },
+    {
+      id: 'tube',
+      image: 'primitives-tube',
+      label: 'tube',
+      description: 'A tube with outer radius 5, inner radius 3 and height 12.',
+      focus: {
+        context: 'export const hollowTube = tube(5, 3, 12)',
+        token: 'tube',
+      },
+    },
+    {
+      id: 'coil',
+      image: 'primitives-coil',
+      label: 'coil',
+      description:
+        'A three-turn coil with centerline radius 5, wire radius 1 and pitch 4.',
+      focus: {
+        context: 'export const helicalCoil = coil(5, 1, 4, 3)',
+        token: 'coil',
+      },
+    },
+    {
+      id: 'box',
+      image: 'primitives',
+      label: 'box',
+      description: 'A box with dimensions 12 by 10 by 8.',
+      focus: {
+        context: 'export const cuboid = box(12, 10, 8)',
+        token: 'box',
+      },
+    },
+  ],
   gears: [
     {
       id: 'bore',

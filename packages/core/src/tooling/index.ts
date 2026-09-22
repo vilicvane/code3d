@@ -1,3 +1,4 @@
+export {authoringApi} from '../library/authoring-api.js';
 export {beginModelInputs} from '../library/input.js';
 export type {ModelInputValues, ModelInputDefinition} from '../library/input.js';
 export {beginTimeOffset} from '../library/time-offset.js';
@@ -68,7 +69,6 @@ export type {SketchRegion} from '../library/sketch-regions.js';
 
 export {describeOpenCascadeException} from '../library/open-cascade-error.js';
 export {
-  authoringApi,
   beginModelEvaluation,
   beginModelInspection,
   relationPreview,

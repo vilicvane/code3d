@@ -52,7 +52,8 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 
 ## Documentation
 
-- [Modeling API](docs/api.md): primitives, operations, materials and measurements.
+- [Modeling API by task](docs/api.md#browse-by-task): primitives, operations, placement, materials and measurements.
+- [Solid primitives](docs/api.md#solid-primitives): individual references for box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil.
 - [Model values](docs/values.md): immutable values and geometry measurements.
 - [Local coordinates](docs/local-coordinates.md): frames, origins and placement conventions.
 - [Relations](docs/relations.mdx): position parts using bounds, geometry and frames.

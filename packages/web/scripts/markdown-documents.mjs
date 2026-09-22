@@ -9,6 +9,7 @@ import {load as parseYaml} from 'js-yaml';
 import {renderSamples} from '../../app/render-samples/catalog.ts';
 
 import {publishLink} from './document-sources.mjs';
+import {sourceReferences} from './source-review.mjs';
 export {
   repository,
   featuredPackages,
@@ -170,7 +171,22 @@ export async function renderMarkdown(document, documents) {
   if (document.package)
     markdown = markdown.replace(
       /^(# .+\n)/,
-      `$1\n${document.package.name} · v${document.package.version}\n`,
+      `$1\n${document.package.name} · ${document.sourceReview ? 'Reviewed with ' : ''}v${document.package.version}\n`,
     );
+  if (document.sourceReview) {
+    const sources = sourceReferences(
+      document.repository,
+      document.sourceReview,
+    );
+    markdown +=
+      '\n## Reviewed source files\n\n' +
+      sources
+        .map(
+          source =>
+            `- ${source.href ? `[${source.path}](${source.href})` : `\`${source.path}\``} — SHA-256: \`${source.sha256}\`; ${source.commit ? `commit: \`${source.commit}\`` : 'commit unavailable for this content'}.`,
+        )
+        .join('\n') +
+      '\n';
+  }
   return markdown.trim() + '\n';
 }

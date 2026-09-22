@@ -194,7 +194,7 @@ test(
         result.definition!.some(
           entry =>
             entry.fileName ===
-            'file:///workspace/node_modules/%40code3d/core/src/library/runtime.ts',
+            'file:///workspace/node_modules/%40code3d/core/src/library/box.ts',
         ),
       );
       assert.equal(
