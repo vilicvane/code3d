@@ -7,6 +7,7 @@ import {
   dimension,
   distance,
   group,
+  frame,
   line,
   type Anchor,
   type Inspector,
@@ -217,6 +218,14 @@ const candidateDimension: PreviewValue = dimension({
   candidates: [{start: [-6, -7, -8], end: [6, -7, -8]}],
 });
 void candidateDimension;
+
+const referenceDimension: PreviewValue = dimension({
+  owner: frame(),
+  value: 5,
+  start: [0, 0, 0],
+  end: [3, 4, 0],
+});
+void referenceDimension;
 
 export function readonlyMeasurements() {
   const body = box(2, 3, 4);

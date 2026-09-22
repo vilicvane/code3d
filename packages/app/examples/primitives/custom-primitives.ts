@@ -28,10 +28,9 @@ const short = twistKnob(10, 3, shortHeight, 30)
   .originOffset(-15, -shortHeight / 2, 0)
   .material('#8ed5d1');
 
-export const customPrimitivesExample = group(
-  [base, tall, short],
-  'Custom twisted knobs',
-);
+export const customPrimitivesExample = group([base, tall, short], {
+  name: 'Custom twisted knobs',
+});
 
 function buildTwistedKnob(
   radius: number,

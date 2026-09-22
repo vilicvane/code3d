@@ -13,7 +13,7 @@ import * as ISO7379 from '@code3d/screws/iso7379';
 function place(model: SolidModel, column: number, row: number, name: string) {
   return group(
     [model.originCenter().originOffset(-column * 24, 0, -row * 36)],
-    name,
+    {name: name},
   );
 }
 
@@ -54,5 +54,5 @@ export default group(
     ),
     place(ISO7379.screw(8, 20), 4, 1, 'ISO 7379 / GB/T 5281 · shoulder'),
   ],
-  'Screw head shapes and drives',
+  {name: 'Screw head shapes and drives'},
 ).material('#aaa');

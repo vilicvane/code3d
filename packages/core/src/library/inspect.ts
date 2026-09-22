@@ -1,4 +1,4 @@
-import type {Anchor, Model, SolidModel} from './runtime.js';
+import type {Anchor, Frame, Model, SolidModel} from './runtime.js';
 import type {Sketch, SketchPoint} from './sketch.js';
 import type {RigidTransform, Vec3} from './spatial.js';
 
@@ -53,7 +53,7 @@ type DimensionLines =
   | Readonly<{candidates: readonly DimensionSegment[]}>
   | Readonly<{at: Vec3}>;
 type DimensionOptions = Readonly<{
-  owner: Model;
+  owner: Model | Frame;
   value: number;
   axisLabel?: string;
 }>;

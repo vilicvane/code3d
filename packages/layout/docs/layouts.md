@@ -123,7 +123,7 @@ const pins = grid(repeat(cylinder(3, 10), 12), {
   axes: ['x', 'z'],
   gap: 8,
 });
-export default group(pins, 'Grid of pins');
+export default group(pins, {name: 'Grid of pins'});
 ```
 
 ![Twelve cylindrical pins arranged in four columns and three rows.](../../web/src/assets/models/layout-grid.png)
@@ -224,7 +224,7 @@ const fins = radial(repeat(box(12, 8, 3), 12), {
   axis: 'y',
   rotate: true,
 });
-export default group(fins, 'Radial fins');
+export default group(fins, {name: 'Radial fins'});
 ```
 
 ![Twelve 12 by 8 by 3 mm fins placed around a 30 mm radius circle and rotated with the layout.](../../web/src/assets/models/layout-radial.png)

@@ -15,6 +15,98 @@ declare const window: Window & {
 };
 
 test(
+  'frame-only measurements render and export without fabricated model geometry',
+  {timeout: 90_000},
+  async t => {
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext({
+      viewport: {width: 1440, height: 1000},
+    });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/\[mobx\]/i.test(message.text())) errors.push(message.text());
+    });
+    const source = `import {distance, frame, offset} from '@code3d/core';
+const base = frame('Base');
+const tip = frame('Tip').relate(() => offset(12, 16, 0));
+export default distance(base.origin, tip.origin);`;
+    await page.route('**/src/project/default-project.ts*', route =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body: `export const defaultProject = ${JSON.stringify({files: [{path: '/model.ts', source}]})};`,
+      }),
+    );
+    await page.route('**/src/main.ts*', async route => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        body:
+          (await response.text()) +
+          '\nwindow.inspectionApp = {viewport, codeEditor, compiler, previewState};',
+      });
+    });
+    await page.goto(process.env.CODE3D_TEST_URL!, {
+      waitUntil: 'domcontentloaded',
+    });
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    await page.evaluate(() => {
+      const editor = window.inspectionApp.codeEditor.editor;
+      editor.setPosition(
+        editor
+          .getModel()!
+          .getPositionAt(editor.getValue().lastIndexOf('distance(') + 1),
+      );
+    });
+    await page.waitForFunction(() => {
+      const {previewState, viewport} = window.inspectionApp;
+      return (
+        !previewState.inspecting &&
+        viewport['inspectionScene']?.target.some(
+          item => item.kind === 'dimension',
+        )
+      );
+    });
+    const rendered = await page.evaluate(async () => {
+      const {previewState, viewport} = window.inspectionApp;
+      const scene = viewport['inspectionScene']!;
+      const dimension = scene.target.find(item => item.kind === 'dimension')!;
+      const measurement = viewport['decorationLayers']
+        .get('inspection')!
+        .find(item => item.measurement)!.measurement!;
+      const png = await viewport.captureImage(1200, 800);
+      return {
+        kinds: [...scene.objects.values()].map(object => object.kind),
+        meshes: [...scene.objects.values()].filter(object => object.mesh)
+          .length,
+        owner: dimension.model.kind,
+        text: measurement.getObjectByName('distance-label')!.userData.text,
+        line: !!measurement.getObjectByName('distance-line'),
+        ticks: measurement['ticks'].geometry.instanceCount,
+        pngBytes: png.size,
+        diagnostic: previewState.inspectionDiagnostic,
+      };
+    });
+    assert.ok(rendered.kinds.length > 0);
+    assert.ok(rendered.kinds.every(kind => kind === 'reference'));
+    assert.equal(rendered.meshes, 0);
+    assert.equal(rendered.owner, 'reference');
+    assert.equal(rendered.text, '20');
+    assert.equal(rendered.line, true);
+    assert.equal(rendered.ticks, 2);
+    assert.ok(rendered.pngBytes > 1000);
+    assert.equal(rendered.diagnostic, undefined);
+    await page.screenshot({path: '/tmp/code3d-231-reference-measurement.png'});
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'gear array member carets draw only the assembled gears on screen and in exports',
   {timeout: 120_000},
   async t => {

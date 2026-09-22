@@ -12,5 +12,5 @@ const tiles = fillGrid(tile, space, {
 });
 export default group(
   [space.material('#526273'), ...tiles.map(tile => tile.material('#8ed5d1'))],
-  'Fill a grid within bounds',
+  {name: 'Fill a grid within bounds'},
 );

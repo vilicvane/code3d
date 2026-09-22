@@ -19,7 +19,6 @@ const fins = fillFlex(box(2, 10, 30).material('#8ed5d1'), ventilationSpace, {
   gap: 5,
 });
 
-export default group(
-  [base, leftSide, rightSide, ...fins],
-  'Ventilation grille',
-);
+export default group([base, leftSide, rightSide, ...fins], {
+  name: 'Ventilation grille',
+});

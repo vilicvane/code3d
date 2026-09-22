@@ -49,11 +49,9 @@ export type {
 } from './sketch.js';
 
 export {
-  getModelData,
   offset,
   originCenter,
   rotate,
-  setModelData,
   pivot,
   pivotVertex,
   pivotPoint,
@@ -76,6 +74,7 @@ export {
   text,
   frustum,
   group,
+  frame,
   inspectGroupMembers,
   intersect,
   line,
@@ -117,6 +116,8 @@ export type {
   ExposedValue,
   FaceAnchor,
   FrameAnchor,
+  Frame,
+  GroupOptions,
   RotationCouplingConfig,
   FaceModel,
   GeometryCapabilities,
@@ -132,6 +133,7 @@ export type {
   ModelForKind,
   ModelGeometryKind,
   ModelKind,
+  ModelMetadata,
   NamedElements,
   PlanarElements,
   PointAnchor,

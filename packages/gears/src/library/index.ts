@@ -4,19 +4,19 @@ import {
   box,
   cut,
   cylinder,
-  getModelData,
   group,
   inspectGroupMembers,
+  line,
   offset,
-  setModelData,
   union,
 } from '@code3d/core';
 import type {
   Bound,
   CanonicalElements,
+  Edge,
   InspectContext,
   InspectResult,
-  LineAnchor,
+  PointAnchor,
   SolidModel,
 } from '@code3d/core';
 import {
@@ -43,13 +43,17 @@ export type {
 } from './specification.js';
 export {moduleSeriesI, moduleSeriesII} from './specification.js';
 
-export type GearElements = CanonicalElements &
+type GearFaceElements = CanonicalElements &
   Readonly<{
-    gearAxis: LineAnchor;
     gearFaceUp: Bound;
     gearFaceDown: Bound;
   }>;
+export type GearElements = GearFaceElements &
+  Readonly<{gearAxis: Edge; gearCenter: PointAnchor}>;
 export type Gear = SolidModel<GearElements>;
+
+/** One shaft: a single gear, or rigidly connected incoming and outgoing gears. */
+export type GearAssemblyEntry = Gear | readonly [Gear, Gear];
 
 type GearProfile = Readonly<{
   kind: 'external' | 'internal';
@@ -63,21 +67,54 @@ type GearProfile = Readonly<{
 
 const gearProfileKey = Symbol('gearProfile');
 
-function withGearProfile(gear: Gear, profile: GearProfile): Gear {
-  setModelData(gear, gearProfileKey, profile);
-  return gear;
+// Store dimensions relative to the nominal axis length, which follows scaling.
+// The snapshot needs no operation history or Core-specific metadata handlers.
+type GearMetadata = Omit<
+  GearProfile,
+  'normalModule' | 'faceWidth' | 'pitchRadius'
+> &
+  Readonly<{modulePerFaceWidth: number}>;
+
+function withGearProfile(
+  gear: SolidModel<GearFaceElements>,
+  profile: Omit<GearProfile, 'pitchRadius'>,
+): Gear {
+  const {kind, teeth, helixAngle, hand, normalModule, faceWidth} = profile;
+  const axis = line([0, -faceWidth / 2, 0], [0, faceWidth / 2, 0]);
+  return gear
+    .expose({axis, gearAxis: axis, gearCenter: axis.midpoint})
+    .withMetadata({
+      [gearProfileKey]: {
+        kind,
+        teeth,
+        helixAngle,
+        hand,
+        modulePerFaceWidth: normalModule / faceWidth,
+      } satisfies GearMetadata,
+    });
 }
 
 function profileOf(gear: Gear): GearProfile {
-  const profile = getModelData<GearProfile>(gear, gearProfileKey);
+  const profile = gear.metadata[gearProfileKey] as GearMetadata | undefined;
   if (!profile)
-    throw new Error(
-      'Gear assembly requires a gear created by @code3d/gears, optionally followed by relate() or material().',
-    );
-  return profile;
+    throw new Error('Gear assembly requires a gear created by @code3d/gears.');
+  const faceWidth = gear.gearAxis.length;
+  const normalModule = profile.modulePerFaceWidth * faceWidth;
+  return {
+    ...profile,
+    faceWidth,
+    normalModule,
+    pitchRadius:
+      (normalModule * profile.teeth) /
+      (2 * Math.cos((profile.helixAngle * Math.PI) / 180)),
+  };
 }
 
-/** Adjust the pair at the corresponding adjacent position in the gear array. */
+function entryGears(entry: GearAssemblyEntry): readonly Gear[] {
+  return 'frame' in entry ? [entry] : entry;
+}
+
+/** Adjust the mesh between adjacent shaft entries in the assembly array. */
 export type GearPairConfig = Readonly<{
   /**
    * Turn from the preceding center-line direction, in degrees. Defaults to 0
@@ -91,11 +128,11 @@ export type GearPairConfig = Readonly<{
   axialOffset?: number;
 }>;
 
-/** Shared adjustments and optional overrides for adjacent gear pairs. */
+/** Shared adjustments and optional overrides for meshes between adjacent shafts. */
 export type GearAssemblyConfig = Readonly<{
   centerDistanceDelta?: number;
   axialOffset?: number;
-  /** Pair 0 joins gears 0–1, pair 1 joins gears 1–2, and so on. */
+  /** Pair i joins entry i's outgoing gear to entry i + 1's incoming gear. */
   pairs?: readonly GearPairConfig[];
 }>;
 
@@ -150,7 +187,6 @@ function toothTwist(profile: GearProfile, localY: number): number {
 function alignedToothAngle(
   source: GearProfile,
   target: GearProfile,
-  sourceAngle: number,
   directionAngle: number,
   sourceY: number,
   targetY: number,
@@ -161,25 +197,24 @@ function alignedToothAngle(
       ? directionAngle + Math.PI
       : directionAngle;
   const targetContact = internal ? sourceContact : directionAngle + Math.PI;
-  const ratio = ((internal ? 1 : -1) * source.teeth) / target.teeth;
   const raw =
-    ratio * sourceAngle +
     (Math.PI -
       source.teeth * (sourceContact + toothTwist(source, sourceY)) -
       target.teeth * (targetContact + toothTwist(target, targetY))) /
-      target.teeth;
+    target.teeth;
   const pitch = (2 * Math.PI) / target.teeth;
   return raw - Math.round(raw / pitch) * pitch;
 }
 
 /**
- * Mesh each adjacent pair in array order, returning related gear values.
+ * Mesh adjacent shafts; a tuple rigidly connects its incoming and outgoing gears.
+ * Return all related gears in flattened input order.
  * @code3d.inspect assembleGears.inspect
  * @code3d.inspect gears assembleGears.inspect
  * @code3d.inspect config assembleGears.inspect
  */
 export function assembleGears(
-  gears: readonly Gear[],
+  gears: readonly GearAssemblyEntry[],
   config: GearAssemblyConfig = {},
 ): Gear[] {
   if (config.pairs && config.pairs.length !== Math.max(0, gears.length - 1))
@@ -187,74 +222,81 @@ export function assembleGears(
       'Pair overrides must match the number of adjacent gear pairs.',
     );
 
-  const assembled = [...gears];
-  const toothAngles = gears.map(() => 0);
-  const axisY = gears.map(() => 0);
+  const assembled: Gear[] = [];
   let centerLineAngle = 0;
-  for (let index = 1; index < gears.length; index++) {
-    const pair = config.pairs?.[index - 1];
-    const source = assembled[index - 1];
-    const target = gears[index];
-    const sourceProfile = profileOf(source);
-    const targetProfile = profileOf(target);
-    const distance =
-      nominalCenterDistance(source, target) +
-      finite(
-        'Center distance delta',
-        pair?.centerDistanceDelta ?? config.centerDistanceDelta ?? 0,
+  for (const [index, entry] of gears.entries()) {
+    const [incoming, outgoing] = entryGears(entry);
+    let placed = incoming;
+    if (index > 0) {
+      const pair = config.pairs?.[index - 1];
+      const source = assembled[assembled.length - 1];
+      const target = incoming;
+      const sourceProfile = profileOf(source);
+      const targetProfile = profileOf(target);
+      const distance =
+        nominalCenterDistance(source, target) +
+        finite(
+          'Center distance delta',
+          pair?.centerDistanceDelta ?? config.centerDistanceDelta ?? 0,
+        );
+      if (distance <= 0)
+        throw new Error('Adjusted center distance must be positive.');
+      const axialOffset = finite(
+        'Axial offset',
+        pair?.axialOffset ?? config.axialOffset ?? 0,
       );
-    if (distance <= 0)
-      throw new Error('Adjusted center distance must be positive.');
-    const axialOffset = finite(
-      'Axial offset',
-      pair?.axialOffset ?? config.axialOffset ?? 0,
-    );
-    if (
-      Math.abs(axialOffset) >=
-      (sourceProfile.faceWidth + targetProfile.faceWidth) / 2
-    )
-      throw new Error('Meshing gear faces must overlap axially.');
-    const turnAngle = finite('Pair angle', pair?.angle ?? 0);
-    centerLineAngle = (centerLineAngle + (turnAngle % 360)) % 360;
-    const directionAngle = (centerLineAngle * Math.PI) / 180;
+      if (
+        Math.abs(axialOffset) >=
+        (sourceProfile.faceWidth + targetProfile.faceWidth) / 2
+      )
+        throw new Error('Meshing gear faces must overlap axially.');
+      const turnAngle = finite('Pair angle', pair?.angle ?? 0);
+      centerLineAngle = (centerLineAngle + (turnAngle % 360)) % 360;
+      const directionAngle = (centerLineAngle * Math.PI) / 180;
 
-    axisY[index] = axisY[index - 1] + axialOffset;
-    const contactY =
-      (Math.max(
-        axisY[index - 1] - sourceProfile.faceWidth / 2,
-        axisY[index] - targetProfile.faceWidth / 2,
-      ) +
-        Math.min(
-          axisY[index - 1] + sourceProfile.faceWidth / 2,
-          axisY[index] + targetProfile.faceWidth / 2,
-        )) /
-      2;
-    toothAngles[index] = alignedToothAngle(
-      sourceProfile,
-      targetProfile,
-      toothAngles[index - 1],
-      directionAngle,
-      contactY - axisY[index - 1],
-      contactY - axisY[index],
-    );
-    const ratio =
-      ((sourceProfile.kind === 'internal' || targetProfile.kind === 'internal'
-        ? 1
-        : -1) *
-        sourceProfile.teeth) /
-      targetProfile.teeth;
-    const phase =
-      ((toothAngles[index] - ratio * toothAngles[index - 1]) * 180) / Math.PI;
-
-    assembled[index] = target.relate(self => [
-      align(self.origin, source.origin),
-      coupleRotation(source, {ratio, phase}),
-      offset(
-        distance * Math.cos(directionAngle),
-        axialOffset,
-        distance * Math.sin(directionAngle),
-      ),
-    ]);
+      const contactY =
+        (Math.max(
+          -sourceProfile.faceWidth / 2,
+          axialOffset - targetProfile.faceWidth / 2,
+        ) +
+          Math.min(
+            sourceProfile.faceWidth / 2,
+            axialOffset + targetProfile.faceWidth / 2,
+          )) /
+        2;
+      const phase =
+        (alignedToothAngle(
+          sourceProfile,
+          targetProfile,
+          directionAngle,
+          contactY,
+          contactY - axialOffset,
+        ) *
+          180) /
+        Math.PI;
+      const ratio =
+        ((sourceProfile.kind === 'internal' || targetProfile.kind === 'internal'
+          ? 1
+          : -1) *
+          sourceProfile.teeth) /
+        targetProfile.teeth;
+      placed = target.relate(self => [
+        align(self.gearCenter, source.gearCenter),
+        coupleRotation(source, {ratio, phase}),
+        offset(
+          distance * Math.cos(directionAngle),
+          axialOffset,
+          distance * Math.sin(directionAngle),
+        ),
+      ]);
+    }
+    assembled.push(placed);
+    if (outgoing) {
+      const incomingGear = placed;
+      assembled.push(
+        outgoing.relate(self => align(self.frame, incomingGear.frame)),
+      );
+    }
   }
   return assembled;
 }
@@ -262,14 +304,16 @@ export function assembleGears(
 /** @internal */
 export namespace assembleGears {
   export function inspect(
-    [gears]: [readonly Gear[], GearAssemblyConfig?],
+    [gears]: [readonly GearAssemblyEntry[], GearAssemblyConfig?],
     context: InspectContext<Gear[]>,
   ): InspectResult | undefined {
     return (
       context.return &&
       inspectGroupMembers(
         context.return,
-        context.focused.parameter === 'gears' ? gears : context.return,
+        context.focused.parameter === 'gears'
+          ? gears.flatMap(entryGears)
+          : context.return,
       )
     );
   }
@@ -355,7 +399,6 @@ export function spurGear(options: SpurGearOptions): Gear {
       dimensions,
       options.mounting,
     ).expose({
-      gearAxis: toothed.axis,
       gearFaceUp: toothed.up,
       gearFaceDown: toothed.down,
     }),
@@ -365,7 +408,6 @@ export function spurGear(options: SpurGearOptions): Gear {
       normalModule: options.module,
       faceWidth: options.faceWidth,
       helixAngle: 0,
-      pitchRadius: dimensions.pitchRadius,
     },
   );
 }
@@ -398,7 +440,6 @@ export function helicalGear(options: HelicalGearOptions): Gear {
       dimensions,
       options.mounting,
     ).expose({
-      gearAxis: toothed.axis,
       gearFaceUp: toothed.up,
       gearFaceDown: toothed.down,
     }),
@@ -409,7 +450,6 @@ export function helicalGear(options: HelicalGearOptions): Gear {
       faceWidth: options.faceWidth,
       helixAngle: options.helixAngle,
       hand: options.hand,
-      pitchRadius: dimensions.pitchRadius,
     },
   );
 }
@@ -451,7 +491,6 @@ export function internalGear(options: InternalGearOptions): Gear {
   }
   return withGearProfile(
     cut(rim, tools).expose({
-      gearAxis: rim.axis,
       gearFaceUp: rim.up,
       gearFaceDown: rim.down,
     }),
@@ -461,7 +500,6 @@ export function internalGear(options: InternalGearOptions): Gear {
       normalModule: options.module,
       faceWidth: options.faceWidth,
       helixAngle: 0,
-      pitchRadius: dimensions.pitchRadius,
     },
   );
 }

@@ -623,7 +623,7 @@ test(
 const start = circle(20);
 const via = regularPolygon(20, 8).relate(self => [on(self, start.up), pivot([50, 0, 0]).rotate(0, 0, 45), offset(0, 0, 0)]);
 const end = rectangle(40, 40).relate(self => [on(self, start.up), pivot([50, 0, 0]).rotate(0, 0, 90)]);
-export const sections = group([start, via, end], 'Loft sections');
+export const sections = group([start, via, end], {name: 'Loft sections'});
 export default loft([start, via, end]).material('#d8ff3e');`;
     await setSource(page, source, 'offset');
     const inspect = () =>
@@ -1741,7 +1741,7 @@ const joined = union([drilled, boss]).material(neutral);
 const lens = intersect([sphere(8), box(12, 12, 12)])
   .relate(part => [on(part, joined.right), offset(0, 1, 3), pivot([-10, 0, 0]).rotate(0, 0, -31)])
   .material(accent);
-export const booleanOperationsExample = group([joined, lens], 'Boolean operations');`;
+export const booleanOperationsExample = group([joined, lens], {name: 'Boolean operations'});`;
     await page.evaluate(source => {
       const e = window.coordinateApp.codeEditor.editor;
       e.getModel()!.setValue(source);

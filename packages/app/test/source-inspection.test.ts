@@ -503,6 +503,120 @@ test('loads published inspectors whose declarations were stripped, through alias
   }
 });
 
+test('reference-only inspection preserves captured measurement and relation stages without model wrappers', async () => {
+  const inspect =
+    await compile(`import {align, distance, frame, offset} from '@code3d/core';
+    const base = frame('Base').relate(() => offset(2, 3, 4));
+    export default frame('Moving').relate(self => {
+      const measured = distance(base.origin, self.origin);
+      return [align(self, base), offset(8, 0, 0)];
+    });`);
+  const measured = defined(await inspect('distance(base.origin, self.origin)'));
+  const dimension = measured.target.find(item => item.kind === 'dimension');
+  assert.ok(dimension?.kind === 'dimension' && 'start' in dimension);
+  assert.equal(dimension.model.kind, 'reference');
+  assert.ok(Math.abs(dimension.value - Math.sqrt(29)) < 1e-6);
+  assert.deepEqual(dimension.start, [2, 3, 4]);
+  assert.deepEqual(dimension.end, [0, 0, 0]);
+  for (const scene of [
+    measured,
+    defined(await inspect('align(self, base)', 1)),
+    defined(await inspect('offset(8, 0, 0)', 8)),
+  ]) {
+    assert.ok(scene.objects.size > 0);
+    for (const object of scene.objects.values()) {
+      assert.equal(object.kind, 'reference');
+      assert.equal(object.mesh, undefined);
+      assert.deepEqual(object.children, []);
+    }
+  }
+  const stage = defined(await inspect('align(self, base)', 1));
+  const self = stage.target.find(
+    item => item.kind === 'anchor' && item.model.name === 'Moving',
+  );
+  assert.ok(self?.kind === 'anchor');
+  assert.deepEqual(self.elements[0].transform.position, [2, 3, 4]);
+  const final = defined(await inspect('offset(8, 0, 0)', 8));
+  const moved = final.target.find(
+    item => item.kind === 'anchor' && item.model.name === 'Moving',
+  );
+  assert.ok(moved?.kind === 'anchor');
+  assert.deepEqual(moved.elements[0].transform.position, [10, 3, 4]);
+  const again = defined(await inspect('distance(base.origin, self.origin)'));
+  assert.equal(
+    again.target.find(item => item.kind === 'dimension')?.model.nodeId,
+    dimension.model.nodeId,
+  );
+});
+
+test('standalone frames inspect without geometry and group frame options retain the assembly context', async () => {
+  const inspect =
+    await compile(`import {align, box, frame, group, offset, rotate} from '@code3d/core';
+    const datum = frame('Datum');
+    const base = datum.relate(() => [offset(10, 20, 30), rotate(0, 30, 0)]);
+    const part = box(4, 6, 8).relate(self => [align(self.frame, base), rotate(0, 450, 0)]);
+    export default group([part], {name: 'Assembly', frame: base});`);
+  const created = defined(await inspect("frame('Datum')")).target[0];
+  assert.equal(created.kind, 'anchor');
+  if (created.kind !== 'anchor') return;
+  assert.equal(created.elements[0].kind, 'frame');
+  const position = defined(await inspect('offset(10, 20, 30)', 8));
+  assert.ok(
+    position.target.some(
+      item =>
+        item.kind === 'anchor' &&
+        item.elements.some(element => element.kind === 'frame'),
+    ),
+  );
+  const selected = defined(await inspect('base});', 1));
+  assert.equal(selected.kind, 'inspect');
+  assert.equal(selected.target.length, 1);
+  const base = selected.target[0];
+  assert.equal(base.kind, 'anchor');
+  if (base.kind !== 'anchor') return;
+  assert.equal(base.model.kind, 'reference');
+  assert.equal(base.focused, true);
+  assert.equal(base.elements[0].kind, 'frame');
+  base.elements[0].transform.position.forEach(value =>
+    assert.ok(Math.abs(value) < 1e-6),
+  );
+  assert.equal(selected.ambient.length, 1);
+  const members = defined(await inspect('[part]', 1));
+  assert.equal(members.target.length, 1);
+  assert.equal(members.target[0].focused, true);
+  assert.equal(members.target[0].kind, 'model');
+});
+
+test('group member inspection preserves empty reference frames and member focus', async () => {
+  const inspect =
+    await compile(`import {align, box, group, offset} from '@code3d/core';
+    const base = group([]);
+    const part = box(4, 6, 8).relate(self => [align(self.frame, base.frame), offset(12, 0, 0)]);
+    export default group([base, part]);`);
+  for (const [token, focused] of [
+    ['[base, part]', [true, true]],
+    ['base, part', [true, false]],
+    ['part]);', [false, true]],
+  ] as const) {
+    const scene = defined(await inspect(token));
+    assert.deepEqual(
+      scene.target.map(item => item.focused),
+      focused,
+      token,
+    );
+    const [empty, part] = scene.target;
+    assert.ok(empty.kind === 'model' && part.kind === 'model');
+    assert.deepEqual(
+      empty.model.elements.filter(element => element.bound),
+      [],
+    );
+    assert.equal(empty.model.children[0].mesh, undefined);
+    assert.equal(empty.model.children[0].children.length, 0);
+    assert.deepEqual(part.model.children[0].transform.position, [12, 0, 0]);
+    assert.equal(width({kind: 'model', model: part.model.children[0]}), 4);
+  }
+});
+
 test('gear assembly parameters inspect the positioned train', async () => {
   const inspect = await compile(`import {group} from '@code3d/core';
     import {assembleGears, spurGear} from '@code3d/gears';
@@ -543,6 +657,48 @@ test('gear assembly parameters inspect the positioned train', async () => {
     focused.target.map(target => target.focused),
     [false, true],
   );
+});
+
+test('compound gear inspection keeps tuple and individual member focus', async () => {
+  const inspect = await compile(`import {group} from '@code3d/core';
+    import {assembleGears, spurGear} from '@code3d/gears';
+    const first = spurGear({module: 2, teeth: 20, faceWidth: 10});
+    const large = spurGear({module: 2, teeth: 30, faceWidth: 10});
+    const small = spurGear({module: 2, teeth: 18, faceWidth: 10}).originOffset(0, -12, 0);
+    const last = spurGear({module: 2, teeth: 40, faceWidth: 10});
+    const placed = assembleGears([first, [large, small], last], {centerDistanceDelta: 0.2});
+    export default group(placed);`);
+  for (const [token, focused] of [
+    ['assembleGears(', [true, true, true, true]],
+    ['[first, [large, small], last]', [true, true, true, true]],
+    ['[large, small]', [false, true, true, false]],
+    ['large, small', [false, true, false, false]],
+    ['small], last', [false, false, true, false]],
+  ] as const) {
+    const scene = defined(await inspect(token));
+    assert.deepEqual(
+      scene.target.map(item => item.focused),
+      focused,
+      token,
+    );
+    const positions = scene.target.map(item => {
+      assert.ok(item.kind === 'model');
+      return item.model.children[0].transform.position;
+    });
+    positions.forEach((position, index) => {
+      const expected = [
+        [0, 0, 0],
+        [50.2, 0, 0],
+        [50.2, 0, 0],
+        [108.4, 12, 0],
+      ][index];
+      assert.ok(
+        position.every(
+          (value, axis) => Math.abs(value - expected[axis]) < 1e-6,
+        ),
+      );
+    });
+  }
 });
 
 test('reports inspector errors separately from successful model evaluation and drops replaced contexts', async () => {

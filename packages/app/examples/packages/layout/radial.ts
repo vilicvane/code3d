@@ -6,4 +6,4 @@ const fins = radial(repeat(box(12, 8, 3), 12), {
   axis: 'y',
   rotate: true,
 });
-export default group(fins, 'Radial fins');
+export default group(fins, {name: 'Radial fins'});

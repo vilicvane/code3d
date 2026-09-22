@@ -35,8 +35,8 @@ export const gears = assembleGears([pinion, wheel, idler], {
 const mountingPlate = box(160, 4, 120)
   .originOffset(-35, 0, -20)
   .material('#536675');
-export const train = group(gears, 'Three-gear train').relate(() =>
+export const train = group(gears, {name: 'Three-gear train'}).relate(() =>
   on(mountingPlate.up),
 );
 
-export default group([mountingPlate, train], 'Mounted gear train');
+export default group([mountingPlate, train], {name: 'Mounted gear train'});

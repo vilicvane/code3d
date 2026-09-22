@@ -45,6 +45,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - Declare numeric form parameters with `input('Width', 40)`, or add `{min, max, step}` as a third argument for bounded controls and sliders. See [numeric inputs](docs/runtime.md#numeric-inputs).
 - Models have local coordinate frames. Constructors choose the initial origin;
   derived operations inherit their main input frame. See [local coordinates](docs/local-coordinates.md).
+- Use `frame()` for an independent coordinate reference and `group(parts, {frame: base, name: 'Assembly'})` to choose the assembly's coordinates. The frame adds no geometry. See [independent frames](docs/api.md#independent-coordinate-frames).
 - Modeling operations return new values. Measurements such as `.length`, `.area`
   and `.volume` return numbers; select an expression in the App to inspect it.
 - Node loads the modeling kernel automatically. Model authors do not initialize
@@ -54,6 +55,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 
 - [Modeling API](docs/api.md): primitives, operations, materials and measurements.
 - [Model values](docs/values.md): immutable values and geometry measurements.
+- [Model metadata](docs/api.md#model-metadata): symbol-keyed snapshots for package-specific data.
 - [Local coordinates](docs/local-coordinates.md): frames, origins and placement conventions.
 - [Relations](docs/relations.mdx): position parts using bounds, geometry and frames.
 - [Rotation coupling](docs/api.md#rotation-coupling): transmit cumulative angles through fixed-axis connections.

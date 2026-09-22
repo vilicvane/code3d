@@ -13,6 +13,7 @@ import {
   bezier,
   box,
   type ModelBounds,
+  type ModelMetadata,
   circle,
   coil,
   coupleRotation,
@@ -26,6 +27,9 @@ import {
   cache,
   frustum,
   group,
+  frame,
+  type Frame,
+  type GroupOptions,
   intersect,
   line,
   loft,
@@ -73,6 +77,16 @@ import {
   type VertexId,
   type VertexModel,
 } from '@code3d/core';
+
+const assemblyFrame: Frame = frame().relate(self => align(self, frame()));
+const groupOptions: GroupOptions = {name: 'Assembly', frame: assemblyFrame};
+group([box(1, 2, 3)], groupOptions);
+// @ts-expect-error a coordinate frame has no finite geometry bounds
+assemblyFrame.bounds();
+// @ts-expect-error frames are references, not group members
+group([assemblyFrame]);
+// @ts-expect-error naming and coordinate frame use one options object
+group([], 'Assembly');
 import {definePrimitive, replicad, type Shape3D} from '@code3d/core/replicad';
 import {MeshPhysicalMaterial, type Material} from '@code3d/core/three';
 import * as THREE from '@code3d/core/three';
@@ -130,6 +144,17 @@ ellipse();
 ellipsoid(5, 3);
 const oval: SolidModel = ellipsoid(5, 3, 4);
 oval.surface(1);
+const metadataKey = Symbol('metadata');
+const metadata: ModelMetadata = {[metadataKey]: {label: 'part'}};
+const tagged: SolidModel = oval.withMetadata(metadata);
+const metadataValue: unknown = tagged.metadata[metadataKey];
+void metadataValue;
+// @ts-expect-error Metadata snapshots are read-only.
+tagged.metadata[metadataKey] = 'changed';
+// @ts-expect-error Metadata keys are symbols.
+oval.withMetadata({label: 'part'});
+// @ts-expect-error Metadata reads use symbol keys.
+tagged.metadata.label;
 // @ts-expect-error Rectangle dimensions remain required.
 rectangle();
 // @ts-expect-error Polygon radius and sides remain required.
