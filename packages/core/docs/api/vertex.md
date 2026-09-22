@@ -6,6 +6,7 @@ sourceReview:
   sources:
     - path: packages/core/src/library/runtime.ts
       sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
+      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
     - path: packages/core/src/library/topology.ts
       sha256: f9f0d048fe30cc80046a25123aa8101ca51e85cdb5b2e66260c6a68f43f84715
       commit: 67228dd8559d584852df7bfbd47ed89f1d8003e9
@@ -66,6 +67,13 @@ model alive when using it. To create standalone point geometry from coordinates,
 use [point](point.md).
 
 ## IDs and selection order
+
+`TopologyKind` is `'vertex' | 'edge' | 'surface'`. `TopologyId` is
+`number | readonly [number, number, ...number[]]`; `VertexId`, `EdgeId` and
+`SurfaceId` are aliases of that type. Components must be positive safe integers.
+The aliases identify the intended selector but do not encode model ownership in
+TypeScript. IDs for different kinds or owners are not interchangeable merely
+because they have the same numeric value.
 
 IDs belong to the original geometry's topology namespace, not to an array index
 or the entire application. A valid ID is a positive integer or a readonly path

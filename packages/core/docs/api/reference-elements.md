@@ -6,6 +6,7 @@ sourceReview:
   sources:
     - path: packages/core/src/library/runtime.ts
       sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
+      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
     - path: packages/core/src/library/spatial.ts
       sha256: 810c4fa69352c26c32fb04a0e7867f6327698e02f3212669f17d777784322a78
       commit: 69d231fb775befdb3cd098291b4097ccd52d8966
@@ -60,6 +61,10 @@ Import the functions and named types from `@code3d/core`.
 
 ## References and model values
 
+`ElementKind` is `'point' | 'line' | 'face' | 'frame'`.
+`Anchor<Kind extends ElementKind = ElementKind>` uses that category as a private
+brand; it has no ordinary public coordinate fields. `PointAnchor` specializes
+`Anchor<'point'>`; the other anchor interfaces add only their documented members.
 An `Anchor<Kind>` is an opaque reference accepted by compatible modeling APIs.
 `PointAnchor`, `LineAnchor`, `FaceAnchor` and `FrameAnchor` express the geometry
 or coordinate system being referenced. They do not expose raw position tuples.

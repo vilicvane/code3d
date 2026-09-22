@@ -37,6 +37,9 @@ model kinds.
 
 ## Imports and types
 
+The [complete export index](api/exports.md) maps every public function, type and
+model member to its primary reference, including tooling and interoperability.
+
 [Model types and capabilities](api/model-types.md) explains all model aliases,
 kind mappings, capability interfaces, named elements and common vectors.
 
@@ -299,117 +302,34 @@ configuration fields and the supported acyclic driving graph.
 
 ## Origins and rotation
 
-Every model, including groups, has a `frame: FrameAnchor` coordinate reference.
-`frame.origin: PointAnchor` references its zero point; `model.origin` returns
-that same reference. These references have no geometry and cannot be added as
-models to a group. A point model's geometry may be away from its own origin.
-
-`align(self.origin, other.origin)` constrains only position.
-`align(self.frame, other.frame)` constrains position and all three axis directions.
-Use `.frame` explicitly: aligning curves or surfaces still refers to their
-underlying geometry. Frames support `expose`, including `.origin` on the exposed
-frame, and retain their occurrence and transform through composition.
-
-All models provide `originPoint()`, `originOffset()` and `rotate()`. Solids, faces,
-curves and points additionally provide vertex/center selection:
-
-| Method                                              | Behavior                                                      |
-| --------------------------------------------------- | ------------------------------------------------------------- |
-| [`.originPoint(pointRef)`](api/origin-point.md)     | Set the origin to a point reference, including a group member |
-| [`.originVertex(id)`](api/origin-vertex.md)         | Set the origin to an input-model vertex                       |
-| [`.originCenter()`](api/origin-center.md)           | Set the origin to the current local bounding-box center       |
-| [`.originOffset(dx, dy, dz)`](api/origin-offset.md) | Add a local-coordinate offset to the current origin           |
-| [`.rotate(x, y, z)`](api/model-rotate.md)           | Rotate about the origin, in degrees, fixed X then Y then Z    |
-
-Origin methods return new values and preserve topology IDs. Their individual
-references explain point coordinates, carried centers and group behavior.
-Rotation and [scaling](api/scaled.md) act about current local zero.
-
-Every geometric model exposes `center`: its initial local bounding-box center,
-carried along by subsequent transforms. Rotation does not recalculate it from
-the rotated shape's axis-aligned bounds. Origin edits change its coordinates;
-`originPoint(model.center)` selects that carried point explicitly. After a rotation, it can differ from the center used by `originCenter()`.
-A group inherits the first member's solved local coordinate frame, including
-its origin and axes, while preserving relative member placement. Nested groups
-keep their own frames; an empty group uses the default origin and axes. Member
-order can change the group's frame. Group origin
-edits move the entire assembly's local coordinates together; they preserve its
-internal relations. `rotate(x, y, z)` turns the solved assembly about its current
-origin, including nested instances. `originPoint(part.center)` resolves the member's actual
-placement; repeated sources need a specific instance reference. Groups do not
-have aggregate vertex IDs, a geometric center or scaling.
-See [group coordinates](local-coordinates.md#group-origins).
-
-For a runnable example and
-the vertex picker, origin arrows, and rotation rings, see
-[choosing an origin and rotating a part](origins-and-rotation.mdx).
+Every model has a [frame and origin](api/reference-elements.md#frame-and-origin).
+Use [originPoint](api/origin-point.md), [originVertex](api/origin-vertex.md),
+[originOffset](api/origin-offset.md) or [originCenter](api/origin-center.md) to
+choose local zero. [Model rotate](api/model-rotate.md) rotates local geometry;
+[relation rotate](api/rotate.md) places it in a composition.
 
 ### Centering a collection
 
-[`originCenter(model)`](api/origin-center.md) matches the instance method.
-[`originCenter(models)`](api/origin-center.md#an-array-is-one-layout) centers the
-entire resolved layout together, preserving spacing, order and member types.
-See the reference for empty arrays, coordinate frames and text layouts.
+[originCenter](api/origin-center.md) covers the free function's readonly
+collection form, shared bounds and preserved member placement.
 
 ## Anchors and relations
 
-Package authors can use `setModelData(model, key, value)` to associate
-package-specific data with a newly built model, and `getModelData(model, key)`
-to read it. Keys are symbols. Data is retained when `.relate()` or
-`.material()` creates a new value; other model operations do not retain it.
-This data stays in process and is not part of model geometry or snapshots.
+[Reference elements](api/reference-elements.md) distinguishes finite geometry,
+infinite axes/planes and coordinate frames. Build placement with
+[relate](api/relate.md), [on](api/on.md), [align](api/align.md) and
+[coupleRotation](api/couple-rotation.md). Their references explain callback
+identity, supported geometry, solve order and remaining freedom.
 
-Solid primitives expose `center` and `axis`; every model provides directional
-bounds: `up` (+Y), `down` (−Y), `right` (+X), `left` (−X), `front` (+Z),
-and `back` (−Z), in that model's local frame.
+Use separate [offset](api/offset.md) and [rotate](api/rotate.md) steps after
+constraints. [pivot](api/pivot.md), [pivotVertex](api/pivot-vertex.md),
+[pivotPoint](api/pivot-point.md), [axisEdge](api/axis-edge.md) and
+[axisLine](api/axis-line.md) choose the rotation reference. Read the
+[placement workflow](relations.mdx) for complete assemblies.
 
-`on(target.up)` translates the whole current `relate` self.
-`on(geometry, target.up)` selects the source explicitly and also only translates. The source may be a model, point,
-edge, or surface; its own finite extent is measured along the target direction.
-Tangential position and orientation are preserved. Targets must be directional
-bounds. Infinite reference lines and planes cannot supply a finite source extent.
-
-Return an array from `relate()` to combine positional conditions. Inconsistent
-positions report a conflict. `offset(x, y, z)` translates self from the original
-solution in the target reference frame. Explicit zero changes nothing; use
-point or axis alignment for centering. `bound.flip()` reverses contact
-facing without changing geometry or reference axes.
-
-`relate` returns a new model, represented by its callback parameter `self`.
-Every returned constraint must involve that value, as in `on(base.up)`
-or `on(base, self.up)`. External variables keep their original identity, including
-the receiver of `relate`: `part.relate(() => on(part.right))` places a
-new part against the original. Select the new part's topology and rotation
-references through `self`; references selected from `part` belong to the original.
-
-`align(source, target)` always takes two explicit references. Point, curve, and
-surface references solve geometric position and orientation; frame/frame aligns
-the complete coordinate systems. Models are never implicitly converted to frames.
-Same-dimensional references coincide; a lower-dimensional reference lies on the
-whole supporting geometry of the other. Edges use their underlying curves and
-faces their underlying surfaces, ignoring trims and parameter origins. Supported
-types are points, straight lines, circles, ellipses, planes, cylinders, and
-spheres. Select a solid's center, axis, vertex, edge, or surface first.
-
-Curve–curve alignment is directed; `lineReference.reverse()` selects the opposite
-direction. Surface–surface alignment matches normal sense; `faceReference.flip()`
-selects the opposite facing. Neither changes the reference axes or geometry.
-Point membership ignores direction. Constraints expose no transformation methods.
-Place independent transformations after the constraints in the `relate` array:
-
-- `offset(x, y, z)`: move self along fixed composition axes.
-- `rotate(x, y, z)`: rotate around self's origin and local XYZ axes.
-- `pivot([x, y, z]).rotate(x, y, z)`: a pivot in self's local frame.
-- `pivotVertex(id).rotate(x, y, z)`: a vertex belonging to self.
-- `pivotPoint(pointRef).rotate(x, y, z)`: a local or external point.
-- `axisEdge(id).rotate(angle)`: a straight edge belonging to self.
-- `axisLine(lineRef).rotate(angle)`: a positioned local or external axis.
-
-Angles are degrees; XYZ rotations apply X, then Y, then Z. Pivot/axis selections
-must be completed with `rotate`. Consecutive constraints solve jointly, followed
-by transformations in array order. A later constraint starts a new segment from
-the preceding pose. Groups move their assembled children as rigid bodies.
-Standalone geometry is unchanged.
+Package authors can attach [symbol-keyed model data](api/model-data.md) and
+publish [named reference elements](api/expose.md). These serve distinct purposes:
+package metadata and the model's public placement interface.
 
 ## Topology
 

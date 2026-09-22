@@ -257,7 +257,10 @@ export default defineConfig({
                         },
                         {
                           label: 'Models and common types',
-                          items: [{slug: 'docs/packages/core/api/model-types'}],
+                          items: [
+                            {slug: 'docs/packages/core/api/model-types'},
+                            {slug: 'docs/packages/core/api/exports'},
+                          ],
                         },
                         {
                           label: 'Parameters, time and caching',
