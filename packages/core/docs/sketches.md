@@ -37,6 +37,21 @@ derived layers, observations, and failure diagnostics. Use the [entity](api/sket
 [derived-layer](api/sketch-derive.md) and [region](api/sketch-faces.md) references
 for complete API rules.
 
+### Editing dimensions and constraints in the App
+
+Click a dimension label, such as a circle's **R** label, to edit its value or
+TypeScript expression. After you change or add a dimension or geometric
+constraint in the sketch editor, a successful solve also synchronizes safely
+writable local geometry inputs. One Undo or Redo restores both the constraint
+and those geometry inputs.
+
+Synchronization preserves expressions and upstream geometry. It does not choose
+between independent evaluations of the same source definition. When the source
+cannot be safely synchronized, the App keeps the source mismatch warning.
+Direct source edits also retain this warning and an explicit **Fix** action
+where safe. A failed solve shows diagnostics and keeps the last successful
+sketch, when available, as a read-only reference.
+
 ### Relating a sketch to a model plane
 
 `s.relate(self => align(self.plane, target))` returns a new sketch with spatial

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Page} from './browser-connection.ts';
-import {open, point, text, waitForSource} from './sketch-test.ts';
+import {open, openPage, point, text, waitForSource} from './sketch-test.ts';
 
 const circle = (page: Page, id: number, layer = 'local') =>
   page.locator(
@@ -21,6 +21,101 @@ async function resize(page: Page, id: number, delta: number) {
   await page.mouse.move(x + delta, y, {steps: 5});
   await page.mouse.up();
 }
+
+test('the constraints example updates its hole from radius four to six', async t => {
+  const page = await openPage(t);
+  await page.goto(
+    `${process.env.CODE3D_TEST_URL}/#/file/examples/sketches/constraints.ts`,
+  );
+  await page.waitForFunction(() =>
+    window.sketchTestEditor?.getValue().includes('movable hole'),
+  );
+  await page.evaluate(() => {
+    window.sketchTestEditor.setPosition({lineNumber: 5, column: 18});
+    window.sketchTestEditor.focus();
+  });
+  await page.getByRole('region', {name: 'Sketch editor'}).waitFor();
+  const before = await radius(page, 10);
+  await page.locator('.constraint-badge[data-kind="radius"]').click();
+  await field(page, 'Radius').fill('6');
+  await page.keyboard.press('Enter');
+  await waitForSource(page, /'radius',\s*10,\s*6/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.ok(Math.abs((await radius(page, 10)) - before * 1.5) < 0.01);
+  await waitForSource(page, /'circle',\s*10,\s*\[9,\s*6\]/);
+  assert.equal(
+    await page.locator('.viewport-diagnostic[data-severity="warning"]').count(),
+    0,
+  );
+  await page.keyboard.press('Control+z');
+  await waitForSource(page, /'radius',\s*10,\s*4/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.match(await text(page), /'circle',\s*10,\s*\[9,\s*4\]/);
+  assert.ok(Math.abs((await radius(page, 10)) - before) < 0.01);
+  await page.keyboard.press('Control+y');
+  await waitForSource(page, /'radius',\s*10,\s*6/);
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.match(await text(page), /'circle',\s*10,\s*\[9,\s*6\]/);
+  assert.ok(Math.abs((await radius(page, 10)) - before * 1.5) < 0.01);
+});
+
+test('editing a radius constraint automatically updates solved circle geometry', async t => {
+  const page = await open(
+    t,
+    "import {sketch} from '@code3d/core';\nconst value = sketch([['point',1,[0,0]],['circle',2,[1,10]]], {constraints:[['fixed',1],['radius',2,10]]});",
+  );
+  const before = await radius(page);
+  for (const [value, apply] of [
+    [20, 'click'],
+    [15, 'enter'],
+    [12, 'click'],
+  ] as const) {
+    await page.locator('.constraint-badge[data-kind="radius"]').click();
+    await field(page, 'Radius').fill(String(value));
+    if (apply === 'enter') await page.keyboard.press('Enter');
+    else
+      await page
+        .getByRole('button', {name: 'Apply constraint', exact: true})
+        .click();
+    await waitForSource(page, new RegExp(`'radius',\\s*2,\\s*${value}`));
+    await page.waitForFunction(
+      expected =>
+        Math.abs(
+          Number(
+            document
+              .querySelector('.sketch-canvas circle.local[data-kind="circle"]')
+              ?.getAttribute('r'),
+          ) - expected,
+        ) < 0.01,
+      (before * value) / 10,
+    );
+  }
+});
+
+test('a conflicting radius edit retains the last solved geometry and constraints together', async t => {
+  const page = await open(
+    t,
+    "import {sketch} from '@code3d/core';\nconst value = sketch([['point',1,[0,0]],['circle',2,[1,10]]], {constraints:[['radius',2,10],['radius',2,10]]});",
+  );
+  const before = await radius(page);
+  await page.locator('.constraint-badge[data-kind="radius"]').first().click();
+  await field(page, 'Radius').fill('20');
+  await page.keyboard.press('Enter');
+  await waitForSource(page, /'radius',\s*2,\s*20/);
+  await page.waitForFunction(
+    () => window.sketchTestRuntime.previewState.status === 'error',
+  );
+  assert.equal(await radius(page), before);
+  assert.deepEqual(
+    await page
+      .locator('.constraint-badge[data-kind="radius"] text')
+      .allTextContents(),
+    ['R10', 'R10'],
+  );
+  await page.keyboard.press('Control+z');
+  await page.getByText('Ready', {exact: true}).waitFor();
+  assert.equal(await radius(page), before);
+});
 
 test('numeric circles use analytic previews, native input history and one atomic undo', async t => {
   const page = await open(t, empty);

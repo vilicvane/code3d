@@ -18,6 +18,7 @@ import {
   type SketchGeometryData,
 } from '../model/sketch-drag';
 import type {CompiledSketch} from '../model/sketch-trace';
+import type {ModelDiagnostic} from '../model/diagnostic';
 import {SketchEditor, type SketchEditorView} from '../ui/sketch-editor';
 import {action, computed, makeObservable, observableRef, reaction} from 'mobx';
 import {
@@ -26,7 +27,6 @@ import {
 } from './sketch-context';
 import {
   analyzeSketchSource,
-  isNumericSketchConstraint,
   sketchDraftEntity,
   type SketchChange,
   type SketchEditIntent,
@@ -45,6 +45,12 @@ export class SketchEditorController {
   private context: readonly SketchContextOutline[] = [];
   private viewScope = '';
   private sourceRange?: SourceRef;
+  private pendingSynchronization?: {
+    sourceVersion: number;
+    layer: string;
+    sourceRef: SourceRef;
+    undoGroup: string;
+  };
   private readonly stopView: () => void;
 
   constructor(
@@ -52,7 +58,10 @@ export class SketchEditorController {
     private readonly host: {
       readSource(ref: SourceRef): string | undefined;
       resolveSourceRef(ref: SourceRef): SourceRef | undefined;
-      commit(intent: SketchEditIntent): boolean;
+      sourceVersion(): number;
+      commit(intent: SketchEditIntent, undoGroup?: string): boolean;
+      cancelEditGroup(file: string, undoGroup: string): void;
+      resumeEditGroup(file: string, undoGroup: string): void;
       reportResult(operation: SketchChange['kind'], error?: string): void;
       solve(
         layers: readonly SketchSnapshot[],
@@ -91,6 +100,8 @@ export class SketchEditorController {
       hide: action,
       invalidate: action,
       retain: action,
+      synchronizeSource: action,
+      sourceEdited: action,
       commit: action,
       dispose: action,
     });
@@ -154,6 +165,7 @@ export class SketchEditorController {
 
   dispose(): void {
     this.revision++;
+    this.cancelSynchronization();
     this.stopView();
     this.editor.dispose();
   }
@@ -232,7 +244,11 @@ export class SketchEditorController {
     }));
     const last = this.sourceLayers.at(-1);
     if (!last) return false;
+    this.revision++;
+    this.editor.cancel();
     this.active = last;
+    this.layers = this.sourceLayers;
+    this.data = last.data;
     this.stale = !sketches.has(last.id);
     return true;
   }
@@ -244,8 +260,64 @@ export class SketchEditorController {
   }
   invalidate(): void {
     this.revision++;
+    this.cancelSynchronization();
     this.stale = true;
     this.editor.cancel();
+  }
+
+  /** Formatting is part of the same source operation; other tool edits supersede it. */
+  sourceEdited(undoGroup?: string): void {
+    const pending = this.pendingSynchronization;
+    if (!pending) return;
+    if (undoGroup === pending.undoGroup)
+      pending.sourceVersion = this.host.sourceVersion();
+    else this.cancelSynchronization();
+  }
+
+  /** Complete this GUI edit with the compiler's safe source repair before
+   * publishing its result. Ordinary source edits still require an explicit Fix.
+   */
+  synchronizeSource(diagnostics: readonly ModelDiagnostic[]): boolean {
+    const pending = this.pendingSynchronization;
+    if (!pending) return false;
+    // The source editor retains committed groups until its deferred formatter
+    // finishes, so returning to the code does not add a separate undo step.
+    this.pendingSynchronization = undefined;
+    if (pending.sourceVersion !== this.host.sourceVersion()) {
+      this.host.cancelEditGroup(pending.sourceRef.file, pending.undoGroup);
+      return false;
+    }
+    const diagnostic = diagnostics.find(
+      diagnostic =>
+        diagnostic.viewport === 'sketch-source-sync' &&
+        diagnostic.relatedSketchIds?.includes(pending.layer),
+    );
+    const intent = diagnostic?.actions?.find(
+      action => action.intent.kind === 'sketch.edit',
+    )?.intent;
+    if (intent?.kind !== 'sketch.edit') return false;
+    const current = this.host.resolveSourceRef(pending.sourceRef);
+    if (
+      !current ||
+      current.file !== intent.sourceRef.file ||
+      current.start !== intent.sourceRef.start ||
+      current.end !== intent.sourceRef.end
+    )
+      return false;
+    // The new compilation has not published its source refs yet. Resolve the
+    // original edit's tracked ref, whose range already follows that edit.
+    this.host.resumeEditGroup(pending.sourceRef.file, pending.undoGroup);
+    return this.host.commit(
+      {...intent, sourceRef: pending.sourceRef},
+      pending.undoGroup,
+    );
+  }
+
+  private cancelSynchronization(): void {
+    const pending = this.pendingSynchronization;
+    this.pendingSynchronization = undefined;
+    if (pending)
+      this.host.cancelEditGroup(pending.sourceRef.file, pending.undoGroup);
   }
 
   private async preview(
@@ -324,37 +396,46 @@ export class SketchEditorController {
       return false;
     }
     const local = this.layers.at(-1)!;
-    const committed = this.host.commit({
-      kind: 'sketch.edit',
-      sourceRef: active.definitionRef,
-      expectedText,
-      layer: active.id,
-      references: active.references,
-      change,
-    });
+    this.cancelSynchronization();
+    const undoGroup =
+      change.kind === 'dimension' ||
+      change.kind === 'constrain' ||
+      (change.kind === 'append' && change.constraints?.length)
+        ? `sketch:${active.id}:${this.host.sourceVersion()}`
+        : undefined;
+    const committed = this.host.commit(
+      {
+        kind: 'sketch.edit',
+        sourceRef: active.definitionRef,
+        expectedText,
+        layer: active.id,
+        references: active.references,
+        change,
+      },
+      undoGroup,
+    );
     if (!committed) return false;
     this.revision++;
-    const changedDimension =
-      change.kind === 'dimension' ? change.value : undefined;
-    const addedConstraints =
-      change.kind === 'constrain' || change.kind === 'append'
-        ? (change.constraints ?? [])
-        : [];
-    if (
-      typeof changedDimension === 'string' ||
-      !addedConstraints.every(isNumericSketchConstraint)
-    ) {
-      // Source expressions are evaluated in the real project scope by the next
-      // compile. Do not publish a snapshot with a guessed numeric constraint.
+    if (undoGroup)
+      this.pendingSynchronization = {
+        sourceVersion: this.host.sourceVersion(),
+        layer: active.id,
+        sourceRef: active.definitionRef,
+        undoGroup,
+      };
+    if (change.kind === 'dimension' || change.kind === 'constrain') {
+      // Both literals and expressions use the project's actual solve. Keep the
+      // last successful geometry and constraints together until it completes.
       this.stale = true;
       return true;
     }
+    const addedConstraints =
+      change.kind === 'append' ? (change.constraints ?? []) : [];
     const removed =
       change.kind === 'delete' || change.kind === 'trim' ? change.ids : [];
     const entries =
       change.kind === 'append' || change.kind === 'trim' ? change.entries : [];
-    const data =
-      change.kind === 'move' || change.kind === 'constrain' ? change.data : [];
+    const data = change.kind === 'move' ? change.data : [];
     this.data = [
       ...this.data
         .filter(
@@ -396,19 +477,9 @@ export class SketchEditorController {
     const copiedConstraints: SketchConstraint<SketchPointAddress>[] = [];
     const constraints = local.constraints.flatMap(
       (constraint, index): SketchConstraint<SketchPointAddress>[] => {
-        if (change.kind === 'dimension' && change.index === index)
-          return [
-            [
-              constraint[0],
-              constraint[1],
-              changedDimension!,
-            ] as SketchConstraint<SketchPointAddress>,
-          ];
         if (
-          ((change.kind === 'delete' || change.kind === 'trim') &&
-            change.constraints.includes(index)) ||
-          (change.kind === 'constrain' &&
-            change.removedConstraints?.includes(index))
+          (change.kind === 'delete' || change.kind === 'trim') &&
+          change.constraints.includes(index)
         )
           return [];
         const rewrite =
