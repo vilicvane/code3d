@@ -2,10 +2,11 @@ import {builtinPackageNames} from './builtin-packages';
 import {decodeProjectFile, type ProjectFileReader} from './file-reader';
 import {
   dependencyFields,
-  findPackageScope,
   manifestDependencies,
   parsePackageManifest,
   parsePackageSpecifier,
+  packageResolutionKey,
+  resolvedPackageDirectory,
   type PackageManifest,
 } from './package-manifest';
 import {normalizeProjectPath, projectDirectory} from './project';
@@ -43,10 +44,6 @@ async function readManifest(files: ProjectFileReader, path: string) {
     : parsePackageManifest(decodeProjectFile(bytes), path);
 }
 
-export function resolvedPackageDirectory(path: string): string | undefined {
-  return /^(.*\/node_modules\/(?:@[^/]+\/)?[^/]+)(?:\/|$)/.exec(path)?.[1];
-}
-
 async function matchingPackageVersions(files: ProjectFileReader) {
   return Object.fromEntries(
     (
@@ -65,152 +62,220 @@ async function matchingPackageVersions(files: ProjectFileReader) {
   );
 }
 
-async function installedManifest(
-  files: ProjectFileReader,
-  name: string,
-  rootPath: string,
-): Promise<{manifest: PackageManifest; packagePath: string} | undefined> {
-  for (
-    let directory = projectDirectory(rootPath);
-    ;
-    directory = projectDirectory(directory)
-  ) {
-    const path = normalizeProjectPath(
-      directory + '/node_modules/' + name + '/package.json',
-    );
-    const manifest = await readManifest(files, path);
-    if (manifest)
-      return {
-        manifest,
-        packagePath: projectDirectory(
-          (await files.stat(path))?.realPath ?? path,
-        ),
-      };
-    if (directory === '/') return undefined;
-  }
-}
+type CompatibilityPackage = PackageCompatibilityIssue['packages'][number];
+type DeclaredPackages = Readonly<{
+  directory: string;
+  packages: readonly CompatibilityPackage[];
+}>;
 
-/** Check the selected package filesystem, before old Core exports are resolved. */
-export async function findPackageCompatibility(
-  files: ProjectFileReader,
-  builtinFiles: ProjectFileReader,
-  rootPath: string,
-): Promise<PackageCompatibilityIssue | undefined> {
-  const matchingVersions = await matchingPackageVersions(builtinFiles);
-  const declared = new Set<string>();
-  const packages: PackageCompatibilityIssue['packages'][number][] = [];
-  for (
-    let directory = projectDirectory(rootPath);
-    ;
-    directory = projectDirectory(directory)
-  ) {
-    const manifestPath = normalizeProjectPath(directory + '/package.json');
-    const manifest = await readManifest(files, manifestPath);
-    const dependencies = manifestDependencies(manifest ?? {});
-    for (const [specifier, range] of Object.entries(dependencies)) {
-      if (declared.has(specifier)) continue;
-      declared.add(specifier);
-      const name = modelingPackage(specifier, range);
-      if (!name || !matchingVersions[name]) continue;
-      const installed = await installedManifest(files, specifier, rootPath);
-      // A missing installation retains the normal actionable resolution error.
-      if (!installed) continue;
-      const version =
-        typeof installed.manifest.version === 'string'
-          ? installed.manifest.version
-          : 'unknown';
-      const expected = matchingVersions[name];
-      if (version !== expected)
-        packages.push({
-          name,
-          packagePath: installed.packagePath,
-          specifier,
-          installed: version,
-          expected,
-          manifestPath,
-        });
+/** One compilation owns all checks, declaration lookups and warning aggregation. */
+export class PackageCompatibilityCheck {
+  private readonly manifests = new Map<
+    string,
+    Promise<PackageManifest | undefined>
+  >();
+  private readonly declarations = new Map<string, Promise<DeclaredPackages>>();
+  private readonly resolutions = new Map<string, Promise<void>>();
+  private readonly packages = new Map<string, CompatibilityPackage>();
+
+  private constructor(
+    private readonly files: ProjectFileReader,
+    private readonly matchingVersions: Readonly<Record<string, string>>,
+    private readonly checkCancelled: () => void,
+  ) {}
+
+  static async create(
+    files: ProjectFileReader,
+    builtinFiles: ProjectFileReader,
+    checkCancelled: () => void = () => {},
+  ): Promise<PackageCompatibilityCheck> {
+    const versions = await matchingPackageVersions(builtinFiles);
+    checkCancelled();
+    return new PackageCompatibilityCheck(files, versions, checkCancelled);
+  }
+
+  get issue(): PackageCompatibilityIssue | undefined {
+    const packages = [...this.packages.values()];
+    return packages.length
+      ? {
+          directory: projectDirectory(packages[0].manifestPath),
+          packages,
+          matchingVersions: this.matchingVersions,
+        }
+      : undefined;
+  }
+
+  async checkDeclared(rootPath: string): Promise<void> {
+    this.checkCancelled();
+    this.merge((await this.declared(rootPath)).packages);
+  }
+
+  async checkResolved(path: string, importer: string): Promise<void> {
+    this.checkCancelled();
+    const key = packageResolutionKey({path, importer});
+    if (!key) return;
+    let pending = this.resolutions.get(key);
+    if (!pending) {
+      pending = this.findResolved(path, importer).then(packages =>
+        this.merge(packages),
+      );
+      this.resolutions.set(key, pending);
     }
-    if (directory === '/') break;
+    await pending;
   }
-  return packages.length
-    ? {
-        directory: projectDirectory(packages[0].manifestPath),
-        packages,
-        matchingVersions,
-      }
-    : undefined;
-}
 
-/** Check only a package reached by real module resolution, including transitive aliases. */
-export async function findResolvedPackageCompatibility(
-  files: ProjectFileReader,
-  builtinFiles: ProjectFileReader,
-  path: string,
-  importer: string,
-): Promise<PackageCompatibilityIssue | undefined> {
-  const resolved = resolvedPackageDirectory(path);
-  if (!resolved) return undefined;
-  const manifestPath = resolved + '/package.json';
-  const directory = projectDirectory(
-    (await files.stat(manifestPath))?.realPath ?? manifestPath,
-  );
-  const manifest = await readManifest(files, directory + '/package.json');
-  if (
-    !manifest?.name ||
-    !builtinPackageNames.some(builtin => builtin === manifest.name)
-  )
-    return undefined;
-  const name = manifest.name;
-  const matchingVersions = await matchingPackageVersions(builtinFiles);
-  const expected = matchingVersions[name];
-  if (!expected || manifest.version === expected) return undefined;
-  const installed =
-    typeof manifest.version === 'string' ? manifest.version : 'unknown';
-  const owner = resolvedPackageDirectory(importer);
-  // A dependency can share the installation owned by an author declaration.
-  // Match its physical path so a nested copy is never mistaken for that package.
-  const authorPath = owner
-    ? normalizeProjectPath(
-        importer.slice(0, importer.indexOf('/node_modules/')) + '/__lookup.ts',
+  private merge(packages: readonly CompatibilityPackage[]): void {
+    this.checkCancelled();
+    for (const pkg of packages) {
+      const previous = this.packages.get(pkg.packagePath);
+      if (
+        !previous ||
+        !pkg.manual ||
+        (previous.manual?.reason === 'undeclared' &&
+          pkg.manual.reason === 'transitive')
       )
-    : importer;
-  const declared = await findPackageCompatibility(
-    files,
-    builtinFiles,
-    authorPath,
-  );
-  if (declared?.packages.some(pkg => pkg.packagePath === directory))
-    return declared;
-  const ownerManifest = owner
-    ? await readManifest(files, owner + '/package.json')
-    : undefined;
-  const scope = await findPackageScope(files, authorPath);
-  const manual: NonNullable<
-    PackageCompatibilityIssue['packages'][number]['manual']
-  > = owner
-    ? {
-        reason: 'transitive',
-        dependency:
-          ownerManifest?.name ??
-          owner.slice(
-            owner.lastIndexOf('/node_modules/') + '/node_modules/'.length,
+        this.packages.set(pkg.packagePath, pkg);
+    }
+  }
+
+  private manifest(path: string): Promise<PackageManifest | undefined> {
+    let pending = this.manifests.get(path);
+    if (!pending) {
+      pending = readManifest(this.files, path);
+      this.manifests.set(path, pending);
+    }
+    return pending;
+  }
+
+  private declared(rootPath: string): Promise<DeclaredPackages> {
+    const directory = projectDirectory(rootPath);
+    let pending = this.declarations.get(directory);
+    if (!pending) {
+      pending = this.findDeclared(rootPath);
+      this.declarations.set(directory, pending);
+    }
+    return pending;
+  }
+
+  private async installedManifest(name: string, rootPath: string) {
+    for (
+      let directory = projectDirectory(rootPath);
+      ;
+      directory = projectDirectory(directory)
+    ) {
+      const path = normalizeProjectPath(
+        directory + '/node_modules/' + name + '/package.json',
+      );
+      const manifest = await this.manifest(path);
+      if (manifest)
+        return {
+          manifest,
+          packagePath: projectDirectory(
+            (await this.files.stat(path))?.realPath ?? path,
           ),
+        };
+      if (directory === '/') return undefined;
+    }
+  }
+
+  private async findDeclared(rootPath: string): Promise<DeclaredPackages> {
+    const declared = new Set<string>();
+    const packages: CompatibilityPackage[] = [];
+    let scope: string | undefined;
+    for (
+      let directory = projectDirectory(rootPath);
+      ;
+      directory = projectDirectory(directory)
+    ) {
+      const manifestPath = normalizeProjectPath(directory + '/package.json');
+      const manifest = await this.manifest(manifestPath);
+      if (manifest) scope ??= directory;
+      for (const [specifier, range] of Object.entries(
+        manifestDependencies(manifest ?? {}),
+      )) {
+        if (declared.has(specifier)) continue;
+        declared.add(specifier);
+        const name = modelingPackage(specifier, range);
+        if (!name || !this.matchingVersions[name]) continue;
+        const installed = await this.installedManifest(specifier, rootPath);
+        // Missing installations retain the ordinary module resolution error.
+        if (!installed) continue;
+        const version =
+          typeof installed.manifest.version === 'string'
+            ? installed.manifest.version
+            : 'unknown';
+        const expected = this.matchingVersions[name];
+        if (version !== expected)
+          packages.push({
+            name,
+            packagePath: installed.packagePath,
+            specifier,
+            installed: version,
+            expected,
+            manifestPath,
+          });
       }
-    : {reason: 'undeclared'};
-  return {
-    directory: scope.directory,
-    packages: [
+      if (directory === '/') break;
+    }
+    return {directory: scope ?? '/', packages};
+  }
+
+  private async findResolved(
+    path: string,
+    importer: string,
+  ): Promise<readonly CompatibilityPackage[]> {
+    // checkResolved has already established that this crosses a package boundary.
+    const manifestPath = resolvedPackageDirectory(path)! + '/package.json';
+    const directory = projectDirectory(
+      (await this.files.stat(manifestPath))?.realPath ?? manifestPath,
+    );
+    const manifest = await this.manifest(directory + '/package.json');
+    if (
+      !manifest?.name ||
+      !builtinPackageNames.some(name => name === manifest.name)
+    )
+      return [];
+    const name = manifest.name;
+    const expected = this.matchingVersions[name];
+    if (!expected || manifest.version === expected) return [];
+    const installed =
+      typeof manifest.version === 'string' ? manifest.version : 'unknown';
+    const owner = resolvedPackageDirectory(importer);
+    const authorPath = owner
+      ? normalizeProjectPath(
+          importer.slice(0, importer.indexOf('/node_modules/')) +
+            '/__lookup.ts',
+        )
+      : importer;
+    const declared = await this.declared(authorPath);
+    // The same physical installation keeps its author declaration, including aliases.
+    if (declared.packages.some(pkg => pkg.packagePath === directory))
+      return declared.packages;
+    const ownerManifest = owner
+      ? await this.manifest(owner + '/package.json')
+      : undefined;
+    return [
       {
         name,
         packagePath: directory,
         installed,
         expected,
-        manifestPath: normalizeProjectPath(scope.directory + '/package.json'),
-        manual,
+        manifestPath: normalizeProjectPath(
+          declared.directory + '/package.json',
+        ),
+        manual: owner
+          ? {
+              reason: 'transitive',
+              dependency:
+                ownerManifest?.name ??
+                owner.slice(
+                  owner.lastIndexOf('/node_modules/') + '/node_modules/'.length,
+                ),
+            }
+          : {reason: 'undeclared'},
       },
-    ],
-    matchingVersions,
-  };
+    ];
+  }
 }
 
 /** Keep latest declarations; update other Code3D versions without moving fields or aliases. */

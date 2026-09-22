@@ -29,7 +29,7 @@ import {SnapshotWorkerPool, type SnapshotPoolOptions} from './snapshot-pool';
 /** Native geometry and dependency instances live only on this side of the artifact boundary. */
 export class ProjectExecutor {
   private runtime?: ProjectRuntime;
-  private identity?: string;
+  private executionIdentity?: string;
   private executor?: ReturnType<typeof createModelExecutor>;
   private geometry?: ModelGeometrySnapshot;
   private inspectionGeometry?: ModelGeometrySnapshot;
@@ -52,7 +52,7 @@ export class ProjectExecutor {
       checkCancelled();
       this.disposeGeometry();
       if (
-        this.identity !== artifact.dependencies.id ||
+        this.executionIdentity !== artifact.dependencies.executionIdentity ||
         this.runtime?.failedImport
       ) {
         this.disposeRuntime();
@@ -70,7 +70,7 @@ export class ProjectExecutor {
           this.runtime.snapshotRuntime,
           this.snapshotOptions,
         );
-        this.identity = artifact.dependencies.id;
+        this.executionIdentity = artifact.dependencies.executionIdentity;
       }
       const runtime = this.runtime!;
       if (settings) {
@@ -246,7 +246,7 @@ export class ProjectExecutor {
     this.snapshotPool = undefined;
     this.runtime?.dispose();
     this.runtime = undefined;
-    this.identity = undefined;
+    this.executionIdentity = undefined;
     this.executor = undefined;
   }
   private disposeGeometry(): void {

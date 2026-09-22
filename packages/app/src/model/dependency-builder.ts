@@ -5,11 +5,13 @@ import {
 } from '../project/file-reader';
 import type {ProjectAssets} from '../project/project-assets';
 import {
+  packageResolutionKey,
+  type PackageResolution,
+} from '../project/package-manifest';
+import {
   ProjectBuilder,
   dependencyFileIdentity,
-  packageResolutionKey,
   type ModuleFormats,
-  type PackageResolution,
   type ProjectBundle,
 } from '../project/project-builder';
 import {executableModuleSource} from './executable-module';
@@ -28,7 +30,10 @@ type RuntimeEntries = Readonly<{
 }>;
 
 export type DependencyArtifact = Readonly<{
+  /** Complete persisted and transferred snapshot, including package provenance. */
   id: string;
+  /** Executable content that requires its own module and kernel instances. */
+  executionIdentity: string;
   kernelIdentity: string;
   source: string;
   formats: ModuleFormats;
@@ -269,7 +274,7 @@ export class DependencyBuilder {
     const metadata = [...this.builder.dependencyMetadata].sort(([a], [b]) =>
       a.localeCompare(b),
     );
-    const artifact = {
+    const executable = {
       kernelIdentity,
       source: executableModuleSource(
         'code3d-project:/dependencies.js',
@@ -281,10 +286,14 @@ export class DependencyBuilder {
           '__code3dCachedFunction',
         ],
       ),
-      formats: new Map(this.modules),
       wasm,
       sketchWasm,
       resources,
+    };
+    const artifact = {
+      ...executable,
+      executionIdentity: await dependencyExecutionIdentity(executable),
+      formats: new Map(this.modules),
       runtime: core,
       metadata,
       packageResolutions: this.resolutions(),
@@ -306,16 +315,37 @@ function dependencyArtifactIdentity(
   artifact: Omit<DependencyArtifact, 'id'>,
 ): Promise<string> {
   return runtimeArtifactIdentity([
-    new TextEncoder().encode(artifact.source),
     new TextEncoder().encode(
       JSON.stringify([
+        artifact.executionIdentity,
+        [...artifact.formats],
         artifact.runtime,
         artifact.metadata,
         artifact.packageResolutions,
-        [...artifact.resources.keys()],
       ]),
     ),
-    ...artifact.resources.values(),
+  ]);
+}
+
+function dependencyExecutionIdentity(
+  artifact: Pick<
+    DependencyArtifact,
+    'kernelIdentity' | 'source' | 'wasm' | 'sketchWasm' | 'resources'
+  >,
+): Promise<string> {
+  // Asset reads can finish in any order; execution depends on their paths and bytes.
+  const resources = [...artifact.resources].sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  return runtimeArtifactIdentity([
+    new TextEncoder().encode(artifact.source),
+    new TextEncoder().encode(
+      JSON.stringify([
+        artifact.kernelIdentity,
+        resources.map(([path]) => path),
+      ]),
+    ),
+    ...resources.map(([, bytes]) => bytes),
     artifact.wasm,
     artifact.sketchWasm,
   ]);

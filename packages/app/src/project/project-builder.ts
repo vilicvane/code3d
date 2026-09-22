@@ -13,7 +13,7 @@ import {
 } from './file-reader';
 import {ProjectPackageResolver, nodeBuiltinError} from './package-resolver';
 import type {ProjectAssets} from './project-assets';
-import {projectDirectory} from './project';
+import {packageResolutionKey, type PackageResolution} from './package-manifest';
 
 // Build-time Node supplies its real builtin catalog, including subpaths.
 const nodeBuiltins = new Set(__CODE3D_NODE_BUILTINS__);
@@ -30,21 +30,6 @@ export type SourceTransform = (
   cached: CachedDefinitions,
 ) => string;
 export type ModuleFormats = ReadonlyMap<string, 'esm' | 'cjs'>;
-export type PackageResolution = Readonly<{path: string; importer: string}>;
-
-/** Package ownership is independent of a package's internal modules or author filenames. */
-export function packageResolutionKey({
-  path,
-  importer,
-}: PackageResolution): string | undefined {
-  if (importer === '/.__code3d-entry.js') return undefined;
-  const [target, owner] = [path, importer].map(
-    path => /^(.*\/node_modules\/(?:@[^/]+\/)?[^/]+)(?:\/|$)/.exec(path)?.[1],
-  );
-  if (!target || owner === target) return undefined;
-  return JSON.stringify([target, owner ?? projectDirectory(importer)]);
-}
-
 export type ProjectBundle = Readonly<{
   source: string;
   files: readonly string[];

@@ -10,8 +10,7 @@ import {
 } from '../project/file-reader';
 import {patchModelPackages} from '../project/model-package-patches';
 import {
-  findPackageCompatibility,
-  findResolvedPackageCompatibility,
+  PackageCompatibilityCheck,
   type PackageCompatibilityIssue,
 } from '../project/package-compatibility';
 import {
@@ -24,7 +23,6 @@ import {ProjectAssets} from '../project/project-assets';
 import {
   ProjectBuilder,
   dependencyFileIdentity,
-  packageResolutionKey,
 } from '../project/project-builder';
 import {
   ProjectLanguageLoader,
@@ -64,8 +62,7 @@ export class ProjectCompiler {
   private dependencies: DependencyBuilder;
   private restoredDependencies?: DependencyArtifact;
   private refreshRequested?: symbol;
-  private readonly checkedPackages = new Map<string, Promise<void>>();
-  private reportPackageIssue?: (issue: PackageCompatibilityIssue) => void;
+  private packageCompatibility?: PackageCompatibilityCheck;
 
   constructor(
     private readonly sourceFiles: ProjectFileReader,
@@ -83,7 +80,9 @@ export class ProjectCompiler {
       this.packages,
       engine,
       this.assets,
-      (path, importer) => this.checkResolvedPackage(path, importer),
+      async (path, importer) => {
+        await this.packageCompatibility?.checkResolved(path, importer);
+      },
     );
     this.dependencies = new DependencyBuilder(
       this.packages,
@@ -112,7 +111,6 @@ export class ProjectCompiler {
     onWarnings?: (warnings: readonly ModelDiagnostic[]) => void,
   ): Promise<ProjectBuildArtifact> {
     checkCancelled();
-    this.checkedPackages.clear();
     onProgress?.('reading-files');
     const refreshRequest = this.refreshRequested;
     const refresh = !!refreshRequest;
@@ -227,65 +225,16 @@ export class ProjectCompiler {
     const runtimeSourceRef = imports.find(item =>
       isBuiltinPackageSpecifier(item.specifier),
     )?.sourceRef;
-    let packageIssue: PackageCompatibilityIssue | undefined;
-    const publishWarnings = () => {
-      checkCancelled();
-      const affected = packageIssue?.packages.map(
-        pkg =>
-          pkg.specifier ??
-          (pkg.manual?.reason === 'transitive'
-            ? pkg.manual.dependency
-            : pkg.name),
-      );
-      const warningSourceRef = imports.find(item =>
-        affected?.some(
-          specifier =>
-            item.specifier === specifier ||
-            item.specifier.startsWith(specifier + '/'),
-        ),
-      )?.sourceRef;
-      onWarnings?.(
-        packageIssue
-          ? [
-              packageCompatibilityWarning(
-                packageIssue,
-                warningSourceRef ?? {file: root, start: 0, end: 0},
-              ),
-            ]
-          : [],
-      );
-    };
-    this.reportPackageIssue = issue => {
-      checkCancelled();
-      const packages = new Map(
-        packageIssue?.packages.map(pkg => [pkg.packagePath, pkg]),
-      );
-      for (const pkg of issue.packages) {
-        const previous = packages.get(pkg.packagePath);
-        if (
-          !previous ||
-          !pkg.manual ||
-          (previous.manual?.reason === 'undeclared' &&
-            pkg.manual.reason === 'transitive')
-        )
-          packages.set(pkg.packagePath, pkg);
-      }
-      packageIssue = {
-        ...issue,
-        directory: packageIssue?.directory ?? issue.directory,
-        packages: [...packages.values()],
-      };
-    };
+    const compatibility = await PackageCompatibilityCheck.create(
+      this.packages,
+      this.builtinFiles,
+      checkCancelled,
+    );
+    this.packageCompatibility = compatibility;
     try {
-      const issue = await findPackageCompatibility(
-        this.packages,
-        this.builtinFiles,
-        rootPath,
-      );
-      checkCancelled();
-      if (issue) this.reportPackageIssue(issue);
+      await compatibility.checkDeclared(rootPath);
       for (const {path, importer} of this.builder.packageResolutions.values())
-        await this.checkResolvedPackage(path, importer);
+        await compatibility.checkResolved(path, importer);
       const languageProject = {
         files: [
           ...overrides.files.filter(file => !entryPaths.includes(file.path)),
@@ -335,7 +284,7 @@ export class ProjectCompiler {
       // Warm builds and restored dependencies can reuse package facades without
       // resolving their internal imports again. Their original owners still matter.
       for (const {path, importer} of dependencies.packageResolutions)
-        await this.checkResolvedPackage(path, importer);
+        await compatibility.checkResolved(path, importer);
       checkCancelled();
       const project: ModelProject = {
         files: await Promise.all(
@@ -382,8 +331,34 @@ export class ProjectCompiler {
     } finally {
       // Publish one complete snapshot, also on a genuine build error. Incremental
       // checks must not temporarily clear warnings or collapse their UI details.
-      publishWarnings();
-      this.reportPackageIssue = undefined;
+      // Release the request before cancellation or a consumer can throw.
+      this.packageCompatibility = undefined;
+      checkCancelled();
+      const issue = compatibility.issue;
+      const affected = issue?.packages.map(
+        pkg =>
+          pkg.specifier ??
+          (pkg.manual?.reason === 'transitive'
+            ? pkg.manual.dependency
+            : pkg.name),
+      );
+      const warningSourceRef = imports.find(item =>
+        affected?.some(
+          specifier =>
+            item.specifier === specifier ||
+            item.specifier.startsWith(specifier + '/'),
+        ),
+      )?.sourceRef;
+      onWarnings?.(
+        issue
+          ? [
+              packageCompatibilityWarning(
+                issue,
+                warningSourceRef ?? {file: root, start: 0, end: 0},
+              ),
+            ]
+          : [],
+      );
     }
   }
 
@@ -395,28 +370,6 @@ export class ProjectCompiler {
 
   cancel(): Promise<void> {
     return this.builder.cancel();
-  }
-
-  private async checkResolvedPackage(
-    path: string,
-    importer: string,
-  ): Promise<void> {
-    const key = packageResolutionKey({path, importer});
-    if (!key) return;
-    let pending = this.checkedPackages.get(key);
-    if (!pending) {
-      const report = this.reportPackageIssue;
-      pending = findResolvedPackageCompatibility(
-        this.packages,
-        this.builtinFiles,
-        path,
-        importer,
-      ).then(issue => {
-        if (issue) report?.(issue);
-      });
-      this.checkedPackages.set(key, pending);
-    }
-    await pending;
   }
 
   restoreDependencies(artifact: DependencyArtifact): DependencyArtifact {

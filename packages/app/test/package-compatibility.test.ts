@@ -4,6 +4,7 @@ import {after, before, test} from 'node:test';
 import type {ModelDiagnostic} from '../src/model/diagnostic.ts';
 import type {ProjectFileReader} from '../src/project/file-reader.ts';
 import type {PackageManifest} from '../src/project/package-manifest.ts';
+import type {PackageCompatibilityIssue} from '../src/project/package-compatibility.ts';
 import {packageTestFiles} from './project-test-files.ts';
 import {createAppTestServer} from './vite-test-server.ts';
 
@@ -63,6 +64,19 @@ function memoryFiles(entries: Record<string, unknown>): ProjectFileReader & {
   };
 }
 
+async function checkCompatibility(
+  files: ProjectFileReader,
+  builtinFiles: ProjectFileReader,
+  rootPath: string,
+) {
+  const check = await compatibility.PackageCompatibilityCheck.create(
+    files,
+    builtinFiles,
+  );
+  await check.checkDeclared(rootPath);
+  return check.issue;
+}
+
 const coreManifest = '/node_modules/@code3d/core/package.json';
 const versions = {'@code3d/core': '2.0.0', '@code3d/materials': '3.0.0'};
 const builtinFiles = () =>
@@ -84,11 +98,7 @@ for (const installed of ['1.0.0', '2.0.0', '3.0.0']) {
     });
     const packages = new ProjectPackages(files, builtins);
     await packages.update({files: []}, '/model.ts');
-    const issue = await compatibility.findPackageCompatibility(
-      packages,
-      builtins,
-      '/model.ts',
-    );
+    const issue = await checkCompatibility(packages, builtins, '/model.ts');
     if (installed === versions['@code3d/core']) {
       assert.equal(issue, undefined);
     } else {
@@ -127,7 +137,7 @@ test('nested scopes retain the actual manifest owners and resolve aliases withou
   });
   const packages = new ProjectPackages(files, builtins);
   await packages.update({files: []}, '/panel/src/model.ts');
-  const issue = await compatibility.findPackageCompatibility(
+  const issue = await checkCompatibility(
     packages,
     builtins,
     '/panel/src/model.ts',
@@ -161,11 +171,7 @@ test('nested scopes retain the actual manifest owners and resolve aliases withou
   );
   await packages.update({files: []}, '/panel/src/model.ts');
   assert.equal(
-    await compatibility.findPackageCompatibility(
-      packages,
-      builtins,
-      '/panel/src/model.ts',
-    ),
+    await checkCompatibility(packages, builtins, '/panel/src/model.ts'),
     undefined,
   );
 });
@@ -202,22 +208,19 @@ for (const [specifier, name] of [
         return info && {...info, realPath};
       },
     };
-    const declared = await compatibility.findPackageCompatibility(
+    const check = await compatibility.PackageCompatibilityCheck.create(
       files,
       builtins,
-      '/model.ts',
     );
+    await check.checkDeclared('/model.ts');
+    const declared = check.issue;
     assert.ok(declared);
     assert.equal(declared.packages.length, 1);
     assert.equal(declared.packages[0].packagePath, packagePath);
     assert.equal(declared.packages[0].specifier, specifier);
     for (const importer of ['/model.ts', '/node_modules/wrapper/index.js']) {
-      const resolved = await compatibility.findResolvedPackageCompatibility(
-        files,
-        builtins,
-        packagePath + '/index.js',
-        importer,
-      );
+      await check.checkResolved(packagePath + '/index.js', importer);
+      const resolved: PackageCompatibilityIssue | undefined = check.issue;
       assert.deepEqual(
         resolved,
         declared,
@@ -238,11 +241,7 @@ test('zero-install and latest development overlays use the selected packages ins
   await packages.update({files: []});
   assert.equal(packages.source, 'builtin');
   assert.equal(
-    await compatibility.findPackageCompatibility(
-      packages,
-      builtins,
-      '/model.ts',
-    ),
+    await checkCompatibility(packages, builtins, '/model.ts'),
     undefined,
   );
   files.contents.set(
@@ -260,11 +259,7 @@ test('zero-install and latest development overlays use the selected packages ins
   await packages.update({files: []});
   assert.equal(packages.source, 'project');
   assert.equal(
-    await compatibility.findPackageCompatibility(
-      packages,
-      builtins,
-      '/model.ts',
-    ),
+    await checkCompatibility(packages, builtins, '/model.ts'),
     undefined,
   );
   files.contents.set(
@@ -273,13 +268,8 @@ test('zero-install and latest development overlays use the selected packages ins
   );
   await packages.update({files: []});
   assert.equal(
-    (
-      await compatibility.findPackageCompatibility(
-        packages,
-        builtins,
-        '/model.ts',
-      )
-    )?.packages[0].installed,
+    (await checkCompatibility(packages, builtins, '/model.ts'))?.packages[0]
+      .installed,
     '1.0.0',
   );
 });
@@ -290,14 +280,132 @@ test('missing installations keep their module error while an installed package w
     '/package.json': {dependencies: {'@code3d/core': 'latest'}},
   });
   assert.equal(
-    await compatibility.findPackageCompatibility(files, builtins, '/model.ts'),
+    await checkCompatibility(files, builtins, '/model.ts'),
     undefined,
   );
   files.contents.set(coreManifest, '{}');
   assert.equal(
-    (await compatibility.findPackageCompatibility(files, builtins, '/model.ts'))
-      ?.packages[0].installed,
+    (await checkCompatibility(files, builtins, '/model.ts'))?.packages[0]
+      .installed,
     'unknown',
+  );
+});
+
+test('one compilation shares manifest and version reads across declared and resolved package checks', async () => {
+  const files = memoryFiles({
+    '/package.json': {
+      dependencies: {'@code3d/core': 'latest', '@code3d/materials': 'latest'},
+    },
+    [coreManifest]: {name: '@code3d/core', version: '1.0.0'},
+    '/node_modules/@code3d/materials/package.json': {
+      name: '@code3d/materials',
+      version: '1.0.0',
+    },
+    '/node_modules/wrapper/package.json': {name: 'wrapper', version: '1.0.0'},
+  });
+  const tracked = (reader: ProjectFileReader) => {
+    const reads = new Map<string, number>();
+    return {
+      reads,
+      files: {
+        ...reader,
+        readFile(path: string) {
+          reads.set(path, (reads.get(path) ?? 0) + 1);
+          return reader.readFile(path);
+        },
+      },
+    };
+  };
+  const source = tracked(files);
+  const builtins = tracked(builtinFiles());
+  const check = await compatibility.PackageCompatibilityCheck.create(
+    source.files,
+    builtins.files,
+  );
+  await check.checkDeclared('/model.ts');
+  await Promise.all([
+    check.checkResolved('/node_modules/@code3d/core/index.js', '/model.ts'),
+    check.checkResolved('/node_modules/@code3d/core/tooling.js', '/other.ts'),
+    check.checkResolved(
+      '/node_modules/@code3d/core/index.js',
+      '/parts/model.ts',
+    ),
+    check.checkResolved(
+      '/node_modules/@code3d/materials/index.js',
+      '/node_modules/wrapper/index.js',
+    ),
+  ]);
+  assert.equal(check.issue?.packages.length, 2);
+  assert.ok(check.issue?.packages.every(pkg => !pkg.manual));
+  assert.equal(source.reads.get('/package.json'), 1);
+  assert.equal(source.reads.get(coreManifest), 1);
+  assert.ok([...builtins.reads.values()].every(count => count === 1));
+
+  files.contents.set(
+    coreManifest,
+    JSON.stringify({name: '@code3d/core', version: versions['@code3d/core']}),
+  );
+  const next = await checkCompatibility(
+    source.files,
+    builtins.files,
+    '/model.ts',
+  );
+  assert.deepEqual(
+    next?.packages.map(pkg => pkg.name),
+    ['@code3d/materials'],
+    'the next compilation reads the updated installation',
+  );
+});
+
+test('cancelled package reads cannot publish issues into a later compilation', async () => {
+  const files = memoryFiles({
+    '/package.json': {dependencies: {'@code3d/core': 'latest'}},
+    [coreManifest]: {name: '@code3d/core', version: '1.0.0'},
+  });
+  let start!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>(resolve => {
+    start = resolve;
+  });
+  const released = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const delayed: ProjectFileReader = {
+    ...files,
+    async readFile(path) {
+      const bytes = await files.readFile(path);
+      if (path === coreManifest) {
+        start();
+        await released;
+      }
+      return bytes;
+    },
+  };
+  let cancelled = false;
+  const old = await compatibility.PackageCompatibilityCheck.create(
+    delayed,
+    builtinFiles(),
+    () => {
+      if (cancelled) throw new Error('Compilation superseded.');
+    },
+  );
+  const pending = old.checkDeclared('/model.ts');
+  await started;
+  cancelled = true;
+  files.contents.set(
+    coreManifest,
+    JSON.stringify({name: '@code3d/core', version: versions['@code3d/core']}),
+  );
+  assert.equal(
+    await checkCompatibility(files, builtinFiles(), '/model.ts'),
+    undefined,
+  );
+  release();
+  await assert.rejects(pending, /Compilation superseded/);
+  assert.equal(
+    old.issue,
+    undefined,
+    'an old asynchronous check must not publish its stale result',
   );
 });
 

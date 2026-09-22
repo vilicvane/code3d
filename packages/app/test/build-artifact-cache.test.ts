@@ -106,6 +106,14 @@ test('each opened file has its own complete latest artifact, including entries w
     const restoredA = fresh.restore(aKey)!;
     const restoredB = fresh.restore(bKey)!;
     assert.equal(
+      restoredA.dependencies.executionIdentity,
+      a.dependencies.executionIdentity,
+    );
+    assert.deepEqual(
+      restoredA.dependencies.packageResolutions,
+      a.dependencies.packageResolutions,
+    );
+    assert.equal(
       await projectArtifactIdentity(restoredA),
       a.id,
       'restoring an artifact does not hash its stored identity',

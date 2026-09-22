@@ -118,7 +118,11 @@ Reset 保留身份与名称，先持久记录 `template: 'examples'`，再删除
 App 原型期按随附包清单中的精确 npm 版本检查项目选用的公共建模包，
 不使用 App 私有 package.json 版本，也不引入兼容协议号。
 `package-compatibility.ts` 沿有效包文件系统读取实际安装，保留每个不匹配依赖的
-声明清单归属。检查在语言与 tooling 出口加载前完成，使真实出口或运行时错误发生时
+声明清单归属。每次编译创建独立的 `PackageCompatibilityCheck`，只读取一次 App
+版本表，共用声明查询和已解析清单，并统一包来源去重与警告汇总。编译器只保留
+当前检查上下文；结束时先释放引用，再检查取消并发布完整警告，取消或发布失败
+均不会留下上一请求的回调。包目录和来源键由 `package-manifest.ts` 统一解析。
+检查在语言与 tooling 出口加载前完成，使真实出口或运行时错误发生时
 仍能给出版本背景；内置包直接使用随附版本，开发 workspace 覆盖沿原有 reader 生效。
 版本不同仅产生结构化警告，携带实际版本、App 版本与清单路径，不抛出模型错误，
 不阻止构建、渲染或有效缓存恢复。缓存预览恢复仍核对当前包环境和依赖元数据，
@@ -309,6 +313,11 @@ JSDoc 工具与 inspect 元数据共用声明、重载和别名定位；回调�
 内部实现文件分别注册成公开入口。Core 发现与第一次依赖输出共用一次构建；首次
 引入新的外部模块才扩展整体产物。恢复旧入口时，若当前产物
 仍包含它的模块且内核身份、解析元数据一致，复用当前合集，避免执行 Worker 来回重启。
+依赖产物的完整 `id` 包含执行内容身份、模块格式、运行时入口、安装元数据和包来源，
+用于持久化及跨 Worker 传输；`executionIdentity` 只反映执行源码、资源路径与字节、
+两份 WASM 及内核身份，用于执行 Worker 和运行时实例的复用。跨子目录切换只增加
+包来源时，完整产物仍生成新标识以保存来源，但沿用执行身份，不重新初始化未变化的
+运行时。真实执行内容变化仍创建新的运行时。
 
 [BuildArtifactCache](../../../packages/app/src/model/build-artifact-cache.ts)以项目身份、
 规范化入口路径和构建上下文查找 `latest`。每个被浏览的源码文件独立保存，即使它
@@ -335,7 +344,9 @@ JSDoc 工具与 inspect 元数据共用声明、重载和别名定位；回调�
 
 恢复的是输出，不是 esbuild AST；编译 Worker 按需重建 context。跨 Worker 只传普通
 数据，不传 TS Program、函数、模块 namespace 或原生 Shape。每条有序 Worker 通道
-只在依赖身份变化时发送完整依赖；执行侧只接收当前入口数据和自身资源，不接收
+只在完整依赖产物 `id` 变化时发送完整依赖；执行侧按 `executionIdentity` 判断是否
+重建模块和内核实例。因此警告来源更新会传递并保存，但不会触发执行 Worker 重启。
+执行侧只接收当前入口数据和自身资源，不接收
 类型声明，也不重复复制运行时已有的资源。重建 Worker 后重新发送完整依赖。回归入口为
 [build-artifact-cache](../../../packages/app/test/build-artifact-cache.test.ts)、
 [build-artifacts 浏览器回归](../../../packages/app/test/browser/build-artifacts.test.ts)与

@@ -101,7 +101,7 @@ export class ModelCompilerClient {
   restored: Readonly<{rootPath: string; module: ModelModule}> | undefined;
   private lastEntry?: string;
   private executableArtifact?: ProjectBuildArtifact;
-  private executorDependency?: string;
+  private executorIdentity?: string;
   private cacheReset?: {
     promise: Promise<void>;
     finish(error?: Error): void;
@@ -475,11 +475,12 @@ export class ModelCompilerClient {
   }
   private startExecution(): void {
     if (this.runningExecution || !this.queuedExecution) return;
-    const dependency = this.queuedExecution.request.artifact.dependencies.id;
+    const identity =
+      this.queuedExecution.request.artifact.dependencies.executionIdentity;
     // Native ESM records and kernel instances are released with their Worker.
-    if (this.executorDependency && this.executorDependency !== dependency)
+    if (this.executorIdentity && this.executorIdentity !== identity)
       this.restartExecutor();
-    this.executorDependency = dependency;
+    this.executorIdentity = identity;
     this.runningExecution = this.queuedExecution;
     this.queuedExecution = undefined;
     const request = this.runningExecution.request;
@@ -764,7 +765,7 @@ export class ModelCompilerClient {
     this.executor.terminate();
     this.storage.disconnect(this.executor);
     this.exportable = undefined;
-    this.executorDependency = undefined;
+    this.executorIdentity = undefined;
     this.executionArtifacts.reset();
     this.executor = this.createExecutor();
   }

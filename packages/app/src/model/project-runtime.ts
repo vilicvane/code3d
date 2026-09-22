@@ -4,7 +4,7 @@ import type {DependencyArtifact} from './dependency-builder';
 import {ModelResources} from './model-resources';
 import {ModuleEvaluator, type ModuleExports} from './module-evaluator';
 
-/** One immutable dependency artifact owns the executor's module and kernel identities. */
+/** Executable dependency content owns the executor's module and kernel instances. */
 export class ProjectRuntime {
   private importFailure = false;
   get failedImport(): boolean {
