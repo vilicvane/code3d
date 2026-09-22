@@ -8,6 +8,7 @@ import {
   Vector4,
   Matrix4,
   BufferGeometry,
+  Quaternion,
   type Object3D,
 } from 'three';
 
@@ -18,6 +19,27 @@ export type CameraFraming = Readonly<{
   distance: number;
   viewHeight: number;
 }>;
+
+export type CameraPose = CameraFraming &
+  Readonly<{
+    orientation: Quaternion;
+    projection: CameraProjection;
+    /** Displayed perspective strength; 0 is orthographic, 1 is the navigation lens. */
+    projectionMix: number;
+  }>;
+
+export function transformCameraPose(
+  pose: CameraPose,
+  transform: Matrix4,
+): CameraPose {
+  return {
+    ...pose,
+    focus: pose.focus.clone().applyMatrix4(transform),
+    orientation: new Quaternion()
+      .setFromRotationMatrix(transform)
+      .multiply(pose.orientation),
+  };
+}
 
 export const defaultFieldOfView = 42;
 

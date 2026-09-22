@@ -151,7 +151,7 @@ test(
         const pose = viewport['controls'].capturePose();
         return {
           pose: {...pose, orientation: pose.orientation.toArray()},
-          local: viewport['keepLocalView'],
+          local: viewport['viewState'].keepLocalView,
         };
       });
       assert.equal(camera.local, false);

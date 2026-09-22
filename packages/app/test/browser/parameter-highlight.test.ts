@@ -138,7 +138,7 @@ async function measure(page: Page) {
         lines,
         camera: viewport['camera'].position.toArray(),
         selectedKey: viewport.getSelected()?.key,
-        scene: viewport['activeScene']?.key,
+        scene: viewport['viewState'].scene?.key,
       };
     } finally {
       restore.forEach(restore => restore());

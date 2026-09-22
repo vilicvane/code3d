@@ -9,8 +9,9 @@ import {
   resizeViewCamera,
   updateProjectionCamera,
   setCameraViewHeight,
+  transformCameraPose,
   type CameraFraming,
-  type CameraProjection,
+  type CameraPose,
   type ViewCamera,
 } from '../rendering/view-camera';
 import {
@@ -32,13 +33,6 @@ declare module 'three/addons/controls/ArcballControls.js' {
   }
 }
 
-export type CameraPose = CameraFraming &
-  Readonly<{
-    orientation: Quaternion;
-    projection: CameraProjection;
-    /** Displayed perspective strength; 0 is orthographic, 1 is the navigation lens. */
-    projectionMix: number;
-  }>;
 const transitionDurations = {view: 300, projection: 100} as const;
 
 /** Arcball navigation with the current focus exposed to framing and previews. */
@@ -97,6 +91,7 @@ export class ViewportNavigation extends ArcballControls {
       endNavigation: action,
       updateTransition: action,
       restorePose: action,
+      rebase: action,
       frame: action,
       setViewDirection: action,
       resetView: action,
@@ -194,6 +189,21 @@ export class ViewportNavigation extends ArcballControls {
     }
   }
 
+  /** Change scene coordinates without finishing an ongoing camera transition. */
+  rebase(transform: Matrix4): void {
+    const transition = this.transition;
+    this.applyPose(transformCameraPose(this.capturePose(), transform));
+    this.syncCamera();
+    if (transition)
+      this.transition = {
+        ...transition,
+        from: transformCameraPose(transition.from, transform),
+        to: transformCameraPose(transition.to, transform),
+      };
+    if (this.gestureStart)
+      this.gestureStart = transformCameraPose(this.gestureStart, transform);
+  }
+
   setViewDirection(direction: Vector3, up: Vector3): void {
     this.transitionTo({
       ...this.capturePose(),
@@ -242,9 +252,13 @@ export class ViewportNavigation extends ArcballControls {
   updateTransition(time: number): void {
     const transition = this.transition;
     if (!transition) return;
-    const t = Math.min(
-      (time - transition.startedAt) / transitionDurations[transition.kind],
-      1,
+    // A queued RAF timestamp can precede a transition started later in that frame.
+    const t = Math.max(
+      0,
+      Math.min(
+        (time - transition.startedAt) / transitionDurations[transition.kind],
+        1,
+      ),
     );
     const eased = t * t * (3 - 2 * t);
     const {from, to} = transition;

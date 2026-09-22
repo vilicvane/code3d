@@ -279,6 +279,8 @@ When an edit makes the model extend beyond the viewport, the camera moves back
 to show it with a margin, keeping your viewing direction and projection. Smaller
 results do not automatically zoom in. Camera adjustment waits until a navigation
 or modeling drag ends; moving between parameter highlights does not trigger it.
+The check also covers shape changes with unchanged overall bounds. Switching
+parameter highlights during a camera transition lets that transition continue.
 
 Zooming or panning until part of the model is outside the viewport keeps that
 local view during later edits. Zoom or pan back until the whole model is visible,

@@ -64,11 +64,23 @@ test(
     await page.goto(process.env.CODE3D_TEST_URL);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
     await page.evaluate(() => {
-      const {codeEditor, viewport} = window.viewportMemoryUi;
+      const {codeEditor} = window.viewportMemoryUi;
       const model = codeEditor.editor.getModel()!;
       codeEditor.editor.setPosition(
         model.getPositionAt(model.getValue().indexOf('a =') + 1),
       );
+    });
+    await page.waitForFunction(() => {
+      const {codeEditor, viewport} = window.viewportMemoryUi;
+      return (
+        viewport['inspectionSource']?.offset ===
+        codeEditor.editor
+          .getModel()!
+          .getOffsetAt(codeEditor.editor.getPosition()!)
+      );
+    });
+    await page.evaluate(() => {
+      const {viewport} = window.viewportMemoryUi;
       const controls = viewport['controls'];
       controls.focus.set(2, 3, 4);
       viewport['camera'].position.set(2, 3, 104);
@@ -271,6 +283,81 @@ async function fits(page: Page): Promise<boolean> {
 }
 
 test(
+  'accepted geometry is checked even when its world bounds stay the same',
+  {timeout: 120_000},
+  async t => {
+    const page = await open(t);
+    const source = (sign: number) => `import {line} from '@code3d/core';
+const sign = ${sign};
+const body = line([-50, -50 * sign, 0], [50, 50 * sign, 0]);`;
+    await load(page, source(1), 'body =');
+    await page.evaluate(() => {
+      const controls = window.viewportMemory.viewport['controls'];
+      const pose = controls.capturePose();
+      controls.restorePose({
+        focus: pose.focus.clone().set(0, 0, 0),
+        distance: 150,
+        viewHeight: 120,
+        projection: 'orthographic',
+        projectionMix: 0,
+        orientation: pose.orientation
+          .clone()
+          .setFromAxisAngle(pose.focus.clone().set(0, 0, 1), Math.PI / 4),
+      });
+    });
+    await wheel(page, -1);
+    assert.equal(await fits(page), true);
+    assert.equal(await localView(page), false);
+    const initial = await state(page);
+    await load(page, source(-1), 'body =');
+    assert.equal(await fits(page), true);
+    assert.ok((await state(page)).viewHeight > initial.viewHeight);
+    assert.equal(await localView(page), false);
+  },
+);
+
+test(
+  'source focus leaves an automatic camera transition running from its displayed pose',
+  {timeout: 120_000},
+  async t => {
+    const page = await open(t, true);
+    await page.emulateMedia({reducedMotion: 'no-preference'});
+    const source = (size: number) =>
+      `import {box} from '@code3d/core'; const body = box(${size}, ${size}, ${size});`;
+    await load(page, source(20), 'body =');
+    await load(page, source(200), 'body =');
+    const result = await page.evaluate(() => {
+      const {viewport, module, file, source} = window.viewportMemory;
+      const controls = viewport['controls'];
+      const before = controls.capturePose().viewHeight;
+      const target = controls.savedPose().viewHeight;
+      const transition = controls['transition'];
+      // Publish a same-scene focus update within the current animation frame.
+      viewport.renderInspection(module, viewport['inspectionScene'], {
+        file,
+        offset: source.indexOf('200, 200') + 6,
+      });
+      return {
+        before,
+        after: controls.capturePose().viewHeight,
+        target,
+        transitioning: controls.transitioning,
+        sameTransition: controls['transition'] === transition,
+      };
+    });
+    assert.ok(result.target > result.before);
+    assert.equal(result.transitioning, true);
+    assert.equal(result.sameTransition, true);
+    near(result.after, result.before);
+    await page.waitForFunction(
+      () => !window.viewportMemory.viewport['controls'].transitioning,
+    );
+    near((await state(page)).viewHeight, result.target);
+    assert.equal(await fits(page), true);
+  },
+);
+
+test(
   'automatic framing waits for navigation to end and animates the accepted geometry',
   {timeout: 120_000},
   async t => {
@@ -324,7 +411,9 @@ test(
 );
 
 async function localView(page: Page): Promise<boolean> {
-  return page.evaluate(() => window.viewportMemory.viewport['keepLocalView']);
+  return page.evaluate(
+    () => window.viewportMemory.viewport['viewState'].keepLocalView,
+  );
 }
 
 async function wheel(page: Page, delta: number): Promise<void> {
@@ -537,6 +626,8 @@ export const large = box(200, 200, 200);`;
         file,
         source.indexOf('large =') + 1,
       );
+      // The first queued RAF may belong to a frame preceding transition startup.
+      controls.updateTransition(controls['transition']!.startedAt - 8);
       const start = controls.capturePose().distance;
       const end = controls.savedPose().distance;
       const samples: number[] = [];
