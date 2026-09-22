@@ -36,5 +36,5 @@ const samples = grid(
   },
 );
 
-const palette = group(samples, 'Material presets');
+const palette = group(samples, {name: 'Material presets'});
 export default palette;

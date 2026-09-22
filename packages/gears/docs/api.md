@@ -101,9 +101,12 @@ internal tooth root circle.
 
 The shaft axis is local **+Y**. The tooth face spans `-faceWidth/2` to
 `+faceWidth/2`; the origin is at the axis and tooth-width midplane. The result
-exposes `gearAxis`, `gearFaceUp` and `gearFaceDown` for relation placement. These
-refer to the toothed body's original faces, including when a hub or shaft
-extends past them. The canonical `axis`, `up` and `down` remain available.
+exposes `gearAxis`, `gearCenter`, `gearFaceUp` and `gearFaceDown` for relation
+placement. `gearAxis` is a straight edge spanning the nominal tooth width;
+`gearCenter` is its midpoint. The canonical `axis` uses that same shaft line.
+The gear face bounds refer to the original toothed body, including when a hub
+or shaft extends past it. The generic `up` and `down` bounds still measure the
+complete solid. Named references follow origin edits and uniform scaling.
 
 ## Assemble compatible gears
 
@@ -113,8 +116,10 @@ ring and external pinion use the difference. The function checks matching
 normal module and helix angle. Parallel-shaft external helical pairs must have
 opposite hands. Internal-to-internal meshes are unsupported.
 
-`assembleGears(gears, config)` connects each adjacent pair in array order:
-`0→1→2…`. It returns related gear values, with the first gear unchanged.
+`assembleGears(gears, config)` connects adjacent shaft entries in array order:
+`0→1→2…`. Each entry is a gear or a two-element tuple `[incoming, outgoing]`
+for a compound shaft. It returns a flat array of related gear values, with the
+first gear unchanged.
 The helper calculates the engagement phase from tooth counts and contact
 direction, then couples the models through Core’s
 `coupleRotation(source, {ratio, phase})`, using their own axes and tooth-count ratio; no
@@ -149,8 +154,9 @@ change increases radial separation; for an internal ring and pinion, a negative
 change increases radial clearance.
 
 Shared config values apply to each adjacent pair. When pairs need different
-settings, `pairs[0]` adjusts gears 0–1, `pairs[1]` adjusts gears 1–2, and so
-on. Provide one entry per adjacent pair. `pairs[i].angle` is the turn in degrees
+settings, `pairs[0]` adjusts shaft entries 0–1, `pairs[1]` adjusts entries 1–2,
+and so on. Provide one entry per adjacent pair of outer entries; a tuple's
+internal connection does not consume a pair. `pairs[i].angle` is the turn in degrees
 from the preceding center-line's forward extension to the next center line,
 in the assembly XZ plane. It defaults to 0°, continuing straight. The first
 pair starts from +X. Positive angles turn from +X toward +Z; negative angles
@@ -186,13 +192,45 @@ gear in `assembleGears()` highlights its positioned member within the full
 train. Selecting the whole input array or the `assembleGears` function name
 emphasizes all assembled gears.
 
-Input gears must come from this package's constructors. Only `.material()` and
-`.relate()` preserve the nominal tooth parameters used by this helper. Other
-operations, including `.originOffset()` and `.scaled()`, return ordinary models
-without those parameters. To follow an external
-anchor, relate the first gear before calling `assembleGears()`, or relate the
+Input gears must come from this package's constructors. Metadata survives
+`.material()`, `.relate()`, origin edits and uniform scaling. Gear dimensions
+are resolved from the current named references, so scaling both gears changes
+their center distance; scaling only one can make their modules incompatible.
+Assembly aligns the actual tooth centers rather than assuming the origins are
+at those centers. To follow an external anchor, relate the first gear before
+calling `assembleGears()`, or relate the
 completed `group()` afterward. A later replacement such as
 `first = first.relate(...)` does not retarget the already returned gears.
+
+### Compound shafts
+
+Use a tuple when one shaft receives motion through one gear and drives the next
+shaft through another. The first tuple member meshes with the previous shaft;
+the second meshes with the next. The helper aligns the second member's frame
+to the assembled first member's frame, carrying its full rotation.
+
+```ts
+const middleLarge = spurGear({module: 2, teeth: 30, faceWidth: 10});
+const middleSmall = spurGear({
+  module: 2,
+  teeth: 18,
+  faceWidth: 14,
+}).originOffset(0, -12, 0);
+const gears = assembleGears([pinion, [middleLarge, middleSmall], wheel], {
+  centerDistanceDelta: 0.2,
+});
+```
+
+Here the smaller gear's tooth center is 12 mm above its origin. Its 14 mm tooth
+width and the large gear's 10 mm tooth width make their adjacent faces touch.
+Aligning the two frames creates the layer spacing, and `wheel` is placed at the small
+gear's tooth center height. Choose each gear's origin so that the two frames
+describe the same shaft datum and their axes are coaxial. The assembly call
+does not need a layer-offset option.
+
+The returned order is `[pinion, middleLarge, middleSmall, wheel]`. Tuples also
+work at the beginning or end of a train. Selecting a tuple in the App highlights
+both assembled members; selecting one member highlights just that gear.
 
 ### Drive through connected parts
 
@@ -205,10 +243,21 @@ ring and pinion turn in the same direction. Angular changes scale by
 `sourceTeeth / targetTeeth`.
 
 The [live transmission example](../../app/examples/packages/gears/transmission.ts)
-uses a single **Drive angle** slider and 20/30/40 teeth. One input revolution
-produces −2/3 revolution at the middle shaft and +1/2 revolution at the output
-crank. Drag through zero or several turns; cumulative angles are preserved.
-The shaft centers remain fixed as the input rotates.
+uses a single **Drive angle** slider and one tuple-based `assembleGears` call: a 20-tooth
+input drives a 30-tooth middle gear, then a coaxial 18-tooth gear drives a
+40-tooth output. The smaller middle gear uses `.originOffset(0, -12, 0)` to
+define the upper layer. The helper performs frame alignment within the tuple,
+so no additional angle input or manual ratio coupling is needed.
+
+One input revolution produces −2/3 revolution at both middle gears and +3/10
+revolution at the output crank: `(20 / 30) * (18 / 40) = 0.3`. Drag through zero
+or several turns; cumulative angles are preserved. The shaft centers remain
+fixed as the input rotates.
+
+The example's fixed `base` is a Core `frame()` reference. The final
+`group(parts, {frame: base})` contains only real parts and keeps the assembly's
+coordinates independent of the input crank's rotation; no base plate or empty
+group is needed.
 
 This subset uses fixed parallel +Y shafts in the assembly solve frame, with
 frame alignment, origin coincidence, `on()` and independent Y `rotate()` steps.

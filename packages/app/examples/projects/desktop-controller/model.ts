@@ -32,7 +32,7 @@ const key = keycap(6).relate(part => [
 
 export default group(
   [body, panel, knob, key, ...internalParts(), ...panelScrews()],
-  'Desktop controller',
+  {name: 'Desktop controller'},
 );
 
 function internalParts() {

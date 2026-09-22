@@ -10,7 +10,7 @@ export function makePanel() {
   );
   const plate = blank.cut([shaft, ...holes]).material('#353a33');
   const label = makeLabel().originOffset(28, -1.5, -22);
-  return group([plate, label], 'Controller panel').expose({
+  return group([plate, label], {name: 'Controller panel'}).expose({
     mountingFace: blank.down,
     axis: blank.axis,
     top: blank.up,

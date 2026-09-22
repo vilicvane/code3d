@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import {after, test} from 'node:test';
 import {replicad} from '@code3d/core/replicad';
-import {align, group, intersect} from '@code3d/core';
+import {align, box, distance, group, intersect, rotate} from '@code3d/core';
+import {rotateVector} from '@code3d/core/tooling';
 import {
   createModelSnapshotter,
   disposeModelObjects,
@@ -365,12 +366,102 @@ test('assembly rejects incompatible gears or malformed pair overrides', () => {
       () => assembleGears([a, b], {pairs: [{angle}]}),
       /Pair angle must be finite/,
     );
-  assert.throws(() => nominalCenterDistance(a.scaled(2), b), /created by/);
+  assert.throws(() => nominalCenterDistance(a.scaled(2), b), /normal module/);
 });
 
-test('external crank drives meshed gears and output attachments without moving the shafts', async () => {
-  const {box, rotate} = await import('@code3d/core');
-  const {rotateVector} = await import('@code3d/core/tooling');
+test('gear dimensions and meshing follow origin edits and uniform scaling', () => {
+  const a = keep(spurGear({module: 2, teeth: 21, faceWidth: 10}));
+  const b = keep(spurGear({module: 2, teeth: 24, faceWidth: 8}));
+  const first = a.originOffset(5, 7, 9).scaled(2);
+  const second = b.scaled(2).originOffset(-4, -3, 2);
+  assert.equal(nominalCenterDistance(a, b), 45);
+  assert.equal(nominalCenterDistance(first, second), 90);
+  const pair = assembleGears([first, second], {centerDistanceDelta: 0.4});
+  near(
+    ['x', 'y', 'z'].map(axis =>
+      distance(pair[0].gearCenter, pair[1].gearCenter, axis as 'x' | 'y' | 'z'),
+    ),
+    [90.4, 0, 0],
+  );
+  assert.throws(() => intersect(pair), /no common solid volume/);
+});
+
+test('tuple gears transmit complete turns across origin-defined layers and shaft angles', () => {
+  const snapshot = createModelSnapshotter();
+  const prototypes = [20, 30, 18, 40].map(teeth =>
+    keep(spurGear({module: 2, teeth, faceWidth: 10})),
+  );
+  const small = prototypes[2].originOffset(0, -12, 0);
+  const base = box(1, 1, 1);
+  let initialHeadings: number[] | undefined;
+  for (const angle of [0, 17, -55, 359, 360, 361, -720]) {
+    const driver = prototypes[0].relate(self => [
+      align(self.frame, base.frame),
+      rotate(0, angle, 0),
+    ]);
+    const gears = assembleGears(
+      [driver, [prototypes[1], small], prototypes[3]],
+      {
+        centerDistanceDelta: 0.2,
+        pairs: [{angle: 30}, {angle: 60}],
+      },
+    );
+    const nodes = snapshot(group([base, ...gears])).children.slice(1);
+    assert.equal(nodes.length, 4);
+    const headings = nodes.map(child => {
+      const x = rotateVector([1, 0, 0], child.transform.quaternion);
+      return Math.atan2(-x[2], x[0]);
+    });
+    initialHeadings ??= headings;
+    headings.forEach((value, i) => {
+      const expected =
+        initialHeadings![i] +
+        ([1, -2 / 3, -2 / 3, 0.3][i] * angle * Math.PI) / 180;
+      near(
+        [Math.cos(value), Math.sin(value)],
+        [Math.cos(expected), Math.sin(expected)],
+      );
+    });
+    const x = 50.2 * Math.cos(Math.PI / 6);
+    near(nodes[1].transform.position, [x, 0, 25.1]);
+    near(nodes[2].transform.position, [x, 0, 25.1]);
+    near(nodes[3].transform.position, [x, 12, 83.3]);
+    near(nodes[1].transform.quaternion, nodes[2].transform.quaternion);
+    assert.ok(
+      Math.abs(distance(gears[1].gearCenter, gears[2].gearCenter) - 12) < 1e-6,
+    );
+    if ([0, 17, -55, 361].includes(angle))
+      for (const pair of [gears.slice(0, 2), gears.slice(2)])
+        assert.throws(() => intersect(pair), /no common solid volume/);
+  }
+  const lone = assembleGears([[prototypes[1], small]]);
+  assert.equal(lone.length, 2);
+  assert.equal(lone[0], prototypes[1]);
+  assert.ok(
+    Math.abs(distance(lone[0].gearCenter, lone[1].gearCenter) - 12) < 1e-6,
+  );
+  const ends = assembleGears([
+    [prototypes[1], small],
+    [prototypes[3], prototypes[0].originOffset(0, 12, 0)],
+  ]);
+  const positions = snapshot(group(ends)).children.map(
+    node => node.transform.position,
+  );
+  near(positions[0], [0, 0, 0]);
+  near(positions[1], positions[0]);
+  near(positions[2], [58, 12, 0]);
+  near(positions[3], positions[2]);
+  near([distance(ends[0].gearCenter, ends[3].gearCenter, 'y')], [0]);
+  assert.throws(
+    () =>
+      assembleGears([prototypes[0], [prototypes[1], small], prototypes[3]], {
+        pairs: [{}, {}, {}],
+      }),
+    /number of adjacent gear pairs/,
+  );
+});
+
+test('external crank drives meshed gears and output attachments without moving the shafts', () => {
   const snapshot = createModelSnapshotter();
   const prototypes = [20, 30, 40].map(teeth =>
     keep(spurGear({module: 2, teeth, faceWidth: 10})),
@@ -421,8 +512,7 @@ test('external crank drives meshed gears and output attachments without moving t
   }
 });
 
-test('internal and helical transmission remain engaged away from the initial pose', async () => {
-  const {box, rotate} = await import('@code3d/core');
+test('internal and helical transmission remain engaged away from the initial pose', () => {
   const base = box(1, 1, 1);
   const ring = keep(
     internalGear({module: 2, teeth: 48, faceWidth: 10, outerDiameter: 130}),
@@ -450,6 +540,11 @@ test('internal and helical transmission remain engaged away from the initial pos
     [ring, pinion, -0.2],
     [pinion, ring, -0.2],
     [right, left, 0.2],
+    [
+      right.scaled(2).originOffset(0, -6, 0),
+      left.originOffset(0, 4, 0).scaled(2),
+      0.4,
+    ],
   ] as const)
     for (const angle of [-37, 53, 361]) {
       const driver = source.relate(self => [

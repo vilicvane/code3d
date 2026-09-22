@@ -22,7 +22,7 @@ import {box, group} from '@code3d/core';
 import {linear, repeat} from '@code3d/layout';
 
 const posts = linear(repeat(box(8, 20, 8), 5), {axis: 'x', step: 16});
-export default group(posts, 'Linear posts');
+export default group(posts, {name: 'Linear posts'});
 ```
 
 ![Five identical posts arranged in a straight row at a 16 mm pitch.](../web/src/assets/models/layout-linear.png)

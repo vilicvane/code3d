@@ -674,7 +674,7 @@ test('editing a plate fillet does not rebuild an unchanged screw across compiles
       'const hole = ISO4762.clearanceHole("M6", 10).relate(tool => on(tool.shaftBottom, plate.down.flip()));',
       'plate = cut(plate, [hole]).material("#666");',
       'const screw = ISO4762.screw("M6", 18).material("#999").relate(part => [on(part.headBottom, hole.counterboreBottom.flip()), offset(0, -0.5, 0)]);',
-      'export default group([plate, screw], "M6 fastener demo");',
+      'export default group([plate, screw], {name: "M6 fastener demo"});',
     ].join('\n');
   let buildCount;
   try {

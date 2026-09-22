@@ -583,6 +583,7 @@ project without restarting its conversation. See the [agent guide](../guides/age
 for connection, following an agent, image history, and access management.
 
 The `/examples/packages/gears/transmission.ts` example connects a driven crank to
-three gears and an output crank. Drag **Drive angle** in Inputs: the middle shaft
-reverses at 2/3 speed, and the output follows at half speed. Several complete
-turns remain continuous. See [gear transmission](/docs/packages/gears/api/#drive-through-connected-parts).
+two gear stages, with a large and a small gear fixed to the middle shaft.
+Drag **Drive angle** in Inputs: both middle gears reverse at 2/3 speed, and
+the output follows at 3/10 speed on the upper layer. Several complete turns
+remain continuous. See [gear transmission](/docs/packages/gears/api/#drive-through-connected-parts).

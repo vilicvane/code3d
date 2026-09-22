@@ -556,12 +556,12 @@ in code; selecting a face does not automatically generate a related sketch.
 
 ## Composition and boolean operations
 
-| Function               | Result                                        |
-| ---------------------- | --------------------------------------------- |
-| `group(models, name?)` | Composition that preserves its separate parts |
-| `union(solids)`        | Fused solid                                   |
-| `cut(stock, tools)`    | Stock with the tool volumes removed           |
-| `intersect(solids)`    | Shared solid volume                           |
+| Function                  | Result                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| `group(models, options?)` | Composition that preserves its separate parts; options select `name` and `frame` |
+| `union(solids)`           | Fused solid                                                                      |
+| `cut(stock, tools)`       | Stock with the tool volumes removed                                              |
+| `intersect(solids)`       | Shared solid volume                                                              |
 
 `group()` accepts a `readonly Model[]`, including ordinary groups, empty groups,
 and any depth of nested groups mixed with solids, faces, curves, or points. Each
@@ -569,6 +569,12 @@ nested group keeps its hierarchy. No type assertion or `expose()` call is needed
 to compose it; use `expose()` when callers need named member references. Generic
 helpers can use `ModelCapabilities<Elements, Kind>` and `ModelForKind<Elements, Kind>`
 to preserve the concrete model kind and exposed members through chained calls.
+
+Use `{name: 'Assembly', frame: base}` to name the group and explicitly select
+its local coordinate system. `frame` accepts an independent `frame()` value,
+a model's `.frame`, or an exposed frame. It contributes a reference, not an
+output member. Without this option, the first member defines the coordinates.
+See [independent coordinate frames](#independent-coordinate-frames).
 
 Relations are resolved at composition and geometry evaluation boundaries.
 `stock.cut(tools)` is equivalent to `cut(stock, tools)`. Arrays in booleans and
@@ -721,6 +727,34 @@ For automatic tooth ratios and engagement phase, use
 
 ## Origins and rotation
 
+### Independent coordinate frames
+
+`frame(name?)` returns a `Frame`: an independent origin and three axes, with
+no geometry, bounds, or mesh. Use it directly with `align`, and use `.origin`
+when only position matters. `frame.relate(self => ...)` returns a new frame
+with the specified relations and transformations, preserving the old value.
+
+```ts
+import {align, box, frame, group, input, rotate} from '@code3d/core';
+
+const base = frame('Assembly frame');
+const angle = input('Angle', 0);
+const crank = box(30, 4, 8).relate(self => [
+  align(self.frame, base),
+  rotate(0, angle, 0),
+]);
+export default group([crank], {name: 'Crank', frame: base});
+```
+
+The group expresses its members in `base`'s solved origin and axes. The crank
+rotates within that frame; it does not redefine the assembly's coordinates.
+Frames can also follow other frames using `align(self, otherFrame)` and be
+exposed as named references. They are not `Model` values and cannot be group
+members. Selecting the `frame` option in the App shows the coordinate reference
+with the assembly as context.
+
+### Model coordinate references
+
 Every model, including groups, has a `frame: FrameAnchor` coordinate reference.
 `frame.origin: PointAnchor` references its zero point; `model.origin` returns
 that same reference. These references have no geometry and cannot be added as
@@ -754,10 +788,10 @@ Every geometric model exposes `center`: its initial local bounding-box center,
 carried along by subsequent transforms. Rotation does not recalculate it from
 the rotated shape's axis-aligned bounds. Origin edits change its coordinates;
 `originPoint(model.center)` selects that carried point explicitly. After a rotation, it can differ from the center used by `originCenter()`.
-A group inherits the first member's solved local coordinate frame, including
+A group without an explicit `frame` inherits the first member's solved local coordinate frame, including
 its origin and axes, while preserving relative member placement. Nested groups
-keep their own frames; an empty group uses the default origin and axes. Member
-order can change the group's frame. Group origin
+keep their own frames; an empty group uses the default origin and axes unless
+an explicit frame is selected. Member order can change the default group's frame. Group origin
 edits move the entire assembly's local coordinates together; they preserve its
 internal relations. `rotate(x, y, z)` turns the solved assembly about its current
 origin, including nested instances. `originPoint(part.center)` resolves the member's actual
@@ -794,13 +828,39 @@ font line metrics are not part of these bounds.
 See the [text example](../../app/examples/text.ts). Select `originCenter(outlines)`
 to preview the centered faces, then pass them directly to `extrude` or `wrap`.
 
-## Anchors and relations
+## Model metadata
 
-Package authors can use `setModelData(model, key, value)` to associate
-package-specific data with a newly built model, and `getModelData(model, key)`
-to read it. Keys are symbols. Data is retained when `.relate()` or
-`.material()` creates a new value; other model operations do not retain it.
-This data stays in process and is not part of model geometry or snapshots.
+Every model has a readonly `metadata` dictionary with symbol keys. Package
+authors use `.withMetadata(entries)` to return a new model with entries merged
+into its current metadata snapshot. Reusing a symbol replaces that entry;
+different symbols remain independent, even with the same description.
+
+```ts
+const partInfo = Symbol('partInfo');
+const part = box(20, 10, 30).withMetadata({
+  [partInfo]: {name: 'bracket'},
+});
+const shifted = part.originOffset(0, -5, 0);
+const info = shifted.metadata[partInfo]; // unknown; the package owns its type.
+```
+
+Writing metadata copies the dictionary without changing the original model.
+Values are opaque and copied by reference; treat nested data as immutable.
+There is no metadata history or replay protocol. Origin edits, rotation, scaling,
+materials, exposed references and relations retain the current entries. Derived
+geometry inherits its primary input's metadata: for example, `extrude` uses the
+profile and `cut` uses the stock. Multi-input geometry uses the first input
+without merging other inputs' entries. A new `group` has its own empty metadata;
+its children retain theirs.
+
+Core does not interpret or scale numbers inside metadata, or rebind references
+stored there. Put geometric references in `expose` so they follow the model's
+coordinate changes. A package can keep scale-independent metadata and resolve
+dimensions from those current references, or explicitly write updated values
+with `withMetadata` when its own operation changes their meaning. Metadata stays
+in process; render snapshots, Worker messages and geometry exports do not include it.
+
+## Anchors and relations
 
 Solid primitives expose `center` and `axis`; every model provides directional
 bounds: `up` (+Y), `down` (−Y), `right` (+X), `left` (−X), `front` (+Z),

@@ -193,6 +193,7 @@ export function createModelExecutor(
     instrumentModelOperation,
     isRelationExpression,
     isModelObject,
+    isFrame,
     isSketch,
     sketchFrame,
     modelElementReference,
@@ -380,14 +381,17 @@ export function createModelExecutor(
         recordSourceValue(id, 'value', location, result, context.id, runtime);
       }
       const order = ++evaluationOrder;
-      if (isSketch(result))
-        instrumentModelOperation(sketchFrame(result), {
-          siteId: id,
-          execution,
-          order,
-          sourceRef: location,
-          parameters,
-        });
+      if (isSketch(result) || isFrame(result))
+        instrumentModelOperation(
+          isFrame(result) ? result : sketchFrame(result),
+          {
+            siteId: id,
+            execution,
+            order,
+            sourceRef: location,
+            parameters,
+          },
+        );
       if (context.kind === 'call') {
         recordCatalogValue(
           {

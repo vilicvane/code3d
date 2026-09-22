@@ -23,7 +23,7 @@ export const renderSamples = [
     category: 'Layouts',
     file: 'packages/layout/linear.ts',
     focus: {
-      context: "export default group(posts, 'Linear posts')",
+      context: "export default group(posts, {name: 'Linear posts'})",
       token: 'group',
     },
     view: {direction: [0.4, 0.7, 1.5], up: [0, 1, 0]},
@@ -37,7 +37,7 @@ export const renderSamples = [
     category: 'Layouts',
     file: 'packages/layout/grid.ts',
     focus: {
-      context: "export default group(pins, 'Grid of pins')",
+      context: "export default group(pins, {name: 'Grid of pins'})",
       token: 'group',
     },
     view: {direction: [0.5, 1.5, 1.2], up: [0, 1, 0]},
@@ -74,7 +74,7 @@ export const renderSamples = [
     file: 'packages/gears/assembly.ts',
     focus: {
       context:
-        "export default group([mountingPlate, train], 'Mounted gear train')",
+        "export default group([mountingPlate, train], {name: 'Mounted gear train'})",
       token: 'group',
     },
     view: {direction: [0.5, 1.8, 1.2], up: [0, 1, 0]},
@@ -473,7 +473,7 @@ export const sourceContextSets: Readonly<
         'Constrain the complete 120° train to the upper face of a mounting plate.',
       focus: {
         context:
-          "export default group([mountingPlate, train], 'Mounted gear train')",
+          "export default group([mountingPlate, train], {name: 'Mounted gear train'})",
         token: 'group',
       },
     },

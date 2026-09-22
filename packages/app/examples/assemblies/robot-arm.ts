@@ -36,7 +36,7 @@ function joint(capRadius: number) {
           .material(accent),
       ),
     ],
-    'Hinge pin',
+    {name: 'Hinge pin'},
   );
 }
 
@@ -71,7 +71,7 @@ const palm = union([
   .cut([axle(boreRadius, thickness + 2)])
   .originOffset(0, 0, -layer)
   .material(paint);
-const gripper = group([joint(6), palm, ...fingers], 'Gripper').rotate(
+const gripper = group([joint(6), palm, ...fingers], {name: 'Gripper'}).rotate(
   0,
   0,
   wrist,
@@ -85,7 +85,7 @@ const forearm = group(
     link(forearmLength, 10, 8).originOffset(0, 0, layer),
     gripper.originOffset(0, -forearmLength, 0),
   ],
-  'Forearm',
+  {name: 'Forearm'},
 ).rotate(0, 0, elbow);
 
 const upperArm = group(
@@ -94,7 +94,7 @@ const upperArm = group(
     link(upperLength, 12, 10).originOffset(0, 0, -layer),
     forearm.originOffset(0, -upperLength, 0),
   ],
-  'Upper arm',
+  {name: 'Upper arm'},
 ).rotate(0, 0, shoulder);
 
 // The fixed shoulder cheek sits behind the upper arm, above the pedestal.
@@ -109,7 +109,7 @@ const pedestal = union([
   .material(dark);
 const turntable = group(
   [pedestal, upperArm.originOffset(0, -shoulderHeight, 0)],
-  'Turntable',
+  {name: 'Turntable'},
 ).rotate(0, baseYaw, 0);
 
 const bolts = [-1, 1].flatMap(x =>
@@ -127,5 +127,5 @@ export default group(
     ...bolts,
     turntable,
   ],
-  'Robot arm',
+  {name: 'Robot arm'},
 );

@@ -1250,7 +1250,7 @@ const tilted = box(10, 4, 8).relate(self =>
   [on(self, base.up), offset(0, 10, 0), rotate(20, 30, 45)]);
 const members = [base, tilted];
 const inner = group(members).rotate(0, 25, 0);
-export const outer = group([inner, box(6, 12, 4)], 'Grid assembly');
+export const outer = group([inner, box(6, 12, 4)], {name: 'Grid assembly'});
 `;
   await page.evaluate(source => {
     window.navigationApp.codeEditor.editor.setValue(source);

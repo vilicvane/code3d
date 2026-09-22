@@ -27,7 +27,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'assemblies/robot-arm.ts': ['default', 23],
   'packages/gears/parts.ts': ['default', 5],
   'packages/gears/assembly.ts': ['default', 4],
-  'packages/gears/transmission.ts': ['default', 12],
+  'packages/gears/transmission.ts': ['default', 11],
   'packages/screws.ts': ['default', 10],
   'projects/phone-stand.ts': ['default', 1],
   'assemblies/screw-box/model.ts': ['default', 6],
@@ -224,6 +224,43 @@ for (const entry of exampleEntries) {
         validateGeometry(snapshot(exports[expected[0]])),
         expected[1],
       );
+      if (entry.file === 'packages/gears/transmission.ts') {
+        const assembly = snapshot(exports.default);
+        assert.equal(assembly.children.length, 7);
+        const gears = assembly.children.slice(1, 5);
+        for (const [index, expected] of [
+          [0, 0, 0],
+          [50.2, 0, 0],
+          [50.2, 0, 0],
+          [108.4, 12, 0],
+        ].entries())
+          gears[index].transform.position.forEach((value, axis) =>
+            assert.ok(Math.abs(value - expected[axis]) < 1e-6),
+          );
+        assert.deepEqual(
+          gears[1].transform.quaternion,
+          gears[2].transform.quaternion,
+        );
+        assert.ok(
+          Math.abs(
+            distance(exports.gears[1].gearCenter, exports.gears[2].gearCenter) -
+              12,
+          ) < 1e-6,
+        );
+        for (const pair of [exports.gears.slice(0, 2), exports.gears.slice(2)])
+          assert.throws(() => intersect(pair), /no common solid volume/);
+        // Every shaft ends at the same height, including the raised second stage.
+        for (const [index, attachment] of [
+          [0, exports.inputCrank],
+          [5, exports.middleShaft],
+          [6, exports.outputCrank],
+        ] as const) {
+          const bottom =
+            attachment.bounds().minimum[1] +
+            assembly.children[index].transform.position[1];
+          assert.ok(Math.abs(bottom + 18) < 1e-6);
+        }
+      }
       if (entry.file === 'packages/gears/assembly.ts') {
         const [plate, train] = snapshot(exports.default).children;
         assert.equal(plate.kind, 'solid');

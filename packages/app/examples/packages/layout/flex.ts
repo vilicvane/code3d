@@ -7,4 +7,4 @@ const parts = flex([box(12, 6, 16), cylinder(5, 14), box(20, 10, 12)], {
   crossAxis: 'x',
   alignItems: 'center',
 });
-export default group(parts, 'Flex with clearances');
+export default group(parts, {name: 'Flex with clearances'});

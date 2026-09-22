@@ -11,4 +11,4 @@ const arm = box(48, 4, 8)
   .relate(() => [on(base.up), rotate(0, angle, 0)]);
 
 // Select the complete assembly, then press Play below the viewport.
-export default group([base, arm], 'Rotating arm');
+export default group([base, arm], {name: 'Rotating arm'});

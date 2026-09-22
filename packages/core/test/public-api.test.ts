@@ -44,6 +44,7 @@ const authoringValues = [
   'text',
   'frustum',
   'group',
+  'frame',
   'intersect',
   'line',
   'loft',
@@ -71,7 +72,7 @@ const inspectorEntries = [
   'inspectVolume',
 ];
 
-const libraryHelpers = ['getModelData', 'setModelData', 'inspectGroupMembers'];
+const libraryHelpers = ['inspectGroupMembers'];
 
 test('exports authoring values, library helpers and runtime inspectors without leaking internal declarations', async () => {
   assert.deepEqual(
@@ -151,11 +152,12 @@ test('exposes only the root, Replicad, Three.js, and tooling package entries', a
   ]);
 });
 
-test('keeps the concrete model class out of the root declaration', async () => {
+test('keeps concrete model and frame classes out of the root declaration', async () => {
   const declaration = await readFile(
     new URL('../bld/library/index.d.ts', import.meta.url),
     'utf8',
   );
   assert.doesNotMatch(declaration, /\bModelObject\b/);
+  assert.doesNotMatch(declaration, /\bFrameObject\b/);
   assert.match(declaration, /\bGroupModel\b/);
 });

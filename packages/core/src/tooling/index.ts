@@ -83,6 +83,7 @@ export {
   isConstraint,
   isRelationExpression,
   isModelObject,
+  isFrame,
   isSolidModel,
   modelElementReference,
   previewAnchorReference,
