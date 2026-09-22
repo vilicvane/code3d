@@ -1030,8 +1030,72 @@ test('cut tool inspection declines upstream values outside its recorded operands
     const scene = defined(await inspect(token));
     assert.equal(scene.kind, 'preview');
     assert.equal(scene.target.length, 1);
-    assert.equal(width(scene.target[0]), 20);
+    assert.equal(width(scene.target[0]), 16);
     assert.deepEqual(scene.ambient, []);
+  }
+});
+
+test('cut tool inspection declines non-solid values in tool builder receivers', async () => {
+  const inspect = await compile(`import {box, rectangle} from '@code3d/core';
+    const stock = box(20,20,20);
+    const builder = {
+      profile: rectangle(12,12),
+      tool() { return this.profile.extrude(30); },
+    };
+    stock.cut([builder.tool()]);`);
+  const scene = defined(await inspect('builder.tool'));
+  assert.equal(scene.kind, 'preview');
+  assert.equal(scene.target.length, 1);
+  assert.equal(width(scene.target[0]), 12);
+  assert.deepEqual(scene.ambient, []);
+});
+
+test('enclosing inspectors retain the default preview owner across calls, receivers and closures', async () => {
+  const inspect = await compile(`import {box} from '@code3d/core';
+    /**
+     * @code3d.inspect operand outer.inspectInput
+     * @code3d.inspect outer.inspectCall
+     */
+    function outer(operand: unknown, mode: string) { return box(30,2,3); }
+    namespace outer {
+      export function inspectInput([operand, mode]) {
+        return mode === 'parameter' ? {target: [box(40,2,3)]} : undefined;
+      }
+      export function inspectCall([operand, mode]) {
+        return mode === 'call' ? {target: [box(50,2,3)]} : undefined;
+      }
+    }
+    /**
+     * @code3d.inspect.closure build wrap.inspectBody
+     * @code3d.inspect wrap.inspectCall
+     */
+    function wrap(build: () => void) { build(); return box(13,2,3); }
+    namespace wrap {
+      export function inspectBody() { return undefined; }
+      export function inspectCall() { throw new Error('Callback body re-entered the call inspector'); }
+    }
+    const input = box(7,2,3);
+    outer(box(9,2,3).originOffset(-1,0,0), 'decline');
+    outer(input.originOffset(-2,0,0), 'decline');
+    outer(input, 'decline');
+    outer(input.originOffset(-3,0,0), 'parameter');
+    outer(input.originOffset(-4,0,0), 'call');
+    outer(wrap(() => { input; }), 'decline');
+    outer(wrap(() => { input.originOffset(-5,0,0); }), 'decline');`);
+  for (const [token, delta, size, kind] of [
+    ['box(9,2,3)', 3, 9, 'preview'],
+    ['input.originOffset(-2', 0, 7, 'preview'],
+    ["input, 'decline'", 0, 30, 'preview'],
+    ['input.originOffset(-3', 0, 40, 'inspect'],
+    ['input.originOffset(-4', 0, 50, 'inspect'],
+    ['input;', 0, 7, 'preview'],
+    ['input.originOffset(-5', 6, 7, 'preview'],
+  ] as const) {
+    const scene = defined(await inspect(token, delta));
+    assert.equal(scene.kind, kind, token);
+    assert.equal(scene.target.length, 1, token);
+    assert.equal(width(scene.target[0]), size, token);
+    assert.deepEqual(scene.ambient, [], token);
   }
 });
 

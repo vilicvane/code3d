@@ -37,6 +37,8 @@ import {DRAWER_HEIGHT, DRAWER_THICKNESS, DRAWER_CLIENT_WIDTH, DRAWER_CLIENT_HEIG
 let body = box(DRAWER_HEIGHT, DRAWER_THICKNESS, DRAWER_CLIENT_WIDTH).fillet(
   (DRAWER_THICKNESS / 2) * 0.99, [1, 3, 5, 7],
 );
+const tool = box(DRAWER_CLIENT_HEIGHT, DRAWER_CLIENT_THICKNESS, DRAWER_CLIENT_WIDTH);
+body.cut([tool.originOffset(-1,0,0)]);
 body = body.cut([
   box(DRAWER_CLIENT_HEIGHT, DRAWER_CLIENT_THICKNESS, DRAWER_CLIENT_WIDTH)
     .relate(self => on(self.up, body.up)),
@@ -71,6 +73,7 @@ body = body.cut([
       ['box(DRAWER_CLIENT_HEIGHT', 3, 'preview', 1, 0],
       ['box(DRAWER_CLIENT_HEIGHT', 4, 'inspect', 2, 0],
       ['cut([', 5, 'inspect', 2, 1],
+      ['tool.originOffset', 0, 'preview', 1, 0],
       ['box(DRAWER_CLIENT_HEIGHT', 3, 'preview', 1, 0],
     ] as const) {
       const offset = source.lastIndexOf(token) + delta;
@@ -98,6 +101,19 @@ body = body.cut([
         ),
         undefined,
       );
+      if (kind === 'preview') {
+        const width = await page.evaluate(() => {
+          const item =
+            window.inspectionApp.viewport['inspectionScene']!.target[0];
+          if (item.kind !== 'model')
+            throw new Error('Expected the selected model');
+          const xs = Array.from(item.model.mesh!.vertices).filter(
+            (_, index) => index % 3 === 0,
+          );
+          return Math.max(...xs) - Math.min(...xs);
+        });
+        assert.equal(width, 16);
+      }
     }
     assert.ok(
       await page.evaluate(

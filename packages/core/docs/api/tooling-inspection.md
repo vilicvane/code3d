@@ -5,7 +5,7 @@ sourceReview:
   packageVersion: 0.0.1-alpha.15
   sources:
     - path: packages/app/src/model/inspection.ts
-      sha256: a91369693877bbdf8bada54ed1362bc3affdd163c3738cfe2cc78428f913e20b
+      sha256: e3180cc24f719b9ffe7493d9b897c48c84a46df924c3e807b9fd83ab8b5f53ca
     - path: packages/core/src/library/inspect.ts
       sha256: 530883228cd23a27f1e13c5153669c24ce87d523f4ff1cc52202dab698063e45
       commit: e8843e109cb86d5dcfee6e28859625a22921372d

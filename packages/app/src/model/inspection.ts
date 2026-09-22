@@ -359,7 +359,10 @@ export class InspectionSession {
         }
         // Declining a callback body is not selecting the callback argument.
         // Continue to outer scopes without re-entering its owning call inspector.
-        if (insideClosure) continue;
+        if (insideClosure) {
+          fallback ??= preview(focus.value);
+          continue;
+        }
         const site = this.sites.get(call.siteId);
         if (
           !site ||
@@ -416,13 +419,13 @@ export class InspectionSession {
             );
             if (result !== undefined) return selected(result);
           }
-          // Enclosing inspectors can still describe an inner call's value, but
-          // declining it must not replace that value with the outer call's result.
-          fallback ??= preview(call.return);
-          // Arguments default to their owning call; non-renderable results still
-          // reach the enclosing scope (e.g. a relation's closure inspector).
-          if (inArguments && fallback) return fallback;
         }
+        // A receiver remains its own value; call names and arguments default to
+        // the owning call's result. Outer inspectors may describe that preview,
+        // but their default results cannot replace an already selected value.
+        fallback ??= preview(inReceiver ? focus.value : call.return);
+        // Non-renderable results still reach an enclosing closure inspector.
+        if (inArguments && fallback) return fallback;
       }
       while (closure) {
         const result = await this.inspectClosure(closure, focus);

@@ -5,7 +5,7 @@ sourceReview:
   packageVersion: 0.0.1-alpha.15
   sources:
     - path: packages/core/src/library/cut.ts
-      sha256: c7f1dbbc5e881c1ca1679c4b50182bf0dbb9fc1bcfd7a31b5ec25322344211c7
+      sha256: 05f2020592e99732b41b638e1ad8caaa10a25437c6a1a9be93021a253f58e650
     - path: packages/core/src/library/runtime.ts
       sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
       commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
@@ -85,6 +85,8 @@ Selecting the tools array previews the consumed tools and their cut volume with
 the stock in the background. In `blank.cut([box(...).relate(...)])`, selecting
 `box` previews that constructor's result; it does not use the later related
 tool's placement. Selecting the `box` dimensions still shows their measurements.
+Similarly, selecting `tool` in `blank.cut([tool.relate(...)])` previews the
+original tool in its local coordinates.
 See [custom inspectors](inspectors.md) for inspection scope and fallback rules.
 
 Boolean construction can fail on coincident or degenerate geometry. Avoid

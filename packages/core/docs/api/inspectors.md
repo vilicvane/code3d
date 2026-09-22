@@ -5,7 +5,7 @@ sourceReview:
   packageVersion: 0.0.1-alpha.15
   sources:
     - path: packages/app/src/model/inspection.ts
-      sha256: a91369693877bbdf8bada54ed1362bc3affdd163c3738cfe2cc78428f913e20b
+      sha256: e3180cc24f719b9ffe7493d9b897c48c84a46df924c3e807b9fd83ab8b5f53ca
     - path: packages/core/src/library/inspect.ts
       sha256: 530883228cd23a27f1e13c5153669c24ce87d523f4ff1cc52202dab698063e45
       commit: e8843e109cb86d5dcfee6e28859625a22921372d
@@ -90,10 +90,12 @@ context behind the reference in both kinds of preview.
 Use `@code3d.inspect parameter callback` when a parameter needs additional context;
 use `@code3d.inspect callback` for an exceptional call-result view. A parameter
 first tries its parameter inspector, then the call inspector, then the ordinary
-call result. An enclosing inspector may describe an inner call's value; if it
-declines, the default preview keeps the inner call's result instead of replacing
-it with the enclosing call's result. A declared closure body has its own scope: declining it continues
-outward without re-entering that same call's parameter or call inspector. The callback
+call result. A method receiver keeps its selected value as the default preview.
+An enclosing inspector may describe an inner value; if it declines, it cannot
+replace that value's default preview with the enclosing call's result.
+A declared closure body has its own scope: declining it preserves the selected
+value and continues outward without re-entering that same call's parameter or
+call inspector. The callback
 receives the original argument tuple and `InspectContext`; method receivers are
 in `context.receiver`. Its `target` and `ambient` arrays own the complete scene.
 Returning `undefined` declines the scope; returning `{}` intentionally displays
@@ -120,9 +122,10 @@ For cut tools and intersect operands, selected inputs are targets and other inpu
 are ambient. The generated cut volume (orange) or intersection (cyan) is a separate
 target, including when inspecting a single input. A failed intersection still
 shows the selected inputs and ambient operands without inventing a result.
-The cut tool inspector accepts only the actual tools passed to that invocation.
-An upstream value, such as `box(...)` before `.relate(...)` creates the tool, keeps
-its ordinary preview instead of borrowing the tool's solved placement.
+The cut tool inspector accepts a selection only when every preview value is an
+actual tool passed to that invocation. Upstream constructors and receivers, such
+as `box(...)` or `tool` in `tool.relate(...)`, keep their ordinary preview instead
+of borrowing the consumed tool's solved placement.
 These region inspectors use ordinary unlit materials with depth testing disabled,
 so their colors remain visible through the translucent inputs.
 
