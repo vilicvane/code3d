@@ -78,6 +78,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Curved surface wrapping](docs/api.md#curved-surface-wrapping): wrap profiles and thicken along surface normals.
 - [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx): compose model functions.
 - [Model tools](../web/src/content/docs/docs/guides/model-tools.mdx): add editing tools and argument presets.
+- [Extension API](docs/api/define-primitive.md): native builders, package metadata, custom inspectors and annotations.
 - [Custom primitives](docs/custom-primitives.mdx): extend modeling with Replicad geometry.
 - [Runtime integration](docs/runtime.md): numeric inputs, time offsets, resources, materials and source inspection.
 - [Current limitations](../web/src/content/docs/docs/getting-started/limitations.md): supported workflows and known boundaries.

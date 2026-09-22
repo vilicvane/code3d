@@ -223,6 +223,18 @@ export default defineConfig({
                           ],
                         },
                         {
+                          label: 'Extension development',
+                          items: [
+                            {slug: 'docs/packages/core/api/define-primitive'},
+                            {slug: 'docs/packages/core/api/model-data'},
+                            {slug: 'docs/packages/core/api/inspectors'},
+                            {
+                              slug: 'docs/packages/core/api/inspect-group-members',
+                            },
+                            {slug: 'docs/packages/core/api/annotations'},
+                          ],
+                        },
+                        {
                           label: 'Models and common types',
                           items: [{slug: 'docs/packages/core/api/model-types'}],
                         },

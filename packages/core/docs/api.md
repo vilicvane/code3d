@@ -29,8 +29,8 @@ model methods and reference properties are grouped by what they do.
 | Materials and appearance         | [material and colors](api/material.md), [Three.js integration](api/three.md)                                                                                                                                                                   |
 | Parameters, time and caching     | [input](api/input.md), [timeOffset](api/time-offset.md) and [cache](api/cache.md)                                                                                                                                                              |
 
-For reusable library development, see [custom primitives](custom-primitives.mdx),
-[model data](#anchors-and-relations) and [custom inspectors and annotations](runtime.md#source-inspection).
+For reusable library development, see [definePrimitive and Replicad](api/define-primitive.md),
+[model data](api/model-data.md) and [custom inspectors](api/inspectors.md), [group member inspection](api/inspect-group-members.md) and [annotations](api/annotations.md).
 Execution hosts use the separate [tooling entry](runtime.md#source-and-development).
 The [model values guide](values.md) explains the capabilities of different
 model kinds.
