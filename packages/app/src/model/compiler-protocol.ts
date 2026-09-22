@@ -136,6 +136,11 @@ type WorkerResponse =
       topology: TopologyInspection;
     }>
   | Readonly<{kind: 'language'; id: number; language: ProjectLanguage}>
+  | Readonly<{
+      kind: 'warnings';
+      id: number;
+      warnings: readonly ModelDiagnostic[];
+    }>
   | Readonly<{kind: 'progress'; id: number; phase: CompilationPhase}>
   | Readonly<{kind: 'result'; id: number; ok: true; module: ModelModule}>
   | Readonly<{kind: 'export'; id: number; ok: true; blob: Blob}>

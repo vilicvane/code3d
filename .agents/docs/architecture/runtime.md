@@ -118,30 +118,45 @@ Reset 保留身份与名称，先持久记录 `template: 'examples'`，再删除
 App 原型期按随附包清单中的精确 npm 版本检查项目选用的公共建模包，
 不使用 App 私有 package.json 版本，也不引入兼容协议号。
 `package-compatibility.ts` 沿有效包文件系统读取实际安装，保留每个不匹配依赖的
-声明清单归属。检查在语言与 tooling 出口加载前完成，避免旧 Core 先触发难以理解的
-出口或运行时错误；内置包直接使用随附版本，开发 workspace 覆盖沿原有 reader 生效。
-不匹配通过结构化模型诊断跨 Worker 和 agent 观察返回，携带实际版本、所需版本与
-清单路径。缓存预览恢复同样核对当前包环境和依赖元数据，不能重新执行已过时的安装。
+声明清单归属。检查在语言与 tooling 出口加载前完成，使真实出口或运行时错误发生时
+仍能给出版本背景；内置包直接使用随附版本，开发 workspace 覆盖沿原有 reader 生效。
+版本不同仅产生结构化警告，携带实际版本、App 版本与清单路径，不抛出模型错误，
+不阻止构建、渲染或有效缓存恢复。缓存预览恢复仍核对当前包环境和依赖元数据，
+版本警告独立于构建失败；缺失模块、无效出口及真正的编译/运行错误保留正常诊断。
 真实模块解析继续检查抵达的建模包，覆盖 npm alias、未声明但提升可见的包以及第三方
-依赖的嵌套安装。未声明或传递依赖的诊断标记人工修复原因及导入方，不通过自动添加
+依赖的嵌套安装。未声明或传递依赖的警告标记人工更新原因及导入方，不通过自动添加
 顶层同名包伪装升级成功；构建器只提供解析路径回调，检查策略仍归项目编译器。
+每个条目通过文件系统的 `realPath` 保留实际安装目录 `packagePath`，按物理安装去重，
+避免把浏览器安装链接和它指向的包重复当成直接与传递依赖。直接声明保留 `specifier`
+以定位 npm alias。缓存记录按包所属目录去重的 `path` 与 `importer` 来源，在复用
+或恢复依赖时重新核对，避免漏掉传递依赖的版本警告，也不因换文件重复初始化运行时。
 
 文件管理器底部的统一 Packages 状态区由
 [PackageStatusView](../../../packages/app/src/ui/package-status.ts) 呈现下载/安装进度、
 安装失败与 Retry、版本不匹配和升级失败。它接收按目录的进度事件，拥有呈现所需的
-operation/failure 与生命周期，直接观察当前模型诊断，不另存一份兼容性状态。
+operation/failure 与生命周期，直接观察编译器拥有的版本警告，不从 preview 错误派生，
+不另存一份兼容性状态。`ModelCompilerClient.warnings` 是独立的 observable，Worker
+按请求 id 发布一份完整 `warnings` 快照，相同内容不重复刷新视图；每项仍使用 `ModelDiagnostic`，带
+`severity: 'warning'`、`packageCompatibility` 与对应 `sourceRef`。编辑器将这些警告
+与常规诊断合并，在受影响的 import/export specifier（包括 alias）显示 warning；
+入口没有匹配导入时标在入口起始位置。AgentObserver 将编译及模型运行警告放在成功
+结果的 `data.warnings`，实际失败时放在 `error.details.warnings`，与原诊断并存。
+ProjectSession 将观察结果整体嵌入 apply 回执，公开路径分别是
+`data.observation.warnings` 与 `error.details.observation.warnings`；警告本身不会转为错误。
 原 ProjectTree 的手动进度刷新路径已移除；每个成功通知独立在 3 秒后消失，不隐藏
 其他目录的进行中任务或错误。版本状态默认只显示 Code3D version mismatch、浏览器
 Update Code3D packages 或本地 Refresh 主操作，以及折叠的 Details。展开后展示
-Installed/Required、清单打开入口、本地包管理器指引、浏览器 Refresh、Reload app 和
+Installed/App version、清单打开入口、本地 npm 更新命令、浏览器 Refresh、Reload app 和
 Clear build cache；不在 viewport 放置浮层。
 
 Browser storage 的 Update Code3D packages 在原项目保存队列中更新
 对应清单，保留原有 `latest` 和 `npm:@code3d/...@latest` 声明；固定旧版声明改为 App
 匹配版本，依赖字段、npm alias 和其他配置保留。无论声明是否变化，均通过现有强制更新
 入口重新解析依赖图，再沿安装事务安装和重编译，不沿用旧 lock 锁定的版本。
-本地目录提供清单与更新指引：`latest` 保留，使用包管理器的 update 命令实际更新安装；
-仅 install 可能复用旧 lock。固定旧版修改为所需版本后安装，完成后经共享刷新命令重读。
+本地目录提供清单与更新指引：`latest` 和 npm alias 保留，先将过时固定版本或范围改为
+App 版本，再在所属清单目录执行 `npm update`，实际更新安装和 lock，
+默认不重写依赖声明；其他包管理器使用对应 update 命令。仅 install 可能复用旧 lock。
+完成后经共享刷新命令重读。
 若 latest 解析到比 App 更新的包，指引重载 App；仍不匹配则继续提示，不强行改为固定版本。
 现有 compiler recipe 内容指纹继续隔离 App 更新前后的构建缓存；清缓存属于辅助恢复，
 不能替代升级依赖，不清理作者文件、已安装包及其他工作区缓存。

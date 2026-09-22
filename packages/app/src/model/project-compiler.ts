@@ -12,7 +12,6 @@ import {patchModelPackages} from '../project/model-package-patches';
 import {
   findPackageCompatibility,
   findResolvedPackageCompatibility,
-  resolvedPackageDirectory,
   type PackageCompatibilityIssue,
 } from '../project/package-compatibility';
 import {
@@ -25,6 +24,7 @@ import {ProjectAssets} from '../project/project-assets';
 import {
   ProjectBuilder,
   dependencyFileIdentity,
+  packageResolutionKey,
 } from '../project/project-builder';
 import {
   ProjectLanguageLoader,
@@ -33,7 +33,11 @@ import {
 import {ProjectPackages} from '../project/project-packages';
 import type {CompilationProgress} from './compilation-progress';
 import {createModelCompiler, type DesignContext} from './compiler';
-import {ModelDiagnosticError, diagnosticFromError} from './diagnostic';
+import {
+  ModelDiagnosticError,
+  diagnosticFromError,
+  type ModelDiagnostic,
+} from './diagnostic';
 
 import {projectArtifactIdentity} from './build-artifact-cache';
 import type {CompiledModelSource} from './compiler';
@@ -61,6 +65,7 @@ export class ProjectCompiler {
   private restoredDependencies?: DependencyArtifact;
   private refreshRequested?: symbol;
   private readonly checkedPackages = new Map<string, Promise<void>>();
+  private reportPackageIssue?: (issue: PackageCompatibilityIssue) => void;
 
   constructor(
     private readonly sourceFiles: ProjectFileReader,
@@ -104,6 +109,7 @@ export class ProjectCompiler {
     restoreDependencies?: (
       scope: string,
     ) => Promise<DependencyArtifact | undefined>,
+    onWarnings?: (warnings: readonly ModelDiagnostic[]) => void,
   ): Promise<ProjectBuildArtifact> {
     checkCancelled();
     this.checkedPackages.clear();
@@ -190,7 +196,7 @@ export class ProjectCompiler {
     // Editor documents are overlays, not the set of files belonging to a run.
     // Explicit entry files also need language support when they have no editor model.
     const entries = await Promise.all(entryPaths.map(readSource));
-    const runtimeSourceRef = entries.flatMap(file => {
+    const imports = entries.flatMap(file => {
       const source = ts.createSourceFile(
         file.path,
         file.source,
@@ -204,42 +210,97 @@ export class ProjectCompiler {
         )
           return [];
         const specifier = statement.moduleSpecifier;
-        return specifier &&
-          ts.isStringLiteralLike(specifier) &&
-          isBuiltinPackageSpecifier(specifier.text)
+        return specifier && ts.isStringLiteralLike(specifier)
           ? [
               {
-                file: file.path,
-                start: specifier.getStart(source),
-                end: specifier.end,
+                specifier: specifier.text,
+                sourceRef: {
+                  file: file.path,
+                  start: specifier.getStart(source),
+                  end: specifier.end,
+                },
               },
             ]
           : [];
       });
-    })[0];
-    const issue = await findPackageCompatibility(
-      this.packages,
-      this.builtinFiles,
-      rootPath,
-    );
-    checkCancelled();
-    if (issue) throw packageCompatibilityError(issue, runtimeSourceRef);
-    const languageProject = {
-      files: [
-        ...overrides.files.filter(file => !entryPaths.includes(file.path)),
-        ...entries,
-      ],
+    });
+    const runtimeSourceRef = imports.find(item =>
+      isBuiltinPackageSpecifier(item.specifier),
+    )?.sourceRef;
+    let packageIssue: PackageCompatibilityIssue | undefined;
+    const publishWarnings = () => {
+      checkCancelled();
+      const affected = packageIssue?.packages.map(
+        pkg =>
+          pkg.specifier ??
+          (pkg.manual?.reason === 'transitive'
+            ? pkg.manual.dependency
+            : pkg.name),
+      );
+      const warningSourceRef = imports.find(item =>
+        affected?.some(
+          specifier =>
+            item.specifier === specifier ||
+            item.specifier.startsWith(specifier + '/'),
+        ),
+      )?.sourceRef;
+      onWarnings?.(
+        packageIssue
+          ? [
+              packageCompatibilityWarning(
+                packageIssue,
+                warningSourceRef ?? {file: root, start: 0, end: 0},
+              ),
+            ]
+          : [],
+      );
     };
-    const language = await this.language.load(
-      languageProject,
-      reader.packageSpecifiers,
-      rootPath,
-      () => onProgress?.('resolving-imports'),
-    );
-    checkCancelled();
-    onLanguage?.(language);
-
+    this.reportPackageIssue = issue => {
+      checkCancelled();
+      const packages = new Map(
+        packageIssue?.packages.map(pkg => [pkg.packagePath, pkg]),
+      );
+      for (const pkg of issue.packages) {
+        const previous = packages.get(pkg.packagePath);
+        if (
+          !previous ||
+          !pkg.manual ||
+          (previous.manual?.reason === 'undeclared' &&
+            pkg.manual.reason === 'transitive')
+        )
+          packages.set(pkg.packagePath, pkg);
+      }
+      packageIssue = {
+        ...issue,
+        directory: packageIssue?.directory ?? issue.directory,
+        packages: [...packages.values()],
+      };
+    };
     try {
+      const issue = await findPackageCompatibility(
+        this.packages,
+        this.builtinFiles,
+        rootPath,
+      );
+      checkCancelled();
+      if (issue) this.reportPackageIssue(issue);
+      for (const {path, importer} of this.builder.packageResolutions.values())
+        await this.checkResolvedPackage(path, importer);
+      const languageProject = {
+        files: [
+          ...overrides.files.filter(file => !entryPaths.includes(file.path)),
+          ...entries,
+        ],
+      };
+      const language = await this.language.load(
+        languageProject,
+        reader.packageSpecifiers,
+        rootPath,
+        () => onProgress?.('resolving-imports'),
+      );
+      checkCancelled();
+      onLanguage?.(language);
+
       if (this.refreshRequested === refreshRequest)
         this.refreshRequested = undefined;
       this.assets.beginCompilation();
@@ -271,6 +332,10 @@ export class ProjectCompiler {
         discovery,
         loadingRuntime,
       );
+      // Warm builds and restored dependencies can reuse package facades without
+      // resolving their internal imports again. Their original owners still matter.
+      for (const {path, importer} of dependencies.packageResolutions)
+        await this.checkResolvedPackage(path, importer);
       checkCancelled();
       const project: ModelProject = {
         files: await Promise.all(
@@ -314,6 +379,11 @@ export class ProjectCompiler {
         ...diagnostic,
         sourceRef: diagnostic.sourceRef ?? runtimeSourceRef,
       });
+    } finally {
+      // Publish one complete snapshot, also on a genuine build error. Incremental
+      // checks must not temporarily clear warnings or collapse their UI details.
+      publishWarnings();
+      this.reportPackageIssue = undefined;
     }
   }
 
@@ -331,19 +401,20 @@ export class ProjectCompiler {
     path: string,
     importer: string,
   ): Promise<void> {
-    const directory = resolvedPackageDirectory(path);
-    if (!directory) return;
-    let pending = this.checkedPackages.get(directory);
+    const key = packageResolutionKey({path, importer});
+    if (!key) return;
+    let pending = this.checkedPackages.get(key);
     if (!pending) {
+      const report = this.reportPackageIssue;
       pending = findResolvedPackageCompatibility(
         this.packages,
         this.builtinFiles,
         path,
         importer,
       ).then(issue => {
-        if (issue) throw packageCompatibilityError(issue);
+        if (issue) report?.(issue);
       });
-      this.checkedPackages.set(directory, pending);
+      this.checkedPackages.set(key, pending);
     }
     await pending;
   }
@@ -365,27 +436,6 @@ export class ProjectCompiler {
       this.builtinSourceFiles,
     );
     await packages.update(project, rootPath);
-    if (
-      await findPackageCompatibility(
-        packages,
-        this.builtinSourceFiles,
-        rootPath,
-      )
-    )
-      return false;
-    for (const [path, info] of artifact.metadata) {
-      if (
-        info?.kind === 'file' &&
-        path.endsWith('/package.json') &&
-        (await findResolvedPackageCompatibility(
-          packages,
-          this.builtinSourceFiles,
-          path,
-          rootPath,
-        ))
-      )
-        return false;
-    }
     const metadata = await statProjectFiles(
       packages,
       artifact.metadata.map(([path]) => path),
@@ -402,20 +452,23 @@ export class ProjectCompiler {
   }
 }
 
-function packageCompatibilityError(
+function packageCompatibilityWarning(
   issue: PackageCompatibilityIssue,
   sourceRef?: SourceRef,
-): ModelDiagnosticError {
-  return new ModelDiagnosticError({
+): ModelDiagnostic {
+  return {
     kind: 'project',
+    severity: 'warning',
     summary: 'Code3D package version mismatch',
-    details: issue.packages
-      .map(
-        pkg =>
-          `${pkg.name}: installed ${pkg.installed}; this App requires ${pkg.expected}.`,
-      )
-      .join('\n'),
+    details:
+      issue.packages
+        .map(
+          pkg =>
+            `${pkg.name}: installed ${pkg.installed}; this App includes ${pkg.expected}.`,
+        )
+        .join('\n') +
+      '\nBuilds continue with the installed versions. Update packages if you encounter compatibility problems.',
     sourceRef,
     packageCompatibility: issue,
-  });
+  };
 }

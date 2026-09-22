@@ -7,7 +7,9 @@ import type {ProjectAssets} from '../project/project-assets';
 import {
   ProjectBuilder,
   dependencyFileIdentity,
+  packageResolutionKey,
   type ModuleFormats,
+  type PackageResolution,
   type ProjectBundle,
 } from '../project/project-builder';
 import {executableModuleSource} from './executable-module';
@@ -35,6 +37,7 @@ export type DependencyArtifact = Readonly<{
   resources: ReadonlyMap<string, Uint8Array>;
   runtime: RuntimeEntries;
   metadata: readonly (readonly [string, ProjectFileInfo | null])[];
+  packageResolutions: readonly PackageResolution[];
 }>;
 
 /** esbuild owns one complete dependency graph, including lazy module initialization. */
@@ -83,6 +86,15 @@ export class DependencyBuilder {
       )
     )
       return artifact;
+    const resolutions = new Set(
+      current.packageResolutions.map(packageResolutionKey),
+    );
+    if (
+      artifact.packageResolutions.some(
+        resolution => !resolutions.has(packageResolutionKey(resolution)),
+      )
+    )
+      return artifact;
     return current;
   }
 
@@ -107,6 +119,8 @@ export class DependencyBuilder {
       this.modules.set(path, format);
     for (const [path, info] of artifact.metadata)
       this.builder.dependencyMetadata.set(path, info);
+    for (const resolution of artifact.packageResolutions)
+      this.builder.recordPackageResolution(resolution);
     return true;
   }
 
@@ -199,7 +213,20 @@ export class DependencyBuilder {
       }
       this.modules.set(path, format);
     }
-    if (!changed) return this.artifact!;
+    if (!changed) {
+      const artifact = this.artifact!;
+      const packageResolutions = this.resolutions();
+      if (
+        JSON.stringify(packageResolutions) ===
+        JSON.stringify(artifact.packageResolutions)
+      )
+        return artifact;
+      const updated = {...artifact, packageResolutions};
+      return (this.artifact = {
+        ...updated,
+        id: await dependencyArtifactIdentity(updated),
+      });
+    }
     onBuild?.();
     const prepared = this.preparedBundle;
     const [bundle, wasm, sketchWasm] = await Promise.all([
@@ -242,17 +269,7 @@ export class DependencyBuilder {
     const metadata = [...this.builder.dependencyMetadata].sort(([a], [b]) =>
       a.localeCompare(b),
     );
-    const id = await runtimeArtifactIdentity([
-      new TextEncoder().encode(bundle.source),
-      new TextEncoder().encode(
-        JSON.stringify([core, metadata, [...resources.keys()]]),
-      ),
-      ...resources.values(),
-      wasm,
-      sketchWasm,
-    ]);
-    return (this.artifact = {
-      id,
+    const artifact = {
       kernelIdentity,
       source: executableModuleSource(
         'code3d-project:/dependencies.js',
@@ -270,8 +287,38 @@ export class DependencyBuilder {
       resources,
       runtime: core,
       metadata,
+      packageResolutions: this.resolutions(),
+    };
+    return (this.artifact = {
+      ...artifact,
+      id: await dependencyArtifactIdentity(artifact),
     });
   }
+
+  private resolutions(): readonly PackageResolution[] {
+    return [...this.builder.packageResolutions]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, resolution]) => resolution);
+  }
+}
+
+function dependencyArtifactIdentity(
+  artifact: Omit<DependencyArtifact, 'id'>,
+): Promise<string> {
+  return runtimeArtifactIdentity([
+    new TextEncoder().encode(artifact.source),
+    new TextEncoder().encode(
+      JSON.stringify([
+        artifact.runtime,
+        artifact.metadata,
+        artifact.packageResolutions,
+        [...artifact.resources.keys()],
+      ]),
+    ),
+    ...artifact.resources.values(),
+    artifact.wasm,
+    artifact.sketchWasm,
+  ]);
 }
 
 function dependencyEntry(

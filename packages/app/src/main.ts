@@ -100,10 +100,7 @@ import {
   viewportDiagnostic,
 } from './model/viewport-diagnostic';
 import {ViewportToolFeedback} from './ui/viewport-tool-feedback';
-import {
-  BrowserPackageManager,
-  PackageInstallationError,
-} from './project/browser-package-manager';
+import {BrowserPackageManager} from './project/browser-package-manager';
 import {
   browserPackageFiles,
   developmentWorkspaces,
@@ -638,13 +635,6 @@ dockPanels.register({
   body: elements,
 });
 
-const codeEditor = new CodeEditor(
-  editorHost,
-  initialProject,
-  initialProject.files[0]?.path,
-  () => previewState.editorDiagnostics,
-);
-replaceFileRoute(codeEditor.currentFile());
 const packageManager = !directoryConnected
   ? new BrowserPackageManager(
       projectFileSystem as BrowserProjectFileSystem,
@@ -662,6 +652,28 @@ const packageManager = !directoryConnected
     )
   : undefined;
 const packageFiles = packageManager?.dependencies ?? localPackageFiles;
+const preparePackages = async (_project: ModelProject, file: string) => {
+  if (!packageManager) return;
+  await agentProject.flush();
+  await packageManager.prepare(file);
+};
+const compiler = new ModelCompilerClient(
+  packageFiles,
+  preparePackages,
+  directoryConnected
+    ? `directory:${directoryWorkspaceId}`
+    : browserProjectWorkspaceId(browserProject!.id),
+);
+const codeEditor = new CodeEditor(
+  editorHost,
+  initialProject,
+  initialProject.files[0]?.path,
+  () => [
+    ...previewState.editorDiagnostics,
+    ...(compiler.rootPath === previewState.file ? compiler.warnings : []),
+  ],
+);
+replaceFileRoute(codeEditor.currentFile());
 const navigationPackages = new ProjectPackages(
   localPackageFiles,
   browserPackageFiles,
@@ -687,18 +699,6 @@ codeEditor.fileReader = {
     );
   },
 };
-const preparePackages = async (_project: ModelProject, file: string) => {
-  if (!packageManager) return;
-  await agentProject.flush();
-  await packageManager.prepare(file);
-};
-const compiler = new ModelCompilerClient(
-  packageFiles,
-  preparePackages,
-  directoryConnected
-    ? `directory:${directoryWorkspaceId}`
-    : browserProjectWorkspaceId(browserProject!.id),
-);
 const stopLanguage = autorun(() =>
   codeEditor.setProjectLanguage(compiler.language),
 );
@@ -778,7 +778,11 @@ const agentPanel = new AgentPanel(
 );
 const settingsDialog = new AppSettingsDialog(appSettings);
 const packageStatus = new PackageStatusView(projectExplorer, {
-  issue: () => previewState.diagnostic?.packageCompatibility,
+  issue: () =>
+    compiler.rootPath === previewState.file
+      ? compiler.warnings.find(warning => warning.packageCompatibility)
+          ?.packageCompatibility
+      : undefined,
   update: packageManager ? updateCompatiblePackages : undefined,
   retry: packageManager ? updateProjectDependencies : undefined,
   openManifest: path => activateProjectFile(path, true),
@@ -2670,18 +2674,7 @@ async function runModel(
     runInAction(() => {
       designContextState.compiling = undefined;
     });
-    let diagnostic = diagnosticFromError(error, 'project');
-    const packageCompatibility = previewState.diagnostic?.packageCompatibility;
-    if (
-      error instanceof PackageInstallationError &&
-      packageCompatibility?.packages.some(
-        pkg => parentProjectDirectory(pkg.manifestPath) === error.directory,
-      )
-    ) {
-      // Failed installs retain their previous packages. Keep the version notice
-      // and its recovery actions while reporting the installation failure.
-      diagnostic = {...diagnostic, packageCompatibility};
-    }
+    const diagnostic = diagnosticFromError(error, 'project');
     if (previewState.pendingFile || previewState.retainingView)
       clearPresentedView();
     previewState.fail(diagnostic);

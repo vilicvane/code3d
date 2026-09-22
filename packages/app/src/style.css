@@ -809,6 +809,10 @@ kbd {
   white-space: pre-line;
 }
 
+.package-status .package-compatibility-summary {
+  margin: 4px 0;
+}
+
 .package-version {
   margin-top: 10px;
 }
@@ -841,6 +845,14 @@ kbd {
 
 .package-compatibility-manifests code {
   font-size: 10px;
+}
+
+.package-compatibility-manifests .package-update-command {
+  padding: 4px 6px;
+  border-radius: 3px;
+  background: var(--soft);
+  color: #c9cdc2;
+  font-size: 11px;
 }
 
 .package-compatibility-notice:not([hidden]) + .package-downloads:not([hidden]) {

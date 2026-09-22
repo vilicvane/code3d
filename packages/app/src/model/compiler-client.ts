@@ -3,7 +3,13 @@ import type {
   TopologyInspection,
   TopologyInspectionOptions,
 } from '@code3d/core/tooling';
-import {action, makeObservable, observableRef, runInAction} from 'mobx';
+import {
+  action,
+  makeObservable,
+  observableRef,
+  observableStruct,
+  runInAction,
+} from 'mobx';
 import {appSettings} from '../app-settings';
 import {browserPackageFiles} from '../project/browser-packages';
 import {statProjectFiles, type ProjectFileReader} from '../project/file-reader';
@@ -28,7 +34,7 @@ import {
 } from './compiler-protocol';
 import CompilerWorker from './compiler.worker?worker';
 import {ArtifactStoreHost} from './artifact-store-host';
-import {ModelDiagnosticError} from './diagnostic';
+import {ModelDiagnosticError, type ModelDiagnostic} from './diagnostic';
 import type {InspectSelection} from './inspection';
 import type {InspectionSnapshot} from './inspection-snapshot';
 import ExecutorWorker from './executor.worker?worker';
@@ -89,6 +95,9 @@ export class ModelCompilerClient {
   phase: CompilationPhase | undefined;
   /** Undefined until the current compilation has prepared its dependency graph. */
   language: ProjectLanguage | undefined;
+  /** Non-blocking diagnostics for the selected entry's installed packages. */
+  warnings: readonly ModelDiagnostic[] = [];
+  rootPath: string | undefined;
   restored: Readonly<{rootPath: string; module: ModelModule}> | undefined;
   private lastEntry?: string;
   private executableArtifact?: ProjectBuildArtifact;
@@ -126,6 +135,8 @@ export class ModelCompilerClient {
         phase: observableRef,
         restored: observableRef,
         language: observableRef,
+        warnings: observableStruct,
+        rootPath: observableRef,
         cancel: action,
         execute: action,
         dispose: action,
@@ -153,6 +164,8 @@ export class ModelCompilerClient {
     return new Promise((resolve, reject) =>
       runInAction(() => {
         const id = this.nextId++;
+        if (this.rootPath !== rootPath) this.warnings = [];
+        this.rootPath = rootPath;
         this.languageRequestId = id;
         this.language = undefined;
         this.exportable = undefined;
@@ -426,6 +439,8 @@ export class ModelCompilerClient {
     this.runningCompile = undefined;
     this.executableArtifact = undefined;
     this.exportable = undefined;
+    this.warnings = [];
+    this.rootPath = undefined;
   }
   inspectTopology(
     module: ModelModule,
@@ -531,6 +546,10 @@ export class ModelCompilerClient {
           if (data.id === this.languageRequestId) this.language = data.language;
           return;
         }
+        if (data.kind === 'warnings') {
+          if (data.id === this.languageRequestId) this.warnings = data.warnings;
+          return;
+        }
         if (data.kind === 'cached') {
           if (
             this.pending?.kind === 'compile' &&
@@ -597,13 +616,7 @@ export class ModelCompilerClient {
           this.startExecution();
         } else if (data.kind === 'result' && !data.ok) {
           const error = new ModelDiagnosticError(data.diagnostic);
-          if (data.diagnostic.packageCompatibility) {
-            this.queuedExecution = undefined;
-            this.cancelExecution();
-            this.cachedResult = undefined;
-            this.restored = undefined;
-            this.fail(data.id, error);
-          } else if (
+          if (
             this.runningExecution?.cached &&
             this.runningExecution.compileId === data.id
           )

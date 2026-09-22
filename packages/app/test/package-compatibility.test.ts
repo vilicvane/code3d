@@ -1,6 +1,7 @@
 import * as esbuild from 'esbuild';
 import assert from 'node:assert/strict';
 import {after, before, test} from 'node:test';
+import type {ModelDiagnostic} from '../src/model/diagnostic.ts';
 import type {ProjectFileReader} from '../src/project/file-reader.ts';
 import type {PackageManifest} from '../src/project/package-manifest.ts';
 import {packageTestFiles} from './project-test-files.ts';
@@ -96,6 +97,8 @@ for (const installed of ['1.0.0', '2.0.0', '3.0.0']) {
         packages: [
           {
             name: '@code3d/core',
+            specifier: '@code3d/core',
+            packagePath: '/node_modules/@code3d/core',
             installed,
             expected: '2.0.0',
             manifestPath: '/package.json',
@@ -132,12 +135,16 @@ test('nested scopes retain the actual manifest owners and resolve aliases withou
   assert.deepEqual(issue?.packages, [
     {
       name: '@code3d/materials',
+      specifier: 'surface',
+      packagePath: '/panel/node_modules/surface',
       installed: '1.0.0',
       expected: '3.0.0',
       manifestPath: '/panel/package.json',
     },
     {
       name: '@code3d/core',
+      specifier: '@code3d/core',
+      packagePath: '/node_modules/@code3d/core',
       installed: '1.0.0',
       expected: '2.0.0',
       manifestPath: '/package.json',
@@ -162,6 +169,64 @@ test('nested scopes retain the actual manifest owners and resolve aliases withou
     undefined,
   );
 });
+
+for (const [specifier, name] of [
+  ['@code3d/core', '@code3d/core'],
+  ['surface', '@code3d/materials'],
+]) {
+  test(`a symlinked ${specifier} installation keeps its direct declaration after module resolution`, async () => {
+    const builtins = builtinFiles();
+    const declaredPath = '/node_modules/' + specifier;
+    const packagePath = '/.code3d/fixture/node_modules/' + name;
+    const entries = memoryFiles({
+      '/package.json': {
+        dependencies: {
+          [specifier]: specifier === name ? 'latest' : `npm:${name}@latest`,
+          wrapper: '1.0.0',
+        },
+      },
+      [packagePath + '/package.json']: {name, version: '1.0.0'},
+      [packagePath + '/index.js']: 'export const value = 1;',
+      '/node_modules/wrapper/package.json': {name: 'wrapper', version: '1.0.0'},
+      '/node_modules/wrapper/index.js': `export {value} from '${specifier}';`,
+    });
+    const dereference = (path: string) =>
+      path === declaredPath || path.startsWith(declaredPath + '/')
+        ? packagePath + path.slice(declaredPath.length)
+        : path;
+    const files: ProjectFileReader = {
+      readFile: path => entries.readFile(dereference(path)),
+      async stat(path) {
+        const realPath = dereference(path);
+        const info = await entries.stat(realPath);
+        return info && {...info, realPath};
+      },
+    };
+    const declared = await compatibility.findPackageCompatibility(
+      files,
+      builtins,
+      '/model.ts',
+    );
+    assert.ok(declared);
+    assert.equal(declared.packages.length, 1);
+    assert.equal(declared.packages[0].packagePath, packagePath);
+    assert.equal(declared.packages[0].specifier, specifier);
+    for (const importer of ['/model.ts', '/node_modules/wrapper/index.js']) {
+      const resolved = await compatibility.findResolvedPackageCompatibility(
+        files,
+        builtins,
+        packagePath + '/index.js',
+        importer,
+      );
+      assert.deepEqual(
+        resolved,
+        declared,
+        'resolving a physical path must preserve the single directly upgradable package',
+      );
+      assert.equal(resolved?.packages[0].manual, undefined);
+    }
+  });
+}
 
 test('zero-install and latest development overlays use the selected packages instead of old disk installations', async () => {
   const builtins = builtinFiles();
@@ -279,71 +344,148 @@ test('upgrading preserves latest declarations and dependency fields while updati
   );
 });
 
-test('compilation reports a structured mismatch before attempting missing old tooling exports', async () => {
-  const files = memoryFiles({
-    '/package.json': {dependencies: {'@code3d/core': '1.0.0'}},
-    [coreManifest]: {name: '@code3d/core', version: '1.0.0'},
+test('version warnings allow real package compilation and preserve genuine compilation errors', async () => {
+  const current = JSON.parse(
+    new TextDecoder().decode(await packageTestFiles.readFile(coreManifest)),
+  );
+  const entries = memoryFiles({
+    '/package.json': {dependencies: {'@code3d/core': 'latest', wrapper: '1'}},
+    '/node_modules/wrapper/package.json': {
+      name: 'wrapper',
+      version: '1',
+      type: 'module',
+      main: './index.js',
+    },
+    '/node_modules/wrapper/index.js': 'export {box} from "@code3d/core";',
+    [coreManifest]: {...current, version: '0.0.0'},
     '/model.ts':
-      'import {box} from "@code3d/core"; export default box(1, 2, 3);',
+      'import {box} from "@code3d/core"; import {box as otherBox} from "wrapper"; export default box(1, 2, 3); export const another = otherBox(2, 3, 4);',
   });
-  const compiler = new ProjectCompiler(files, builtinFiles(), esbuild);
+  const files: ProjectFileReader = {
+    readFile: async path =>
+      (await entries.readFile(path)) ?? packageTestFiles.readFile(path),
+    stat: async path =>
+      (await entries.stat(path)) ?? packageTestFiles.stat(path),
+  };
+  const compiler = new ProjectCompiler(files, packageTestFiles, esbuild);
+  let warnings: readonly ModelDiagnostic[] = [];
+  const compile = () =>
+    compiler.compile(
+      {files: []},
+      '/model.ts',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      value => {
+        warnings = value;
+      },
+    );
   try {
-    await assert.rejects(compiler.compile({files: []}, '/model.ts'), error => {
+    const original = await compile();
+    assert.ok(original.model);
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0].severity, 'warning');
+    assert.equal(warnings[0].sourceRef?.file, '/model.ts');
+    assert.equal(
+      warnings[0].packageCompatibility?.packages[0].installed,
+      '0.0.0',
+    );
+    assert.equal(
+      warnings[0].packageCompatibility?.packages.length,
+      1,
+      'direct and transitive imports share one installation warning',
+    );
+    assert.equal(
+      warnings[0].packageCompatibility?.packages[0].manual,
+      undefined,
+      'a directly declared package keeps its upgrade action',
+    );
+    entries.contents.set(
+      '/model.ts',
+      'import {box} from "@code3d/core"; export default box(7, 2, 3);',
+    );
+    const edited = await compile();
+    assert.notEqual(
+      edited.id,
+      original.id,
+      'warnings must not freeze subsequent edits',
+    );
+    assert.equal(warnings[0].severity, 'warning');
+    entries.contents.set(
+      '/model.ts',
+      'import {value} from "./missing-compatibility-fixture.js"; export default value;',
+    );
+    await assert.rejects(compile(), error => {
       assert.ok(error instanceof ModelDiagnosticError);
-      assert.equal(error.diagnostic.summary, 'Code3D package version mismatch');
-      assert.equal(error.diagnostic.sourceRef?.file, '/model.ts');
-      assert.deepEqual(structuredClone(error.diagnostic).packageCompatibility, {
-        directory: '/',
-        packages: [
-          {
-            name: '@code3d/core',
-            installed: '1.0.0',
-            expected: '2.0.0',
-            manifestPath: '/package.json',
-          },
-        ],
-        matchingVersions: versions,
-      });
+      assert.notEqual(
+        error.diagnostic.summary,
+        'Code3D package version mismatch',
+      );
+      assert.equal(error.diagnostic.packageCompatibility, undefined);
+      assert.match(error.message, /missing-compatibility-fixture/);
       return true;
     });
+    assert.equal(
+      warnings[0].severity,
+      'warning',
+      'real failures retain the separate actionable warning',
+    );
+    entries.contents.set(coreManifest, JSON.stringify(current));
+    entries.contents.set('/model.ts', 'export const value = 1;');
+    await compile();
+    assert.deepEqual(
+      warnings,
+      [],
+      'the next resolved installation clears the warning',
+    );
   } finally {
     await compiler.dispose();
   }
 });
 
-test('an alias-only installed Core is checked even when the runtime uses builtin packages', async () => {
-  const files = memoryFiles({
-    '/package.json': {
-      dependencies: {'legacy-core': 'npm:@code3d/core@1.0.0'},
-    },
+test('an alias-only installed Core warns without preventing the builtin runtime from compiling', async () => {
+  const entries = memoryFiles({
+    '/package.json': {dependencies: {'legacy-core': 'npm:@code3d/core@1.0.0'}},
     '/node_modules/legacy-core/package.json': {
       name: '@code3d/core',
       version: '1.0.0',
     },
     '/model.ts':
-      'import {box} from "legacy-core"; export default box(1, 2, 3);',
+      'import {box} from "@code3d/core"; export default box(1, 2, 3);',
   });
-  const compiler = new ProjectCompiler(files, builtinFiles(), esbuild);
+  const compiler = new ProjectCompiler(entries, packageTestFiles, esbuild);
+  let warnings: readonly ModelDiagnostic[] = [];
   try {
-    await assert.rejects(compiler.compile({files: []}, '/model.ts'), error => {
-      assert.ok(error instanceof ModelDiagnosticError);
-      assert.equal(
-        error.diagnostic.packageCompatibility?.packages[0].name,
-        '@code3d/core',
-      );
-      assert.equal(
-        error.diagnostic.packageCompatibility?.packages[0].manifestPath,
-        '/package.json',
-      );
-      return true;
-    });
+    await compiler.compile(
+      {files: []},
+      '/model.ts',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      value => {
+        warnings = value;
+      },
+    );
+    assert.equal(warnings[0].severity, 'warning');
+    assert.equal(
+      warnings[0].packageCompatibility?.packages[0].name,
+      '@code3d/core',
+    );
+    assert.equal(
+      warnings[0].packageCompatibility?.packages[0].manifestPath,
+      '/package.json',
+    );
     assert.equal(
       await compiler.canRestoreDependencies(
         {metadata: []},
         {files: []},
         '/model.ts',
       ),
-      false,
+      true,
     );
   } finally {
     await compiler.dispose();
@@ -351,7 +493,7 @@ test('an alias-only installed Core is checked even when the runtime uses builtin
 });
 
 for (const dynamic of [false, true]) {
-  test(`a reached ${dynamic ? 'dynamic' : 'static'} transitive package retains its dependency owner and structured diagnostic`, async () => {
+  test(`a reached ${dynamic ? 'dynamic' : 'static'} transitive package retains its dependency owner in a nonblocking warning`, async () => {
     const current = JSON.parse(
       new TextDecoder().decode(await packageTestFiles.readFile(coreManifest)),
     );
@@ -386,21 +528,67 @@ for (const dynamic of [false, true]) {
     };
     const compiler = new ProjectCompiler(files, packageTestFiles, esbuild);
     try {
-      await assert.rejects(
-        compiler.compile({files: []}, '/model.ts'),
-        error => {
-          assert.ok(error instanceof ModelDiagnosticError);
-          const issue = error.diagnostic.packageCompatibility;
-          assert.equal(issue?.packages[0].name, '@code3d/materials');
-          assert.equal(issue?.packages[0].installed, '0.0.0');
-          assert.equal(issue?.packages[0].manifestPath, '/package.json');
-          assert.deepEqual(issue?.packages[0].manual, {
-            reason: 'transitive',
-            dependency: 'wrapper',
-          });
-          return true;
+      let warnings: readonly ModelDiagnostic[] = [];
+      const original = await compiler.compile(
+        {files: []},
+        '/model.ts',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        value => {
+          warnings = value;
         },
       );
+      const issue = warnings[0].packageCompatibility;
+      assert.equal(warnings[0].severity, 'warning');
+      assert.equal(issue?.packages[0].name, '@code3d/materials');
+      assert.equal(issue?.packages[0].installed, '0.0.0');
+      assert.equal(issue?.packages[0].manifestPath, '/package.json');
+      assert.deepEqual(issue?.packages[0].manual, {
+        reason: 'transitive',
+        dependency: 'wrapper',
+      });
+      await compiler.compile(
+        {files: []},
+        '/model.ts',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        value => {
+          warnings = value;
+        },
+      );
+      assert.deepEqual(
+        warnings[0].packageCompatibility,
+        issue,
+        'warm dependency reuse retains reached transitive warnings',
+      );
+      const restored = new ProjectCompiler(files, packageTestFiles, esbuild);
+      try {
+        await restored.compile(
+          {files: []},
+          '/model.ts',
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          async () => original.dependencies,
+          value => {
+            warnings = value;
+          },
+        );
+        assert.deepEqual(
+          warnings[0].packageCompatibility,
+          issue,
+          'a fresh compiler adopting saved dependencies rechecks reached packages',
+        );
+      } finally {
+        await restored.dispose();
+      }
       const path =
         '/node_modules/wrapper/node_modules/legacy-materials/package.json';
       assert.equal(
@@ -409,8 +597,8 @@ for (const dynamic of [false, true]) {
           {files: []},
           '/model.ts',
         ),
-        false,
-        'cached unchanged transitive packages cannot bypass the version check',
+        true,
+        'an unchanged transitive package warning must not block cache restoration',
       );
     } finally {
       await compiler.dispose();
@@ -441,20 +629,30 @@ test('a reached hoisted modeling package without a direct declaration requires a
   };
   const compiler = new ProjectCompiler(files, packageTestFiles, esbuild);
   try {
-    await assert.rejects(compiler.compile({files: []}, '/model.ts'), error => {
-      assert.ok(error instanceof ModelDiagnosticError);
-      const issue = error.diagnostic.packageCompatibility;
-      assert.equal(issue?.packages[0].name, '@code3d/materials');
-      assert.equal(issue?.packages[0].manifestPath, '/package.json');
-      assert.deepEqual(issue?.packages[0].manual, {reason: 'undeclared'});
-      return true;
-    });
+    let warnings: readonly ModelDiagnostic[] = [];
+    await compiler.compile(
+      {files: []},
+      '/model.ts',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      value => {
+        warnings = value;
+      },
+    );
+    const issue = warnings[0].packageCompatibility;
+    assert.equal(warnings[0].severity, 'warning');
+    assert.equal(issue?.packages[0].name, '@code3d/materials');
+    assert.equal(issue?.packages[0].manifestPath, '/package.json');
+    assert.deepEqual(issue?.packages[0].manual, {reason: 'undeclared'});
   } finally {
     await compiler.dispose();
   }
 });
 
-test('cache restoration rejects incompatible or changed installations and respects current manifest overlays', async () => {
+test('cache restoration permits version differences but rejects changed installations and respects current manifest overlays', async () => {
   const files = memoryFiles({
     '/package.json': {dependencies: {'@code3d/core': '1.0.0'}},
     [coreManifest]: {name: '@code3d/core', version: '1.0.0'},
@@ -467,8 +665,8 @@ test('cache restoration rejects incompatible or changed installations and respec
   try {
     assert.equal(
       await compiler.canRestoreDependencies(old, {files: []}, '/model.ts'),
-      false,
-      'unchanged metadata must not revive an incompatible package',
+      true,
+      'an unchanged installation remains restorable despite its version warning',
     );
     files.contents.set(
       coreManifest,

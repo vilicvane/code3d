@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {after, before, test, type TestContext} from 'node:test';
-import {gzipSync} from 'node:zlib';
-import {packTar} from 'modern-tar';
+import {gunzipSync, gzipSync} from 'node:zlib';
+import {packTar, unpackTar} from 'modern-tar';
+import {normalizedModelSnapshot} from '../model-snapshot.ts';
 import type {PackageManifest} from '../../src/project/package-manifest.ts';
 import {
   chromium,
@@ -19,6 +20,7 @@ declare const window: Window & {
     previewState: import('../../src/model/preview-state.ts').ModelPreviewState;
     projectFileSystem: import('../../src/project/filesystem.ts').ProjectFileSystem;
   };
+  compatibilityMarkers(): import('monaco-editor/editor').editor.IMarker[];
 };
 
 const oldVersion = '0.0.0-upgrade-fixture.1';
@@ -70,6 +72,30 @@ async function fixture(t: TestContext): Promise<Page> {
         '\nwindow.compatibilityApp = {codeEditor, compiler, previewState, projectFileSystem};',
     });
   });
+  await context.route('**/src/editor.ts*', async route => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body:
+        (await response.text()) +
+        '\nwindow.compatibilityMarkers = () => monaco.editor.getModelMarkers({owner:"code3d-model"});',
+    });
+  });
+  // Keep the bundled reader, but use the production workspace catalog so
+  // installed latest declarations are never replaced by development builds.
+  await context.route('**/src/project/browser-packages.ts*', route => {
+    if (
+      new URL(route.request().url()).searchParams.has('compatibility-original')
+    )
+      return route.continue();
+    return route.fulfill({
+      contentType: 'text/javascript',
+      body: `
+        export * from '/src/project/browser-packages.ts?compatibility-original';
+        export const developmentWorkspaces = {};
+      `,
+    });
+  });
   return context.newPage();
 }
 
@@ -85,39 +111,62 @@ async function seed(
   );
 }
 
-async function ready(page: Page): Promise<void> {
+async function ready(page: Page, warning = false): Promise<void> {
   await page.waitForFunction(
-    () => {
+    warning => {
       const app = window.compatibilityApp;
       if (!app) return false;
-      if (
-        app.previewState.diagnostic &&
-        !app.previewState.diagnostic.packageCompatibility
-      )
+      if (app.previewState.diagnostic)
         throw new Error(JSON.stringify(app.previewState.diagnostic));
       return (
         !app.previewState.diagnostic &&
         document.querySelector('#viewport-status')?.textContent?.trim() ===
-          'Ready'
+          'Ready' &&
+        app.compiler.warnings.some(item => item.packageCompatibility) ===
+          warning
       );
     },
-    undefined,
+    warning,
     {timeout: 120_000},
   );
   assert.equal(
-    await page.getByRole('alert', {name: mismatchName, exact: true}).count(),
-    0,
+    await page.getByRole('note', {name: mismatchName, exact: true}).count(),
+    Number(warning),
   );
+  if (warning) {
+    assert.ok(
+      await page.evaluate(
+        () => window.compatibilityApp.previewState.module?.objects.size,
+      ),
+      'version warnings do not prevent rendering a model',
+    );
+    await page.waitForFunction(() =>
+      window
+        .compatibilityMarkers()
+        .some(
+          marker =>
+            marker.message.includes('Code3D package version mismatch') &&
+            marker.severity === 4,
+        ),
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        window.compatibilityMarkers().some(marker => marker.severity === 8),
+      ),
+      false,
+      'the editor represents the mismatch as a warning, not an error',
+    );
+  }
 }
 
 async function openMismatchDetails(page: Page, screenshot: string) {
-  const notice = page.getByRole('alert', {name: mismatchName, exact: true});
+  const notice = page.getByRole('note', {name: mismatchName, exact: true});
   await notice.waitFor({timeout: 90_000});
   assert.equal(
     await page
       .locator('#project-explorer')
       .getByRole('status', {name: 'Packages', exact: true})
-      .getByRole('alert', {name: mismatchName, exact: true})
+      .getByRole('note', {name: mismatchName, exact: true})
       .count(),
     1,
     'package compatibility belongs to the shared file explorer package status',
@@ -159,9 +208,8 @@ type RegistryEntry = {
   integrity: string;
 };
 
-// Use this build's real published artifacts for recovery. Only the incompatible
-// installation is synthetic: it lacks tooling so version detection must happen
-// before an old runtime can fail with an unrelated missing-export diagnostic.
+// Both versions contain real published code. Changing only the package metadata
+// isolates version detection from actual compiler/runtime incompatibilities.
 async function registryFixture(context: BrowserContext) {
   const artifacts: {
     name: string;
@@ -198,19 +246,27 @@ async function registryFixture(context: BrowserContext) {
   const coreTags: string[] = [];
   let failCoreDownload = false;
   for (const name of ['@code3d/core', '@code3d/materials']) {
-    const manifest = {name, version: oldVersion, type: 'module' as const};
+    const current = entries.find(entry => entry.manifest.name === name)!;
+    const manifest = {
+      ...current.manifest,
+      version: oldVersion,
+      ...(name === '@code3d/materials'
+        ? {peerDependencies: {'@code3d/core': oldVersion}}
+        : {}),
+    };
     const body = new TextEncoder().encode(JSON.stringify(manifest));
+    const contents = await unpackTar(gunzipSync(current.bytes));
     const bytes = gzipSync(
-      await packTar([
-        {
-          header: {
-            name: 'package/package.json',
-            type: 'file',
-            size: body.length,
-          },
-          body,
-        },
-      ]),
+      await packTar(
+        contents.map(entry => {
+          const data =
+            entry.header.name === 'package/package.json' ? body : entry.data;
+          return {
+            header: {...entry.header, size: data?.length ?? 0},
+            body: data,
+          };
+        }),
+      ),
     );
     entries.push({
       manifest,
@@ -281,6 +337,7 @@ async function registryFixture(context: BrowserContext) {
   });
   return {
     versions,
+    entries,
     coreTags,
     publishCurrent() {
       Object.assign(latest, versions);
@@ -292,27 +349,10 @@ async function registryFixture(context: BrowserContext) {
 }
 
 test(
-  'browser package updates resolve a new latest tag without pinning it or losing author files and dependency fields',
+  'browser version warnings permit renders, edits, cached previews and real errors while updates preserve latest declarations',
   {timeout: 240_000},
   async t => {
     const page = await fixture(t);
-    // Keep Vite's real bundled package reader, but use production's empty
-    // workspace catalog so latest is resolved by the actual npm installer.
-    await page.context().route('**/src/project/browser-packages.ts*', route => {
-      if (
-        new URL(route.request().url()).searchParams.has(
-          'compatibility-original',
-        )
-      )
-        return route.continue();
-      return route.fulfill({
-        contentType: 'text/javascript',
-        body: `
-          export * from '/src/project/browser-packages.ts?compatibility-original';
-          export const developmentWorkspaces = {};
-        `,
-      });
-    });
     const registry = await registryFixture(page.context());
     const {versions} = registry;
     const manifest = {
@@ -329,6 +369,116 @@ test(
       {path: '/README.md', source: authorNotes},
     ]);
     await page.goto(process.env.CODE3D_TEST_URL!);
+    await ready(page, true);
+    const original = normalizedModelSnapshot(
+      await page.evaluate(() =>
+        JSON.stringify([
+          ...window.compatibilityApp.previewState.module!.objects,
+        ]),
+      ),
+    );
+    await page.evaluate(() =>
+      window.compatibilityApp.codeEditor.editor
+        .getModel()!
+        .setValue(
+          window.compatibilityApp.codeEditor.editor
+            .getModel()!
+            .getValue()
+            .replace('box(10,', 'box(14,'),
+        ),
+    );
+    await page.waitForFunction(
+      () =>
+        !window.compatibilityApp.previewState.busy &&
+        window.compatibilityApp.previewState.sourceVersion ===
+          window.compatibilityApp.codeEditor.sourceVersion(),
+    );
+    await ready(page, true);
+    assert.notEqual(
+      normalizedModelSnapshot(
+        await page.evaluate(() =>
+          JSON.stringify([
+            ...window.compatibilityApp.previewState.module!.objects,
+          ]),
+        ),
+      ),
+      original,
+    );
+    await page.evaluate(
+      source =>
+        window.compatibilityApp.codeEditor.editor.getModel()!.setValue(source),
+      source,
+    );
+    await page.waitForFunction(
+      () =>
+        !window.compatibilityApp.previewState.busy &&
+        window.compatibilityApp.previewState.sourceVersion ===
+          window.compatibilityApp.codeEditor.sourceVersion(),
+    );
+    await ready(page, true);
+
+    // Let the saved preview arrive before background compilation completes, so
+    // this verifies restoration instead of merely rebuilding after a reload.
+    await page
+      .context()
+      .route('**/src/model/compiler.worker.ts*', async route => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          body:
+            (await response.text()) +
+            `
+        const compatibilityPost = self.postMessage.bind(self);
+        self.postMessage = (message, ...rest) => {
+          if (message.kind === 'compiled') setTimeout(() => compatibilityPost(message, ...rest), 1500);
+          else compatibilityPost(message, ...rest);
+        };
+      `,
+        });
+      });
+    await page.reload();
+    await ready(page, true);
+    assert.ok(
+      await page.evaluate(
+        () => window.compatibilityApp.compiler.restored?.module.objects.size,
+      ),
+      'unchanged installed packages with a different version still restore their cached preview',
+    );
+    await page.evaluate(() =>
+      window.compatibilityApp.codeEditor.editor
+        .getModel()!
+        .setValue(
+          'import {missingCompatibilityFixtureExport} from "@code3d/core"; export default missingCompatibilityFixtureExport();',
+        ),
+    );
+    await page.waitForFunction(
+      () => !!window.compatibilityApp.previewState.diagnostic,
+    );
+    assert.match(
+      await page.evaluate(
+        () => window.compatibilityApp.previewState.diagnostic!.summary,
+      ),
+      /missingCompatibilityFixtureExport/,
+    );
+    assert.ok(
+      await page.evaluate(() =>
+        window.compatibilityApp.compiler.warnings.some(
+          warning => warning.packageCompatibility,
+        ),
+      ),
+    );
+    await page.evaluate(
+      source =>
+        window.compatibilityApp.codeEditor.editor.getModel()!.setValue(source),
+      source,
+    );
+    await page.waitForFunction(
+      () =>
+        !window.compatibilityApp.previewState.busy &&
+        window.compatibilityApp.previewState.sourceVersion ===
+          window.compatibilityApp.codeEditor.sourceVersion(),
+    );
+    await ready(page, true);
     const notice = await openMismatchDetails(page, 'browser-package-mismatch');
     const rows = await notice.locator('.package-version').allTextContents();
     for (const name of ['@code3d/core', '@code3d/materials']) {
@@ -341,7 +491,7 @@ test(
         ),
       );
     }
-    assert.match(await notice.innerText(), /Installed[\s\S]*Required/);
+    assert.match(await notice.innerText(), /Installed[\s\S]*App version/);
     assert.match(await notice.innerText(), /\/package\.json/);
     assert.match(await notice.innerText(), /does not upgrade packages/);
     await notice
@@ -371,8 +521,7 @@ test(
     await notice
       .getByRole('button', {name: 'Update Code3D packages', exact: true})
       .click();
-    // The notice owns the command failure. A build can retain the original
-    // mismatch diagnostic, so its summary is not the download-error signal.
+    // The download failure and version warning are independent of model errors.
     // Installation drains in-flight package downloads before rolling back,
     // so wait within the package-operation budget rather than the UI timeout.
     try {
@@ -409,9 +558,10 @@ test(
       .locator('.package-compatibility-notice[aria-busy="false"]')
       .waitFor();
     assert.ok(
-      await page.evaluate(
-        () =>
-          window.compatibilityApp.previewState.diagnostic?.packageCompatibility,
+      await page.evaluate(() =>
+        window.compatibilityApp.compiler.warnings.some(
+          warning => warning.packageCompatibility,
+        ),
       ),
       'installation failures keep the actionable version mismatch context',
     );
@@ -500,14 +650,61 @@ test(
 );
 
 test(
-  'local package mismatches identify the owning manifest and recover after external installation and Refresh',
+  'local warnings show npm alias update instructions and clear after refreshing an actual installation',
   {timeout: 180_000},
   async t => {
     const page = await fixture(t);
-    await seed(page, [
-      {path: '/model.ts', source},
-      {path: '/README.md', source: authorNotes},
-    ]);
+    // Deliver an old request's warning once more immediately after a newer
+    // entry reports no warnings, reproducing an in-flight Worker response.
+    await page
+      .context()
+      .route('**/src/model/compiler.worker.ts*', async route => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          body:
+            (await response.text()) +
+            `
+        const compatibilityPost = self.postMessage.bind(self);
+        let previousCompatibilityWarnings;
+        self.postMessage = (message, ...rest) => {
+          compatibilityPost(message, ...rest);
+          if (message.kind !== 'warnings') return;
+          if (message.warnings.length) previousCompatibilityWarnings = message;
+          else if (previousCompatibilityWarnings && previousCompatibilityWarnings.id !== message.id)
+            compatibilityPost(previousCompatibilityWarnings);
+        };
+      `,
+        });
+      });
+    const registry = await registryFixture(page.context());
+    const archive = registry.entries.find(
+      entry =>
+        entry.manifest.name === '@code3d/materials' &&
+        entry.manifest.version === oldVersion,
+    )!;
+    const installedFiles = (await unpackTar(gunzipSync(archive.bytes))).flatMap(
+      entry =>
+        entry.data
+          ? [
+              {
+                path:
+                  '/parts/node_modules/surface/' +
+                  entry.header.name.replace(/^package\//, ''),
+                bytes: Array.from(entry.data),
+              },
+            ]
+          : [],
+    );
+    const localSource = `import {box} from '@code3d/core';
+import {plastic} from 'surface';
+export default box(10, 8, 6).material(plastic());
+`;
+    const manifest = {
+      type: 'module',
+      dependencies: {surface: 'npm:@code3d/materials@latest'},
+    };
+    await seed(page, [{path: '/model.ts', source}]);
     // Use real directory reads and writes with a fresh handle per document.
     // Chrome can crash when an OPFS handle is deserialized from IndexedDB.
     await page.context().route('**/src/project/directory-access.ts*', route => {
@@ -529,55 +726,51 @@ test(
     });
     await page.goto(process.env.CODE3D_TEST_URL!);
     await ready(page);
-    const expected = await page.evaluate(
-      async ({source, authorNotes, oldVersion}) => {
+    await page.evaluate(
+      async ({installedFiles, localSource, authorNotes, manifest, source}) => {
         const {openDirectoryProjectFileSystem} =
           await import('/src/project/filesystem.ts');
-        const {browserPackageFiles} =
-          await import('/src/project/browser-packages.ts');
         const root = await (
           await navigator.storage.getDirectory()
         ).getDirectoryHandle('compatibility-local', {create: true});
         const files = await openDirectoryProjectFileSystem(root);
         await files.initialize(async () => {});
-        await files.writeFile(
-          '/parts/package.json',
-          JSON.stringify({
-            type: 'module',
-            dependencies: {'@code3d/core': oldVersion},
-          }),
-        );
-        await files.writeFile('/parts/model.ts', source);
+        await files.writeFile('/parts/package.json', JSON.stringify(manifest));
+        await files.writeFile('/parts/model.ts', localSource);
+        await files.writeFile('/model.ts', source);
         await files.writeFile('/README.md', authorNotes);
-        await files.writeFile(
-          '/parts/node_modules/@code3d/core/package.json',
-          JSON.stringify({
-            name: '@code3d/core',
-            version: oldVersion,
-            type: 'module',
-          }),
-        );
-        return JSON.parse(
-          new TextDecoder().decode(
-            await browserPackageFiles.readFile(
-              '/node_modules/@code3d/core/package.json',
-            ),
-          ),
-        ).version as string;
+        for (const file of installedFiles)
+          await files.writeFile(file.path, new Uint8Array(file.bytes));
       },
-      {source, authorNotes, oldVersion},
+      {installedFiles, localSource, authorNotes, manifest, source},
     );
     const url = new URL(process.env.CODE3D_TEST_URL!);
     url.searchParams.set('workspace', 'compatibility-local');
     url.hash = '/file/parts/model.ts';
     await page.goto(url.href);
+    await ready(page, true);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window
+          .compatibilityMarkers()
+          .filter(marker =>
+            marker.message.includes('Code3D package version mismatch'),
+          )
+          .map(marker => ({
+            file: marker.resource.path,
+            line: marker.startLineNumber,
+          })),
+      ),
+      [{file: '/workspace/parts/model.ts', line: 2}],
+      'the warning belongs to the surface alias import, not the compatible Core import',
+    );
     const notice = await openMismatchDetails(page, 'local-package-mismatch');
     const text = await notice.innerText();
-    assert.match(text, /@code3d\/core/);
+    assert.match(text, /@code3d\/materials/);
     assert.ok(text.includes(oldVersion));
-    assert.ok(text.includes(expected));
+    assert.ok(text.includes(registry.versions['@code3d/materials']));
     assert.match(text, /\/parts\/package\.json/);
-    assert.match(text, /package manager/);
+    assert.match(text, /npm/);
     assert.match(text, /latest/);
     assert.match(text, /Refresh/);
     assert.equal(
@@ -599,32 +792,57 @@ test(
     );
     await notice.waitFor();
 
-    // Development's latest declaration selects the built workspace closure.
-    // Replacing the effective local install exercises Refresh without copying
-    // thousands of third-party/native files into this directory fixture.
-    await page.evaluate(async () => {
+    await page.evaluate(() =>
+      window.compatibilityApp.codeEditor.openFile('/model.ts'),
+    );
+    await page.waitForFunction(
+      () =>
+        !window.compatibilityApp.previewState.busy &&
+        window.compatibilityApp.previewState.file === '/model.ts',
+    );
+    await ready(page);
+    assert.deepEqual(
+      await page.evaluate(() => window.compatibilityApp.compiler.warnings),
+      [],
+      'an old Worker warning cannot contaminate the newly selected entry',
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        window
+          .compatibilityMarkers()
+          .some(marker => marker.resource.path === '/workspace/model.ts'),
+      ),
+      false,
+    );
+    await page.evaluate(() =>
+      window.compatibilityApp.codeEditor.openFile('/parts/model.ts'),
+    );
+    await ready(page, true);
+
+    // The package's code is already valid: replacing installed metadata models
+    // an external npm update without changing latest or using a dev overlay.
+    await page.evaluate(async version => {
       const files = window.compatibilityApp.projectFileSystem;
-      await files.writeFile(
-        '/parts/package.json',
-        JSON.stringify({
-          type: 'module',
-          dependencies: {'@code3d/core': 'latest'},
-        }),
+      const path = '/parts/node_modules/surface/package.json';
+      const installed = JSON.parse(
+        new TextDecoder().decode(await files.readFile(path)),
       );
-    });
+      await files.writeFile(path, JSON.stringify({...installed, version}));
+    }, registry.versions['@code3d/materials']);
     await notice.getByRole('button', {name: 'Refresh', exact: true}).click();
     await ready(page);
     assert.deepEqual(
       await page.evaluate(async () => {
         const files = window.compatibilityApp.projectFileSystem;
+        const text = async (path: string) =>
+          new TextDecoder().decode(await files.readFile(path));
         return {
-          source: new TextDecoder().decode(
-            await files.readFile('/parts/model.ts'),
-          ),
-          notes: new TextDecoder().decode(await files.readFile('/README.md')),
+          source: await text('/parts/model.ts'),
+          notes: await text('/README.md'),
+          manifest: JSON.parse(await text('/parts/package.json')),
         };
       }),
-      {source, notes: authorNotes},
+      {source: localSource, notes: authorNotes, manifest},
     );
   },
 );

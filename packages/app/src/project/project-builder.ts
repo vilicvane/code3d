@@ -13,6 +13,7 @@ import {
 } from './file-reader';
 import {ProjectPackageResolver, nodeBuiltinError} from './package-resolver';
 import type {ProjectAssets} from './project-assets';
+import {projectDirectory} from './project';
 
 // Build-time Node supplies its real builtin catalog, including subpaths.
 const nodeBuiltins = new Set(__CODE3D_NODE_BUILTINS__);
@@ -29,6 +30,21 @@ export type SourceTransform = (
   cached: CachedDefinitions,
 ) => string;
 export type ModuleFormats = ReadonlyMap<string, 'esm' | 'cjs'>;
+export type PackageResolution = Readonly<{path: string; importer: string}>;
+
+/** Package ownership is independent of a package's internal modules or author filenames. */
+export function packageResolutionKey({
+  path,
+  importer,
+}: PackageResolution): string | undefined {
+  if (importer === '/.__code3d-entry.js') return undefined;
+  const [target, owner] = [path, importer].map(
+    path => /^(.*\/node_modules\/(?:@[^/]+\/)?[^/]+)(?:\/|$)/.exec(path)?.[1],
+  );
+  if (!target || owner === target) return undefined;
+  return JSON.stringify([target, owner ?? projectDirectory(importer)]);
+}
+
 export type ProjectBundle = Readonly<{
   source: string;
   files: readonly string[];
@@ -56,6 +72,7 @@ export type ProjectBuildOptions = Readonly<{
 export class ProjectBuilder {
   private readonly resolver: ProjectPackageResolver;
   readonly dependencyMetadata = new Map<string, ProjectFileInfo | null>();
+  readonly packageResolutions = new Map<string, PackageResolution>();
 
   constructor(
     private readonly files: ProjectFileReader,
@@ -102,8 +119,17 @@ export class ProjectBuilder {
     kind: 'import' | 'require' = 'import',
   ): Promise<string | false> {
     const path = await this.resolver.resolve(specifier, importer, kind);
-    if (path !== false) await this.onResolved?.(path, importer);
+    if (path !== false) {
+      this.recordPackageResolution({path, importer});
+      await this.onResolved?.(path, importer);
+    }
     return path;
+  }
+
+  recordPackageResolution(resolution: PackageResolution): void {
+    const key = packageResolutionKey(resolution);
+    if (key && !this.packageResolutions.has(key))
+      this.packageResolutions.set(key, resolution);
   }
 
   private readonly sessions = new Map<
@@ -116,6 +142,7 @@ export class ProjectBuilder {
     this.sessions.clear();
     await Promise.all(sessions.map(session => session.dispose()));
     this.dependencyMetadata.clear();
+    this.packageResolutions.clear();
   }
 
   async cancel(): Promise<void> {

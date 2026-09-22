@@ -15,6 +15,10 @@ export type PackageCompatibilityIssue = Readonly<{
   directory: string;
   packages: readonly Readonly<{
     name: string;
+    /** Selected installation, including aliases and nested dependency copies. */
+    packagePath: string;
+    /** The author's dependency name, which may be an npm alias. */
+    specifier?: string;
     installed: string;
     expected: string;
     manifestPath: string;
@@ -65,7 +69,7 @@ async function installedManifest(
   files: ProjectFileReader,
   name: string,
   rootPath: string,
-): Promise<PackageManifest | undefined> {
+): Promise<{manifest: PackageManifest; packagePath: string} | undefined> {
   for (
     let directory = projectDirectory(rootPath);
     ;
@@ -75,7 +79,13 @@ async function installedManifest(
       directory + '/node_modules/' + name + '/package.json',
     );
     const manifest = await readManifest(files, path);
-    if (manifest) return manifest;
+    if (manifest)
+      return {
+        manifest,
+        packagePath: projectDirectory(
+          (await files.stat(path))?.realPath ?? path,
+        ),
+      };
     if (directory === '/') return undefined;
   }
 }
@@ -106,10 +116,19 @@ export async function findPackageCompatibility(
       // A missing installation retains the normal actionable resolution error.
       if (!installed) continue;
       const version =
-        typeof installed.version === 'string' ? installed.version : 'unknown';
+        typeof installed.manifest.version === 'string'
+          ? installed.manifest.version
+          : 'unknown';
       const expected = matchingVersions[name];
       if (version !== expected)
-        packages.push({name, installed: version, expected, manifestPath});
+        packages.push({
+          name,
+          packagePath: installed.packagePath,
+          specifier,
+          installed: version,
+          expected,
+          manifestPath,
+        });
     }
     if (directory === '/') break;
   }
@@ -129,8 +148,12 @@ export async function findResolvedPackageCompatibility(
   path: string,
   importer: string,
 ): Promise<PackageCompatibilityIssue | undefined> {
-  const directory = resolvedPackageDirectory(path);
-  if (!directory) return undefined;
+  const resolved = resolvedPackageDirectory(path);
+  if (!resolved) return undefined;
+  const manifestPath = resolved + '/package.json';
+  const directory = projectDirectory(
+    (await files.stat(manifestPath))?.realPath ?? manifestPath,
+  );
   const manifest = await readManifest(files, directory + '/package.json');
   if (
     !manifest?.name ||
@@ -144,28 +167,24 @@ export async function findResolvedPackageCompatibility(
   const installed =
     typeof manifest.version === 'string' ? manifest.version : 'unknown';
   const owner = resolvedPackageDirectory(importer);
-  // An import from another author scope can still have its own directly
-  // upgradable declaration. Never offer edits to a dependency's package.json.
-  if (!owner) {
-    const declared = await findPackageCompatibility(
-      files,
-      builtinFiles,
-      importer,
-    );
-    if (declared?.packages.some(pkg => pkg.name === name)) return declared;
-  }
+  // A dependency can share the installation owned by an author declaration.
+  // Match its physical path so a nested copy is never mistaken for that package.
+  const authorPath = owner
+    ? normalizeProjectPath(
+        importer.slice(0, importer.indexOf('/node_modules/')) + '/__lookup.ts',
+      )
+    : importer;
+  const declared = await findPackageCompatibility(
+    files,
+    builtinFiles,
+    authorPath,
+  );
+  if (declared?.packages.some(pkg => pkg.packagePath === directory))
+    return declared;
   const ownerManifest = owner
     ? await readManifest(files, owner + '/package.json')
     : undefined;
-  const scope = await findPackageScope(
-    files,
-    owner
-      ? normalizeProjectPath(
-          importer.slice(0, importer.indexOf('/node_modules/')) +
-            '/__lookup.ts',
-        )
-      : importer,
-  );
+  const scope = await findPackageScope(files, authorPath);
   const manual: NonNullable<
     PackageCompatibilityIssue['packages'][number]['manual']
   > = owner
@@ -183,6 +202,7 @@ export async function findResolvedPackageCompatibility(
     packages: [
       {
         name,
+        packagePath: directory,
         installed,
         expected,
         manifestPath: normalizeProjectPath(scope.directory + '/package.json'),

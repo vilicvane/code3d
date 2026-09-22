@@ -131,6 +131,7 @@ async function compile(request: CompileRequest): Promise<void> {
               await buildEntryKey(request.projectIdentity!, scope),
             )
         : undefined,
+      warnings => send({kind: 'warnings', id: request.id, warnings}),
     );
     checkCancelled();
     if (request.projectIdentity) {

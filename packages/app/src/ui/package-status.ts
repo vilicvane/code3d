@@ -12,7 +12,7 @@ import type {PackageInstallationProgress} from '../project/browser-package-manag
 import type {PackageCompatibilityIssue} from '../project/package-compatibility';
 import {projectDirectory} from '../project/project';
 
-/** One explorer view for package operations and the current model's compatibility diagnostic. */
+/** One explorer view for package operations and the current model's version warning. */
 export class PackageStatusView {
   readonly element = document.createElement('section');
   private readonly notice = document.createElement('div');
@@ -70,10 +70,13 @@ export class PackageStatusView {
     this.element.tabIndex = -1;
     this.element.hidden = true;
     this.notice.className = 'package-compatibility-notice';
-    this.notice.setAttribute('role', 'alert');
+    this.notice.setAttribute('role', 'note');
     this.notice.setAttribute('aria-label', 'Code3D package version mismatch');
     const title = document.createElement('strong');
     title.textContent = 'Code3D version mismatch';
+    const explanation = document.createElement('p');
+    explanation.className = 'package-compatibility-summary';
+    explanation.textContent = 'Builds continue with the installed versions.';
     const actions = document.createElement('div');
     actions.className = 'package-status-actions';
     if (options.update) {
@@ -112,7 +115,7 @@ export class PackageStatusView {
     );
     this.status.className = 'package-compatibility-status';
     this.status.hidden = true;
-    this.notice.append(title, actions, this.status, this.details);
+    this.notice.append(title, explanation, actions, this.status, this.details);
     this.downloads.className = 'package-downloads';
     this.element.append(this.notice, this.downloads);
     host.append(this.element);
@@ -269,7 +272,7 @@ export class PackageStatusView {
         const versions = document.createElement('dl');
         for (const [label, value] of [
           ['Installed', pkg.installed],
-          ['Required', pkg.expected],
+          ['App version', pkg.expected],
         ]) {
           const term = document.createElement('dt');
           term.textContent = label;
@@ -288,16 +291,16 @@ export class PackageStatusView {
       ? manual
           .map(pkg =>
             pkg.manual!.reason === 'transitive'
-              ? `${pkg.manual!.dependency} loads this version of ${pkg.name}. Update the project dependency that provides it to a release using ${pkg.name}@${pkg.expected}.`
-              : `Declare ${pkg.name}@${pkg.expected} in ${pkg.manifestPath}.`,
+              ? `${pkg.manual!.dependency} loads this version of ${pkg.name}. To match the App, update the project dependency that provides it to a release using ${pkg.name}@${pkg.expected}.`
+              : `To match the App, declare ${pkg.name}@${pkg.expected} in ${pkg.manifestPath}.`,
           )
           .join('\n') +
         (this.options.update
           ? '\nBrowser storage installs changed declarations when you run the model again.'
-          : '\nInstall with your package manager, then choose Refresh.')
+          : '\nKeep latest declarations; change outdated fixed versions or ranges first. Run the npm command below in each package.json folder, or use your package manager’s update command. Then choose Refresh.')
       : this.options.update
         ? 'Update installed Code3D packages and outdated version declarations. Your latest declarations and other dependencies are kept.'
-        : 'Update packages in each folder below with your package manager. Keep latest declarations; change outdated pinned versions to the required versions. Then choose Refresh.';
+        : 'Keep latest declarations, including npm aliases. Change outdated fixed versions or ranges to the App versions first. Run the npm command below in each package.json folder, or use your package manager’s update command. Then choose Refresh.';
     this.manifests.replaceChildren(
       ...paths.map(path => {
         const button = document.createElement('button');
@@ -318,6 +321,14 @@ export class PackageStatusView {
         const label = document.createElement('code');
         label.textContent = path;
         entry.append(label, button);
+        if (!this.options.update) {
+          const command = document.createElement('code');
+          command.className = 'package-update-command';
+          command.textContent = 'npm update';
+          command.title =
+            'Update this folder’s dependencies within their declarations, without rewriting package.json.';
+          entry.append(command);
+        }
         return entry;
       }),
     );
