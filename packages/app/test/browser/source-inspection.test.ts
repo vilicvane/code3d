@@ -15,6 +15,103 @@ declare const window: Window & {
 };
 
 test(
+  'nested cut constructors keep their preview through caret and array changes',
+  {timeout: 90_000},
+  async t => {
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext({
+      viewport: {width: 1440, height: 1000},
+    });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/\[mobx\]/i.test(message.text())) errors.push(message.text());
+    });
+    const source = `import {box, on} from '@code3d/core';
+import {DRAWER_HEIGHT, DRAWER_THICKNESS, DRAWER_CLIENT_WIDTH, DRAWER_CLIENT_HEIGHT, DRAWER_CLIENT_THICKNESS} from './constants.ts';
+let body = box(DRAWER_HEIGHT, DRAWER_THICKNESS, DRAWER_CLIENT_WIDTH).fillet(
+  (DRAWER_THICKNESS / 2) * 0.99, [1, 3, 5, 7],
+);
+body = body.cut([
+  box(DRAWER_CLIENT_HEIGHT, DRAWER_CLIENT_THICKNESS, DRAWER_CLIENT_WIDTH)
+    .relate(self => on(self.up, body.up)),
+]);`;
+    const files = [
+      {path: '/model.ts', source},
+      {
+        path: '/constants.ts',
+        source: `export const DRAWER_HEIGHT = 20, DRAWER_THICKNESS = 8, DRAWER_CLIENT_WIDTH = 16, DRAWER_CLIENT_HEIGHT = 16, DRAWER_CLIENT_THICKNESS = 6;`,
+      },
+    ];
+    await page.route('**/src/project/default-project.ts*', route =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body: `export const defaultProject = ${JSON.stringify({files})};`,
+      }),
+    );
+    await page.route('**/src/main.ts*', async route => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        body:
+          (await response.text()) +
+          '\nwindow.inspectionApp = {viewport, codeEditor, compiler, previewState};',
+      });
+    });
+    await page.goto(process.env.CODE3D_TEST_URL!, {
+      waitUntil: 'domcontentloaded',
+    });
+    await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    for (const [token, delta, kind, targets, ambient] of [
+      ['box(DRAWER_CLIENT_HEIGHT', 3, 'preview', 1, 0],
+      ['box(DRAWER_CLIENT_HEIGHT', 4, 'inspect', 2, 0],
+      ['cut([', 5, 'inspect', 2, 1],
+      ['box(DRAWER_CLIENT_HEIGHT', 3, 'preview', 1, 0],
+    ] as const) {
+      const offset = source.lastIndexOf(token) + delta;
+      await page.evaluate(offset => {
+        const editor = window.inspectionApp.codeEditor.editor;
+        editor.setPosition(editor.getModel()!.getPositionAt(offset));
+      }, offset);
+      await page.waitForFunction(
+        ({kind, targets, ambient, offset}) => {
+          const {viewport, previewState} = window.inspectionApp;
+          const scene = viewport['inspectionScene'];
+          return (
+            !previewState.inspecting &&
+            scene?.kind === kind &&
+            scene.target.length === targets &&
+            scene.ambient.length === ambient &&
+            viewport['inspectionSource']?.offset === offset
+          );
+        },
+        {kind, targets, ambient, offset},
+      );
+      assert.equal(
+        await page.evaluate(
+          () => window.inspectionApp.previewState.inspectionDiagnostic,
+        ),
+        undefined,
+      );
+    }
+    assert.ok(
+      await page.evaluate(
+        async () =>
+          (await window.inspectionApp.viewport.captureImage(1200, 800)).size >
+          1000,
+      ),
+    );
+    await page.screenshot({path: '/tmp/code3d-239-cut-inspection.png'});
+    assert.deepEqual(errors, []);
+  },
+);
+
+test(
   'frame-only measurements render and export without fabricated model geometry',
   {timeout: 90_000},
   async t => {

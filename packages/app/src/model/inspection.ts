@@ -348,6 +348,7 @@ export class InspectionSession {
     this.inspecting = true;
     try {
       let closure = focus.closure;
+      let fallback: InspectedValues | undefined;
       for (let call = focus.call; call; call = call.parent) {
         let insideClosure = false;
         while (closure && closure.call === call) {
@@ -415,13 +416,12 @@ export class InspectionSession {
             );
             if (result !== undefined) return selected(result);
           }
-          // An argument with no custom scene previews the owning call's result.
-          // Non-renderable results (e.g. relation descriptions) still reach their
-          // enclosing closure inspector.
-          if (inArguments) {
-            const result = preview(call.return);
-            if (result) return result;
-          }
+          // Enclosing inspectors can still describe an inner call's value, but
+          // declining it must not replace that value with the outer call's result.
+          fallback ??= preview(call.return);
+          // Arguments default to their owning call; non-renderable results still
+          // reach the enclosing scope (e.g. a relation's closure inspector).
+          if (inArguments && fallback) return fallback;
         }
       }
       while (closure) {
@@ -429,7 +429,7 @@ export class InspectionSession {
         if (result !== undefined) return selected(result);
         closure = closure.parent;
       }
-      return preview(focus.value);
+      return fallback ?? preview(focus.value);
     } finally {
       this.inspecting = false;
     }

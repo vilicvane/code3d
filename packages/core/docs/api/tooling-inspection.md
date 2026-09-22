@@ -2,13 +2,13 @@
 title: Inspection recording and identity
 description: Record per-call inspector data and map preview copies back to their source focus identities.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.15
   sources:
     - path: packages/app/src/model/inspection.ts
-      sha256: 22de3db44e18aef80c032f550835e1cf74ad9bcd899abeb246eda1ad53778ebf
-      commit: 257dac61457d3ec723fd8054ebcb2e12daceba85
+      sha256: a91369693877bbdf8bada54ed1362bc3affdd163c3738cfe2cc78428f913e20b
     - path: packages/core/src/library/inspect.ts
       sha256: 530883228cd23a27f1e13c5153669c24ce87d523f4ff1cc52202dab698063e45
+      commit: e8843e109cb86d5dcfee6e28859625a22921372d
 sidebar:
   hidden: true
 head:

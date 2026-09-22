@@ -990,6 +990,51 @@ test('expose inspects recorded references in the receiving assembly without repe
   assert.equal(result.ambient.length, 0);
 });
 
+test('nested constructors preview their own result before a cut consumes a related copy', async () => {
+  const inspect = await compile(`import {box, cut, on} from '@code3d/core';
+    let body = box(20,8,16).fillet(3.96, [1,3,5,7]);
+    body = body.cut([
+      box(16,6,16).relate(self => on(self.up, body.up)),
+    ]);
+    cut(box(20,8,16), [box(12,4,12).originOffset(-2,0,0)]);`);
+  for (const [token, size] of [
+    ['box(16,6,16)', 16],
+    ['box(12,4,12)', 12],
+  ] as const) {
+    const scene = defined(await inspect(token, 'box'.length));
+    assert.equal(scene.kind, 'preview');
+    assert.equal(scene.target.length, 1);
+    assert.equal(width(scene.target[0]), size);
+    assert.deepEqual(scene.ambient, []);
+  }
+  const dimension = defined(await inspect('box(16,6,16)', 'box('.length));
+  assert.equal(dimension.kind, 'inspect');
+  assert.ok(dimension.target.some(item => item.kind === 'dimension'));
+  const tools = defined(await inspect('[\n      box', 1));
+  assert.equal(tools.kind, 'inspect');
+  assert.equal(tools.target.length, 2);
+  assert.deepEqual(
+    tools.target.map(item => item.focused),
+    [true, false],
+  );
+  assert.equal(tools.ambient.length, 1);
+});
+
+test('cut tool inspection declines upstream values outside its recorded operands', async () => {
+  const inspect = await compile(`import {box, cut, on} from '@code3d/core';
+    const stock = box(20,8,16);
+    const tool = box(16,6,16);
+    stock.cut([tool.relate(self => on(self.up, stock.up))]);
+    cut(stock, [tool.originOffset(-1,0,0)]);`);
+  for (const token of ['tool.relate', 'tool.originOffset']) {
+    const scene = defined(await inspect(token));
+    assert.equal(scene.kind, 'preview');
+    assert.equal(scene.target.length, 1);
+    assert.equal(width(scene.target[0]), 20);
+    assert.deepEqual(scene.ambient, []);
+  }
+});
+
 test('boolean inspectors preserve original placement and generate only the focused cut volume', async () => {
   const inspect =
     await compile(`import {align, box, cut, union, intersect, group, offset} from '@code3d/core';
