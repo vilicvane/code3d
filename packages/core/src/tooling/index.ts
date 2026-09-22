@@ -80,6 +80,7 @@ export {
   executeSnapshotQueryBatch,
   instrumentRelation,
   instrumentModelOperation,
+  modelOperationObject,
   isConstraint,
   isRelationExpression,
   isModelObject,

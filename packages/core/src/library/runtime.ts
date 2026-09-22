@@ -216,7 +216,7 @@ type CompositionInspectData = Readonly<{
 }>;
 
 type InspectionFrame = Readonly<{
-  owner(model: RelationObject): ModelObject | undefined;
+  owner(model: RelationObject): ModelObject | FrameObject | undefined;
   display(model: RelationObject): PreviewValue | undefined;
   positioned(
     value: Anchor,
@@ -2103,6 +2103,7 @@ export abstract class RelationObject {
   readonly nodeId: string;
   /** @internal */
   abstract readonly name: string;
+  protected abstract readonly operation: StoredOperation;
   protected placements: StoredPlacement[];
 
   protected get initialPose(): RigidTransform {
@@ -2132,7 +2133,28 @@ export abstract class RelationObject {
     return valueTrace(this).parameters;
   }
 
-  protected abstract copyRelations(init: RelationObjectInit): RelationObject;
+  protected abstract copyRelations(
+    init: RelationObjectInit,
+    operation?: StoredOperation,
+  ): RelationObject;
+
+  protected relateValue(
+    build: (self: this) => Relation | readonly Relation[],
+  ): this {
+    const operation = storedOperation('relate', [
+      {model: this, role: 'source', index: 0},
+    ]);
+    const related = this.copyRelations({}, operation) as this;
+    const references = related.addRelations(() => build(related));
+    operation.inputs.push(
+      ...references.map((model, index) => ({
+        model,
+        role: 'reference' as const,
+        index,
+      })),
+    );
+    return related;
+  }
 
   protected edgeReference(_id: EdgeId): RelationReference {
     throw new Error(
@@ -2159,19 +2181,74 @@ export abstract class RelationObject {
   }
 
   /** @internal */
-  abstract relatedObjects(): readonly RelationObject[];
+  relatedObjects(): readonly RelationObject[] {
+    return [
+      ...this.operation.inputs.map(input => input.model),
+      ...this.placements.flatMap(constraintReferences),
+    ];
+  }
   /** @internal */
   abstract toSnapshot(
     meshCache?: Map<AnyShape, RenderMesh>,
   ): ModelSnapshotObject;
   /** @internal */
-  abstract attachOperationTrace(
+  attachOperationTrace(
     siteId: string,
     execution: number,
     order: number,
     sourceRef: SourceRef,
-    outputIndex?: number,
-  ): void;
+    outputIndex = 0,
+  ): void {
+    if (!operationTraces.has(this.operation))
+      operationTraces.set(this.operation, {
+        siteId,
+        execution,
+        order,
+        sourceRef,
+        outputIndex,
+      });
+  }
+
+  protected operationSnapshot(): ModelOperationSnapshot {
+    const {kind, inputs, selections} = this.operation;
+    const {siteId, execution, order, sourceRef} =
+      operationTraces.get(this.operation) ?? {};
+    return {
+      id: storedOperationId(this.operation),
+      siteId,
+      execution,
+      kind,
+      order,
+      outputNodeId: this.nodeId,
+      inputs: inputs.map(({model, role, index}) => ({
+        nodeId: model.nodeId,
+        role,
+        index,
+      })),
+      selections: selections.map(selection => ({
+        kind: selection.kind,
+        inputNodeId: selection.input.nodeId,
+        ids: [...selection.ids],
+        transform: toTransform(selection.transform),
+      })),
+      sourceRef,
+      spatial: this.operation.spatial,
+      dimensions: this.operation.dimensions,
+    };
+  }
+
+  protected relationSnapshot(): RelationPreview['object'] {
+    const context = RelationObject.createSolveContext([this]);
+    return {
+      nodeId: this.nodeId,
+      compositionTransform: toTransform(this.solvePose(context)),
+      constraints: this.constraints.map(value =>
+        this.constraintSnapshot(value, context),
+      ),
+      transformations: this.transformationSnapshots(context),
+      relationStages: this.relationStageSnapshots(context),
+    };
+  }
 
   /** Store relations only after the complete callback has returned. */
   protected addRelations(
@@ -3055,17 +3132,17 @@ export abstract class RelationObject {
   }
 }
 
-class FrameObject extends RelationObject implements Frame {
-  declare readonly [anchorKind]: 'frame';
-  readonly [coordinateFrame] = true;
-  readonly [anchorReferenceValue]: AnchorReference;
-  readonly origin: PointAnchor;
-  private readonly operation: StoredOperation;
+/** Spatial values whose reference elements do not require finite geometry. */
+abstract class ReferenceObject extends RelationObject {
+  protected abstract readonly referenceElements: StoredElements;
 
   constructor(
     readonly name: string,
-    private readonly source?: FrameObject,
+    protected readonly operation: StoredOperation,
+    source?: ReferenceObject,
     init: RelationObjectInit = {},
+    private readonly retainedPose = source?.initialPose ??
+      identityRigidTransform,
   ) {
     super({
       placements: source?.placements,
@@ -3073,6 +3150,47 @@ class FrameObject extends RelationObject implements Frame {
       parameters: source?.parameters,
       ...init,
     });
+  }
+
+  protected override get initialPose(): RigidTransform {
+    return this.retainedPose;
+  }
+
+  toSnapshot(): ModelSnapshotObject {
+    return {
+      ...this.relationSnapshot(),
+      kind: 'reference',
+      name: this.name,
+      children: [],
+      origin,
+      transform: toTransform(identityRigidTransform),
+      elements: snapshotElements(this.referenceElements),
+      sourceRefs: [...this.sourceRefs],
+      parameters: [...this.parameters],
+      operation: this.operationSnapshot(),
+    };
+  }
+
+  abstract inspectionValue(
+    frame: InspectionFrame,
+    pose: RigidTransform,
+  ): PreviewValue;
+}
+
+class FrameObject extends ReferenceObject implements Frame {
+  declare readonly [anchorKind]: 'frame';
+  readonly [coordinateFrame] = true;
+  readonly [anchorReferenceValue]: AnchorReference;
+  readonly origin: PointAnchor;
+  protected readonly referenceElements: StoredElements;
+
+  constructor(
+    name: string,
+    source?: FrameObject,
+    init: RelationObjectInit = {},
+    operation = storedOperation('frame'),
+  ) {
+    super(name, operation, source, init);
     this[anchorReferenceValue] = {
       model: this,
       name: 'frame',
@@ -3083,79 +3201,22 @@ class FrameObject extends RelationObject implements Frame {
       kind: 'point',
       transform: identityRigidTransform,
     });
-    this.operation = storedOperation(source ? 'relate' : 'frame');
+    this.referenceElements = {frame: this[anchorReferenceValue]};
   }
 
-  protected copyRelations(init: RelationObjectInit): FrameObject {
-    return new FrameObject(this.name, this, init);
+  protected copyRelations(
+    init: RelationObjectInit,
+    operation = this.operation,
+  ): FrameObject {
+    return new FrameObject(this.name, this, init, operation);
   }
 
   relate(build: (self: Frame) => Relation | readonly Relation[]): Frame {
-    const related = new FrameObject(this.name, this);
-    related.addRelations(() => build(related));
-    return related;
+    return this.relateValue(build);
   }
 
-  relatedObjects(): readonly RelationObject[] {
-    return [
-      ...(this.source ? [this.source] : []),
-      ...this.placements.flatMap(constraintReferences),
-    ];
-  }
-
-  attachOperationTrace(
-    siteId: string,
-    execution: number,
-    order: number,
-    sourceRef: SourceRef,
-    outputIndex = 0,
-  ): void {
-    if (!operationTraces.has(this.operation))
-      operationTraces.set(this.operation, {
-        siteId,
-        execution,
-        order,
-        sourceRef,
-        outputIndex,
-      });
-  }
-
-  toSnapshot(): ModelSnapshotObject {
-    const context = RelationObject.createSolveContext([this]);
-    const {siteId, execution, order, sourceRef} =
-      operationTraces.get(this.operation) ?? {};
-    return {
-      nodeId: this.nodeId,
-      kind: 'reference',
-      name: this.name,
-      children: [],
-      origin,
-      compositionTransform: toTransform(this.solvePose(context)),
-      transform: toTransform(identityRigidTransform),
-      elements: snapshotElements({frame: this[anchorReferenceValue]}),
-      constraints: this.constraints.map(value =>
-        this.constraintSnapshot(value, context),
-      ),
-      transformations: this.transformationSnapshots(context),
-      relationStages: this.relationStageSnapshots(context),
-      sourceRefs: [...this.sourceRefs],
-      parameters: [...this.parameters],
-      operation: {
-        id: storedOperationId(this.operation),
-        siteId,
-        execution,
-        order,
-        sourceRef,
-        kind: this.operation.kind,
-        outputNodeId: this.nodeId,
-        inputs: this.relatedObjects().map((model, index) => ({
-          nodeId: model.nodeId,
-          role: 'reference',
-          index,
-        })),
-        selections: [],
-      },
-    };
+  inspectionValue(frame: InspectionFrame): PreviewValue {
+    return frame.positioned(this)!;
   }
 }
 
@@ -3169,34 +3230,27 @@ export function isFrame(value: unknown): value is FrameObject {
 }
 
 /** Plane-only spatial value used by sketches before a B-Rep face exists. */
-export class SketchFrame extends RelationObject {
-  readonly name = 'Sketch';
+export class SketchFrame extends ReferenceObject {
   readonly plane: FaceAnchor;
-  private readonly source?: SketchFrame;
-  private readonly operation = storedOperation('sketch');
+  protected readonly referenceElements: StoredElements = {
+    plane: {kind: 'face', transform: identityRigidTransform},
+  };
 
   constructor(
     source?: SketchFrame,
     init: RelationObjectInit = {},
-    private readonly retainedPose?: RigidTransform,
+    retainedPose?: RigidTransform,
+    operation = storedOperation(
+      'sketch',
+      source ? [{model: source, role: 'source', index: 0}] : [],
+    ),
   ) {
-    super({
-      placements: source?.placements,
-      sourceRefs: source?.sourceRefs,
-      parameters: source?.parameters,
-      ...init,
-    });
-    this.source = source;
-    this.plane = modelAnchor(this, 'plane', {
-      kind: 'face',
-      transform: identityRigidTransform,
-    }) as FaceAnchor;
-  }
-
-  protected override get initialPose(): RigidTransform {
-    return (
-      this.retainedPose ?? this.source?.initialPose ?? identityRigidTransform
-    );
+    super('Sketch', operation, source, init, retainedPose);
+    this.plane = modelAnchor(
+      this,
+      'plane',
+      this.referenceElements.plane,
+    ) as FaceAnchor;
   }
 
   /** Snapshot the plane's placement without retaining its mutable relation program. */
@@ -3204,73 +3258,17 @@ export class SketchFrame extends RelationObject {
     return new SketchFrame(undefined, {sourceRefs: this.sourceRefs}, pose);
   }
 
-  protected copyRelations(init: RelationObjectInit): SketchFrame {
-    return new SketchFrame(this, init);
-  }
-
-  relatedObjects(): readonly RelationObject[] {
-    return [
-      ...(this.source ? [this.source] : []),
-      ...this.placements.flatMap(constraintReferences),
-    ];
-  }
-
-  attachOperationTrace(
-    siteId: string,
-    execution: number,
-    order: number,
-    sourceRef: SourceRef,
-    outputIndex = 0,
-  ): void {
-    if (!operationTraces.has(this.operation))
-      operationTraces.set(this.operation, {
-        siteId,
-        execution,
-        order,
-        sourceRef,
-        outputIndex,
-      });
-  }
-
-  toSnapshot(): ModelSnapshotObject {
-    const {siteId, execution, order, sourceRef} =
-      operationTraces.get(this.operation) ?? {};
-    return {
-      ...this.snapshot(),
-      kind: 'reference',
-      name: this.name,
-      children: [],
-      transform: toTransform(identityRigidTransform),
-      elements: snapshotElements({
-        plane: {kind: 'face', transform: identityRigidTransform},
-      }),
-      origin,
-      sourceRefs: [...this.sourceRefs],
-      parameters: [...this.parameters],
-      operation: {
-        id: storedOperationId(this.operation),
-        siteId,
-        execution,
-        order,
-        sourceRef,
-        kind: 'sketch',
-        outputNodeId: this.nodeId,
-        inputs: this.relatedObjects().map((model, index) => ({
-          nodeId: model.nodeId,
-          role: 'reference',
-          index,
-        })),
-        selections: [],
-      },
-    };
+  protected copyRelations(
+    init: RelationObjectInit,
+    operation = this.operation,
+  ): SketchFrame {
+    return new SketchFrame(this, init, undefined, operation);
   }
 
   relate(
     build: (frame: SketchFrame) => Relation | readonly Relation[],
   ): SketchFrame {
-    const related = new SketchFrame(this);
-    related.addRelations(() => build(related));
-    return related;
+    return this.relateValue(build);
   }
 
   face(region: SketchRegion): FaceModel {
@@ -3278,16 +3276,11 @@ export class SketchFrame extends RelationObject {
   }
 
   snapshot(): RelationPreview['object'] {
-    const context = RelationObject.createSolveContext([this]);
-    return {
-      nodeId: this.nodeId,
-      compositionTransform: toTransform(this.solvePose(context)),
-      constraints: this.constraints.map(constraint =>
-        this.constraintSnapshot(constraint, context),
-      ),
-      transformations: this.transformationSnapshots(context),
-      relationStages: this.relationStageSnapshots(context),
-    };
+    return this.relationSnapshot();
+  }
+
+  inspectionValue(_frame: InspectionFrame, pose: RigidTransform): PreviewValue {
+    return retainSketchFrame(sketchForFrame(this), pose);
   }
 
   /** Related finite models, expressed in this sketch's local editing plane. */
@@ -3334,7 +3327,7 @@ export class ModelObject<
   private readonly meshTolerance: number;
   private readonly geometryAnchor: StoredElement;
   private readonly elements: StoredElements;
-  private readonly operation: StoredOperation;
+  protected readonly operation: StoredOperation;
   #frame?: FrameAnchor;
 
   private get hasGeometry(): boolean {
@@ -3474,19 +3467,8 @@ export class ModelObject<
       self: RuntimeModel<Elements, Kind>,
     ) => Relation | readonly Relation[],
   ): RuntimeModel<Elements, Kind> {
-    const operation = storedOperation('relate', [
-      {model: this, role: 'source', index: 0},
-    ]);
-    const related = this.copy({}, operation);
-    const references = related.addRelations(() => build(related));
-    operation.inputs.push(
-      ...references.map((model, index) => ({
-        model,
-        role: 'reference' as const,
-        index,
-      })),
-    );
-    return related;
+    const model = this as unknown as RuntimeModel<Elements, Kind>;
+    return model.relateValue(build);
   }
 
   expose<const Sources extends ElementSources>(
@@ -4524,32 +4506,8 @@ export class ModelObject<
   }
 
   /** @internal */
-  attachOperationTrace(
-    siteId: string,
-    execution: number,
-    order: number,
-    sourceRef: SourceRef,
-    outputIndex = 0,
-  ): void {
-    if (operationTraces.has(this.operation)) {
-      return;
-    }
-    operationTraces.set(this.operation, {
-      siteId,
-      execution,
-      order,
-      sourceRef,
-      outputIndex,
-    });
-  }
-
-  /** @internal */
-  relatedObjects(): readonly RelationObject[] {
-    return [
-      ...this.children,
-      ...this.operation.inputs.map(input => input.model),
-      ...this.placements.flatMap(constraintReferences),
-    ];
+  override relatedObjects(): readonly RelationObject[] {
+    return [...this.children, ...super.relatedObjects()];
   }
 
   /** @internal */
@@ -5124,20 +5082,29 @@ export class ModelObject<
       this.inspectionSources.set(value, model);
       return value;
     };
-    const owners = new Map<RelationObject, ModelObject>();
-    const owner = (model: RelationObject): ModelObject | undefined => {
+    const owners = new Map<RelationObject, ModelObject | FrameObject>();
+    const owner = (
+      model: RelationObject,
+    ): ModelObject | FrameObject | undefined => {
       const existing = owners.get(model);
       if (existing) return existing;
       const pose = poses.get(model);
       if (!pose) return undefined;
-      const child = model instanceof ModelObject ? detach(model) : undefined;
+      if (!(model instanceof ModelObject)) {
+        const value = new FrameObject(model.name, undefined, {
+          sourceRefs: model.sourceRefs,
+        });
+        owners.set(model, value);
+        return value;
+      }
+      const child = detach(model);
       const value = ModelObject.create({
         kind: 'group',
         name: model.name,
-        children: child ? [child] : [],
+        children: [child],
         assembly: {
           frame: identityRigidTransform,
-          poses: new Map(child ? [[child, pose]] : []),
+          poses: new Map([[child, pose]]),
         },
         operation: storedOperation('group'),
         sourceRefs: model.sourceRefs,
@@ -5177,16 +5144,16 @@ export class ModelObject<
       values.set(value, result);
       return result;
     };
-    const sketches = new Map<SketchFrame, PreviewValue>();
+    const displays = new Map<RelationObject, PreviewValue>();
     const display = (model: RelationObject): PreviewValue | undefined => {
-      if (model instanceof FrameObject) return positioned(model);
-      if (!(model instanceof SketchFrame))
-        return owner(model) as unknown as Model | undefined;
-      let value = sketches.get(model);
+      let value = displays.get(model);
       const pose = poses.get(model);
       if (!value && pose) {
-        value = retainSketchFrame(sketchForFrame(model), pose);
-        sketches.set(model, value);
+        value =
+          model instanceof ReferenceObject
+            ? model.inspectionValue(frame, pose)
+            : (owner(model) as unknown as Model);
+        displays.set(model, value);
       }
       return value;
     };
@@ -5461,7 +5428,7 @@ export class ModelObject<
   ): InspectResult | undefined {
     const data = context.data;
     if (!data) return undefined;
-    const {owner, positioned} = this.inspectionFrame(data.poses);
+    const {owner, positioned, display} = this.inspectionFrame(data.poses);
     const operands = [a, b].map((value, index) =>
       positioned(value, data.references[index]),
     );
@@ -5487,7 +5454,7 @@ export class ModelObject<
     if (!first) return undefined;
     target.push(
       dimension({
-        owner: first as unknown as Model,
+        owner: first as unknown as Model | Frame,
         start: data.result.start,
         end: data.result.end,
         value: data.result.value,
@@ -5503,7 +5470,7 @@ export class ModelObject<
           : value,
       ),
       ambient: [...data.poses.keys()].flatMap(model => {
-        const value = owner(model) as unknown as Model | undefined;
+        const value = display(model);
         return value && !targets.has(value) ? [value] : [];
       }),
     };
@@ -5570,7 +5537,7 @@ export class ModelObject<
     if (!sourceOwner || !targetOwner) return undefined;
     const {snapshot} = constraint;
     const anchor = (
-      owner: ModelObject,
+      owner: RelationObject,
       model: RelationObject,
       element: ElementSnapshot,
       identity: Anchor,
@@ -5799,8 +5766,11 @@ export class ModelObject<
     return anchorReference(this.vertex(id)).transform.position;
   }
 
-  protected copyRelations(init: RelationObjectInit): ModelObject {
-    return this.copy(init, this.operation);
+  protected copyRelations(
+    init: RelationObjectInit,
+    operation = this.operation,
+  ): ModelObject {
+    return this.copy(init, operation);
   }
 
   /** Fix the assembly coordinates once using an explicit frame or the first member. */
@@ -5838,34 +5808,6 @@ export class ModelObject<
       throw new Error('This operation requires a solid model.');
     }
     return this.requireGeometry() as SolidGeometry;
-  }
-
-  private operationSnapshot(): ModelOperationSnapshot {
-    const {kind, inputs, selections} = this.operation;
-    const {siteId, execution, order, sourceRef} =
-      operationTraces.get(this.operation) ?? {};
-    return {
-      id: storedOperationId(this.operation),
-      siteId,
-      execution,
-      kind,
-      order,
-      outputNodeId: this.nodeId,
-      inputs: inputs.map(({model, role, index}) => ({
-        nodeId: model.nodeId,
-        role,
-        index,
-      })),
-      selections: selections.map(selection => ({
-        kind: selection.kind,
-        inputNodeId: selection.input.nodeId,
-        ids: [...selection.ids],
-        transform: toTransform(selection.transform),
-      })),
-      sourceRef,
-      spatial: this.operation.spatial,
-      dimensions: this.operation.dimensions,
-    };
   }
 
   private copyWithGeometry(
@@ -7280,6 +7222,17 @@ export function instrumentModelOperation(
     instrumentation.sourceRef,
     instrumentation.outputIndex,
   );
+}
+
+/** The spatial value created by an author call, independent of its display kind. */
+export function modelOperationObject(
+  value: unknown,
+): RelationObject | undefined {
+  return value instanceof RelationObject
+    ? value
+    : isSketch(value)
+      ? sketchFrame(value)
+      : undefined;
 }
 
 export function relationTraceReference(

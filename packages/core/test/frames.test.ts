@@ -9,6 +9,7 @@ import {
   group,
   offset,
   rotate,
+  sketch,
 } from '../bld/node/index.js';
 import {
   createModelSnapshotter,
@@ -17,6 +18,8 @@ import {
   isModelObject,
   modelElementReference,
   planModelSnapshotQueries,
+  modelOperationObject,
+  relatedModelObjects,
   transformsAreEquivalent,
   xyzRotation,
 } from '../bld/tooling/index.js';
@@ -36,6 +39,42 @@ const near = (actual: readonly number[], expected: readonly number[]) =>
   actual.forEach((v, i) =>
     assert.ok(Math.abs(v - expected[i]) < 1e-6, `${actual} != ${expected}`),
   );
+
+test('spatial derivations distinguish their source from newly introduced relation references', () => {
+  const left = box(2, 4, 6);
+  const right = box(2, 4, 6).originOffset(-10, 0, 0);
+  const datum = frame().relate(self => align(self, left.frame));
+  const profile = sketch().relate(self => align(self.plane, left.up));
+  const part = box(1, 1, 1).relate(self => align(self.frame, left.frame));
+  const pairs = [
+    [datum, datum.relate(self => align(self, right.frame))],
+    [profile, profile.relate(self => align(self.plane, right.up))],
+    [part, part.relate(self => align(self.frame, right.frame))],
+  ];
+  try {
+    for (const [source, derived] of pairs) {
+      const sourceObject = modelOperationObject(source)!;
+      const derivedObject = modelOperationObject(derived)!;
+      assert.ok(sourceObject);
+      assert.ok(derivedObject);
+      const view = snapshot(derivedObject);
+      assert.equal(view.operation.kind, 'relate');
+      assert.deepEqual(view.operation.inputs, [
+        {nodeId: sourceObject.nodeId, role: 'source', index: 0},
+        {nodeId: runtime(right).nodeId, role: 'reference', index: 0},
+      ]);
+      assert.equal(view.constraints.length, 2);
+      assert.equal(snapshot(sourceObject).constraints.length, 1);
+      assert.ok(relatedModelObjects(derivedObject).includes(runtime(left)));
+    }
+  } finally {
+    disposeModelObjects([
+      runtime(left),
+      runtime(right),
+      ...pairs.flat().map(value => modelOperationObject(value)!),
+    ]);
+  }
+});
 
 test('standalone frames are reference values without model geometry or bounds', () => {
   const base = frame('Assembly frame');

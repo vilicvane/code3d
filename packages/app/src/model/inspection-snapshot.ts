@@ -93,9 +93,11 @@ export async function snapshotInspection(
     if (annotation) validateAnnotation(annotation);
     if (annotation && annotation.kind !== 'anchor-annotation') {
       const {owner, ...value} = annotation;
-      if (!runtime.isModelObject(owner))
-        throw new Error('A preview annotation requires a model owner.');
-      const model = owner;
+      const model = runtime.modelOperationObject(owner);
+      if (!model)
+        throw new Error(
+          'A preview annotation requires a model or frame owner.',
+        );
       add(model);
       return snapshot => ({...value, model: snapshot(model), ...emphasis});
     }

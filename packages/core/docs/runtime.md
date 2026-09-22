@@ -330,7 +330,8 @@ callbacks use normal runtime exports; `@internal` with TypeScript's
 `stripInternal` can hide their declarations while keeping those exports.
 
 A dimension can provide fixed `start`/`end` points or a nonempty `candidates` list.
-All points use the owner's local frame. For candidates, the renderer picks the
+The owner can be a model or an independent `Frame`; a dimension does not require
+finite owner geometry. All points use the owner's local frame. For candidates, the renderer picks the
 nearest segment when inspection begins, then retains it while orbiting or
 rechecking the same parameter. Leaving that inspection resets the choice.
 Both forms show a number, endpoint ticks and a screen-sized dashed line.

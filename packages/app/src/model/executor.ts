@@ -193,7 +193,7 @@ export function createModelExecutor(
     instrumentModelOperation,
     isRelationExpression,
     isModelObject,
-    isFrame,
+    modelOperationObject,
     isSketch,
     sketchFrame,
     modelElementReference,
@@ -333,6 +333,20 @@ export function createModelExecutor(
         executionTrace.arguments.get(1),
         executionTrace.receiver,
       );
+      const order = ++evaluationOrder;
+      const outputs = Array.isArray(result) ? result : [result];
+      outputs.forEach((value, outputIndex) => {
+        const object = modelOperationObject(value);
+        if (object)
+          instrumentModelOperation(object, {
+            siteId: id,
+            execution,
+            outputIndex,
+            order,
+            sourceRef: location,
+            parameters,
+          });
+      });
       if (isRelationExpression(result)) {
         instrumentRelation(result, location, parameters);
         recordSourceConstraint(id, location, result, context.id, runtime);
@@ -342,19 +356,6 @@ export function createModelExecutor(
           result.length > 0 &&
           result.every(isModelObject))
       ) {
-        const order = ++evaluationOrder;
-        for (const [outputIndex, object] of (isModelObject(result)
-          ? [result]
-          : (result as ModelObject[])
-        ).entries())
-          instrumentModelOperation(object, {
-            siteId: id,
-            execution,
-            outputIndex,
-            order,
-            sourceRef: location,
-            parameters,
-          });
         recordSourceValue(
           id,
           'operation-output',
@@ -380,18 +381,6 @@ export function createModelExecutor(
       } else {
         recordSourceValue(id, 'value', location, result, context.id, runtime);
       }
-      const order = ++evaluationOrder;
-      if (isSketch(result) || isFrame(result))
-        instrumentModelOperation(
-          isFrame(result) ? result : sketchFrame(result),
-          {
-            siteId: id,
-            execution,
-            order,
-            sourceRef: location,
-            parameters,
-          },
-        );
       if (context.kind === 'call') {
         recordCatalogValue(
           {

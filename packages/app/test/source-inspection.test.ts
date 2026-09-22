@@ -503,6 +503,52 @@ test('loads published inspectors whose declarations were stripped, through alias
   }
 });
 
+test('reference-only inspection preserves captured measurement and relation stages without model wrappers', async () => {
+  const inspect =
+    await compile(`import {align, distance, frame, offset} from '@code3d/core';
+    const base = frame('Base').relate(() => offset(2, 3, 4));
+    export default frame('Moving').relate(self => {
+      const measured = distance(base.origin, self.origin);
+      return [align(self, base), offset(8, 0, 0)];
+    });`);
+  const measured = defined(await inspect('distance(base.origin, self.origin)'));
+  const dimension = measured.target.find(item => item.kind === 'dimension');
+  assert.ok(dimension?.kind === 'dimension' && 'start' in dimension);
+  assert.equal(dimension.model.kind, 'reference');
+  assert.ok(Math.abs(dimension.value - Math.sqrt(29)) < 1e-6);
+  assert.deepEqual(dimension.start, [2, 3, 4]);
+  assert.deepEqual(dimension.end, [0, 0, 0]);
+  for (const scene of [
+    measured,
+    defined(await inspect('align(self, base)', 1)),
+    defined(await inspect('offset(8, 0, 0)', 8)),
+  ]) {
+    assert.ok(scene.objects.size > 0);
+    for (const object of scene.objects.values()) {
+      assert.equal(object.kind, 'reference');
+      assert.equal(object.mesh, undefined);
+      assert.deepEqual(object.children, []);
+    }
+  }
+  const stage = defined(await inspect('align(self, base)', 1));
+  const self = stage.target.find(
+    item => item.kind === 'anchor' && item.model.name === 'Moving',
+  );
+  assert.ok(self?.kind === 'anchor');
+  assert.deepEqual(self.elements[0].transform.position, [2, 3, 4]);
+  const final = defined(await inspect('offset(8, 0, 0)', 8));
+  const moved = final.target.find(
+    item => item.kind === 'anchor' && item.model.name === 'Moving',
+  );
+  assert.ok(moved?.kind === 'anchor');
+  assert.deepEqual(moved.elements[0].transform.position, [10, 3, 4]);
+  const again = defined(await inspect('distance(base.origin, self.origin)'));
+  assert.equal(
+    again.target.find(item => item.kind === 'dimension')?.model.nodeId,
+    dimension.model.nodeId,
+  );
+});
+
 test('standalone frames inspect without geometry and group frame options retain the assembly context', async () => {
   const inspect =
     await compile(`import {align, box, frame, group, offset, rotate} from '@code3d/core';
@@ -528,6 +574,7 @@ test('standalone frames inspect without geometry and group frame options retain 
   const base = selected.target[0];
   assert.equal(base.kind, 'anchor');
   if (base.kind !== 'anchor') return;
+  assert.equal(base.model.kind, 'reference');
   assert.equal(base.focused, true);
   assert.equal(base.elements[0].kind, 'frame');
   base.elements[0].transform.position.forEach(value =>

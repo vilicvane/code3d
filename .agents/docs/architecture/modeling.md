@@ -68,7 +68,7 @@ loft 使用第一截面，extrude、revolve 与 sweep 保留输入面。group �
 参考架属于组合的坐标依赖但不进入 children；保存其组合内 occurrence，使 expose、
 嵌套、旋转和原点重表达沿同一份装配位姿工作。App 通过既有锚点检查显示参考架与组成员上下文。
 快照和查询计划递归检查自身及后代的实际几何；仅包含空组的 group 不生成方向 bound。
-成员检查包装空参考架时保留其成员身份和 frame；显式查询空几何的 bounds 仍报错。
+成员检查保留空组的成员身份和 frame；显式查询空几何的 bounds 仍报错。
 零尺寸 point 具有真实几何，不等同于空组。
 完整[原点选择规则](../../../packages/core/docs/local-coordinates.md#default-origin-rules)
 统一记录构造器、继承操作、文字和自定义图元的行为。
@@ -81,9 +81,18 @@ loft 使用第一截面，extrude、revolve 与 sweep 保留输入面。group �
 输入关系。Core 保持模型值语义；App 从现有 `isCollection` 派生空间编辑可用性，
 数组不能追加单模型方法，单个成员仍可正常编辑。
 
-运行时的 `RelationObject` 提供关系存储、位姿求解与阶段预览，`ModelObject`
-负责有限几何和拓扑，`FrameObject` 表达独立坐标架，`SketchFrame` 表达不依赖 B-Rep 的草图参考架。这些对象共用
-关系语义，不用虚构面或组合体把空草图接入模型路径；参考架快照不参与几何导出。
+运行时的 `RelationObject` 提供关系存储、派生、位姿求解、操作追踪与阶段预览；
+`relate` 统一将原值记录为 source，将本次新增约束涉及的对象记录为 reference，
+继承的约束仍参与求解。`ModelObject` 负责有限几何和拓扑；`ReferenceObject` 统一
+非几何参考对象的值继承和快照，`FrameObject` 与 `SketchFrame` 分别提供坐标架与
+草图平面的元素语义。App 通过 `modelOperationObject` 解析调用产生的空间对象，
+模型、独立坐标架和草图共用追踪入口；几何输出与参考值的显示方式仍按自身语义决定。
+
+检查视图按调用保存的位姿构造引用。非几何引用的 owner 是独立 Frame，锚点坐标
+统一表达在已保存的检查坐标系中，不用空 group 适配。草图保留其定义及阶段位姿；
+真实模型通过带已保存成员位姿的组装容器显示，保留拓扑来源与工具绑定。
+检查对象按保存位姿的生命周期复用身份，后续 relate 不得改变先前测量和阶段快照。
+测量注解可以由 Model 或 Frame 提供坐标系，参考架快照不参与几何导出。
 草图局部定义、空间副本及上下文编辑的契约见[草图专题](sketch.md#空间参考架与模型上下文)。
 
 - `on` 将模型或有限拓扑的支撑边界放到目标方向 bound，只求平移；不暗中旋转、
