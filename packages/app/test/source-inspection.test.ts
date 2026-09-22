@@ -990,6 +990,115 @@ test('expose inspects recorded references in the receiving assembly without repe
   assert.equal(result.ambient.length, 0);
 });
 
+test('nested constructors preview their own result before a cut consumes a related copy', async () => {
+  const inspect = await compile(`import {box, cut, on} from '@code3d/core';
+    let body = box(20,8,16).fillet(3.96, [1,3,5,7]);
+    body = body.cut([
+      box(16,6,16).relate(self => on(self.up, body.up)),
+    ]);
+    cut(box(20,8,16), [box(12,4,12).originOffset(-2,0,0)]);`);
+  for (const [token, size] of [
+    ['box(16,6,16)', 16],
+    ['box(12,4,12)', 12],
+  ] as const) {
+    const scene = defined(await inspect(token, 'box'.length));
+    assert.equal(scene.kind, 'preview');
+    assert.equal(scene.target.length, 1);
+    assert.equal(width(scene.target[0]), size);
+    assert.deepEqual(scene.ambient, []);
+  }
+  const dimension = defined(await inspect('box(16,6,16)', 'box('.length));
+  assert.equal(dimension.kind, 'inspect');
+  assert.ok(dimension.target.some(item => item.kind === 'dimension'));
+  const tools = defined(await inspect('[\n      box', 1));
+  assert.equal(tools.kind, 'inspect');
+  assert.equal(tools.target.length, 2);
+  assert.deepEqual(
+    tools.target.map(item => item.focused),
+    [true, false],
+  );
+  assert.equal(tools.ambient.length, 1);
+});
+
+test('cut tool inspection declines upstream values outside its recorded operands', async () => {
+  const inspect = await compile(`import {box, cut, on} from '@code3d/core';
+    const stock = box(20,8,16);
+    const tool = box(16,6,16);
+    stock.cut([tool.relate(self => on(self.up, stock.up))]);
+    cut(stock, [tool.originOffset(-1,0,0)]);`);
+  for (const token of ['tool.relate', 'tool.originOffset']) {
+    const scene = defined(await inspect(token));
+    assert.equal(scene.kind, 'preview');
+    assert.equal(scene.target.length, 1);
+    assert.equal(width(scene.target[0]), 16);
+    assert.deepEqual(scene.ambient, []);
+  }
+});
+
+test('cut tool inspection declines non-solid values in tool builder receivers', async () => {
+  const inspect = await compile(`import {box, rectangle} from '@code3d/core';
+    const stock = box(20,20,20);
+    const builder = {
+      profile: rectangle(12,12),
+      tool() { return this.profile.extrude(30); },
+    };
+    stock.cut([builder.tool()]);`);
+  const scene = defined(await inspect('builder.tool'));
+  assert.equal(scene.kind, 'preview');
+  assert.equal(scene.target.length, 1);
+  assert.equal(width(scene.target[0]), 12);
+  assert.deepEqual(scene.ambient, []);
+});
+
+test('enclosing inspectors retain the default preview owner across calls, receivers and closures', async () => {
+  const inspect = await compile(`import {box} from '@code3d/core';
+    /**
+     * @code3d.inspect operand outer.inspectInput
+     * @code3d.inspect outer.inspectCall
+     */
+    function outer(operand: unknown, mode: string) { return box(30,2,3); }
+    namespace outer {
+      export function inspectInput([operand, mode]) {
+        return mode === 'parameter' ? {target: [box(40,2,3)]} : undefined;
+      }
+      export function inspectCall([operand, mode]) {
+        return mode === 'call' ? {target: [box(50,2,3)]} : undefined;
+      }
+    }
+    /**
+     * @code3d.inspect.closure build wrap.inspectBody
+     * @code3d.inspect wrap.inspectCall
+     */
+    function wrap(build: () => void) { build(); return box(13,2,3); }
+    namespace wrap {
+      export function inspectBody() { return undefined; }
+      export function inspectCall() { throw new Error('Callback body re-entered the call inspector'); }
+    }
+    const input = box(7,2,3);
+    outer(box(9,2,3).originOffset(-1,0,0), 'decline');
+    outer(input.originOffset(-2,0,0), 'decline');
+    outer(input, 'decline');
+    outer(input.originOffset(-3,0,0), 'parameter');
+    outer(input.originOffset(-4,0,0), 'call');
+    outer(wrap(() => { input; }), 'decline');
+    outer(wrap(() => { input.originOffset(-5,0,0); }), 'decline');`);
+  for (const [token, delta, size, kind] of [
+    ['box(9,2,3)', 3, 9, 'preview'],
+    ['input.originOffset(-2', 0, 7, 'preview'],
+    ["input, 'decline'", 0, 30, 'preview'],
+    ['input.originOffset(-3', 0, 40, 'inspect'],
+    ['input.originOffset(-4', 0, 50, 'inspect'],
+    ['input;', 0, 7, 'preview'],
+    ['input.originOffset(-5', 6, 7, 'preview'],
+  ] as const) {
+    const scene = defined(await inspect(token, delta));
+    assert.equal(scene.kind, kind, token);
+    assert.equal(scene.target.length, 1, token);
+    assert.equal(width(scene.target[0]), size, token);
+    assert.deepEqual(scene.ambient, [], token);
+  }
+});
+
 test('boolean inspectors preserve original placement and generate only the focused cut volume', async () => {
   const inspect =
     await compile(`import {align, box, cut, union, intersect, group, offset} from '@code3d/core';

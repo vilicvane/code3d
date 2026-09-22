@@ -2,15 +2,16 @@
 title: Custom inspectors and call data
 description: Describe source-selection previews, capture call-time facts and implement typed parameter, getter and closure inspectors.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.15
   sources:
     - path: packages/app/src/model/inspection.ts
-      sha256: 22de3db44e18aef80c032f550835e1cf74ad9bcd899abeb246eda1ad53778ebf
-      commit: 257dac61457d3ec723fd8054ebcb2e12daceba85
+      sha256: e3180cc24f719b9ffe7493d9b897c48c84a46df924c3e807b9fd83ab8b5f53ca
     - path: packages/core/src/library/inspect.ts
       sha256: 530883228cd23a27f1e13c5153669c24ce87d523f4ff1cc52202dab698063e45
+      commit: e8843e109cb86d5dcfee6e28859625a22921372d
     - path: packages/core/src/library/group.ts
       sha256: c9592b8f7ed218c81a147f1a5102592cd8b21cde0953bf0178ea0b848e0952a6
+      commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
 sidebar:
   hidden: true
 head:
@@ -89,8 +90,12 @@ context behind the reference in both kinds of preview.
 Use `@code3d.inspect parameter callback` when a parameter needs additional context;
 use `@code3d.inspect callback` for an exceptional call-result view. A parameter
 first tries its parameter inspector, then the call inspector, then the ordinary
-call result. A declared closure body has its own scope: declining it continues
-outward without re-entering that same call's parameter or call inspector. The callback
+call result. A method receiver keeps its selected value as the default preview.
+An enclosing inspector may describe an inner value; if it declines, it cannot
+replace that value's default preview with the enclosing call's result.
+A declared closure body has its own scope: declining it preserves the selected
+value and continues outward without re-entering that same call's parameter or
+call inspector. The callback
 receives the original argument tuple and `InspectContext`; method receivers are
 in `context.receiver`. Its `target` and `ambient` arrays own the complete scene.
 Returning `undefined` declines the scope; returning `{}` intentionally displays
@@ -117,6 +122,10 @@ For cut tools and intersect operands, selected inputs are targets and other inpu
 are ambient. The generated cut volume (orange) or intersection (cyan) is a separate
 target, including when inspecting a single input. A failed intersection still
 shows the selected inputs and ambient operands without inventing a result.
+The cut tool inspector accepts a selection only when every preview value is an
+actual tool passed to that invocation. Upstream constructors and receivers, such
+as `box(...)` or `tool` in `tool.relate(...)`, keep their ordinary preview instead
+of borrowing the consumed tool's solved placement.
 These region inspectors use ordinary unlit materials with depth testing disabled,
 so their colors remain visible through the translucent inputs.
 

@@ -2,13 +2,13 @@
 title: cut
 description: Subtract one or more solid tools from a stock model.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.15
   sources:
     - path: packages/core/src/library/cut.ts
-      sha256: f8844c1c290abf1ac97673f782e9c25a39403332382f107f2a718aaf578000b7
-      commit: bb707e248ef98fe97db48020a396fd20bf3265ec
+      sha256: 05f2020592e99732b41b638e1ad8caaa10a25437c6a1a9be93021a253f58e650
     - path: packages/core/src/library/runtime.ts
       sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
     - path: packages/core/src/library/topology.ts
       sha256: f9f0d048fe30cc80046a25123aa8101ca51e85cdb5b2e66260c6a68f43f84715
       commit: 67228dd8559d584852df7bfbd47ed89f1d8003e9
@@ -80,6 +80,14 @@ in a later operation. See [topology IDs](../topology.md#ids-belong-to-a-model).
 `blank.cut([drill])` has the same modeling behavior as the free function. Neither
 form changes the blank or drill. Keep tool definitions available if you need to
 change the cut later; they are not exposed as named members on the result.
+
+Selecting the tools array previews the consumed tools and their cut volume with
+the stock in the background. In `blank.cut([box(...).relate(...)])`, selecting
+`box` previews that constructor's result; it does not use the later related
+tool's placement. Selecting the `box` dimensions still shows their measurements.
+Similarly, selecting `tool` in `blank.cut([tool.relate(...)])` previews the
+original tool in its local coordinates.
+See [custom inspectors](inspectors.md) for inspection scope and fallback rules.
 
 Boolean construction can fail on coincident or degenerate geometry. Avoid
 removing the entire stock when subsequent operations require a nonempty solid.

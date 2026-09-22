@@ -42,6 +42,12 @@ export namespace cut {
     >,
   ): InspectResult | undefined {
     if (!context.data) return undefined;
+    // Nested expressions can focus an upstream value before relate or another
+    // operation produces the actual tool. It does not share this cut's frame.
+    if (
+      context.focused.values.some(value => !tools.some(tool => tool === value))
+    )
+      return undefined;
     return ModelObject.inspectCutTools(
       stock,
       tools,

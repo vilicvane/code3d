@@ -348,6 +348,7 @@ export class InspectionSession {
     this.inspecting = true;
     try {
       let closure = focus.closure;
+      let fallback: InspectedValues | undefined;
       for (let call = focus.call; call; call = call.parent) {
         let insideClosure = false;
         while (closure && closure.call === call) {
@@ -358,7 +359,10 @@ export class InspectionSession {
         }
         // Declining a callback body is not selecting the callback argument.
         // Continue to outer scopes without re-entering its owning call inspector.
-        if (insideClosure) continue;
+        if (insideClosure) {
+          fallback ??= preview(focus.value);
+          continue;
+        }
         const site = this.sites.get(call.siteId);
         if (
           !site ||
@@ -415,21 +419,20 @@ export class InspectionSession {
             );
             if (result !== undefined) return selected(result);
           }
-          // An argument with no custom scene previews the owning call's result.
-          // Non-renderable results (e.g. relation descriptions) still reach their
-          // enclosing closure inspector.
-          if (inArguments) {
-            const result = preview(call.return);
-            if (result) return result;
-          }
         }
+        // A receiver remains its own value; call names and arguments default to
+        // the owning call's result. Outer inspectors may describe that preview,
+        // but their default results cannot replace an already selected value.
+        fallback ??= preview(inReceiver ? focus.value : call.return);
+        // Non-renderable results still reach an enclosing closure inspector.
+        if (inArguments && fallback) return fallback;
       }
       while (closure) {
         const result = await this.inspectClosure(closure, focus);
         if (result !== undefined) return selected(result);
         closure = closure.parent;
       }
-      return preview(focus.value);
+      return fallback ?? preview(focus.value);
     } finally {
       this.inspecting = false;
     }
