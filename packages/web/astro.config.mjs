@@ -222,6 +222,13 @@ export default defineConfig({
                             {slug: 'docs/packages/core/api/google-font'},
                           ],
                         },
+                        {
+                          label: 'Materials and appearance',
+                          items: [
+                            {slug: 'docs/packages/core/api/material'},
+                            {slug: 'docs/packages/core/api/three'},
+                          ],
+                        },
                       ],
                     },
                   ]

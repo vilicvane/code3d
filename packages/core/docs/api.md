@@ -26,7 +26,7 @@ model methods and reference properties are grouped by what they do.
 | Groups and placement             | [group and expose](#composition-and-boolean-operations); [relate, on and align](#anchors-and-relations); [offset, rotate and pivot/axis selectors](#independent-placement-transformations); [coupleRotation](#rotation-coupling)               |
 | Topology and references          | [vertex / vertices](api/vertex.md), [edge / edges](api/edge.md), [surface / surfaces](api/surface.md); [reference elements](api/reference-elements.md), [directional bounds](api/directional-bounds.md), [flip / reverse](api/flip-reverse.md) |
 | Geometry measurements            | [distance](api/distance.md), [length](api/length.md), [area](api/area.md), [volume](api/volume.md), [bounds](api/bounds.md), [position](api/position.md)                                                                                       |
-| Materials and appearance         | [material, CSS colors and native Three.js materials](#materials)                                                                                                                                                                               |
+| Materials and appearance         | [material and colors](api/material.md), [Three.js integration](api/three.md)                                                                                                                                                                   |
 | Parameters, time and caching     | [input](runtime.md#numeric-inputs), [timeOffset](runtime.md#time-offset) and [cache](#cached-computations)                                                                                                                                     |
 
 For reusable library development, see [custom primitives](custom-primitives.mdx),
@@ -275,54 +275,11 @@ shows which operations are supported by the value you hold.
 
 ## Materials
 
-Use [`@code3d/materials`](../../materials/docs/presets.md) for common plastic, metal, glass,
-ceramic and paint presets, such as `.material(aluminum({finish: 'polished'}))`.
-Each preset returns a native Three.js material and follows the same rules below.
-
-```ts
-import {box} from '@code3d/core';
-import {MeshPhysicalMaterial} from '@code3d/core/three';
-
-const part = box(20, 10, 12).material(
-  new MeshPhysicalMaterial({
-    color: '#eb633e',
-    roughness: 0.25,
-    clearcoat: 1,
-  }),
-);
-```
-
-`@code3d/core/three` directly re-exports Core's native Three.js classes and types.
-Use this entry in the model and its reusable packages to share the same instance.
-Named imports and `import * as THREE from "@code3d/core/three"` both work in the
-App and Node. Each `.material(value)` call captures a
-complete material and its loaded texture pixels. It returns a new model;
-subsequent changes to the original Three.js instance do not change that model.
-Calling it again replaces everything, without merging fields. An outer group
-replaces the material throughout its subtree; original parts used elsewhere
-remain unchanged.
-
-Use mesh materials for solids and surfaces, line materials for curves, and
-`PointsMaterial` for vertices. Modeling emphasis uses preview copies; Render
-mode and PNG images use the authored material. Loaded image, canvas, ImageBitmap,
-data and cube textures are supported. Load images with `ImageBitmapLoader` in
-the worker before assignment. Native face UVs are normalized to 0–1 per face;
-texture `repeat`, `offset` and `rotation` control mapping. See
-`/examples/materials.ts` in the App.
-
-The transferable value follows Three.js's `toJSON()` / `MaterialLoader`
-representation. Custom classes, callbacks such as `onBeforeCompile`, live
-video/render-target textures, compressed/layered textures and manual mipmaps
-are rejected. Material-local clipping, shadow-side and precision overrides are
-not serialized by Three.js and are also rejected. Shader uniforms must be supported by Three.js JSON.
-
-A CSS string replaces the whole material with the geometry's default material.
-It accepts names, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, `rgb(...)` and
-`rgba(...)`. `.material('#f008')` equals `.material('#ff000088')`;
-`.material('rgba(255, 0, 0, 0.5)')` and `.material('rgb(100% 0% 0% / 50%)')`
-produce half-opaque red. Native materials use Three.js's `opacity` and
-`transparent` settings. STEP and 3MF preserve base color and opacity, while
-shaders and textures are rendered in PNG; STL contains geometry only.
+[material](api/material.md) captures complete appearance on a new model value,
+including colors, transparency and group-wide replacement. [Three.js integration](api/three.md)
+covers `@code3d/core/three`, loaded textures, UV mapping and the supported
+serialization boundary. Use [@code3d/materials presets](../../materials/docs/presets.md)
+for common surfaces.
 
 ## Scaling
 

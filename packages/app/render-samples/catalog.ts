@@ -4,6 +4,17 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'material',
+    title: 'Colors, materials and textures',
+    description:
+      'Compare a color, native physical material and loaded texture.',
+    category: 'Materials',
+    file: 'materials.ts',
+    focus: {context: 'export const plain =', token: 'plain'},
+    mode: 'render',
+    tags: ['material', 'color', 'texture', 'three'],
+  },
+  {
     id: 'sketch-api',
     view: {direction: [1, 2, 1], up: [0, 1, 0]},
     title: 'Sketch definitions and regions',
@@ -492,6 +503,29 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  material: [
+    {
+      id: 'color',
+      image: 'material',
+      label: 'Color',
+      description: 'A plain color selects the default material.',
+      focus: {context: 'export const plain =', token: 'plain'},
+    },
+    {
+      id: 'native',
+      image: 'material-native',
+      label: 'Native material',
+      description: 'A physical material controls lacquered surface appearance.',
+      focus: {context: 'export const lacquered =', token: 'lacquered'},
+    },
+    {
+      id: 'texture',
+      image: 'material-texture',
+      label: 'Texture',
+      description: 'A loaded checker texture repeats over native face UVs.',
+      focus: {context: 'export const textured =', token: 'textured'},
+    },
+  ],
   'sketch-api': [
     {
       id: 'sketch',
