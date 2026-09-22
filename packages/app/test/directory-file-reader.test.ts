@@ -215,6 +215,95 @@ test('an unseeded local directory gains only metadata without enumerating user f
   );
 });
 
+test('an interrupted seed resumes after reopening even when partial files already exist', async () => {
+  const entries: DirectoryEntries = {};
+  const handle = directory(entries);
+  const first = await openDirectoryProjectFileSystem(handle);
+  await assert.rejects(
+    first.initialize(async () => {
+      await first.writeFile('/examples/demo.ts', 'partial example');
+      throw new Error('Interrupted before the starter model was written');
+    }),
+    /Interrupted before the starter model was written/,
+  );
+  const pendingManifest = {
+    version: 1,
+    managedDirectories: {},
+    initializingSeed: true,
+  };
+  assert.deepEqual(
+    JSON.parse(
+      new TextDecoder().decode(await first.readFile('/.code3d/project.json')),
+    ),
+    pendingManifest,
+  );
+  assert.equal(
+    new TextDecoder().decode(await first.readFile('/examples/demo.ts')),
+    'partial example',
+  );
+
+  const resumed = await openDirectoryProjectFileSystem(handle);
+  await resumed.initialize();
+  assert.deepEqual(
+    JSON.parse(
+      new TextDecoder().decode(await resumed.readFile('/.code3d/project.json')),
+    ),
+    pendingManifest,
+  );
+  await resumed.initialize(async () => {
+    await resumed.writeFile('/examples/demo.ts', 'complete example');
+    await resumed.writeFile('/model.ts', 'starter model');
+  });
+  assert.equal(
+    new TextDecoder().decode(await resumed.readFile('/examples/demo.ts')),
+    'complete example',
+  );
+  assert.equal(
+    new TextDecoder().decode(await resumed.readFile('/model.ts')),
+    'starter model',
+  );
+  assert.deepEqual(
+    JSON.parse(
+      new TextDecoder().decode(await resumed.readFile('/.code3d/project.json')),
+    ),
+    {version: 1, managedDirectories: {}},
+  );
+  const completed = await openDirectoryProjectFileSystem(handle);
+  await completed.initialize(async () => {
+    throw new Error('A completed seed must not run again');
+  });
+});
+
+test('initialization preserves managed directory revisions written by its seed', async () => {
+  const fs = await openDirectoryProjectFileSystem(directory({}));
+  const template = {
+    directory: '/examples',
+    revision: 'seeded',
+    files: [{path: '/examples/demo.ts', source: 'example'}],
+  };
+  await fs.initialize(async () => {
+    await fs.resetDirectory(template);
+    await fs.writeFile('/model.ts', 'starter model');
+  });
+  assert.deepEqual(
+    JSON.parse(
+      new TextDecoder().decode(await fs.readFile('/.code3d/project.json')),
+    ),
+    {version: 1, managedDirectories: {'/examples': 'seeded'}},
+  );
+  await fs.syncDirectory(template, async () => {
+    throw new Error('Examples created by the seed are already managed');
+  });
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/examples/demo.ts')),
+    'example',
+  );
+  assert.equal(
+    new TextDecoder().decode(await fs.readFile('/model.ts')),
+    'starter model',
+  );
+});
+
 test('initialization writes the current manifest without discarding directory decisions based on a version marker', async () => {
   const managedDirectories = {'/examples': null, '/samples': 'current'};
   const entries: DirectoryEntries = {

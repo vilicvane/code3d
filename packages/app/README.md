@@ -39,8 +39,25 @@ worktrees reserve another port through the project's
 [worktree workflow](../../.agents/skills/worktree-development/SKILL.md) and pass it
 explicitly to Vite. Each checkout has its own dependencies and cache.
 
-The App can use Browser storage or a user-authorized local directory. Its file
-service owns full-source writes, version checks, and persistence for both user
+The App can use named browser projects or a user-authorized local directory.
+The explorer's location menu creates, switches and deletes browser projects;
+each keeps its own files, installed packages, build cache and agent identity.
+The **New browser project** form combines the project name with a **Create examples**
+checkbox, selected by default. Creating with it selected adds bundled examples and
+the default model; clearing it starts an empty project. Empty local folders ask
+whether to add examples when first opened. You can add them later with **Create examples**
+in the explorer's context menu. The first default browser project includes both automatically.
+The location menu lists projects under **Browser projects** and highlights the
+current project. Click a project name to switch to it, or open its arrow for
+**Open**, **Copy to local folder and open**, **Reset** and **Delete**.
+**Open** saves and switches just like clicking the project name.
+Every project has these actions, including projects that are not open. Resetting
+or deleting another project keeps the current page and unsaved edits in place.
+Copying saves the current project and opens the local folder only after the copy
+succeeds. Background operations wait for other tabs using the target project to close.
+Folder commands and **New browser project** appear below the project list,
+separated by a divider, with **Open folder** or **Change folder** before **New browser project**.
+The App's file service owns full-source writes, version checks, and persistence for both user
 and agent edits. Model preparation resolves project dependencies before compiling
 source. The [file guide](../web/src/content/docs/docs/getting-started/files.md)
 explains the storage and package rules.
@@ -101,6 +118,7 @@ contracts before following the implementation links below.
 | Application composition                               | [main.ts](src/main.ts)                                                  |
 | Editor and source selection                           | [editor.ts](src/editor.ts), [source edits](src/source-edit-diff.ts)     |
 | Project files and package installation                | [Project services](src/project/)                                        |
+| Browser project names and lifecycle                   | [Browser projects](src/project/browser-projects.ts)                     |
 | Compilation, execution and observations               | [Model runtime](src/model/)                                             |
 | 3D rendering and viewport interaction                 | [viewport.ts](src/viewport.ts), [rendering](src/rendering/)             |
 | Sketch and source editing tools                       | [Tools](src/tools/)                                                     |
