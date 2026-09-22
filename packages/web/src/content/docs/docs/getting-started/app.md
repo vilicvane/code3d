@@ -275,11 +275,21 @@ perspective or orthographic projection;
 changing which member is emphasized keeps the collection's view. New models
 are fitted to the viewport, and changes in zoom animate smoothly.
 
+When an edit makes the model extend beyond the viewport, the camera moves back
+to show it with a margin, keeping your viewing direction and projection. Smaller
+results do not automatically zoom in. Camera adjustment waits until a navigation
+or modeling drag ends; moving between parameter highlights does not trigger it.
+
+Zooming or panning until part of the model is outside the viewport keeps that
+local view during later edits. Zoom or pan back until the whole model is visible,
+or reset the view, to resume automatic framing. Each model or collection remembers
+this preference along with its camera view.
+
 A `group()` result and its input collection keep separate views. On the first
 visit to either one, an existing view of the other supplies its starting view,
 with the focus adjusted for the group's origin. Once both have been viewed,
-each remembers your subsequent changes independently. Ordinary dimension and
-whitespace edits retain the view; reloading the page starts a new session.
+each remembers your subsequent changes independently. Edits retain the view unless
+the changed geometry needs automatic framing; reloading the page starts a new session.
 
 ### Inspect inputs and results
 

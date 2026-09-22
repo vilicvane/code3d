@@ -56,6 +56,8 @@ type DimensionOptions = Readonly<{
   owner: Model | Frame;
   value: number;
   axisLabel?: string;
+  /** Highlight an existing edge with a solid green line; measurements use dashes. */
+  style?: 'measurement' | 'edge';
 }>;
 
 /** A passive measurement. `at` labels a point without a dimension line. */

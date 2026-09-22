@@ -111,6 +111,11 @@ asks for a radius. Built-in
 [dimension-based primitives](../../../../../../core/docs/api.md#runtime-defaults-while-editing)
 use this behavior too.
 
+For `box`, moving the caret to a dimension highlights a corresponding edge in
+bright green and shows its length and axis. Empty positions work too:
+`box()` highlights X, `box(12, )` highlights Y, and `box(12, 8, )` highlights Z,
+using the actual default length without changing your code.
+
 An explicit argument keeps its usual display and editing behavior, including
 `undefined` or an expression that produces no numeric result; it never falls
 back to the annotation default. A parameter without `default` remains blank

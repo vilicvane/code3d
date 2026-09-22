@@ -1,4 +1,4 @@
-import type {DimensionSegment} from '@code3d/core';
+import type {Dimension, DimensionSegment} from '@code3d/core';
 import type {
   ModelModule,
   SourceTarget,
@@ -118,6 +118,7 @@ export type ViewportMeasurementDecoration = ViewportDecorationBase &
     kind: 'measurement';
     value: number;
     axisLabel?: string;
+    style?: Dimension['style'];
     appearance: ViewportDecorationAppearance;
   }> &
   (

@@ -1,4 +1,5 @@
 import {Matrix4, Quaternion, Vector3, type Group} from 'three';
+import {action, computed, makeObservable, observableRef} from 'mobx';
 import {
   cameraAspect,
   cameraProjection,
@@ -63,6 +64,7 @@ export class ViewportNavigation extends ArcballControls {
   private touchRotationFrame?: number;
   private viewCamera: ViewCamera;
   private projectionMix = 1;
+  private gestureStart?: CameraPose;
   private readonly defaultDirection: Vector3;
   private readonly defaultUp: Vector3;
   private transition?: Readonly<{
@@ -76,8 +78,32 @@ export class ViewportNavigation extends ArcballControls {
     camera: ViewCamera,
     element: HTMLElement,
     private readonly onCameraChange: (camera: ViewCamera) => void,
+    private readonly onFramingGestureEnd: () => void = () => {},
   ) {
     super(camera, element);
+    makeObservable<
+      this,
+      | 'gestureStart'
+      | 'beginNavigation'
+      | 'endNavigation'
+      | 'transition'
+      | 'resumePerspective'
+    >(this, {
+      gestureStart: observableRef,
+      transition: observableRef,
+      navigating: computed,
+      transitioning: computed,
+      beginNavigation: action,
+      endNavigation: action,
+      updateTransition: action,
+      restorePose: action,
+      frame: action,
+      setViewDirection: action,
+      resetView: action,
+      reset: action,
+      syncCamera: action,
+      resumePerspective: action,
+    });
     this.viewCamera = camera;
     this.addEventListener('change', () => this.refreshViewCamera());
     this.cursorZoom = true;
@@ -90,9 +116,30 @@ export class ViewportNavigation extends ArcballControls {
     this.defaultDirection = camera.position.clone().sub(this.focus).normalize();
     this.defaultUp = camera.up.clone();
     this.syncCamera();
-    this.addEventListener('start', () => {
-      if (this.transition?.kind === 'view') this.syncCamera();
-    });
+    this.addEventListener('start', () => this.beginNavigation());
+    this.addEventListener('end', () => this.endNavigation());
+  }
+
+  get navigating(): boolean {
+    return this.gestureStart !== undefined;
+  }
+
+  private beginNavigation(): void {
+    if (this.transition?.kind === 'view') this.syncCamera();
+    this.gestureStart = this.capturePose();
+  }
+
+  private endNavigation(): void {
+    const start = this.gestureStart;
+    this.gestureStart = undefined;
+    if (!start) return;
+    const end = this.capturePose();
+    // Orbiting changes orientation; only deliberate pan/zoom changes framing intent.
+    if (
+      Math.abs(Math.log(end.viewHeight / start.viewHeight)) > 1e-8 ||
+      end.focus.distanceTo(start.focus) > start.viewHeight * 1e-8
+    )
+      this.onFramingGestureEnd();
   }
 
   get focus(): Vector3 {
@@ -171,23 +218,25 @@ export class ViewportNavigation extends ArcballControls {
     });
   }
 
-  frame(framing: CameraFraming, allowZoomIn: boolean): void {
+  frame(framing: CameraFraming, allowZoomIn: boolean, animate = false): void {
     const pose = this.capturePose();
     const viewHeight = allowZoomIn
       ? framing.viewHeight
       : Math.max(framing.viewHeight, pose.viewHeight);
-    this.applyPose({
-      ...framing,
-      projection: pose.projection,
-      projectionMix: pose.projectionMix,
-      viewHeight,
-      distance:
-        pose.projection === 'perspective'
-          ? (framing.distance * viewHeight) / framing.viewHeight
-          : Math.max(framing.distance, pose.distance),
-      orientation: this.object.quaternion,
-    });
-    this.syncCamera();
+    this.restorePose(
+      {
+        ...framing,
+        projection: pose.projection,
+        projectionMix: pose.projectionMix,
+        viewHeight,
+        distance:
+          pose.projection === 'perspective'
+            ? (framing.distance * viewHeight) / framing.viewHeight
+            : Math.max(framing.distance, pose.distance),
+        orientation: this.object.quaternion.clone(),
+      },
+      animate,
+    );
   }
 
   updateTransition(time: number): void {

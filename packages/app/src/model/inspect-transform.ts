@@ -164,6 +164,10 @@ export class InspectTransform {
       siteId,
       sourceRef: location(selector, file),
       callRef: location(original, file),
+      argumentInsertionRef:
+        !original.arguments.length || original.arguments.hasTrailingComma
+          ? sourceRef(file.fileName, original.arguments.end, original.end - 1)
+          : undefined,
       receiverRef:
         ts.isPropertyAccessExpression(access) ||
         ts.isElementAccessExpression(access)
@@ -176,7 +180,9 @@ export class InspectTransform {
           argument.pos,
           index + 1 < original.arguments.length
             ? original.arguments[index + 1].pos - 1
-            : original.end - 1,
+            : original.arguments.hasTrailingComma
+              ? original.arguments.end - 1
+              : original.end - 1,
         ),
       })),
       signature,

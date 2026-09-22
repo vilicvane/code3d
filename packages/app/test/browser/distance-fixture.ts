@@ -299,6 +299,7 @@ export async function zoomAndExportDistance() {
   const camera = viewport['camera'];
   camera.zoom *= 1.8;
   camera.updateProjectionMatrix();
+  viewport['requestRender']();
   await new Promise<void>(resolve =>
     requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
   );
@@ -319,6 +320,7 @@ export async function zoomAndExportDistance() {
   label.onBeforeRender = () => {};
   camera.zoom /= 1.8;
   camera.updateProjectionMatrix();
+  viewport['requestRender']();
   await new Promise<void>(resolve =>
     requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
   );

@@ -48,23 +48,27 @@ export function box(x = 10, y = 10, z = 10): SolidModel {
 /** @internal */
 export namespace box {
   export function inspectDimension(
-    args: [number, number, number],
+    _args: [number?, number?, number?],
     context: InspectContext<SolidModel>,
   ): InspectResult | undefined {
     if (!context.return) return undefined;
     const parameter = context.focused.parameter!;
-    const value = args[['x', 'y', 'z'].indexOf(parameter)];
+    const value =
+      context.return.bounds().size[['x', 'y', 'z'].indexOf(parameter)];
     return {
       target: [
         context.return,
-        ModelObject.inspectDimension(
-          context.return,
-          parameter,
-          value,
-          context.return,
-          identityRigidTransform,
-          parameter.toUpperCase(),
-        ),
+        {
+          ...ModelObject.inspectDimension(
+            context.return,
+            parameter,
+            value,
+            context.return,
+            identityRigidTransform,
+            parameter.toUpperCase(),
+          ),
+          style: 'edge',
+        },
       ],
     };
   }

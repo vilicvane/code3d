@@ -2,13 +2,13 @@
 title: box
 description: Create a rectangular solid in TypeScript with Code3D. Learn box dimensions, local coordinates, reference elements, validation and editing defaults.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.15
   sources:
     - path: packages/core/src/library/box.ts
-      sha256: 7e05f0294168b3eb547552c50af08e990348e881a0a3e3b4c1b3a357ab3c5150
-      commit: 1baef99a1318fc694825ec0a48d4d39635a3a130
+      sha256: 419639cc4e3bd3887c3a836f5f87b8f6e5b69306cbdf968942282a0f6580dcbf
     - path: packages/core/src/library/validation.ts
       sha256: dae9300aea522c8aee83ef09e6716f31cd17f0cf6fb6df537218ecb72c63419d
+      commit: 69d231fb775befdb3cd098291b4097ccd52d8966
 sidebar:
   hidden: true
 head:
@@ -33,8 +33,9 @@ export const cuboid = box(12, 10, 8);
 ![A rectangular block measuring 12 along X, 10 along Y and 8 along Z in the Code3D modeling view.](../../../web/src/assets/models/primitives.png)
 
 The block is centered at the local origin. In the App, select a dimension
-argument and press Tab to edit that size. Select `cuboid` to inspect the whole
-solid.
+argument to highlight a corresponding edge in bright green, with its length
+and axis label. Press Tab to edit that size. Select `cuboid` to inspect the
+whole solid.
 
 Complete example: [basic shapes](../../../app/examples/primitives/primitives.ts).
 
@@ -125,6 +126,10 @@ the runtime default `10`: `box(12)` previews a 12 × 10 × 10 block. These
 defaults also apply in JavaScript. They do not make the TypeScript parameters
 optional or replace invalid values. Write all three dimensions in finished
 TypeScript models; see [editing incomplete calls](../values.md#editing-incomplete-calls).
+
+The caret inside `box()` highlights X; after the comma in `box(12, )` it
+highlights Y, and in `box(12, 8, )` it highlights Z. Empty slots and explicit
+`undefined` show the actual default length, without inserting source text.
 
 ## Related APIs
 
