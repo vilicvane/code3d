@@ -23,7 +23,7 @@ import {
   kernelOperationCacheStats,
 } from '../bld/library/kernel-cache.js';
 import {castOwnedShape} from '../bld/library/kernel-shapes.js';
-import {wrapFaces} from '../bld/library/wrap.js';
+import {wrapFaces} from '../bld/library/wrap-geometry.js';
 import {
   createModelSnapshotter,
   disposeModelObjects,

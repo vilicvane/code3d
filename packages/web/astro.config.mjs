@@ -130,6 +130,17 @@ export default defineConfig({
                             {slug: 'docs/packages/core/api/regular-polygon'},
                           ],
                         },
+                        {
+                          label: 'Shape construction',
+                          items: [
+                            {slug: 'docs/packages/core/api/extrude'},
+                            {slug: 'docs/packages/core/api/revolve'},
+                            {slug: 'docs/packages/core/api/sweep'},
+                            {slug: 'docs/packages/core/api/loft'},
+                            {slug: 'docs/packages/core/api/wrap'},
+                            {slug: 'docs/packages/core/api/thicken'},
+                          ],
+                        },
                       ],
                     },
                   ]

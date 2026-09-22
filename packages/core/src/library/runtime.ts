@@ -26,7 +26,7 @@ import {
   type AlignmentGeometry,
 } from './alignment-geometry.js';
 import {cachedArtifact} from './cached.js';
-import {extrudeWithTopology, revolveWithTopology} from './extrude.js';
+import {extrudeWithTopology, revolveWithTopology} from './extrude-geometry.js';
 import type {Font} from './font.js';
 import {
   anchorAnnotation,
@@ -56,7 +56,7 @@ import {
   shapeSubshapes,
   transformShape,
 } from './kernel-shapes.js';
-import {loftWithTopology, sweepWithTopology} from './loft.js';
+import {loftWithTopology, sweepWithTopology} from './loft-geometry.js';
 import {captureModelMaterial, type ModelMaterialSnapshot} from './material.js';
 import {
   axisRotation,
@@ -68,8 +68,8 @@ import {
 } from './relation-solver.js';
 import {estimateRetainedBytes} from './retained-memory.js';
 import {shellWithTopology} from './shell.js';
-import {wrapFaces, type WrapOptions} from './wrap.js';
-import {thickenWithTopology} from './thicken.js';
+import {wrapFaces, type WrapOptions} from './wrap-geometry.js';
+import {thickenWithTopology} from './thicken-geometry.js';
 import {surfaceRotation} from './surface-geometry.js';
 import {sketchRegionFace} from './sketch-face.js';
 import type {SketchRegion} from './sketch-regions.js';
@@ -195,7 +195,7 @@ type DistanceInspectData = Readonly<{
   poses: ReadonlyMap<RelationObject, RigidTransform>;
 }>;
 
-type CompositionInspectData = Readonly<{
+export type CompositionInspectData = Readonly<{
   poses: ReadonlyMap<RelationObject, RigidTransform>;
 }>;
 
@@ -756,7 +756,7 @@ let nextNodeId = 1;
 let nextConstraintId = 1;
 let nextOperationId = 1;
 const combineModels = Symbol('combineModels');
-const loftModels = Symbol('loftModels');
+export const loftModels = Symbol('loftModels');
 
 const modelElementKinds = {
   solid: 'frame',
@@ -5742,31 +5742,6 @@ export type LoftOptions = Readonly<{
   ruled?: boolean;
 }>;
 
-/**
- * @code3d.inspect sections loft.inspectSections
- * @code3d.inspect spine loft.inspectSpine
- */
-export function loft(
-  sections: readonly FaceModel<{}>[],
-  {spine, ruled = false}: LoftOptions = {},
-): SolidModel {
-  if (sections.length < 2) {
-    throw new Error('loft requires at least two planar sections.');
-  }
-  const runtimeSections = sections.map(section =>
-    requireModelKind(
-      section,
-      'face',
-      'Every loft section must be a planar face model.',
-    ),
-  );
-  const runtimeSpine = spine
-    ? requireModelKind(spine, 'edge', 'A loft spine must be a curve model.')
-    : undefined;
-  const [first, ...others] = runtimeSections;
-  return first[loftModels](others, runtimeSpine, ruled);
-}
-
 /** @internal */
 export function primitiveConstructor<Args extends unknown[]>(
   build: (...args: Args) => Shape3D,
@@ -6316,155 +6291,6 @@ export namespace originCenter {
 export function union(operands: readonly SolidModel<{}>[]): SolidModel {
   const {first, others} = booleanOperands('union', operands);
   return first[combineModels]('fuse', others);
-}
-
-/**
- * Extrudes each face independently, preserving array order and placement.
- * @code3d.inspect face extrude.inspectFaces
- * @code3d.inspect distance extrude.inspectFaces
- * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
- */
-export function extrude(face: FaceModel<{}>, distance: number): SolidModel;
-/**
- * Extrudes each face independently.
- * @code3d.inspect faces extrude.inspectFaces
- * @code3d.inspect distance extrude.inspectFaces
- * @code3d.param distance {kind: 'length', default: 10, label: 'Extrusion distance'}
- */
-export function extrude(
-  faces: readonly FaceModel<{}>[],
-  distance: number,
-): readonly SolidModel[];
-export function extrude(
-  face: FaceModel<{}> | readonly FaceModel<{}>[],
-  distance = 10,
-): SolidModel | readonly SolidModel[] {
-  const faces = (Array.isArray(face) ? face : [face]).map(value =>
-    requireModelKind(
-      value,
-      'face',
-      'extrude requires a face model or an array of face models.',
-    ),
-  );
-  const solids: SolidModel[] = [];
-  try {
-    for (const value of faces) solids.push(value.extrude(distance));
-    return Array.isArray(face) ? solids : solids[0];
-  } finally {
-    // Inner method records belong to this same free-function invocation.
-    // Restore its complete input scope even when a batch member throws.
-    ModelObject.recordFaceResults(
-      faces,
-      solids as unknown as readonly ModelObject[],
-    );
-  }
-}
-
-/**
- * @code3d.inspect profile revolve.inspectProfile
- * @code3d.inspect axis revolve.inspectAxis
- * @code3d.inspect config revolve.inspectProfile
- * @code3d.param config.angle {kind: 'angle', default: 360, label: 'Revolution angle'}
- * @code3d.param config.advance {kind: 'length', default: 0, label: 'Axial advance'}
- */
-export function revolve(
-  profile: FaceModel<{}>,
-  axis: LineAnchor,
-  config: RevolveConfig,
-): SolidModel;
-export function revolve(
-  profile: FaceModel<{}>,
-  axis: LineAnchor,
-  config: RevolveConfig = {angle: 360},
-): SolidModel {
-  const runtimeProfile = requireModelKind(
-    profile,
-    'face',
-    'revolve requires a face model.',
-  );
-  let result: SolidModel | undefined;
-  try {
-    result = runtimeProfile.revolve(axis, config);
-    return result;
-  } finally {
-    ModelObject.recordRevolve(
-      runtimeProfile,
-      axis,
-      result as ModelObject | undefined,
-    );
-  }
-}
-
-/**
- * Sweeps one planar profile along an open curve.
- * @code3d.inspect profile sweep.inspectProfile
- * @code3d.inspect spine sweep.inspectSpine
- */
-export function sweep(
-  profile: FaceModel<{}>,
-  spine: EdgeModel<{}>,
-): SolidModel {
-  return requireModelKind(
-    profile,
-    'face',
-    'sweep requires a face model.',
-  ).sweep(spine);
-}
-
-/**
- * Wrap coplanar profiles onto one smooth, finite target surface. The complete
- * source bounding rectangle chooses the closest correspondence. Distinct local
- * results and crossing/overlapping regions are errors. Output may split at seams.
- * @code3d.inspect profiles wrap.inspectProfiles
- * @code3d.inspect target wrap.inspectTarget
- */
-export function wrap(
-  profiles: FaceModel<{}> | readonly FaceModel<{}>[],
-  target: Surface | FaceModel<{}>,
-  options: WrapOptions = {},
-): readonly FaceModel<{}>[] {
-  return ModelObject.wrapProfiles(
-    (Array.isArray(profiles) ? profiles : [profiles]).map(profile =>
-      requireModelKind(profile, 'face', 'wrap requires planar face models.'),
-    ),
-    target,
-    options,
-  );
-}
-
-/**
- * Give each face signed thickness along its surface normals, preserving placement.
- * @code3d.inspect face thicken.inspectFaces
- * @code3d.inspect thickness thicken.inspectFaces
- * @code3d.param thickness {kind: 'length', default: 1, label: 'Thickness'}
- */
-export function thicken(face: FaceModel<{}>, thickness: number): SolidModel;
-/**
- * @code3d.inspect faces thicken.inspectFaces
- * @code3d.inspect thickness thicken.inspectFaces
- * @code3d.param thickness {kind: 'length', default: 1, label: 'Thickness'}
- */
-export function thicken(
-  faces: readonly FaceModel<{}>[],
-  thickness: number,
-): readonly SolidModel[];
-export function thicken(
-  face: FaceModel<{}> | readonly FaceModel<{}>[],
-  thickness = 1,
-): SolidModel | readonly SolidModel[] {
-  const faces = (Array.isArray(face) ? face : [face]).map(value =>
-    requireModelKind(value, 'face', 'thicken requires face models.'),
-  );
-  const results: SolidModel[] = [];
-  try {
-    for (const value of faces) results.push(value.thicken(thickness));
-    return Array.isArray(face) ? results : results[0];
-  } finally {
-    ModelObject.recordFaceResults(
-      faces,
-      results as unknown as readonly ModelObject[],
-    );
-  }
 }
 
 /**
@@ -7865,7 +7691,8 @@ function requireModelObject(value: unknown, message: string): ModelObject {
   return value;
 }
 
-function requireModelKind<Kind extends ModelKind>(
+/** @internal */
+export function requireModelKind<Kind extends ModelKind>(
   value: unknown,
   kind: Kind,
   message: string,
@@ -7875,196 +7702,6 @@ function requireModelKind<Kind extends ModelKind>(
     throw new Error(message);
   }
   return object as ModelObject<{}, Kind>;
-}
-
-/** @internal */
-export namespace extrude {
-  export function inspectFaces(
-    [face, distance]: [FaceModel<{}> | readonly FaceModel<{}>[], number],
-    context: InspectContext<
-      SolidModel | readonly SolidModel[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    const faces = (
-      Array.isArray(face) ? face : [face]
-    ) as readonly FaceModel<{}>[];
-    const results = (
-      Array.isArray(context.return)
-        ? context.return
-        : context.return
-          ? [context.return]
-          : []
-    ) as readonly SolidModel[];
-    return ModelObject.inspectExtrude(
-      faces,
-      results,
-      distance,
-      context.focused.parameter,
-      context.data,
-    );
-  }
-  export function inspectMethod(
-    [distance]: [number],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectExtrude(
-        [context.receiver],
-        context.return ? [context.return] : [],
-        distance,
-        context.focused.parameter,
-        context.data,
-      )
-    );
-  }
-}
-
-/** @internal */
-export namespace revolve {
-  export function inspectProfile(
-    [profile, axis]: [FaceModel<{}>, LineAnchor, RevolveConfig],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectRevolve(
-        profile,
-        axis,
-        context.return,
-        context.data,
-        'profile',
-      )
-    );
-  }
-
-  export function inspectAxis(
-    [profile, axis]: [FaceModel<{}>, LineAnchor, RevolveConfig],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectRevolve(
-        profile,
-        axis,
-        context.return,
-        context.data,
-        'axis',
-      )
-    );
-  }
-
-  export function inspectMethodProfile(
-    [axis]: [LineAnchor, RevolveConfig],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectRevolve(
-        context.receiver,
-        axis,
-        context.return,
-        context.data,
-        'profile',
-      )
-    );
-  }
-
-  export function inspectMethodAxis(
-    [axis]: [LineAnchor, RevolveConfig],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return (
-      context.data &&
-      ModelObject.inspectRevolve(
-        context.receiver,
-        axis,
-        context.return,
-        context.data,
-        'axis',
-      )
-    );
-  }
-}
-
-/** @internal */
-export namespace sweep {
-  export function inspectProfile(
-    [profile, spine]: [FaceModel<{}>, EdgeModel<{}>],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(
-      context.data,
-      [spine, ...(context.return ? [context.return] : [])],
-      [profile],
-    );
-  }
-
-  export function inspectSpine(
-    [profile, spine]: [FaceModel<{}>, EdgeModel<{}>],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(
-      context.data,
-      [profile, ...(context.return ? [context.return] : [])],
-      [spine],
-    );
-  }
-
-  export function inspectMethodProfile(
-    [spine]: [EdgeModel<{}>],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectProfile([context.receiver, spine], context);
-  }
-
-  export function inspectMethodSpine(
-    [spine]: [EdgeModel<{}>],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectSpine([context.receiver, spine], context);
-  }
 }
 
 /** @internal */
@@ -8171,40 +7808,6 @@ export namespace cut {
   }
 }
 
-/** @internal */
-export namespace loft {
-  export function inspectSections(
-    [sections, {spine} = {}]: [readonly FaceModel<{}>[], LoftOptions?],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(
-      context.data,
-      [...(context.return ? [context.return] : []), ...(spine ? [spine] : [])],
-      sections,
-    );
-  }
-  export function inspectSpine(
-    [sections, {spine} = {}]: [readonly FaceModel<{}>[], LoftOptions?],
-    context: InspectContext<
-      SolidModel,
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    return ModelObject.inspectComposition(
-      context.data,
-      [...sections, ...(context.return ? [context.return] : [])],
-      spine ? [spine] : [],
-    );
-  }
-}
-
 function booleanOperands(
   operation: 'union' | 'intersect',
   operands: readonly SolidModel<{}>[],
@@ -8260,83 +7863,4 @@ function hasParameter(
       candidate.expressionRef.end === parameter.expressionRef.end &&
       candidate.target.id === parameter.target.id,
   );
-}
-
-/** @internal */
-export namespace wrap {
-  function inspect(
-    [profiles, target]: [
-      FaceModel<{}> | readonly FaceModel<{}>[],
-      Surface | FaceModel<{}>,
-    ],
-    context: InspectContext<
-      readonly FaceModel<{}>[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-    focus: 'profiles' | 'target',
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    const faces = Array.isArray(profiles) ? profiles : [profiles];
-    return ModelObject.inspectComposition(
-      context.data,
-      focus === 'profiles'
-        ? [target, ...(context.return ?? [])]
-        : [...faces, ...(context.return ?? [])],
-      focus === 'profiles' ? faces : [target],
-    );
-  }
-  export function inspectProfiles(
-    args: [FaceModel<{}> | readonly FaceModel<{}>[], Surface | FaceModel<{}>],
-    context: InspectContext<
-      readonly FaceModel<{}>[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ) {
-    return inspect(args, context, 'profiles');
-  }
-  export function inspectTarget(
-    args: [FaceModel<{}> | readonly FaceModel<{}>[], Surface | FaceModel<{}>],
-    context: InspectContext<
-      readonly FaceModel<{}>[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ) {
-    return inspect(args, context, 'target');
-  }
-}
-/** @internal */
-export namespace thicken {
-  export function inspectFaces(
-    [face]: [FaceModel<{}> | readonly FaceModel<{}>[], number],
-    context: InspectContext<
-      SolidModel | readonly SolidModel[],
-      unknown,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    if (!context.data) return undefined;
-    const results = context.return
-      ? Array.isArray(context.return)
-        ? context.return
-        : [context.return]
-      : [];
-    return ModelObject.inspectComposition(
-      context.data,
-      results,
-      Array.isArray(face) ? face : [face],
-    );
-  }
-  export function inspectMethod(
-    [thickness]: [number],
-    context: InspectContext<
-      SolidModel,
-      FaceModel<{}>,
-      CompositionInspectData | undefined
-    >,
-  ): InspectResult | undefined {
-    return inspectFaces([context.receiver, thickness], context);
-  }
 }

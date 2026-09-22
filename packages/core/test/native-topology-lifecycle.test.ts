@@ -24,7 +24,7 @@ import {
   castOwnedShape3D,
   shapeSubshapes,
 } from '../bld/library/kernel-shapes.js';
-import {extrudeWithTopology} from '../bld/library/extrude.js';
+import {extrudeWithTopology} from '../bld/library/extrude-geometry.js';
 import {
   filletEdges,
   initialShapeTopology,

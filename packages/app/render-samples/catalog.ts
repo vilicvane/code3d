@@ -4,6 +4,19 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'shape-construction',
+    title: 'Build solids and curved faces',
+    description:
+      'Extrude, revolve, sweep, loft, wrap and thicken simple profiles.',
+    category: 'Profiles and solids',
+    file: 'operations/shape-construction.ts',
+    focus: {
+      context: 'export const plate = extrude(rectangle(12, 8), 3)',
+      token: 'extrude',
+    },
+    tags: ['extrude', 'revolve', 'sweep', 'loft', 'wrap', 'thicken'],
+  },
+  {
     id: 'material-presets',
     title: 'Material presets under the same light',
     description:
@@ -404,6 +417,68 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  'shape-construction': [
+    {
+      id: 'extrude',
+      image: 'shape-construction',
+      label: 'extrude',
+      description: 'A 12 by 8 plate extruded 3 units.',
+      focus: {
+        context: 'export const plate = extrude(rectangle(12, 8), 3)',
+        token: 'extrude',
+      },
+    },
+    {
+      id: 'revolve',
+      image: 'shaping-revolve',
+      label: 'revolve',
+      description: 'A circular section revolved into a ring.',
+      focus: {
+        context: 'export const ring = revolve(ringSection, axis, {angle: 360})',
+        token: 'revolve',
+      },
+    },
+    {
+      id: 'sweep',
+      image: 'shaping-sweep',
+      label: 'sweep',
+      description: 'A circular profile swept along a Bézier path.',
+      focus: {
+        context: 'export const bentRod = sweep(profile, spine)',
+        token: 'sweep',
+      },
+    },
+    {
+      id: 'loft',
+      image: 'shaping-loft',
+      label: 'loft',
+      description: 'A loft from a circular face to a rectangular face.',
+      focus: {
+        context: 'export const transition = loft([lower, upper])',
+        token: 'loft',
+      },
+    },
+    {
+      id: 'wrap',
+      image: 'shaping-wrap',
+      label: 'wrap',
+      description: 'A rectangular layout wrapped onto a spherical face.',
+      focus: {
+        context: 'export const curvedFaces = wrap(label, ball.surface(1))',
+        token: 'wrap',
+      },
+    },
+    {
+      id: 'thicken',
+      image: 'shaping-thicken',
+      label: 'thicken',
+      description: 'The wrapped face thickened by 0.8 units.',
+      focus: {
+        context: 'export const curvedPlates = thicken(curvedFaces, 0.8)',
+        token: 'thicken',
+      },
+    },
+  ],
   primitives: [
     {
       id: 'point',
@@ -784,6 +859,7 @@ export const exampleEntries = [
   {
     file: 'operations/rotate.ts',
   },
+  {file: 'operations/shape-construction.ts'},
   {file: 'operations/revolve.ts'},
   {file: 'operations/sweep.ts'},
   {file: 'operations/wrap.ts'},

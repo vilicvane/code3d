@@ -19,6 +19,11 @@ API 文档按批次完善时，同步将相应实现按职责拆出。八个 Sol
 `curveAnchor`、面模型创建与几何缓存仍由 runtime 共享，避免反向依赖作者 API。
 `validation.ts` 共享标量和有限坐标校验，`spatial.ts` 负责坐标表示转换。
 
+成形 API 的自由函数与检查器归 `extrude.ts`、`revolve.ts`、`sweep.ts`、
+`loft.ts`、`wrap.ts`、`thicken.ts`；内核算法由 `*-geometry.ts` 拥有。
+实例方法、求解、模型身份及资源缓存仍由 runtime 统一管理，作者模块不被 runtime
+反向导入。复杂 API 的源码核对范围同时包含共享方法实现与相关内核模块。
+
 ## 模型值与公开边界
 
 模型操作产生新值，原几何可共享，但旧模型及其引用的可观察行为不变。内部统一的
@@ -243,11 +248,11 @@ App 状态副本。wrap 继承首输入坐标架，thicken 逐个继承源面。
 源平面架取模型内部 `geometryAnchor`，不读取能由 expose 改写的具名 plane。
 平面包覆输出同步保存实际支撑平面架，后续原点与旋转操作继续重表达该架。
 
-内部职责分为 [wrap 区域定位](../../../packages/core/src/library/wrap.ts)、
+内部职责分为 [wrap 区域定位](../../../packages/core/src/library/wrap-geometry.ts)、
 [测地映射与布局校验](../../../packages/core/src/library/wrap-mapping.ts)、
 [边界拟合与 BRep 构面](../../../packages/core/src/library/wrap-face.ts)。
 [曲面导数与主曲率](../../../packages/core/src/library/surface-geometry.ts)由 wrap 与
-[thicken](../../../packages/core/src/library/thicken.ts)共用；布局校验按曲面上的映射
+[thicken](../../../packages/core/src/library/thicken-geometry.ts)共用；布局校验按曲面上的映射
 插值误差自适应细分，所有探测点位于有限矩形内，并检查短 B-spline 节点区间。
 增厚校验从[裁剪面的私有三角域](../../../packages/core/src/library/surface-domain.ts)
 出发，保留孔与接缝，再按节点区间及曲率裕量/偏移误差细分；不采样整个 UV 包围矩形。

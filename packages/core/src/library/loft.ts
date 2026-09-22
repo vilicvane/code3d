@@ -1,269 +1,69 @@
 import {
-  assembleWire,
-  cast,
-  getOC,
-  measureVolume,
-  type AnyShape,
-  type Edge,
-  type Face,
-  type Wire,
-  type Shape3D,
-} from 'replicad';
-import type {TopoDS_Shape} from 'replicad-opencascadejs';
-import {
-  castOwnedShape,
-  castOwnedShape3D,
-  consumeShapeList,
-  shapeSubshapes,
-} from './kernel-shapes.js';
-import {
-  transferShapeTopology,
-  booleanWithTopology,
-  type TopologyInput,
-  type ShapeTopology,
-} from './topology.js';
-import type {Vec3} from './spatial.js';
+  ModelObject,
+  requireModelKind,
+  loftModels,
+  type FaceModel,
+  type EdgeModel,
+  type LoftOptions,
+  type SolidModel,
+  type CompositionInspectData,
+} from './runtime.js';
+import type {InspectContext, InspectResult} from './inspect.js';
 
-/** Sweep a face along one open edge, keeping the authored starting frame. */
-export function sweepWithTopology(
-  profile: TopologyInput,
-  path: Edge,
-  normal: Vec3,
-): Readonly<{shape: Shape3D; topology: ShapeTopology}> {
-  if (path.isClosed || !(path.length > 1e-9))
-    throw new Error('Sweep spine must be a non-degenerate open curve.');
-  const start = path.pointAt(0);
-  let tangent: ReturnType<Edge['tangentAt']> | undefined;
-  try {
-    tangent = path.tangentAt(0);
-    const position = start.toTuple();
-    const direction = tangent.toTuple();
-    const magnitude = Math.hypot(...direction);
-    if (!(magnitude > 1e-9))
-      throw new Error('Sweep spine must have a non-zero starting tangent.');
-    if (Math.hypot(...position) > 1e-6)
-      throw new Error(
-        'Sweep profile origin must coincide with the spine start.',
-      );
-    if (
-      (normal[0] * direction[0] +
-        normal[1] * direction[1] +
-        normal[2] * direction[2]) /
-        magnitude <
-      1 - 1e-6
-    )
-      throw new Error(
-        'Sweep profile normal must point along the spine start tangent.',
-      );
-  } finally {
-    tangent?.delete();
-    start.delete();
+/**
+ * @code3d.inspect sections loft.inspectSections
+ * @code3d.inspect spine loft.inspectSpine
+ */
+export function loft(
+  sections: readonly FaceModel<{}>[],
+  {spine, ruled = false}: LoftOptions = {},
+): SolidModel {
+  if (sections.length < 2) {
+    throw new Error('loft requires at least two planar sections.');
   }
-  const spine = assembleWire([path]);
-  let result: Readonly<{shape: Shape3D; topology: ShapeTopology}> | undefined;
-  try {
-    result = loftWithTopology([profile], spine, false);
-    if (!(Math.abs(measureVolume(result.shape)) > 0))
-      throw new Error('Sweep did not produce a non-degenerate solid.');
-    const validation = new (getOC().BRepCheck_Analyzer)(result.shape.wrapped);
-    try {
-      if (!validation.IsValid())
-        throw new Error(
-          'Sweep produced an invalid solid. Adjust the profile or path to avoid tight bends and intersections.',
-        );
-    } finally {
-      validation.delete();
-    }
-    return result;
-  } catch (error) {
-    result?.shape.delete();
-    throw error;
-  } finally {
-    spine.delete();
-  }
+  const runtimeSections = sections.map(section =>
+    requireModelKind(
+      section,
+      'face',
+      'Every loft section must be a planar face model.',
+    ),
+  );
+  const runtimeSpine = spine
+    ? requireModelKind(spine, 'edge', 'A loft spine must be a curve model.')
+    : undefined;
+  const [first, ...others] = runtimeSections;
+  return first[loftModels](others, runtimeSpine, ruled);
 }
-
-export function loftWithTopology(
-  sections: readonly TopologyInput[],
-  spine: Wire | undefined,
-  ruled: boolean,
-): Readonly<{shape: Shape3D; topology: ShapeTopology}> {
-  const holes: Wire[][] = [];
-  let outer: {shape: Shape3D; topology: ShapeTopology} | undefined;
-  let inner: {shape: Shape3D; topology: ShapeTopology} | undefined;
-  try {
-    for (const section of sections) {
-      const boundary = (section.shape as Face).clone().outerWire();
-      try {
-        const wires = shapeSubshapes(section.shape, 'wire');
-        holes.push(
-          wires.filter(wire => {
-            if (!wire.isSame(boundary)) return true;
-            wire.delete();
-            return false;
-          }),
-        );
-      } finally {
-        boundary.delete();
-      }
-    }
-    if (holes.some(wires => wires.length !== holes[0].length))
-      throw new Error('Loft sections must have matching hole counts.');
-    if (holes[0].length > 1)
-      throw new Error(
-        'A swept or lofted profile currently supports at most one hole; multiple holes need explicit correspondence.',
-      );
-    outer = loftContoursWithTopology(sections, spine, ruled);
-    if (!holes[0].length) {
-      const result = outer;
-      outer = undefined;
-      return result;
-    }
-    inner = loftContoursWithTopology(
+/** @internal */
+export namespace loft {
+  export function inspectSections(
+    [sections, {spine} = {}]: [readonly FaceModel<{}>[], LoftOptions?],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectComposition(
+      context.data,
+      [...(context.return ? [context.return] : []), ...(spine ? [spine] : [])],
       sections,
-      spine,
-      ruled,
-      holes.map(wires => wires[0]),
     );
-    return booleanWithTopology(
-      {...outer, namespace: 'intermediate'},
-      {...inner, namespace: 'intermediate'},
-      'cut',
-    );
-  } finally {
-    inner?.shape.delete();
-    outer?.shape.delete();
-    holes.flat().forEach(wire => wire.delete());
   }
-}
-
-function loftContoursWithTopology(
-  sections: readonly TopologyInput[],
-  spine: Wire | undefined,
-  ruled: boolean,
-  holes?: readonly Wire[],
-): Readonly<{shape: Shape3D; topology: ShapeTopology}> {
-  const oc = getOC();
-  const builder = spine
-    ? new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped)
-    : new oc.BRepOffsetAPI_ThruSections(true, ruled, 1e-6);
-  const wires: Wire[] = [];
-  let result: Shape3D | undefined;
-  const caps: (Face | undefined)[] = [];
-  try {
-    for (const [index, section] of sections.entries())
-      wires.push(
-        holes
-          ? holes[index].clone()
-          : (section.shape as Face).clone().outerWire(),
-      );
-    if (builder instanceof oc.BRepOffsetAPI_MakePipeShell) {
-      builder.SetMode(false);
-      for (const wire of wires) builder.Add(wire.wrapped, false, false);
-      if (!builder.IsReady())
-        throw new Error(
-          'The loft sections could not be associated with the spine.',
-        );
-      builder.Build();
-      if (!builder.IsDone() || !builder.MakeSolid())
-        throw new Error('Could not construct a solid loft along the spine.');
-    } else {
-      builder.SetMutableInput(false);
-      for (const wire of wires) builder.AddWire(wire.wrapped);
-      builder.Build();
-      if (!builder.IsDone())
-        throw new Error(
-          'Could not construct a solid loft through these sections. Adjust their positions, orientations, or profiles.',
-        );
-    }
-    result = castOwnedShape3D(builder.Shape());
-    caps[0] = castOwnedShape(builder.FirstShape()) as Face;
-    // A single profile has one inherited start cap; its end cap is new topology.
-    if (sections.length > 1)
-      caps[sections.length - 1] = castOwnedShape(builder.LastShape()) as Face;
-    const topology = transferShapeTopology(
-      sections,
-      result,
-      (input, kind, index) => {
-        const cap = caps[index];
-        // The builder consumes wires, so the profile faces need explicit cap history.
-        if (kind === 'surface')
-          return cap && !holes ? [copyShapeHandle(cap.wrapped)] : [];
-        const modified = consumeShapeList(builder.Modified(input));
-        if (!cap && kind === 'vertex') return modified;
-        let generated: TopoDS_Shape[] = [];
-        let capParts: AnyShape[] = [];
-        let source: AnyShape | undefined;
-        try {
-          generated = consumeShapeList(builder.Generated(input));
-          if (cap) capParts = shapeSubshapes(cap, kind);
-          else source = cast(input);
-          // Sweeps generate side faces from edges and side edges from vertices.
-          // Their intersection with this section's cap identifies its descendants,
-          // including splits, without relying on traversal or geometric proximity.
-          for (const raw of generated) {
-            const shape = cast(raw);
-            try {
-              const parts = shapeSubshapes(shape, kind);
-              try {
-                for (const part of capParts) {
-                  if (parts.some(candidate => candidate.isSame(part)))
-                    modified.push(copyShapeHandle(part.wrapped));
-                }
-                // Ruled lofts can copy intermediate profile edges while
-                // retaining their vertices. Generated side faces plus the
-                // exact endpoint identities establish the copied edge history.
-                if (source)
-                  for (const part of parts)
-                    if (sameVertices(source, part))
-                      modified.push(copyShapeHandle(part.wrapped));
-              } finally {
-                parts.forEach(part => part.delete());
-              }
-            } finally {
-              shape.delete();
-            }
-          }
-          return modified;
-        } catch (error) {
-          modified.forEach(shape => shape.delete());
-          throw error;
-        } finally {
-          generated.forEach(shape => shape.delete());
-          capParts.forEach(part => part.delete());
-          source?.delete();
-        }
-      },
+  export function inspectSpine(
+    [sections, {spine} = {}]: [readonly FaceModel<{}>[], LoftOptions?],
+    context: InspectContext<
+      SolidModel,
+      unknown,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    if (!context.data) return undefined;
+    return ModelObject.inspectComposition(
+      context.data,
+      [...sections, ...(context.return ? [context.return] : [])],
+      spine ? [spine] : [],
     );
-    return {shape: result, topology};
-  } catch (error) {
-    result?.delete();
-    throw error;
-  } finally {
-    caps.forEach(cap => cap?.delete());
-    wires.forEach(wire => wire.delete());
-    builder.delete();
-  }
-}
-
-function copyShapeHandle(shape: TopoDS_Shape): TopoDS_Shape {
-  return shape.Oriented(shape.Orientation());
-}
-
-function sameVertices(left: AnyShape, right: AnyShape): boolean {
-  const leftVertices = shapeSubshapes(left, 'vertex');
-  let rightVertices: AnyShape[] = [];
-  try {
-    rightVertices = shapeSubshapes(right, 'vertex');
-    return (
-      leftVertices.length > 0 &&
-      leftVertices.length === rightVertices.length &&
-      leftVertices.every(vertex =>
-        rightVertices.some(candidate => candidate.isSame(vertex)),
-      )
-    );
-  } finally {
-    leftVertices.forEach(vertex => vertex.delete());
-    rightVertices.forEach(vertex => vertex.delete());
   }
 }

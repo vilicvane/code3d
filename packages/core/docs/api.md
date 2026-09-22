@@ -96,12 +96,12 @@ Planar profiles lie in the local XZ plane with a +Y normal.
 | [`arc(start, middle, end)`](api/arc.md)                               | Arc through three points                                                  |
 | [`bezier(points)`](api/bezier.md)                                     | Bézier curve                                                              |
 | [`spline(points)`](api/spline.md)                                     | B-spline fitted to ordered samples                                        |
-| `loft(sections, options?)`                                            | Solid through sections; optional curve spine                              |
-| `extrude(faceOrFaces, distance)`                                      | Solid extruded along one face's local normal                              |
-| `revolve(profile, axis, config)`                                      | Solid rotated about a straight directed axis, with optional axial advance |
-| `sweep(profile, spine)`                                               | Solid formed by carrying one face along an open curve                     |
-| `wrap(profiles, target, options?)`                                    | Curved faces mapped from one planar layout onto a finite surface          |
-| `thicken(faceOrFaces, thickness)`                                     | Solids offset along oriented surface normals                              |
+| [`loft(sections, options?)`](api/loft.md)                             | Solid through sections; optional curve spine                              |
+| [`extrude(faceOrFaces, distance)`](api/extrude.md)                    | Solid extruded along one face's local normal                              |
+| [`revolve(profile, axis, config)`](api/revolve.md)                    | Solid rotated about a straight directed axis, with optional axial advance |
+| [`sweep(profile, spine)`](api/sweep.md)                               | Solid formed by carrying one face along an open curve                     |
+| [`wrap(profiles, target, options?)`](api/wrap.md)                     | Curved faces mapped from one planar layout onto a finite surface          |
+| [`thicken(faceOrFaces, thickness)`](api/thicken.md)                   | Solids offset along oriented surface normals                              |
 
 See [local coordinates and placement](local-coordinates.md) for
 the coordinate frame of a model, reference, or composition.
@@ -114,166 +114,23 @@ endpoints. Curve tangents do not redefine the model's XYZ axes.
 Profiles and curves are model values that can be inspected and related to
 other models.
 
-Face models also support `face.extrude(distance)`. Both forms accept a finite,
-non-zero signed distance and preserve the starting face's coordinates. For an
-unrotated profile, positive distance extends along +Y; negative distance extends
-along −Y. Rotating the face rotates its extrusion direction; changing its origin
-does not recenter the result. The returned solid supports Boolean operations,
-fillets, chamfers, and shells. `extrude(faces, distance)` accepts a readonly array
-of profiles and returns a readonly array of solids in the same order, preserving
-each face's placement. An empty input returns `[]`; a single face still returns
-a single solid. Both overloads retain required TypeScript distances and use the
-same runtime default of 10 while editing.
-
-```ts
-import {circle, extrude, rectangle} from '@code3d/core';
-
-export const plate = rectangle(30, 20).extrude(3).fillet(0.5);
-export const pin = extrude(circle(2), -10);
-```
+See [extrude](api/extrude.md) for signed straight extrusion and
+[loft](api/loft.md) for ordered sections and optional spine guidance.
 
 ### Rotational solids
 
-`revolve(profile, axis, config: RevolveConfig)` and
-`profile.revolve(axis, config)` rotate one face about a straight directed axis.
-`line(...)` can be passed directly; an existing straight edge or axis reference
-also works.
-`config.angle` is a required finite, non-zero angle in degrees. `config.advance`
-is the signed total distance traveled along the directed axis during that angle;
-it defaults to zero. A positive angle follows the axis's right-hand direction.
-Reversing the axis reverses both the rotation sense and the direction of a positive
-advance. With zero advance, the angle may cover at most one turn. With non-zero
-advance, it may cover multiple turns to form a simple screw-motion solid.
-
-```ts
-import {circle, line, rectangle, revolve} from '@code3d/core';
-
-const axis = line([0, -20, 0], [0, 20, 0]);
-const ringSection = rectangle(4, 6).rotate(90, 0, 0).originOffset(-8, 0, 0);
-export const ring = revolve(ringSection, axis, {angle: 360});
-
-const wireSection = circle(1).rotate(90, 0, 0).originOffset(-8, 0, 0);
-export const spring = wireSection.revolve(axis, {angle: 5 * 360, advance: 25});
-```
-
-The authoring signature requires `config`. While editing an incomplete call,
-the App uses 360 degrees and zero advance so its parameter tool can add the
-config object.
-
-The result keeps the profile's local frame and is an ordinary `SolidModel`.
-The axis participates in the same relation solve as the profile; its own model
-placement is respected. A helical profile must have one outer boundary without
-holes. Intersecting turns and profiles that cross the axis may fail to produce a
-valid solid; leave clearance between turns and keep the profile off the axis.
-For a multi-turn coil with round wire and automatic pitch clearance checks,
-[`coil`](api/coil.md) remains the shorter constructor.
+[revolve](api/revolve.md) covers planar profiles, directed axes and optional axial
+advance. [coil](api/coil.md) provides a circular-wire shortcut with pitch checks.
 
 ### Path sweeps
 
-`sweep(profile, spine)` and `profile.sweep(spine)` carry one planar face along a
-continuous open `EdgeModel`, such as a line or Bézier curve. The face's local
-origin must meet the path's start, and its normal must point along the starting
-tangent. The operation respects the solved placement of both inputs and returns
-a solid in the profile's local frame; it does not move or rotate the supplied
-profile to fit the path.
-
-```ts
-import {bezier, circle, sweep} from '@code3d/core';
-
-const profile = circle(2);
-const spine = bezier([
-  [0, 0, 0],
-  [0, 8, 0],
-  [5, 16, 0],
-  [5, 24, 0],
-]);
-export const bentRod = sweep(profile, spine);
-```
-
-The path must be open with a non-zero starting tangent. The output is an ordinary
-`SolidModel` that supports subsequent Boolean and finishing operations. Very
-tight bends or self-intersections may prevent the kernel from producing a valid
-solid. One through hole in the profile is supported; profiles with multiple
-holes currently need explicit contour correspondence. Use the
-[App example](../../app/examples/operations/sweep.ts) to inspect
-the profile, path and result.
+[sweep](api/sweep.md) explains open paths, starting alignment and supported holes.
 
 ### Curved surface wrapping
 
-`wrap(profiles, target, options?)` maps a planar face or a coplanar face array
-onto one finite `Surface` (or face model). It returns a face array because a
-periodic seam can split a profile. `thicken(faceOrFaces, thickness)` and
-`face.thicken(thickness)` then create solids along the surface normals.
-
-```ts
-import {
-  googleFont,
-  originCenter,
-  sphere,
-  text,
-  thicken,
-  cut,
-  wrap,
-} from '@code3d/core';
-
-const ball = sphere(20);
-const profiles = originCenter(text('Code3D', await googleFont('Play'), 9)).map(
-  face => face.originOffset(0, -26, 0),
-);
-const lettering = wrap(profiles, ball.surface(1));
-export default cut(ball, thicken(lettering, -1));
-```
-
-![Raised cylinder text, engraved sphere text and raised lettering on a B-spline ellipsoid.](../../web/src/assets/models/wrap.png)
-
-[Open the complete cylinder, sphere and freeform example](../../app/examples/operations/wrap.ts).
-
-Use `originCenter(profiles)` to center the whole layout. Position its plane
-outside the target using origin, rotation and relation operations.
-The profiles' **shared planar bounding rectangle** chooses the target
-region; it includes glyph holes and the blank space between glyphs. Target
-geometry outside the rectangle's normal projection does not participate in
-localization or crossing checks. The closest target point corresponds to its
-normal projection back onto the source plane. Source directions are carried to
-the tangent plane by the smallest rotation, then distances from this anchor
-follow surface geodesics. Surface UV coordinates do not determine text size.
-
-All profiles share this mapping. Cylinder wrapping preserves developed lengths;
-a sphere or other surface with double curvature generally distorts distances
-between other points and changes area. This is a local mapping, not a promise
-of distortion-free wrapping around an entire surface.
-
-- Multiple closest points are accepted when their local maps agree within
-  tolerance, including a cylinder's tangent generator. Distinct maps raise an
-  error; competing anchors are not averaged.
-- The finite source region may touch the target. A region spanning both sides
-  of it raises a crossing error. Move or rotate the profiles outside the target.
-- The complete mapped rectangle must fit the selected trimmed face, including
-  its holes. Crossing to another topological face is not supported in this
-  version. Periodic seams within the selected face are supported.
-- Smooth analytic and B-spline surfaces are supported. Singular parameterizations,
-  a perpendicular source plane, folds, a full periodic overlap, or a failed boundary fit raise errors. Reduce
-  the region or reposition it when a regular local mapping cannot be found.
-- `options.tolerance` is a positive length in model units (default `0.001`), used
-  for numerical mapping, adaptive layout checks and boundary fitting. Checks
-  refine where interpolation error or spline knot spans need more detail;
-  nonconvergence or an exhausted validation budget raises an error.
-- Wrap results are true curved faces and have no named `plane` reference.
-  Extrusion, revolution and path sweep require planar inputs.
-- Thickness is finite and non-zero. Its sign follows the selected face's
-  orientation: positive is outward for an ordinary solid face. Use positive
-  thickness with `union` for raised text and negative thickness with `cut` for
-  engraving. Surface offsets can fail on tight curvature or intersecting walls;
-  curvature-centre crossings detected by the offset check are rejected. Small
-  lettering and thicknesses are the intended use. Curvature checks follow the
-  trimmed face, including its holes, using a private tessellation and adaptive
-  refinement. These numerical checks do not prove global injectivity or the
-  absence of every possible self-intersection on arbitrary freeform surfaces.
-- Wrap results inherit the first profile's coordinate frame and placement.
-  Thicken preserves each input face's frame and placement. Empty arrays return
-  empty arrays. Original profiles and targets remain unchanged.
-  Replacing a named `plane` reference with `expose` does not change the source
-  geometry's wrapping frame.
+[wrap](api/wrap.md) maps one shared planar layout to a finite curved surface.
+[thicken](api/thicken.md) adds signed thickness for relief or engraving.
+See their references for localization, seams, curvature and numerical limits.
 
 ## Measurements
 

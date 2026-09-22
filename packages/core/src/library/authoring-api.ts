@@ -1,3 +1,9 @@
+import {extrude} from './extrude.js';
+import {revolve} from './revolve.js';
+import {sweep} from './sweep.js';
+import {loft} from './loft.js';
+import {wrap} from './wrap.js';
+import {thicken} from './thicken.js';
 import {circle} from './circle.js';
 import {ellipse} from './ellipse.js';
 import {rectangle} from './rectangle.js';
@@ -39,12 +45,6 @@ import {
   on,
   align,
   text,
-  extrude,
-  loft,
-  revolve,
-  sweep,
-  wrap,
-  thicken,
   group,
   distance,
   union,

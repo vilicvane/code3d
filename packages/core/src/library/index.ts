@@ -1,3 +1,9 @@
+export {extrude} from './extrude.js';
+export {revolve} from './revolve.js';
+export {sweep} from './sweep.js';
+export {loft} from './loft.js';
+export {wrap} from './wrap.js';
+export {thicken} from './thicken.js';
 export {circle} from './circle.js';
 export {ellipse} from './ellipse.js';
 export {rectangle} from './rectangle.js';
@@ -81,16 +87,10 @@ export {
   align,
   cut,
   distance,
-  extrude,
   text,
   group,
   inspectGroupMembers,
   intersect,
-  loft,
-  revolve,
-  sweep,
-  wrap,
-  thicken,
   union,
 } from './runtime.js';
 
