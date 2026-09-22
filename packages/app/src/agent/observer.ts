@@ -51,6 +51,7 @@ type Snapshot = {
   module: ModelModule;
   scene: InspectionSnapshot;
   diagnostic?: ModelDiagnostic;
+  warnings: readonly ModelDiagnostic[];
   models: ObservedModel[];
   createdAt: string;
   summaries: Map<
@@ -84,7 +85,12 @@ export class AgentObserver {
             ? 'inspect_failed'
             : 'model_failed',
           error.diagnostic.summary,
-          error.diagnostic,
+          {
+            ...error.diagnostic,
+            ...(this.compiler.warnings.length
+              ? {warnings: this.compiler.warnings}
+              : {}),
+          },
         );
       });
     this.queue = pending.catch(() => {});
@@ -133,6 +139,7 @@ export class AgentObserver {
             : {arguments: request.arguments}),
         },
       );
+      const warnings = [...this.compiler.warnings, ...module.warnings];
       const viewport = this.getViewport();
       const scope = viewport.sourceEvaluationAt(
         module,
@@ -155,6 +162,7 @@ export class AgentObserver {
           throw error;
         return failure('model_failed', module.diagnostic.summary, {
           ...module.diagnostic,
+          ...(warnings.length ? {warnings} : {}),
           inspectionDiagnostic: error.diagnostic,
         });
       }
@@ -185,7 +193,10 @@ export class AgentObserver {
             )
           : module.diagnostic;
       if (diagnostic && !scene)
-        return failure('model_failed', diagnostic.summary, diagnostic);
+        return failure('model_failed', diagnostic.summary, {
+          ...diagnostic,
+          ...(warnings.length ? {warnings} : {}),
+        });
       if (!scene)
         throw new AgentError(
           'observation_not_found',
@@ -217,6 +228,7 @@ export class AgentObserver {
         module,
         scene,
         diagnostic,
+        warnings,
         models,
         createdAt: new Date().toISOString(),
         summaries: new Map(),
@@ -295,6 +307,7 @@ export class AgentObserver {
       createdAt: snapshot.createdAt,
       modelsTotal: snapshot.models.length,
       models: described,
+      ...(snapshot.warnings.length ? {warnings: snapshot.warnings} : {}),
       ...(!options.model && snapshot.models.length > 16
         ? {nextModel: snapshot.models[16].key}
         : {}),

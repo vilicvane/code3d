@@ -20,6 +20,24 @@ export const dependencyFields = [
   'optionalDependencies',
 ] as const;
 
+export type PackageResolution = Readonly<{path: string; importer: string}>;
+
+export function resolvedPackageDirectory(path: string): string | undefined {
+  return /^(.*\/node_modules\/(?:@[^/]+\/)?[^/]+)(?:\/|$)/.exec(path)?.[1];
+}
+
+/** Package ownership is independent of internal modules or author filenames. */
+export function packageResolutionKey({
+  path,
+  importer,
+}: PackageResolution): string | undefined {
+  if (importer === '/.__code3d-entry.js') return undefined;
+  const target = resolvedPackageDirectory(path);
+  const owner = resolvedPackageDirectory(importer);
+  if (!target || owner === target) return undefined;
+  return JSON.stringify([target, owner ?? projectDirectory(importer)]);
+}
+
 export function parsePackageManifest(
   source: string,
   path: string,

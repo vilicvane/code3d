@@ -70,20 +70,24 @@ Explicit versions keep normal resolution; production uses published packages.
 See [package environment and resolution](../../.agents/docs/architecture/runtime.md#包环境与模块解析)
 for the shared Browser storage and local-folder rules.
 
-After an App update, projects with their own Code3D packages must match the
-modeling package versions shipped with the App. The **Packages** area at the
+After an App update, projects with their own Code3D packages may use different
+modeling package versions from the App. The **Packages** area at the
 bottom of the file explorer brings together download and installation progress,
 installation errors with **Retry**, and version recovery. A **Code3D version
-mismatch** status offers **Update Code3D packages** for Browser storage or
-**Refresh** for local folders. Expand **Details** for installed and required
-versions, package files and recovery instructions. Success notices disappear
+mismatch** warning offers **Update Code3D packages** for Browser storage or
+**Refresh** for local folders. Builds, rendering and cache restoration continue;
+actual compilation or execution failures are still reported normally. The editor
+also shows warnings at related imports or source locations. Expand **Details**
+for installed and App versions, package files and recovery instructions. Success notices disappear
 independently after three seconds.
 For Browser storage, **Update Code3D packages** preserves `latest` declarations,
 including npm aliases, and resolves them again. Fixed older declarations change
-to the required versions before installation. Local folders show the owning
-package files: keep `latest` and use your package manager's update command, or
-change fixed older versions and install, then choose **Refresh**. Built-in
-packages need no manual upgrade. If `latest` installs packages newer than the App,
+to the App versions before installation. Local folders show the owning
+package files and an npm command: keep `latest`, change outdated fixed versions
+or ranges first, then run `npm update` in each manifest's directory
+and choose **Refresh**. By default, this updates dependencies and their lock
+while preserving `package.json` declarations; other package managers use their own update
+command. Built-in packages need no manual upgrade. If `latest` installs packages newer than the App,
 reload the App to check for a newer release; an unresolved mismatch stays visible
 without pinning `latest` to an older version.
 Clearing the build cache does not upgrade installed packages; see the

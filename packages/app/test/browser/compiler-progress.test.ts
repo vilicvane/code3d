@@ -131,6 +131,59 @@ const runtimePhases = [
   'preparing-preview',
 ];
 
+test('package provenance changes preserve the executor Worker and initialized runtime', async t => {
+  const page = await fixture(t);
+  const results = await page.evaluate(async () => {
+    const project = {
+      files: ['/a.ts', '/parts/b.ts'].map(path => ({
+        path,
+        source:
+          'import {box} from "@code3d/core"; export default box(1, 2, 3);',
+      })),
+    };
+    const results: {
+      workers: number;
+      phases: string[];
+      diagnostic?: unknown;
+      objects: number;
+    }[] = [];
+    const run = async (path: string) => {
+      const phases: string[] = [];
+      const module = await client.compile(project, path, undefined, phase =>
+        phases.push(phase),
+      );
+      results.push({
+        workers: window.executorWorkers,
+        phases,
+        diagnostic: module.diagnostic,
+        objects: module.objects.size,
+      });
+    };
+    try {
+      await run('/a.ts');
+      await run('/parts/b.ts');
+      project.files[1].source = [
+        'import {box} from "@code3d/core";',
+        'import {plastic} from "@code3d/materials";',
+        'export const material = plastic();',
+        'export default box(1, 2, 3);',
+      ].join('\n');
+      await run('/parts/b.ts');
+      return results;
+    } finally {
+      client.dispose();
+    }
+  });
+  for (const result of results) {
+    assert.equal(result.diagnostic, undefined);
+    assert.ok(result.objects > 0);
+  }
+  assert.equal(results[1].workers, results[0].workers);
+  assert.equal(results[1].phases.includes('initializing-runtime'), false);
+  assert.equal(results[2].workers, results[1].workers + 1);
+  assert.equal(results[2].phases.includes('initializing-runtime'), true);
+});
+
 test('project preparation can exceed two minutes and still compile normally', async t => {
   const page = await fixture(t);
   await page.clock.install();

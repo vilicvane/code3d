@@ -5,6 +5,10 @@ import {
 } from '../project/file-reader';
 import type {ProjectAssets} from '../project/project-assets';
 import {
+  packageResolutionKey,
+  type PackageResolution,
+} from '../project/package-manifest';
+import {
   ProjectBuilder,
   dependencyFileIdentity,
   type ModuleFormats,
@@ -26,7 +30,10 @@ type RuntimeEntries = Readonly<{
 }>;
 
 export type DependencyArtifact = Readonly<{
+  /** Complete persisted and transferred snapshot, including package provenance. */
   id: string;
+  /** Executable content that requires its own module and kernel instances. */
+  executionIdentity: string;
   kernelIdentity: string;
   source: string;
   formats: ModuleFormats;
@@ -35,6 +42,7 @@ export type DependencyArtifact = Readonly<{
   resources: ReadonlyMap<string, Uint8Array>;
   runtime: RuntimeEntries;
   metadata: readonly (readonly [string, ProjectFileInfo | null])[];
+  packageResolutions: readonly PackageResolution[];
 }>;
 
 /** esbuild owns one complete dependency graph, including lazy module initialization. */
@@ -83,6 +91,15 @@ export class DependencyBuilder {
       )
     )
       return artifact;
+    const resolutions = new Set(
+      current.packageResolutions.map(packageResolutionKey),
+    );
+    if (
+      artifact.packageResolutions.some(
+        resolution => !resolutions.has(packageResolutionKey(resolution)),
+      )
+    )
+      return artifact;
     return current;
   }
 
@@ -107,6 +124,8 @@ export class DependencyBuilder {
       this.modules.set(path, format);
     for (const [path, info] of artifact.metadata)
       this.builder.dependencyMetadata.set(path, info);
+    for (const resolution of artifact.packageResolutions)
+      this.builder.recordPackageResolution(resolution);
     return true;
   }
 
@@ -199,7 +218,20 @@ export class DependencyBuilder {
       }
       this.modules.set(path, format);
     }
-    if (!changed) return this.artifact!;
+    if (!changed) {
+      const artifact = this.artifact!;
+      const packageResolutions = this.resolutions();
+      if (
+        JSON.stringify(packageResolutions) ===
+        JSON.stringify(artifact.packageResolutions)
+      )
+        return artifact;
+      const updated = {...artifact, packageResolutions};
+      return (this.artifact = {
+        ...updated,
+        id: await dependencyArtifactIdentity(updated),
+      });
+    }
     onBuild?.();
     const prepared = this.preparedBundle;
     const [bundle, wasm, sketchWasm] = await Promise.all([
@@ -242,17 +274,7 @@ export class DependencyBuilder {
     const metadata = [...this.builder.dependencyMetadata].sort(([a], [b]) =>
       a.localeCompare(b),
     );
-    const id = await runtimeArtifactIdentity([
-      new TextEncoder().encode(bundle.source),
-      new TextEncoder().encode(
-        JSON.stringify([core, metadata, [...resources.keys()]]),
-      ),
-      ...resources.values(),
-      wasm,
-      sketchWasm,
-    ]);
-    return (this.artifact = {
-      id,
+    const executable = {
       kernelIdentity,
       source: executableModuleSource(
         'code3d-project:/dependencies.js',
@@ -264,14 +286,69 @@ export class DependencyBuilder {
           '__code3dCachedFunction',
         ],
       ),
-      formats: new Map(this.modules),
       wasm,
       sketchWasm,
       resources,
+    };
+    const artifact = {
+      ...executable,
+      executionIdentity: await dependencyExecutionIdentity(executable),
+      formats: new Map(this.modules),
       runtime: core,
       metadata,
+      packageResolutions: this.resolutions(),
+    };
+    return (this.artifact = {
+      ...artifact,
+      id: await dependencyArtifactIdentity(artifact),
     });
   }
+
+  private resolutions(): readonly PackageResolution[] {
+    return [...this.builder.packageResolutions]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, resolution]) => resolution);
+  }
+}
+
+function dependencyArtifactIdentity(
+  artifact: Omit<DependencyArtifact, 'id'>,
+): Promise<string> {
+  return runtimeArtifactIdentity([
+    new TextEncoder().encode(
+      JSON.stringify([
+        artifact.executionIdentity,
+        [...artifact.formats],
+        artifact.runtime,
+        artifact.metadata,
+        artifact.packageResolutions,
+      ]),
+    ),
+  ]);
+}
+
+function dependencyExecutionIdentity(
+  artifact: Pick<
+    DependencyArtifact,
+    'kernelIdentity' | 'source' | 'wasm' | 'sketchWasm' | 'resources'
+  >,
+): Promise<string> {
+  // Asset reads can finish in any order; execution depends on their paths and bytes.
+  const resources = [...artifact.resources].sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
+  return runtimeArtifactIdentity([
+    new TextEncoder().encode(artifact.source),
+    new TextEncoder().encode(
+      JSON.stringify([
+        artifact.kernelIdentity,
+        resources.map(([path]) => path),
+      ]),
+    ),
+    ...resources.map(([, bytes]) => bytes),
+    artifact.wasm,
+    artifact.sketchWasm,
+  ]);
 }
 
 function dependencyEntry(

@@ -411,12 +411,17 @@ removed by cache eviction require network access.
 
 ## After a Code3D update
 
-During the prototype, projects with their own Code3D modeling packages must use
-the versions required by the current App. Before running a model, the App checks
-the selected installed packages. The **Packages** area at the bottom of the file
-explorer shows **Code3D version mismatch**, with **Update Code3D packages** for
-Browser storage or **Refresh** for a local folder. Expand **Details** to see each
-affected package's **Installed** and **Required** versions, open its `package.json`,
+During the prototype, Code3D package versions can change without compatibility
+guarantees. The App checks the selected installed packages and warns when their
+versions differ from its own. **This warning does not stop building or rendering**;
+valid cached previews can still be restored, and actual compilation or execution
+failures are reported normally. The editor also shows warnings at related
+imports or source locations.
+
+The **Packages** area at the bottom of the file explorer shows **Code3D version
+mismatch**, with **Update Code3D packages** for Browser storage or **Refresh**
+for a local folder. Expand **Details** to see each
+affected package's **Installed** and **App version**, open its `package.json`,
 and read the update instructions. **Details** also provides **Refresh** for
 Browser storage, **Reload app**, and **Clear build cache**. This status shares
 the explorer's package progress and error area, leaving the model view clear.
@@ -425,8 +430,8 @@ If your packages are newer than the open App, try **Details → Reload app** fir
 For **Browser storage**, choose **Update Code3D packages** in the Packages area.
 Existing `latest` declarations stay `latest`, including aliases such as
 `npm:@code3d/core@latest`; the command resolves them again instead of reusing
-the old lock. Fixed older Code3D declarations change to the App's required
-versions. It installs the newly resolved dependencies and rebuilds the model.
+the old lock. Fixed older Code3D declarations change to the App's versions.
+It installs the newly resolved dependencies and rebuilds the model.
 Existing dependency sections, other dependency declarations and your source files are preserved.
 The ordinary **Update dependencies** command still follows your existing ranges,
 so it cannot upgrade a dependency pinned to an older version.
@@ -434,12 +439,21 @@ so it cannot upgrade a dependency pinned to an older version.
 For a **local folder**, expand **Details**, use **Open package.json**, and work
 in that manifest's directory:
 
-- Keep `latest` declarations and use your package manager's update command to
-  resolve them again. With npm, for example, run `npm update --save=false @code3d/core`;
-  use the dependency's alias name if it has one. Merely running `npm install`
-  can reuse the older version recorded in the lock.
-- For a fixed older version, change the declaration to the required version,
-  then run your package manager's install command, such as `npm install`.
+- Keep `latest` declarations, including npm aliases such as
+  `npm:@code3d/core@latest`.
+- Change outdated fixed versions or ranges to the **App version** shown for
+  that package.
+- Run the update command for the package manager already used by your project.
+  For npm:
+
+  ```bash
+  npm update
+  ```
+
+  By default, this updates the directory's dependencies within their declarations
+  and writes the lock while preserving `latest` and other `package.json` declarations.
+  To update only specific dependencies, append their names, using alias names
+  where applicable. Merely running `npm install` can reuse an older locked version.
 
 Return to the App and choose **Refresh** after installation. The App does not
 run a package manager on your computer. For a nested project, follow the path
@@ -450,11 +464,11 @@ try **Details → Reload app**. If the versions still do not match, the status
 remains; the App does not pin `latest` to an older version to hide it.
 
 If another library brings in an incompatible Code3D package, **Details** names
-that library. Upgrade it, or the project dependency that brings it in, to a
-release using the required Code3D version; changing
+that library. To match the App, upgrade it or the project dependency that brings
+it in to a release using the App's Code3D version; changing
 only a top-level Code3D dependency may leave the library's nested copy unchanged.
 For an imported package missing from your dependency declarations, add the
-required version to the indicated manifest. These cases show manual guidance
+App's version to the indicated manifest. These cases show manual guidance
 instead of an automatic update button.
 
 Projects using the App's built-in modeling packages already use matching

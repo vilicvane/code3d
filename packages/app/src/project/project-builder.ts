@@ -13,6 +13,7 @@ import {
 } from './file-reader';
 import {ProjectPackageResolver, nodeBuiltinError} from './package-resolver';
 import type {ProjectAssets} from './project-assets';
+import {packageResolutionKey, type PackageResolution} from './package-manifest';
 
 // Build-time Node supplies its real builtin catalog, including subpaths.
 const nodeBuiltins = new Set(__CODE3D_NODE_BUILTINS__);
@@ -56,6 +57,7 @@ export type ProjectBuildOptions = Readonly<{
 export class ProjectBuilder {
   private readonly resolver: ProjectPackageResolver;
   readonly dependencyMetadata = new Map<string, ProjectFileInfo | null>();
+  readonly packageResolutions = new Map<string, PackageResolution>();
 
   constructor(
     private readonly files: ProjectFileReader,
@@ -102,8 +104,17 @@ export class ProjectBuilder {
     kind: 'import' | 'require' = 'import',
   ): Promise<string | false> {
     const path = await this.resolver.resolve(specifier, importer, kind);
-    if (path !== false) await this.onResolved?.(path, importer);
+    if (path !== false) {
+      this.recordPackageResolution({path, importer});
+      await this.onResolved?.(path, importer);
+    }
     return path;
+  }
+
+  recordPackageResolution(resolution: PackageResolution): void {
+    const key = packageResolutionKey(resolution);
+    if (key && !this.packageResolutions.has(key))
+      this.packageResolutions.set(key, resolution);
   }
 
   private readonly sessions = new Map<
@@ -116,6 +127,7 @@ export class ProjectBuilder {
     this.sessions.clear();
     await Promise.all(sessions.map(session => session.dispose()));
     this.dependencyMetadata.clear();
+    this.packageResolutions.clear();
   }
 
   async cancel(): Promise<void> {
