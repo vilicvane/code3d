@@ -181,6 +181,17 @@ export default defineConfig({
                             {slug: 'docs/packages/core/api/couple-rotation'},
                           ],
                         },
+                        {
+                          label: 'Topology and references',
+                          items: [
+                            {slug: 'docs/packages/core/api/vertex'},
+                            {slug: 'docs/packages/core/api/edge'},
+                            {slug: 'docs/packages/core/api/surface'},
+                            {slug: 'docs/packages/core/api/reference-elements'},
+                            {slug: 'docs/packages/core/api/directional-bounds'},
+                            {slug: 'docs/packages/core/api/flip-reverse'},
+                          ],
+                        },
                       ],
                     },
                   ]

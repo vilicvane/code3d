@@ -29,13 +29,36 @@ export function markdownCanonical(document, site) {
 
 export function markdownHeaderRules(documents, site) {
   const base = site.pathname.replace(/\/$/, '');
-  return documents
-    .filter(document => document.html)
-    .map(
+  // Package Markdown always maps from <path>.md to <path>/. One splat keeps
+  // growing API inventories below Cloudflare's 100-rule limit without matching
+  // Markdown-only agent documents or the special /docs/index.md route.
+  const packagePrefix = '/docs/packages/';
+  const packageDocuments = documents.filter(document =>
+    document.route.startsWith(packagePrefix),
+  );
+  const groupPackages =
+    packageDocuments.length > 0 &&
+    packageDocuments.every(
       document =>
-        `${base}${document.route}\n  Link: <${markdownCanonical(document, site)}>; rel="canonical"\n`,
+        document.route.endsWith('.md') &&
+        document.html === document.route.slice(0, -3) + '/',
+    );
+  const rules = groupPackages
+    ? [
+        `${base}${packagePrefix}*.md\n  Link: <${new URL('docs/packages/:splat/', site.href.replace(/\/?$/, '/')).href}>; rel="canonical"\n`,
+      ]
+    : [];
+  for (const document of documents) {
+    if (
+      !document.html ||
+      (groupPackages && document.route.startsWith(packagePrefix))
     )
-    .join('\n');
+      continue;
+    rules.push(
+      `${base}${document.route}\n  Link: <${markdownCanonical(document, site)}>; rel="canonical"\n`,
+    );
+  }
+  return rules.join('\n');
 }
 
 export function documentLocation(source) {

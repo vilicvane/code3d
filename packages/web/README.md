@@ -132,6 +132,12 @@ ordinary heading. MDX model examples expand to actual source and App links.
 Unknown MDX components fail publication until given a Markdown representation.
 No second copy of technical examples or API prose is maintained.
 
+Package Markdown canonical headers share `/docs/packages/*.md`, mapping `:splat`
+to the corresponding HTML path. This keeps growing API references within
+[Cloudflare’s header-rule limit](https://developers.cloudflare.com/pages/configuration/headers/#attach-a-header).
+Other routes retain explicit rules, including the special `/docs/index.md` mapping;
+Markdown-only agent documents receive no HTML canonical header.
+
 For an App development server, set `VITE_CODE3D_DOCS_URL` in the ignored
 `packages/app/.env.development.local`, for example `http://127.0.0.1:4321/docs/`,
 and run the website on that reserved port. Production builds default to

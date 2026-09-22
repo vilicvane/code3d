@@ -4,6 +4,15 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'topology-api',
+    title: 'Topology and references',
+    description: 'Select finite topology and compare reference directions.',
+    category: 'Topology and reuse',
+    file: 'operations/topology-api.ts',
+    focus: {context: 'bodyV.vertex(3)', token: 'vertex'},
+    tags: ['vertex', 'edge', 'surface', 'bounds', 'references'],
+  },
+  {
     id: 'placement',
     title: 'Groups and relative placement',
     description:
@@ -472,6 +481,39 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  'topology-api': [
+    {
+      id: 'vertex',
+      image: 'topology-api',
+      label: 'vertex / vertices',
+      description: 'Select point references to existing topology vertices.',
+      focus: {context: 'bodyV.vertex(3)', token: 'vertex'},
+    },
+    {
+      id: 'edge',
+      image: 'topology-edge',
+      label: 'edge / edges',
+      description:
+        'Select finite edge references for topology, measurement and relations.',
+      focus: {context: 'bodyE.edge(2)', token: 'edge'},
+    },
+    {
+      id: 'surface',
+      image: 'topology-surface',
+      label: 'surface / surfaces',
+      description:
+        'Select finite surface references from a body or face model.',
+      focus: {context: 'bodyS.surface(4)', token: 'surface'},
+    },
+    {
+      id: 'directional-bounds',
+      image: 'topology-directional-bounds',
+      label: 'Directional bounds',
+      description:
+        'Select finite directional boundaries for contact and measurement.',
+      focus: {context: 'bodyB.up', token: 'up'},
+    },
+  ],
   placement: [
     {
       id: 'group',
@@ -1156,6 +1198,7 @@ export const exampleEntries = [
   {
     file: 'operations/rotate.ts',
   },
+  {file: 'operations/topology-api.ts'},
   {file: 'constraints/placement-api.ts'},
   {file: 'operations/local-transforms.ts'},
   {file: 'operations/solid-operations.ts'},

@@ -65,7 +65,8 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Rotation coupling](docs/api.md#rotation-coupling): transmit cumulative angles through fixed-axis connections.
 - [Origins and rotation](docs/origins-and-rotation.mdx): choose a pivot and adjust a part.
 - [Shells](docs/shells.mdx): hollow solids and choose openings.
-- [Topology](docs/topology.md): select vertices, edges and faces and expose named elements.
+- [Topology references](docs/api/vertex.md): select vertices, edges and surfaces; [reference elements](docs/api/reference-elements.md) and [directional bounds](docs/api/directional-bounds.md) define placement interfaces.
+- [Topology workflow](docs/topology.md): visual selection and stable IDs across modeling operations.
 - [Editable sketches](docs/sketches.md): draw and constrain planar geometry.
 - [Text and fonts](docs/text.md): build planar or curved lettering.
 - [Curved surface wrapping](docs/api.md#curved-surface-wrapping): wrap profiles and thicken along surface normals.

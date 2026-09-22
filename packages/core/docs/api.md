@@ -14,20 +14,20 @@ API. For a first runnable model, see the [Core example](../README.md#example).
 Choose a starting shape, build the part, then place and measure it. Functions,
 model methods and reference properties are grouped by what they do.
 
-| Category                         | APIs and reading                                                                                                                                                                                                                 |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Solid primitives                 | [box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil](#solid-primitives)                                                                                                                                      |
-| Points, curves and profiles      | [point, line, arc, bezier, spline, circle, ellipse, rectangle and regularPolygon](#profiles-and-curves)                                                                                                                          |
-| Sketches                         | [sketch, entities, constraints, point references, derive, face and faces](sketches.md)                                                                                                                                           |
-| Text and fonts                   | [text, font and googleFont](text.md)                                                                                                                                                                                             |
-| Shape construction               | [extrude and loft](#profiles-and-curves), [revolve](#rotational-solids), [sweep](#path-sweeps), [wrap and thicken](#curved-surface-wrapping)                                                                                     |
-| Booleans and solid modifications | [union, cut and intersect](#composition-and-boolean-operations); [fillet, chamfer and shell](#model-operations)                                                                                                                  |
-| Origins and local transforms     | [originPoint, originVertex, originOffset, originCenter and model.rotate](#origins-and-rotation); [scaled](#scaling)                                                                                                              |
-| Groups and placement             | [group and expose](#composition-and-boolean-operations); [relate, on and align](#anchors-and-relations); [offset, rotate and pivot/axis selectors](#independent-placement-transformations); [coupleRotation](#rotation-coupling) |
-| Topology and references          | [Vertices, edges and surfaces](#topology); [frames, origins and centers](#origins-and-rotation); [axes, directional bounds, flip and reverse](#anchors-and-relations)                                                            |
-| Geometry measurements            | [distance, length, area and volume](#measurements); [bounds and position](#geometry-measurements)                                                                                                                                |
-| Materials and appearance         | [material, CSS colors and native Three.js materials](#materials)                                                                                                                                                                 |
-| Parameters, time and caching     | [input](runtime.md#numeric-inputs), [timeOffset](runtime.md#time-offset) and [cache](#cached-computations)                                                                                                                       |
+| Category                         | APIs and reading                                                                                                                                                                                                                               |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Solid primitives                 | [box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil](#solid-primitives)                                                                                                                                                    |
+| Points, curves and profiles      | [point, line, arc, bezier, spline, circle, ellipse, rectangle and regularPolygon](#profiles-and-curves)                                                                                                                                        |
+| Sketches                         | [sketch, entities, constraints, point references, derive, face and faces](sketches.md)                                                                                                                                                         |
+| Text and fonts                   | [text, font and googleFont](text.md)                                                                                                                                                                                                           |
+| Shape construction               | [extrude and loft](#profiles-and-curves), [revolve](#rotational-solids), [sweep](#path-sweeps), [wrap and thicken](#curved-surface-wrapping)                                                                                                   |
+| Booleans and solid modifications | [union, cut and intersect](#composition-and-boolean-operations); [fillet, chamfer and shell](#model-operations)                                                                                                                                |
+| Origins and local transforms     | [originPoint, originVertex, originOffset, originCenter and model.rotate](#origins-and-rotation); [scaled](#scaling)                                                                                                                            |
+| Groups and placement             | [group and expose](#composition-and-boolean-operations); [relate, on and align](#anchors-and-relations); [offset, rotate and pivot/axis selectors](#independent-placement-transformations); [coupleRotation](#rotation-coupling)               |
+| Topology and references          | [vertex / vertices](api/vertex.md), [edge / edges](api/edge.md), [surface / surfaces](api/surface.md); [reference elements](api/reference-elements.md), [directional bounds](api/directional-bounds.md), [flip / reverse](api/flip-reverse.md) |
+| Geometry measurements            | [distance, length, area and volume](#measurements); [bounds and position](#geometry-measurements)                                                                                                                                              |
+| Materials and appearance         | [material, CSS colors and native Three.js materials](#materials)                                                                                                                                                                               |
+| Parameters, time and caching     | [input](runtime.md#numeric-inputs), [timeOffset](runtime.md#time-offset) and [cache](#cached-computations)                                                                                                                                     |
 
 For reusable library development, see [custom primitives](custom-primitives.mdx),
 [model data](#anchors-and-relations) and [custom inspectors and annotations](runtime.md#source-inspection).
@@ -625,36 +625,20 @@ Standalone geometry is unchanged.
 
 ## Topology
 
-- `.vertex(id)`, `.edge(id)`, `.surface(id)`: one point, line, or face anchor.
-- `.vertices(ids?)`, `.edges(ids?)`, `.surfaces(ids?)`: arrays of anchors.
+Select finite geometry with [vertex / vertices](api/vertex.md),
+[edge / edges](api/edge.md) and [surface / surfaces](api/surface.md).
+Each reference retains its owning model and topology ID. Child queries validate
+membership and keep the original namespace; see the individual selectors for
+ID paths, ordering, duplicates and empty selections.
 
-These topology references expose readonly `kind` (`vertex`, `edge`, or
-`surface`) and `id` properties. Use `model.edges().map(edge => edge.id)` to
-collect edge IDs for an operation on that model. Plain named anchors such as
-`model.up` do not have these topology properties.
+[Reference elements](api/reference-elements.md) explains frames, origins, centers,
+axes, planes and curve points. [Directional bounds](api/directional-bounds.md)
+provide finite contact boundaries; [flip / reverse](api/flip-reverse.md) changes
+reference orientation without editing geometry.
 
-IDs are model-local. See [topology selection](topology.md) for
-selection behavior and derived-model identity.
-
-`TopologyId` (also used by `VertexId`, `EdgeId`, and `SurfaceId`) is a
-positive integer or a flat numeric source path. A loft cap can be selected with
-`body.surface([1, 1])`; a mixed selection uses an outer list, such as
-`body.surfaces([1, [1, 1], [2, 1]])`. Loft, extrusion and Boolean operations prefix
-one-to-one inherited IDs with the one-based input index. Local edits (`fillet`,
-`chamfer`, `shell`) preserve inherited IDs, including existing paths; their new
-or ambiguous elements receive fresh numbers without reusing retired IDs.
-Transforms preserve complete IDs.
-
-A surface can query its edges and vertices; an edge can query its vertices.
-These queries retain the source model's IDs and validate membership.
-`.center` is a transformed local bounding-box center; edges also provide
-`.start`, `.midpoint`, and `.end` at curve parameters 0, 0.5, and 1.
-Calculated points are anchors, not topology vertices.
-
-Model dimensions use a consistent coordinate scale. When
-[exporting](../../web/src/content/docs/docs/guides/exporting.md#scale-and-orientation), choose how many
-millimeters each model unit represents. This scales the output without changing
-the source model.
+See [topology lineage](topology.md#ids-belong-to-a-model) for identities across
+construction and local edits, and the [exporting guide](../../web/src/content/docs/docs/guides/exporting.md#scale-and-orientation)
+for choosing the physical scale of model units.
 
 ## Cached computations
 

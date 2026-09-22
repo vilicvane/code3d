@@ -51,6 +51,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/sweep.ts': ['default', 1],
   'operations/wrap.ts': ['default', 3],
   'operations/origin.ts': ['centered', 1],
+  'operations/topology-api.ts': ['bodyV', 1],
   'constraints/placement-api.ts': ['stand', 2],
   'operations/local-transforms.ts': ['bottomZero', 1],
   'operations/solid-operations.ts': ['joined', 1],
@@ -291,6 +292,24 @@ for (const entry of exampleEntries) {
           Math.abs(volume(exports.default) - (30 * 8 * 20 - Math.PI * 16 * 8)) <
             1e-5,
         );
+      }
+      if (entry.file === 'operations/topology-api.ts') {
+        assert.equal(exports.corner.kind, 'vertex');
+        assert.equal(exports.corner.id, 3);
+        assert.deepEqual(
+          exports.chosenCorners.map((v: {id: number}) => v.id),
+          [3, 1],
+        );
+        assert.equal(exports.upright.length, 10);
+        assert.ok(Math.abs(exports.topFace.area - 280) < 1e-8);
+        assert.equal(exports.backward.length, 10);
+        assert.ok(Math.abs(exports.downward.area - 96) < 1e-8);
+        assert.equal(
+          distance(exports.backward.start, exports.segment.start),
+          0,
+        );
+        assert.equal(distance(exports.backward.end, exports.segment.end), 0);
+        assert.equal(distance(exports.zero, exports.geometricPoint), 10);
       }
       if (entry.file === 'constraints/placement-api.ts') {
         assert.deepEqual(exports.stand.bounds().size, [32, 16, 24]);
