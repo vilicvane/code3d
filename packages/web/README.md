@@ -237,7 +237,9 @@ rendered example order, links, anchors and assets.
   with its rotation gizmo and parameter panel visible. Update that capture when
   its example or UI changes; the geometry-only renderer does not replace it.
 - Generated model images: `src/assets/models/`. Regenerate after changing
-  examples, source contexts, or the renderer; CI regenerates them on every build.
+  examples, source contexts, or the renderer. Generate and visually review the
+  affected images locally, then commit them with the change. CI builds the
+  website using these checked-in images.
 - Site identity and URL helpers: `src/lib/site.ts`.
 - Website and docs font loading: `src/components/Fonts.astro`. Font faces are
   declared in the initial HTML and the main Latin subsets are preloaded;
@@ -299,10 +301,11 @@ npm run preview --workspace @code3d/web
 ```
 
 `npm run test:types --workspace @code3d/web` checks Astro templates and TypeScript
-in the independent CI workflow. The build generates the static site and
-Pagefind index, includes App, and validates internal links, anchors, and
-asset references. Preview the production build when testing search; Pagefind
-indexes the build output.
+in the independent CI workflow. CI checks documentation source review hashes
+before the workspace tests, then builds the website using checked-in images.
+The build checks those hashes, generates the static site and Pagefind index,
+includes App, and validates internal links, anchors, and asset references.
+Preview the production build when testing search; Pagefind indexes the build output.
 
 Set `CODE3D_SITE_URL` to the public site URL for production, for example
 `https://example.com/` or `https://example.com/code3d/`. It sets canonical URLs,
@@ -336,12 +339,12 @@ This uses the checked-in model images. To regenerate them, run
 `npm run pack:packages` and `npm run render:web-images` after building the public
 packages and App, then rebuild the website.
 
-The website workflow regenerates model images and builds the complete artifact
-before deploying. Full tests run asynchronously in the independent CI workflow
-and do not gate deployment. Automatic deployment from `main` is enabled by setting the repository
-variable `CLOUDFLARE_ACCOUNT_ID` and secret `CLOUDFLARE_API_TOKEN` (an account-scoped
-Workers deployment token). Without the account variable, CI only builds and
-uploads the artifact. Local Wrangler OAuth credentials are never copied to CI.
+App and website deployment use locally built and verified artifacts from the
+commit being published, with the existing local Wrangler authorization. Reuse
+matching verified artifacts when available. Full tests run asynchronously in
+the independent CI workflow and do not gate deployment. CI validates the
+website with checked-in images; it does not regenerate model images, upload
+website artifacts, or deploy the site. Keep deployment credentials local.
 
 `www.code3d.org` is declared as a Worker Custom Domain in `wrangler.jsonc`.
 Cloudflare manages its DNS record and certificate; do not add a competing CNAME.

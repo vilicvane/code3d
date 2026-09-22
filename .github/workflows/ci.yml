@@ -21,7 +21,6 @@ jobs:
   build:
     if: ${{ !inputs.example_pattern }}
     runs-on: ubuntu-latest
-    # Workspace tests and the complete image batch can together exceed an hour.
     timeout-minutes: 75
 
     steps:
@@ -40,6 +39,9 @@ jobs:
       - name: Check formatting
         run: npm run lint-prettier
 
+      - name: Check documentation source reviews
+        run: npm run docs:sources:check --workspace @code3d/web
+
       - name: Test worktree coordination
         run: python3 -B -m unittest discover -s .agents/skills/worktree-development/tests
 
@@ -55,24 +57,11 @@ jobs:
       - name: Verify examples in clean npm projects
         run: npm run test:examples:packages --workspace @code3d/app
 
-      - name: Build app and render-only entry
+      - name: Build app
         run: npm run build --workspace @code3d/app
 
-      - name: Install render browser
-        run: npx playwright-core install --with-deps chromium
-
-      - name: Generate website model images
-        run: npm run render:web-images
-
-      - name: Build website
+      - name: Check website build using committed images
         run: npm run build --workspace @code3d/web
-
-      - name: Upload website artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: code3d-www
-          path: packages/web/dist/www
-          if-no-files-found: error
 
   # Software-rendered runners need minutes per example, so the App examples run
   # as independent shards instead of one serial step.
