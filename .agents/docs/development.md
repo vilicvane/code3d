@@ -70,16 +70,16 @@ PlaneGCS 漏发 `dist/planegcs_dist/planegcs.d.ts`，仓库补丁补齐其模块
 ## 版本发布
 
 版本 tag 标记本次发布对应的提交，npm 发包是版本发布中交付公开包的步骤。
-App 与网站默认在本地构建并通过既有 Wrangler 授权部署；已验证且对应发布提交的
-现成产物直接复用，不为发布再等待远端构建并下载一遍。npm 包由下面的 tag workflow
-可信发布，分别核验上传与部署结果。
+App 与网站在本地构建并通过既有 Wrangler 授权部署；已验证且对应发布提交的
+现成产物直接复用。建模示例、源码上下文或渲染器变更时，在本地生成并目视核对
+受影响的文档配图，与源码一起提交。npm 包由下面的 tag workflow 可信发布，
+分别核验上传与部署结果。
 [独立 CI](../../.github/workflows/ci.yml) 在分支 push、pull request 与手工触发时完整运行
-格式、类型、单元、真实 npm 产物消费、浏览器示例和网站构建检查。CI 异步运行，
-不通过 `needs`、`workflow_run` 或 agent 人工等待成为发布门槛。
-[Build workflow](../../.github/workflows/build.yml) 可在 main 更新或手工触发时构建网站，
-配置了 Cloudflare CI 凭据才自动部署；该可选路径不替代默认的本地发布。版本 tag
-只触发 npm Publish。开始发布时先核对实际部署途径和凭据是否存在，不到构建结束才
-发现 deploy 被跳过；个人 Wrangler OAuth 不复制到 GitHub secrets。
+格式、类型、单元、真实 npm 产物消费、浏览器示例和网站构建检查。文档源码 hash
+在 workspace 测试前独立校验；网站构建使用已检入的图片，继续验证 hash、链接、
+锚点和资源。CI 不生成文档配图、不上传网站产物、不部署网站，也不通过 `needs`、
+`workflow_run` 或 agent 人工等待成为发布门槛。版本 tag 只触发 npm Publish。
+部署前核对本地 Wrangler 授权；个人凭据不复制到 GitHub secrets。
 
 ### 准备版本
 
@@ -107,8 +107,8 @@ App 与网站默认在本地构建并通过既有 Wrangler 授权部署；已验
    确认 npm 包已公开且锁的完整性一致，再推送同一主分支提交并部署网站产物；
    避免网站对用户提供尚不可安装的锁。此顺序只依赖发布结果，不依赖完整 CI。
    网站使用与发布提交一致的本地已验证产物；公开 Markdown 的源码链接也必须指向
-   已推送且对应产物的提交。现成产物满足这些条件时不重建；只有已明确选择远端构建
-   或正在恢复已有远端产物时才下载它继续部署，不把远端构建设为本地部署前置步骤。
+   已推送且对应产物的提交。现成产物满足这些条件时不重建；缺少匹配产物时在本地
+   构建并验证，不依赖 CI 生成或下载网站产物。
 
 公开包发布按 `dependencies`、`peerDependencies` 与 `optionalDependencies` 的反向依赖闭包联动。
 Core 发布新版本时，依赖它的 Layout、Materials、Screws 同步更新版本和 Core 最低版本并纳入本批；
@@ -171,7 +171,7 @@ Trusted Publisher 必须允许 direct publishing；只允许 staged publishing �
 CI 承担，不在上传前后重复运行，也不等待 CI 完成再声明上传结果。交付回报分别记录
 版本 tag、提交、包列表、本地验证、发布结果及独立 CI 状态，不把运行中写成已通过。
 部分成功时逐包记录状态，重试沿用同一个版本 tag；需要修改源码时使用新的版本与 tag。
-App/网站的部署结果按其 workflow 单独记录。
+App/网站的本地部署结果与远端 CI 状态分别记录。
 
 若 npm trust 需要认证，由 agent 发起 CLI 网页授权，给用户可在自己浏览器打开的 URL，
 用户仅负责登录/2FA 授权；agent 继续完成配置与核验，不要求用户逐包编辑设置。
