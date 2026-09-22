@@ -203,6 +203,17 @@ export default defineConfig({
                             {slug: 'docs/packages/core/api/position'},
                           ],
                         },
+                        {
+                          label: 'Sketches',
+                          items: [
+                            {slug: 'docs/packages/core/api/sketch'},
+                            {slug: 'docs/packages/core/api/sketch-entities'},
+                            {slug: 'docs/packages/core/api/sketch-constraints'},
+                            {slug: 'docs/packages/core/api/sketch-derive'},
+                            {slug: 'docs/packages/core/api/sketch-faces'},
+                            {slug: 'docs/packages/core/api/sketch-relate'},
+                          ],
+                        },
                       ],
                     },
                   ]

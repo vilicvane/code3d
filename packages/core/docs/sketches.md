@@ -31,11 +31,11 @@ export const part = profile.face().extrude(3);
 ```
 
 Closed regions bridge sketches to ordinary face and solid modeling. Read the
-[sketch reference](api.md#editable-sketch-regions)
+[sketch reference](api/sketch.md)
 and [agent sketch workflow](../../../docs/agents/sketches.md) for constraints,
-derived layers, observations, and failure diagnostics. Exact tuple types and
-solver behavior live in [sketch.ts](../src/library/sketch.ts) and
-[sketch-solver.ts](../src/library/sketch-solver.ts).
+derived layers, observations, and failure diagnostics. Use the [entity](api/sketch-entities.md), [constraint](api/sketch-constraints.md),
+[derived-layer](api/sketch-derive.md) and [region](api/sketch-faces.md) references
+for complete API rules.
 
 ### Relating a sketch to a model plane
 
@@ -81,3 +81,26 @@ visual references only, not snapping targets or imported geometry constraints.
 The select-surface-and-create UI is tracked separately within
 [#114](https://github.com/vilicvane/code3d/issues/114).
 Try [mounting-plate.ts](../../app/examples/sketches/mounting-plate.ts).
+
+## Selection and dragging
+
+In Select, an ordinary click or box selection replaces the selection, Ctrl
+toggles elements, and Shift only adds them. Drag a box left-to-right for fully
+enclosed geometry or right-to-left for intersecting geometry. A multi-selection
+can remove any editable local constraint on its elements, while adding one
+requires the entire selection to satisfy the tool's prerequisites. Parallel
+accepts two or more local lines and creates pairwise relations; Perpendicular
+and Angle between lines require exactly two. Rectangle tools still create
+horizontal and vertical constraints by default.
+
+Drag an arc endpoint to reshape it while preferring to keep its center in place.
+Drag a circle or arc center to move it while preferring to keep its radius
+unchanged. Hard constraints, expression-controlled values and read-only upstream
+geometry take precedence; these preferences can keep the dragged point from
+reaching the pointer. They apply only during the gesture and do not add persistent
+fixed or radius constraints. To change an editable radius, drag the curve itself
+or edit its source or dimension.
+After the gesture-specific preferences, all other points prefer staying near
+their gesture-start positions. This lowest-priority step only resolves remaining
+freedom: it does not pull back a translated shape, weaken hard constraints or
+add fixed-point constraints to the source.

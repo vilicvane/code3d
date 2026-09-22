@@ -4,6 +4,17 @@ import type {SourceToken} from './source-focus';
 
 export const renderSamples = [
   {
+    id: 'sketch-api',
+    view: {direction: [1, 2, 1], up: [0, 1, 0]},
+    title: 'Sketch definitions and regions',
+    description:
+      'Define constrained profiles, derive layers and build placed solids.',
+    category: 'Profiles and solids',
+    file: 'sketches/sketch-api.ts',
+    focus: {context: 'basicProfile.face().extrude(3)', token: 'extrude'},
+    tags: ['sketch', 'constraints', 'derive', 'regions', 'plane'],
+  },
+  {
     id: 'topology-api',
     title: 'Topology and references',
     description: 'Select finite topology and compare reference directions.',
@@ -481,6 +492,59 @@ export type SourceContext = Readonly<{
 export const sourceContextSets: Readonly<
   Record<string, readonly SourceContext[]>
 > = {
+  'sketch-api': [
+    {
+      id: 'sketch',
+      image: 'sketch-api',
+      label: 'sketch',
+      description:
+        'Define immutable two-dimensional sketch geometry and constraints before building faces.',
+      focus: {context: 'basicProfile.face().extrude(3)', token: 'extrude'},
+    },
+    {
+      id: 'sketch-entities',
+      image: 'sketch-entities',
+      label: 'Sketch entities',
+      description:
+        'Author points, lines, circles and directed circular arcs with layer-local IDs.',
+      focus: {context: 'entityProfile.face().extrude(2)', token: 'extrude'},
+    },
+    {
+      id: 'sketch-constraints',
+      image: 'sketch-constraints',
+      label: 'Sketch constraints',
+      description:
+        'Constrain sketch points and curves while preserving explicit geometric freedom.',
+      focus: {
+        context: 'constrainedProfile.face().extrude(3)',
+        token: 'extrude',
+      },
+    },
+    {
+      id: 'sketch-derive',
+      image: 'sketch-derive',
+      label: 'Sketch point and derive',
+      description:
+        'Reference defining-layer points and add immutable local geometry over an upstream sketch.',
+      focus: {context: 'derivedProfile.face().extrude(10)', token: 'extrude'},
+    },
+    {
+      id: 'sketch-faces',
+      image: 'sketch-faces',
+      label: 'Sketch face and faces',
+      description:
+        'Extract finite faces from closed sketch boundaries, including holes and separate regions.',
+      focus: {context: 'holesProfile.faces()', token: 'faces'},
+    },
+    {
+      id: 'sketch-relate',
+      image: 'sketch-relate',
+      label: 'Sketch plane and relate',
+      description:
+        'Position an immutable sketch plane against model geometry before extracting faces.',
+      focus: {context: 'sketchHost.cut([', token: 'cut'},
+    },
+  ],
   'topology-api': [
     {
       id: 'vertex',
@@ -1198,6 +1262,7 @@ export const exampleEntries = [
   {
     file: 'operations/rotate.ts',
   },
+  {file: 'sketches/sketch-api.ts'},
   {file: 'operations/topology-api.ts'},
   {file: 'constraints/placement-api.ts'},
   {file: 'operations/local-transforms.ts'},

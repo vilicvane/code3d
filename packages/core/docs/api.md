@@ -18,7 +18,7 @@ model methods and reference properties are grouped by what they do.
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Solid primitives                 | [box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil](#solid-primitives)                                                                                                                                                    |
 | Points, curves and profiles      | [point, line, arc, bezier, spline, circle, ellipse, rectangle and regularPolygon](#profiles-and-curves)                                                                                                                                        |
-| Sketches                         | [sketch, entities, constraints, point references, derive, face and faces](sketches.md)                                                                                                                                                         |
+| Sketches                         | [sketch](api/sketch.md), [entities](api/sketch-entities.md), [constraints](api/sketch-constraints.md), [point / derive](api/sketch-derive.md), [face / faces](api/sketch-faces.md), [plane / relate](api/sketch-relate.md)                     |
 | Text and fonts                   | [text, font and googleFont](text.md)                                                                                                                                                                                                           |
 | Shape construction               | [extrude and loft](#profiles-and-curves), [revolve](#rotational-solids), [sweep](#path-sweeps), [wrap and thicken](#curved-surface-wrapping)                                                                                                   |
 | Booleans and solid modifications | [union, cut and intersect](#composition-and-boolean-operations); [fillet, chamfer and shell](#model-operations)                                                                                                                                |
@@ -224,104 +224,18 @@ restores the original expression.
 
 ## Editable sketch regions
 
-Select a `sketch([...])` expression or variable to preview its points and curves
-in 3D. Choose **Edit sketch** to open its 2D editor and **Finish sketch** to return
-to the shared 3D scene.
-Points, lines, circles and arcs use explicit layer-local entity IDs. `face()`
-requires exactly one closed region, including holes; `faces()` returns all regions
-as an ordinary readonly array. Use `map` for independent modeling operations:
-
-```ts
-import {sketch} from '@code3d/core';
-
-const profile = sketch([
-  ['point', 1, [0, 0]],
-  ['circle', 2, [1, 12]],
-  ['circle', 3, [1, 8]],
-]);
-const sleeve = profile.face().extrude(20);
-const parts = profile.faces().map(face => face.extrude(10));
-```
-
-Geometry tuples store current data; the second argument's `constraints` array
-specifies relations that must remain true. Constraints have no IDs and use
-`['kind', target, value?]`. For local lines:
-
-- `['horizontal', line]` and `['vertical', line]` set an axis direction;
-  `['length', line, distance]` sets a positive length.
-- `['angle', line, degrees]` sets Orientation relative to +X.
-- `['parallel', [line1, line2]]` and `['perpendicular', [line1, line2]]`
-  relate two lines without requiring their finite segments to intersect.
-- `['angle', [line1, line2], degrees]` sets Angle between lines: the signed
-  rotation from the first line's authored start-to-end direction to the second,
-  positive counterclockwise and equivalent modulo 360.
-
-In Select, an ordinary click or box selection replaces the selection, Ctrl
-toggles elements, and Shift only adds them. Drag a box left-to-right for fully
-enclosed geometry or right-to-left for intersecting geometry. A multi-selection
-can remove any editable local constraint on its elements, while adding one
-requires the entire selection to satisfy the tool's prerequisites. Parallel
-accepts two or more local lines and creates pairwise relations; Perpendicular
-and Angle between lines require exactly two. Rectangle tools still create
-horizontal and vertical constraints by default.
-
-Drag an arc endpoint to reshape it while preferring to keep its center in place.
-Drag a circle or arc center to move it while preferring to keep its radius
-unchanged. Hard constraints, expression-controlled values and read-only upstream
-geometry take precedence; these preferences can keep the dragged point from
-reaching the pointer. They apply only during the gesture and do not add persistent
-fixed or radius constraints. To change an editable radius, drag the curve itself
-or edit its source or dimension.
-After the gesture-specific preferences, all other points prefer staying near
-their gesture-start positions. This lowest-priority step only resolves remaining
-freedom: it does not pull back a translated shape, weaken hard constraints or
-add fixed-point constraints to the source.
-
-Derived sketches include their read-only upstream boundaries. Separate contours
-produce separate faces; nested contours alternate material, holes and islands.
-Open, crossing, touching, overlapping and branched boundaries must be trimmed into
-valid closed contours before creating faces. The editor leaves unfinished sketches
-editable and previews valid regions without changing entity IDs.
-
-Sketch `[x, y]` maps to model `[x, 0, -y]`, without recentering. `.extrude(distance)`
-and `extrude(face, distance)` are equivalent single-face operations. Distance must
-be finite and nonzero; positive follows the plane normal, negative reverses it.
-Rotating the face rotates its extrusion direction too.
-
-`loft` takes one face per section and preserves a single corresponding hole, with
-or without a spine. Different hole counts or multiple unpaired holes report an
-error rather than silently filling holes. Persistent region IDs and general
-multi-hole correspondence are not available yet. Try `examples/sketches/regions.ts`
-in the App for a plate, multiple cutting tools and a hollow loft.
+[sketch](api/sketch.md) creates an immutable two-dimensional definition. See
+[entity tuples](api/sketch-entities.md) for points, lines, circles and arcs;
+[constraints](api/sketch-constraints.md) for the complete condition union;
+[point and derive](api/sketch-derive.md) for upstream references and local layers;
+and [face and faces](api/sketch-faces.md) for closed regions, holes and islands.
+The [editor workflow](sketches.md) explains selection and drag behavior.
 
 ### Sketch placement and model context
 
-`sketch.relate(self => align(self.plane, target))` creates an immutable spatial
-copy of the same local 2D definition. Empty and open sketches can relate before
-`face()` is available. Targets include named model planes and planar
-`model.surface(id)` references.
-
-```ts
-const host = box(40, 20, 30).rotate(0, 0, 25);
-const profile = sketch([
-  ['point', 1, [0, 0]],
-  ['circle', 2, [1, 4]],
-]);
-const opening = profile.relate(s => align(s.plane, host.surface(4)));
-const result = host.cut([opening.face().extrude(-20)]);
-```
-
-Derived layers, faces and extrusion inherit these relations. Plane alignment does
-not center on a trimmed face or rewrite sketch coordinates. The relation binds
-the referenced immutable host value; later creating another transformed host does
-not redirect it. Use `align()`, not finite-bound `on()`, for the sketch's unbounded
-reference plane.
-
-Select `opening` and choose **Edit sketch** to edit with read-only model outlines in the sketch's
-local plane, or `profile` for the original local view. Both write the same geometry
-array. The outlines do not become snapping targets or external geometry constraints.
-See `examples/sketches/mounting-plate.ts` for a slotted plate. Create the relation
-in code; selecting a face does not automatically generate a related sketch.
+[plane and relate](api/sketch-relate.md) places an empty, open or closed sketch
+against model geometry. It explains the callback's self identity, inherited
+relations, finite/infinite geometry limits and editing in a model context.
 
 ## Composition and boolean operations
 

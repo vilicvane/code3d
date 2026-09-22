@@ -51,6 +51,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'operations/sweep.ts': ['default', 1],
   'operations/wrap.ts': ['default', 3],
   'operations/origin.ts': ['centered', 1],
+  'sketches/sketch-api.ts': ['basicPart', 1],
   'operations/topology-api.ts': ['bodyV', 1],
   'constraints/placement-api.ts': ['stand', 2],
   'operations/local-transforms.ts': ['bottomZero', 1],
@@ -292,6 +293,17 @@ for (const entry of exampleEntries) {
           Math.abs(volume(exports.default) - (30 * 8 * 20 - Math.PI * 16 * 8)) <
             1e-5,
         );
+      }
+      if (entry.file === 'sketches/sketch-api.ts') {
+        const near = (actual: number, expected: number) =>
+          assert.ok(Math.abs(actual - expected) < 1e-6);
+        near(exports.basicPart.volume, 192 * Math.PI);
+        near(exports.entityPart.volume, 34 * Math.PI);
+        near(exports.sleevePart.volume, 3360 * Math.PI);
+        near(exports.constrainedPart.volume, 3000);
+        assert.equal(exports.regionParts.length, 2);
+        for (const part of exports.regionParts) near(part.volume, 45 * Math.PI);
+        near(exports.drilledHost.volume, 40 * 8 * 30 - 128 * Math.PI);
       }
       if (entry.file === 'operations/topology-api.ts') {
         assert.equal(exports.corner.kind, 'vertex');
