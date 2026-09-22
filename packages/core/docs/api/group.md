@@ -5,10 +5,9 @@ sourceReview:
   packageVersion: 0.0.1-alpha.14
   sources:
     - path: packages/core/src/library/group.ts
-      sha256: 25a7f74c0998170569a75f520c6b28d0be85ffc4e5797419ca8067a30163a4e8
-      commit: 757c8003e4ef2c3e4b4e85561e186a82a1dd1c39
+      sha256: c9592b8f7ed218c81a147f1a5102592cd8b21cde0953bf0178ea0b848e0952a6
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
 sidebar:
   hidden: true
 head:
@@ -25,7 +24,7 @@ import {box, group, on} from '@code3d/core';
 
 const standBase = box(32, 4, 24);
 const standPost = box(8, 12, 8).relate(() => on(standBase.up));
-export const stand = group([standBase, standPost], 'Stand');
+export const stand = group([standBase, standPost], {name: 'Stand'});
 ```
 
 ![Compose models into an assembly while preserving separate members and their hierarchy.](../../../web/src/assets/models/placement.png)
@@ -35,7 +34,8 @@ Complete example: [groups and placement](../../../app/examples/constraints/place
 ## Signature
 
 ```ts
-function group(children: readonly Model[], name?: string): GroupModel;
+function group(children: readonly Model[], options?: GroupOptions): GroupModel;
+type GroupOptions = Readonly<{name?: string; frame?: FrameAnchor}>;
 ```
 
 Import the functions and named types from `@code3d/core`.
@@ -44,8 +44,9 @@ Import the functions and named types from `@code3d/core`.
 
 `children` is a readonly array of models: solids, faces, curves, points or nested
 groups. An empty array is valid. A topology or anchor reference is not a model
-and cannot be added as an independent child. `name` is an optional display name,
-defaulting to `Group`.
+and cannot be added as an independent child. `options.name` is an optional display
+name, defaulting to `Group`. `options.frame` selects the assembly coordinates.
+Omitting the options object is equivalent to `{}`.
 
 Relations are solved at the composition boundary. The resulting `GroupModel`
 retains each separate part, material and nested hierarchy. This does not fuse
@@ -54,15 +55,24 @@ The example contains two solids and puts the post's bottom against the base's to
 
 ## Coordinate frame
 
-A nonempty group inherits its first member's solved local frame, including its
+Without `options.frame`, a nonempty group inherits its first member's solved local frame, including its
 origin and axes. Reordering members can therefore change the result coordinates
 without changing the intended relative placement. A nested group is one complete
 member; its children are not flattened to choose the outer origin. An empty group
-has the default frame and no finite geometric bounds.
+uses the default frame when no frame is selected, and has no finite geometric bounds.
+
+With `{frame: reference}`, the reference's solved origin and all axes determine
+the assembly coordinates independently of member order. Use an independent
+[frame](frame.md), a model's `.frame`, or an exposed `FrameAnchor`. The reference
+participates in solving but is not an output child. An exposed frame's own local
+transform is included. Empty groups can also select a frame. Nested groups,
+origin edits and rotations carry the chosen reference occurrence with the
+completed assembly. Selecting the frame option in the App shows the reference
+with member geometry as context.
 
 ## Group capabilities
 
-Groups provide `origin`, `frame`, directional bounds, [bounds](bounds.md),
+Groups provide [metadata and withMetadata](model-data.md), `origin`, `frame`, directional bounds, [bounds](bounds.md),
 `position`, [relate](relate.md), [expose](expose.md), material, originOffset,
 originPoint and [model.rotate](model-rotate.md). Origin edits and rotation act on
 the already assembled layout, preserving member relationships. Groups do not

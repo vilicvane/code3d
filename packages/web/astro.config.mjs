@@ -167,6 +167,7 @@ export default defineConfig({
                           label: 'Groups and placement',
                           items: [
                             {slug: 'docs/packages/core/api/group'},
+                            {slug: 'docs/packages/core/api/frame'},
                             {slug: 'docs/packages/core/api/expose'},
                             {slug: 'docs/packages/core/api/relate'},
                             {slug: 'docs/packages/core/api/on'},

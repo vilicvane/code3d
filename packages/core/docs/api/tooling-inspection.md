@@ -8,8 +8,7 @@ sourceReview:
       sha256: 22de3db44e18aef80c032f550835e1cf74ad9bcd899abeb246eda1ad53778ebf
       commit: 257dac61457d3ec723fd8054ebcb2e12daceba85
     - path: packages/core/src/library/inspect.ts
-      sha256: 41c720ebec3e0ebe941a3b6e7c18f0db08badec6e95021d5e29c59d88c13b5a8
-      commit: 257dac61457d3ec723fd8054ebcb2e12daceba85
+      sha256: 530883228cd23a27f1e13c5153669c24ce87d523f4ff1cc52202dab698063e45
 sidebar:
   hidden: true
 head:

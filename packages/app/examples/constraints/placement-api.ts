@@ -17,7 +17,7 @@ import {
 
 const standBase = box(32, 4, 24);
 const standPost = box(8, 12, 8).relate(() => on(standBase.up));
-export const stand = group([standBase, standPost], 'Stand');
+export const stand = group([standBase, standPost], {name: 'Stand'});
 
 const pin = cylinder(4, 18);
 export const mountingPin = pin.expose({

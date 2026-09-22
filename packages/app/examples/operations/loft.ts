@@ -18,5 +18,5 @@ const end = rectangle(40, 40).relate(() => [
   pivot([50, 0, 0]).rotate(0, 0, 90),
 ]);
 
-export const sections = group([start, via, end], 'Loft sections');
+export const sections = group([start, via, end], {name: 'Loft sections'});
 export default loft([start, via, end]).material('#d8ff3e');

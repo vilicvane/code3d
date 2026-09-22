@@ -1,4 +1,5 @@
 import {group} from './group.js';
+import {frame} from './frame.js';
 import {on} from './on.js';
 import {align} from './align.js';
 import {coupleRotation} from './couple-rotation.js';
@@ -52,6 +53,7 @@ import {text} from './text.js';
 import {distance} from './distance.js';
 
 export const authoringApi = Object.freeze({
+  frame,
   originCenter,
   input,
   timeOffset,

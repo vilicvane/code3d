@@ -24,4 +24,4 @@ const parts = flex(
     alignContent: 'center',
   },
 );
-export default group(parts, 'Wrapped flex rows');
+export default group(parts, {name: 'Wrapped flex rows'});

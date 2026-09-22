@@ -7,11 +7,13 @@ import {appIsolationHeaders} from '../../build/response-headers.ts';
 declare const window: Window & {
   transmissionTest: {
     preview: import('../../src/model/preview-state.ts').ModelPreviewState;
+    codeEditor: import('../../src/editor.ts').CodeEditor;
+    viewport: import('../../src/viewport.ts').ModelViewport;
   };
 };
 
 test(
-  'dragging one external crank drives the complete gear chain before release',
+  'dragging one external crank drives both compound gear stages before release',
   {timeout: 120_000},
   async t => {
     const browser = await chromium.connectOverCDP(
@@ -45,12 +47,92 @@ test(
         response,
         body:
           (await response.text()) +
-          '\nwindow.transmissionTest = {preview: previewState};',
+          '\nwindow.transmissionTest = {preview: previewState, codeEditor, viewport};',
       });
     });
     // A cold development package manifest enumerates published dependencies.
     await page.goto(process.env.CODE3D_TEST_URL!, {timeout: 60_000});
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+    // The assembly contains only actual parts; its frame is a separate reference.
+    for (const [token, focused] of [
+      ['inputCrank, ...gears', [0]],
+      ['gears, middleShaft', [1, 2, 3, 4]],
+      ['middleShaft, outputCrank', [5]],
+      ['outputCrank],', [6]],
+    ] as const) {
+      await page.evaluate(
+        ({source, token}) => {
+          const editor = window.transmissionTest.codeEditor.editor;
+          editor.setPosition(
+            editor.getModel()!.getPositionAt(source.lastIndexOf(token) + 1),
+          );
+        },
+        {source, token},
+      );
+      await page.waitForFunction((focused: readonly number[]) => {
+        const {preview, viewport} = window.transmissionTest;
+        const scene = viewport['inspectionScene'];
+        return (
+          !preview.inspecting &&
+          (!!preview.inspectionDiagnostic ||
+            (scene?.target.length === 7 &&
+              scene.target.every(
+                (item, index) => !!item.focused === focused.includes(index),
+              )))
+        );
+      }, focused);
+      assert.equal(
+        await page.evaluate(
+          () => window.transmissionTest.preview.inspectionDiagnostic,
+        ),
+        undefined,
+        token,
+      );
+    }
+    await page.evaluate(() => {
+      const editor = window.transmissionTest.codeEditor.editor;
+      editor.setPosition(
+        editor
+          .getModel()!
+          .getPositionAt(
+            editor.getValue().lastIndexOf('frame: base') + 'frame: '.length + 1,
+          ),
+      );
+    });
+    await page.waitForFunction(() => {
+      const {preview, viewport} = window.transmissionTest;
+      const scene = viewport['inspectionScene'];
+      return (
+        !preview.inspecting &&
+        !preview.inspectionDiagnostic &&
+        scene?.target.length === 1 &&
+        scene.target[0].kind === 'anchor' &&
+        scene.target[0].focused &&
+        scene.ambient.length === 7
+      );
+    });
+    // Blank source retains the previous scene; select the complete group to
+    // restore the assembly view before exercising its input.
+    await page.evaluate(() => {
+      const editor = window.transmissionTest.codeEditor.editor;
+      editor.setPosition(
+        editor
+          .getModel()!
+          .getPositionAt(editor.getValue().lastIndexOf('group(') + 1),
+      );
+    });
+    await page.waitForFunction(() => {
+      const {preview, viewport} = window.transmissionTest;
+      const scene = viewport['inspectionScene'];
+      return (
+        !preview.inspecting &&
+        !preview.inspectionDiagnostic &&
+        scene?.kind === 'preview' &&
+        scene.target.length === 1 &&
+        scene.target[0].kind === 'model' &&
+        scene.target[0].model.children.length === 7
+      );
+    });
     const panel = page.getByRole('complementary', {name: 'Model inputs'});
     const handle = panel.locator('.dock-panel-handle');
     if ((await handle.getAttribute('aria-expanded')) !== 'true')
@@ -74,12 +156,13 @@ test(
               1 - 2 * (q[1] ** 2 + q[2] ** 2),
             );
           return [
+            [0, 1],
             [1, 1],
-            [2, 1],
+            [2, -2 / 3],
             [3, -2 / 3],
-            [4, 0.5],
+            [4, 0.3],
             [5, -2 / 3],
-            [6, 0.5],
+            [6, 0.3],
           ].every(([index, ratio]) => {
             const expected =
               yaw(initial[index].quaternion) + (angle * ratio * Math.PI) / 180;
@@ -95,7 +178,7 @@ test(
         },
         {angle, initial},
       );
-    // Crossing one revolution changes the half-speed output by half a revolution.
+    // One input revolution turns the compound train's output by 108°.
     for (const angle of [359, 360, 361, -720]) {
       await input.fill(String(angle));
       await waitForAngle(angle);
@@ -122,7 +205,7 @@ test(
       await slider.evaluate(el => document.activeElement === el),
       true,
     );
-    await page.screenshot({path: '/tmp/code3d-215-transmission.png'});
+    await page.screenshot({path: '/tmp/code3d-231-transmission.png'});
     await page.mouse.up();
     assert.deepEqual(errors, []);
   },

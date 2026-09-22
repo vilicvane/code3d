@@ -89,7 +89,7 @@ export type {
 
 export {distance} from './distance.js';
 
-export {getModelData, setModelData} from './runtime.js';
+export {frame} from './frame.js';
 export {text} from './text.js';
 
 export type {
@@ -115,6 +115,8 @@ export type {
   ExposedValue,
   FaceAnchor,
   FrameAnchor,
+  Frame,
+  GroupOptions,
   RotationCouplingConfig,
   FaceModel,
   GeometryCapabilities,
@@ -130,6 +132,7 @@ export type {
   ModelForKind,
   ModelGeometryKind,
   ModelKind,
+  ModelMetadata,
   NamedElements,
   PlanarElements,
   PointAnchor,

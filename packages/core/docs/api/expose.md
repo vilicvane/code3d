@@ -5,7 +5,7 @@ sourceReview:
   packageVersion: 0.0.1-alpha.14
   sources:
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
 sidebar:
   hidden: true
 head:
@@ -86,3 +86,7 @@ fillet or boolean kept the referenced topology. See [topology lineage](../topolo
 `MergedElements<Existing, Added>` replaces matching old keys with the new types.
 `ModelForKind` preserves the receiver's geometric or group kind. Import these
 types from `@code3d/core` when writing generic part libraries.
+
+Independent [frames](frame.md) can be exposed as `FrameAnchor` references. Their
+transformed origin and axes follow the containing model; the exposed reference
+does not promise the original `Frame.relate()` authoring method.

@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {box, cut, cylinder, group, rectangle} from '../bld/node/index.js';
+import {
+  box,
+  cut,
+  cylinder,
+  group,
+  point,
+  rectangle,
+} from '../bld/node/index.js';
 import {
   beginModelEvaluation,
   clearKernelOperationCache,
@@ -54,6 +61,45 @@ function closeNumbers(actual: unknown, expected: unknown, path = ''): void {
       );
   } else assert.deepEqual(actual, expected, path);
 }
+
+test('nested empty groups retain their frames without inventing geometry bounds', () => {
+  const empty = group([]).originOffset(1, 2, 3);
+  const nested = group([group([empty])]).expose({datum: empty.frame});
+  const mixed = group([nested, box(4, 6, 8)]);
+  const pointGroup = group([nested, point()]);
+  const objects = [nested, mixed, pointGroup].map(runtime);
+  try {
+    assert.deepEqual(planModelSnapshotQueries([objects[0]]), []);
+    const snapshot = createModelSnapshotter();
+    const view = snapshot(objects[0]);
+    assert.ok(view.elements.some(element => element.name === 'datum'));
+    for (const node of [view, view.children[0], view.children[0].children[0]]) {
+      assert.equal(node.mesh, undefined);
+      assert.deepEqual(
+        node.elements.filter(element => element.bound),
+        [],
+      );
+    }
+    assert.equal(
+      snapshot(objects[1]).elements.filter(element => element.bound).length,
+      6,
+    );
+    const pointBounds = snapshot(objects[2]).elements.filter(
+      element => element.bound,
+    );
+    assert.equal(pointBounds.length, 6);
+    pointBounds.forEach(element =>
+      assert.deepEqual(element.bound!.size, [0, 0]),
+    );
+    assert.throws(
+      () => nested.bounds(),
+      /Empty geometry has no directional bounds/,
+    );
+    assert.throws(() => nested.up, /Empty geometry has no directional bounds/);
+  } finally {
+    disposeModelObjects(objects);
+  }
+});
 
 test('snapshot batches preserve nested origins, transforms and mesh ownership across binary transfer', () => {
   clearKernelOperationCache();

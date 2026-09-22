@@ -8,8 +8,7 @@ sourceReview:
       sha256: 779d4de9fa63c44633a16aac3c6e1125376dcc7483b0e6cf6d11d6970db87310
       commit: da2824c30b54a50ac216679fff96c67dd3dcee4c
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
     - path: packages/core/src/library/topology.ts
       sha256: f9f0d048fe30cc80046a25123aa8101ca51e85cdb5b2e66260c6a68f43f84715
       commit: 67228dd8559d584852df7bfbd47ed89f1d8003e9
@@ -66,7 +65,7 @@ share its mesh cache; create a fresh one for a new host pass. The result tree
 contains models and reference nodes. A root's `transform` uses model-local
 coordinates; `compositionTransform` records placement when composed.
 
-`modelElementReference(value)` recognizes a named model anchor and returns its
+`modelElementReference(value)` recognizes a named model anchor or independent frame and returns its
 owner, name, element kind, transform and optional bound/direction/facing fields.
 `modelTopologyReference(value)` recognizes a finite topology reference and adds
 the actual geometry owner and selection. Each returns `undefined` for an
@@ -82,7 +81,19 @@ It prepares reference preview data and does not change the model.
 
 ## Instrumentation and record fields
 
-`instrumentModelOperation(object, instrumentation)` records the current source
+`modelOperationObject(value)` resolves a model or independent frame to itself,
+and a Sketch to its internal reference frame. Unsupported values, including an
+ordinary model `.frame` anchor, yield `undefined`. Use it when traversing
+authored operation outputs of different kinds, instead of filtering only models.
+
+### modelOperationObject
+
+```ts
+function modelOperationObject(value: unknown): RelationObject | undefined;
+```
+
+`instrumentModelOperation(object, instrumentation)` accepts a runtime relation
+participant, including model, independent frame and sketch frame, and records the current source
 site, execution index, authored order and parameter dependencies. `outputIndex`
 distinguishes multiple model results from the same invocation. `SourceRef`
 contains the source `file`, inclusive start offset and exclusive end offset in
@@ -94,7 +105,9 @@ using them. `ParameterTarget` identifies a named numeric source target;
 `ModelOperationSnapshot` records output identity, ordered inputs with roles,
 selected topology, optional source/spatial data and authored dimensions.
 `ModelOperationKind` and `ModelOperationInputRole` enumerate all supported
-branches below; do not infer operation semantics from display names.
+branches below, including `frame` and `withMetadata`; do not infer operation
+semantics from display names. Metadata entries themselves are omitted from the
+render snapshot.
 Selections express input geometry in the operation output's frame. Dimension
 `origin` and `vector` use that same local frame.
 
@@ -304,6 +317,7 @@ type ModelOperationInstrumentation = Readonly<{
 
 ```ts
 type ModelOperationKind =
+  | 'frame'
   | 'sketch'
   | 'box'
   | 'cylinder'
@@ -332,6 +346,7 @@ type ModelOperationKind =
   | 'thicken'
   | 'primitive'
   | 'material'
+  | 'withMetadata'
   | 'scaled'
   | 'originOffset'
   | 'originVertex'

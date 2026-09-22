@@ -8,7 +8,7 @@ sourceReview:
       sha256: ea171203ce58b50b86f522331e911d62cf2ee5f5c65d4b4e3e103aac3b2651f6
       commit: 757c8003e4ef2c3e4b4e85561e186a82a1dd1c39
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
     - path: packages/core/src/library/alignment-geometry.ts
       sha256: 5d0a2bee2c0254805edb71643a44b33149a92d2d6253b3a6eb437cd6720156fc
       commit: 7f67264a5c862cdb95c408bcaedff43a3f8f46dd
@@ -72,6 +72,10 @@ Point membership ignores direction; a curve on a surface does not acquire an
 arbitrary heading within that surface.
 
 ## Frame alignment
+
+An independent [`Frame`](frame.md) is already a frame reference: use
+`align(self, otherFrame)` in its `.relate()` callback, or
+`align(self.frame, baseFrame)` when placing a model against it.
 
 `align(self.frame, other.frame)` coincides origins and all three coordinate axes.
 Select `.frame` explicitly: aligning models does not implicitly align their

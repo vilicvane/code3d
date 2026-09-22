@@ -5,8 +5,7 @@ sourceReview:
   packageVersion: 0.0.1-alpha.14
   sources:
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
     - path: packages/core/src/library/spatial.ts
       sha256: 810c4fa69352c26c32fb04a0e7867f6327698e02f3212669f17d777784322a78
       commit: 69d231fb775befdb3cd098291b4097ccd52d8966
@@ -93,6 +92,8 @@ merges its new names.
 
 | Member                                                | Contract and primary reference                                                                                   |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `metadata: ModelMetadata`                             | Readonly symbol-keyed [metadata](model-data.md).                                                                 |
+| `withMetadata(entries: ModelMetadata)`                | Return a new model with merged metadata entries.                                                                 |
 | `origin: PointAnchor`                                 | Same zero-point reference as `frame.origin`; [reference elements](reference-elements.md).                        |
 | `frame: FrameAnchor`                                  | Local coordinate frame, independent of geometry; [reference elements](reference-elements.md).                    |
 | `up`, `down`, `left`, `right`, `front`, `back: Bound` | Six finite [directional bounds](directional-bounds.md).                                                          |

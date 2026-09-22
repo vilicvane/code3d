@@ -14,20 +14,20 @@ API. For a first runnable model, see the [Core example](../README.md#example).
 Choose a starting shape, build the part, then place and measure it. Functions,
 model methods and reference properties are grouped by what they do.
 
-| Category                         | APIs and reading                                                                                                                                                                                                                               |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Solid primitives                 | [box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil](#solid-primitives)                                                                                                                                                    |
-| Points, curves and profiles      | [point, line, arc, bezier, spline, circle, ellipse, rectangle and regularPolygon](#profiles-and-curves)                                                                                                                                        |
-| Sketches                         | [sketch](api/sketch.md), [entities](api/sketch-entities.md), [constraints](api/sketch-constraints.md), [point / derive](api/sketch-derive.md), [face / faces](api/sketch-faces.md), [plane / relate](api/sketch-relate.md)                     |
-| Text and fonts                   | [text](api/text.md), [font](api/font.md), [googleFont](api/google-font.md)                                                                                                                                                                     |
-| Shape construction               | [extrude and loft](#profiles-and-curves), [revolve](#rotational-solids), [sweep](#path-sweeps), [wrap and thicken](#curved-surface-wrapping)                                                                                                   |
-| Booleans and solid modifications | [union, cut and intersect](#composition-and-boolean-operations); [fillet, chamfer and shell](#model-operations)                                                                                                                                |
-| Origins and local transforms     | [originPoint, originVertex, originOffset, originCenter and model.rotate](#origins-and-rotation); [scaled](#scaling)                                                                                                                            |
-| Groups and placement             | [group and expose](#composition-and-boolean-operations); [relate, on and align](#anchors-and-relations); [offset, rotate and pivot/axis selectors](#independent-placement-transformations); [coupleRotation](#rotation-coupling)               |
-| Topology and references          | [vertex / vertices](api/vertex.md), [edge / edges](api/edge.md), [surface / surfaces](api/surface.md); [reference elements](api/reference-elements.md), [directional bounds](api/directional-bounds.md), [flip / reverse](api/flip-reverse.md) |
-| Geometry measurements            | [distance](api/distance.md), [length](api/length.md), [area](api/area.md), [volume](api/volume.md), [bounds](api/bounds.md), [position](api/position.md)                                                                                       |
-| Materials and appearance         | [material and colors](api/material.md), [Three.js integration](api/three.md)                                                                                                                                                                   |
-| Parameters, time and caching     | [input](api/input.md), [timeOffset](api/time-offset.md) and [cache](api/cache.md)                                                                                                                                                              |
+| Category                         | APIs and reading                                                                                                                                                                                                                                        |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Solid primitives                 | [box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil](#solid-primitives)                                                                                                                                                             |
+| Points, curves and profiles      | [point, line, arc, bezier, spline, circle, ellipse, rectangle and regularPolygon](#profiles-and-curves)                                                                                                                                                 |
+| Sketches                         | [sketch](api/sketch.md), [entities](api/sketch-entities.md), [constraints](api/sketch-constraints.md), [point / derive](api/sketch-derive.md), [face / faces](api/sketch-faces.md), [plane / relate](api/sketch-relate.md)                              |
+| Text and fonts                   | [text](api/text.md), [font](api/font.md), [googleFont](api/google-font.md)                                                                                                                                                                              |
+| Shape construction               | [extrude and loft](#profiles-and-curves), [revolve](#rotational-solids), [sweep](#path-sweeps), [wrap and thicken](#curved-surface-wrapping)                                                                                                            |
+| Booleans and solid modifications | [union, cut and intersect](#composition-and-boolean-operations); [fillet, chamfer and shell](#model-operations)                                                                                                                                         |
+| Origins and local transforms     | [originPoint, originVertex, originOffset, originCenter and model.rotate](#origins-and-rotation); [scaled](#scaling)                                                                                                                                     |
+| Groups and placement             | [group and expose](#composition-and-boolean-operations); [frame](api/frame.md); [relate, on and align](#anchors-and-relations); [offset, rotate and pivot/axis selectors](#independent-placement-transformations); [coupleRotation](#rotation-coupling) |
+| Topology and references          | [vertex / vertices](api/vertex.md), [edge / edges](api/edge.md), [surface / surfaces](api/surface.md); [reference elements](api/reference-elements.md), [directional bounds](api/directional-bounds.md), [flip / reverse](api/flip-reverse.md)          |
+| Geometry measurements            | [distance](api/distance.md), [length](api/length.md), [area](api/area.md), [volume](api/volume.md), [bounds](api/bounds.md), [position](api/position.md)                                                                                                |
+| Materials and appearance         | [material and colors](api/material.md), [Three.js integration](api/three.md)                                                                                                                                                                            |
+| Parameters, time and caching     | [input](api/input.md), [timeOffset](api/time-offset.md) and [cache](api/cache.md)                                                                                                                                                                       |
 
 For reusable library development, see [definePrimitive and Replicad](api/define-primitive.md),
 [model data](api/model-data.md) and [custom inspectors](api/inspectors.md), [group member inspection](api/inspect-group-members.md) and [annotations](api/annotations.md).
@@ -245,15 +245,21 @@ relations, finite/infinite geometry limits and editing in a model context.
 
 ## Composition and boolean operations
 
-| Function                                | Result                                        |
-| --------------------------------------- | --------------------------------------------- |
-| [`group(models, name?)`](api/group.md)  | Composition that preserves its separate parts |
-| [`union(solids)`](api/union.md)         | Fused solid                                   |
-| [`cut(stock, tools)`](api/cut.md)       | Stock with the tool volumes removed           |
-| [`intersect(solids)`](api/intersect.md) | Shared solid volume                           |
+| Function                                  | Result                                        |
+| ----------------------------------------- | --------------------------------------------- |
+| [`group(models, options?)`](api/group.md) | Composition that preserves its separate parts |
+| [`union(solids)`](api/union.md)           | Fused solid                                   |
+| [`cut(stock, tools)`](api/cut.md)         | Stock with the tool volumes removed           |
+| [`intersect(solids)`](api/intersect.md)   | Shared solid volume                           |
 
 See [group](api/group.md) for supported members, nested hierarchy and coordinate
 frames. [expose](api/expose.md) publishes typed member references for reuse.
+
+Use `{name: 'Assembly', frame: base}` to name the group and explicitly select
+its local coordinate system. `frame` accepts an independent `frame()` value,
+a model's `.frame`, or an exposed frame. It contributes a reference, not an
+output member. Without this option, the first member defines the coordinates.
+See [independent coordinate frames](#independent-coordinate-frames).
 
 Relations are resolved at composition and geometry evaluation boundaries.
 [`stock.cut(tools)`](api/cut.md) is equivalent to the free function. Arrays in booleans and
@@ -308,10 +314,22 @@ Use [originPoint](api/origin-point.md), [originVertex](api/origin-vertex.md),
 choose local zero. [Model rotate](api/model-rotate.md) rotates local geometry;
 [relation rotate](api/rotate.md) places it in a composition.
 
+### Independent coordinate frames
+
+[`frame(name?)`](api/frame.md) creates an independent coordinate reference without geometry. Use it with `align` and select it in [`group` options](api/group.md#coordinate-frame).
+
+### Model coordinate references
+
+See [frame and origin](api/reference-elements.md#frame-and-origin) for references on model values.
+
 ### Centering a collection
 
 [originCenter](api/origin-center.md) covers the free function's readonly
 collection form, shared bounds and preserved member placement.
+
+## Model metadata
+
+[Model metadata](api/model-data.md) explains symbol-keyed snapshots, `withMetadata` and inheritance through modeling operations.
 
 ## Anchors and relations
 

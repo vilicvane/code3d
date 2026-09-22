@@ -74,5 +74,5 @@ export default group(
     internalRingWithBoltHoles,
     helicalWithHub,
   ],
-  'Gear types and mounting choices',
+  {name: 'Gear types and mounting choices'},
 );

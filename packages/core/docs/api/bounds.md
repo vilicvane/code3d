@@ -5,7 +5,7 @@ sourceReview:
   packageVersion: 0.0.1-alpha.14
   sources:
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
     - path: packages/core/src/library/spatial.ts
       sha256: 810c4fa69352c26c32fb04a0e7867f6327698e02f3212669f17d777784322a78
       commit: 69d231fb775befdb3cd098291b4097ccd52d8966
@@ -68,7 +68,7 @@ is `[20, 8, 0]`, so its base-frame minimum is `[16, 2, -2]` and maximum is
 ## Groups and occurrences
 
 A group's bounds include its actual finite members after their assembly is
-solved. The group frame follows the first member, as described in [group](group.md).
+solved. The group frame uses its explicit frame option, otherwise the first member, as described in [group](group.md).
 An empty group has no finite bounds and throws. A point has zero size in every
 axis; edges or planar faces may have zero extent along some directions.
 

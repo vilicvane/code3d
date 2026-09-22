@@ -57,6 +57,11 @@ Complete example: [gears and mounting options](../app/examples/packages/gears/pa
   complete revolutions, and parts aligned to a gear frame follow that gear.
   The signed delta changes shaft distance; it
   does not specify backlash.
+- Use `assembleGears([input, [large, small], output])` for a compound shaft.
+  The tuple's first gear receives the previous mesh; its second drives the next.
+  The helper aligns their frames. Set layer spacing through the gears' origins,
+  for example `small.originOffset(0, -12, 0)`. Origin edits and uniform scaling
+  preserve the gear metadata used by assembly.
 - `pairs[i].angle` turns from the preceding center-line direction, in degrees.
   The default 0° continues straight. The first pair starts from +X; two 60°
   turns give center-line directions of 60° and 120° from +X. Negative angles
@@ -65,13 +70,14 @@ Complete example: [gears and mounting options](../app/examples/packages/gears/pa
   a `group(...).relate(...)` constraint.
 
 Complete examples: [a three-gear train](../app/examples/packages/gears/assembly.ts)
-and [a live input crank and output transmission](../app/examples/packages/gears/transmission.ts).
+and [a live two-stage transmission with coaxial large and small gears](../app/examples/packages/gears/transmission.ts).
 
 ## Documentation
 
 - [Gear API](docs/api.md): constructors, dimensions, mounting and named references.
 - [Gear assembly](docs/api.md#assemble-compatible-gears): shaft distance, axial
   offset, array-order engagement, per-pair angles and fixed-axis transmission.
+- [Compound shafts](docs/api.md#compound-shafts): tuple entries, frame alignment and origin-defined layers.
 - [Standards and scope](docs/api.md#standards-and-scope): nominal profiles, validation and modeling limits.
 
 ## Source and development

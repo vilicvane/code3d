@@ -23,8 +23,8 @@ const packed = fillFlex(slat.originOffset(0, 0, -10), space, {
 export default group(
   [
     space.material('#526273'),
-    group(counted, 'Count and equal gaps').material('#8ed5d1'),
-    group(packed, 'Fixed gap and right alignment').material('#e6b968'),
+    group(counted, {name: 'Count and equal gaps'}).material('#8ed5d1'),
+    group(packed, {name: 'Fixed gap and right alignment'}).material('#e6b968'),
   ],
-  'Grille layouts',
+  {name: 'Grille layouts'},
 );

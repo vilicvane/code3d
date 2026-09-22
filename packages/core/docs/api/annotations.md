@@ -8,11 +8,9 @@ sourceReview:
       sha256: b166988b7f2f948432fb6b7504f6c47c074e322b0af69d7fc64d88adc68212ab
       commit: da2824c30b54a50ac216679fff96c67dd3dcee4c
     - path: packages/core/src/library/inspect.ts
-      sha256: 41c720ebec3e0ebe941a3b6e7c18f0db08badec6e95021d5e29c59d88c13b5a8
-      commit: 257dac61457d3ec723fd8054ebcb2e12daceba85
+      sha256: 530883228cd23a27f1e13c5153669c24ce87d523f4ff1cc52202dab698063e45
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
 sidebar:
   hidden: true
 head:
@@ -46,7 +44,7 @@ export const preview = {
 
 ```ts
 dimension(value: {
-  owner: Model; value: number; axisLabel?: string;
+  owner: Model | Frame; value: number; axisLabel?: string;
 } & (
   | DimensionSegment
   | {candidates: readonly DimensionSegment[]}
@@ -63,7 +61,10 @@ Import the functions and named types from `@code3d/core`.
 
 ## Dimensions
 
-`Dimension` combines `kind: 'dimension'`, `owner: Model`, `value: number`,
+The owner may be a model or independent [Frame](frame.md). Dimension points use
+that owner's local coordinates; finite owner geometry is not required.
+
+`Dimension` combines `kind: 'dimension'`, `owner: Model | Frame`, `value: number`,
 optional `axisLabel: string`, and exactly one of these line descriptions:
 
 | Shape                                     | Meaning                                                                            |

@@ -54,7 +54,7 @@ Only an explicit origin operation chooses a different local zero.
 | `union`, `intersect`                              | Inherit the first operand's frame.                                                                                                         |
 | `cut`                                             | Inherit the stock's frame.                                                                                                                 |
 | `loft`                                            | Inherit the first section's frame.                                                                                                         |
-| `group`                                           | Inherit the first member's frame after solving placement; an empty group uses the default frame.                                           |
+| `group`                                           | Use the explicit `frame` option, otherwise inherit the first member's solved frame; an empty group defaults to the standard frame.         |
 | `rotate`, `scaled`, `fillet`, `chamfer`, `shell`  | Retain the input model's frame, even when its geometric bounds change.                                                                     |
 | `relate`, `material`, `expose`                    | Retain the model's local frame; relations describe its placement within a composition.                                                     |
 
@@ -76,6 +76,15 @@ coordinate system. `model.frame.origin` references that frame's zero point;
 For `point([10, 0, 0])`, the geometry is at X = 10 while its frame origin is zero.
 Changing local geometry with `rotate()` does not rotate the model's coordinate
 axes. Placement through `relate()` determines the frame's pose in a composition.
+
+Use `frame()` to create an independent coordinate reference. It has an `.origin`
+and supports `.relate(self => ...)`, but has no geometry or directional bounds.
+It can define a group's coordinates with `group(parts, {frame: base})` without
+appearing among its members. See [independent frames](api.md#independent-coordinate-frames).
+
+Empty groups remain valid compositions, including inside other groups.
+They can be inspected, but calling `bounds()` or reading `.up` requires actual
+geometry in the group or its descendants.
 
 Use `align(self.origin, other.origin)` to coincide just the origins, or
 `align(self.frame, other.frame)` to coincide both origins and all three axes.
@@ -143,7 +152,7 @@ New model values also have a coordinate frame:
 
 - A boolean result uses the main operand's local coordinates.
 - A loft uses its first section's local coordinates.
-- A group uses its first member's local coordinates, retaining relative placement.
+- A group uses its explicit frame, or its first member's coordinates by default, retaining relative placement.
 - `expose()` brings a reference into the outer model's local space. For a
   repeated part, use the reference from its specific instance.
 
@@ -153,7 +162,7 @@ scale and up axis are applied afterward. See [exporting models](../../web/src/co
 
 ## Group origins
 
-A group first solves the placement of its direct members, then expresses all
+A group without a `frame` option first solves the placement of its direct members, then expresses all
 members in the **first member's local coordinate frame**, including its origin
 and axes. This is the same reference rule used by `union`, `intersect`, and
 `loft`; `cut` uses the stock's frame. Reordering members can change the group's
@@ -161,6 +170,12 @@ frame, while preserving their relative placement. A nested group is one member,
 with its own existing frame. An empty group uses the default origin and axes.
 A relation's rotation affects that solved member frame; rotating the member's
 geometry directly with `.rotate()` does not redefine its local axes.
+
+With `group(parts, {frame: reference})`, the reference's full solved origin and
+axes define the group's coordinates, independently of member order. An exposed
+frame's own local transform is included. The reference participates in solving
+but is not an output child. Its occurrence follows the completed group's
+rotation and origin edits, including when exposed through nested groups.
 
 ```ts
 import {box, group} from '@code3d/core';

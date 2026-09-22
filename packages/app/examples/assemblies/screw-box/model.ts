@@ -33,7 +33,7 @@ export function screwBox(gap = 14) {
       on(part.headBottom, hole.counterboreBottom.flip()),
     ]),
   );
-  return group([body, lid, ...screws], 'Screw-fastened box');
+  return group([body, lid, ...screws], {name: 'Screw-fastened box'});
 }
 
 export default screwBox(14);

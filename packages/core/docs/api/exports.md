@@ -5,11 +5,9 @@ sourceReview:
   packageVersion: 0.0.1-alpha.14
   sources:
     - path: packages/core/src/library/index.ts
-      sha256: 055071f37f246dbdc5681525823b826eb661dc4ac8dc70a43b676000a5d3448e
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 8f5784bccbc2f8a47139a71af3c3fbfe0c1e767dc9dcd61902fa06413dd40f54
     - path: packages/core/src/tooling/index.ts
-      sha256: e9ef503f0a97cd3637764abfd28aa5efeb5767803cd115214172eac5425c8e65
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 540fe0cf5f3ba5f389da9f2a6441b722aac1b7de24530540eedee37eef8765dc
     - path: packages/core/src/library/replicad.ts
       sha256: 937b1c0bcdd8389e9c3724bb8bf867c3703509400a6bebfcfbcc84c8683e17fe
       commit: 5058f1bbd8f9289ad89f0cf6cb19f7b5fa143eae
@@ -56,7 +54,7 @@ Import the functions and named types from `@code3d/core`.
 
 ## Root functions and values
 
-Import these 53 runtime values from `@code3d/core`. Equivalent free-function and
+Import these 52 runtime values from `@code3d/core`. Equivalent free-function and
 model-method forms share one primary reference. The table is alphabetical;
 [browse by task](../api.md#browse-by-task) when choosing an operation.
 
@@ -83,8 +81,8 @@ model-method forms share one primary reference. The table is alphabetical;
 | `ellipsoid`           | [ellipsoid](ellipsoid.md)                         |
 | `extrude`             | [extrude](extrude.md)                             |
 | `font`                | [font](font.md)                                   |
+| `frame`               | [frame](frame.md)                                 |
 | `frustum`             | [frustum](frustum.md)                             |
-| `getModelData`        | [model data](model-data.md)                       |
 | `googleFont`          | [google font](google-font.md)                     |
 | `group`               | [group](group.md)                                 |
 | `input`               | [input](input.md)                                 |
@@ -104,7 +102,6 @@ model-method forms share one primary reference. The table is alphabetical;
 | `regularPrism`        | [regular prism](regular-prism.md)                 |
 | `revolve`             | [revolve](revolve.md)                             |
 | `rotate`              | [rotate](rotate.md)                               |
-| `setModelData`        | [model data](model-data.md)                       |
 | `sketch`              | [sketch](sketch.md)                               |
 | `sphere`              | [sphere](sphere.md)                               |
 | `spline`              | [spline](spline.md)                               |
@@ -118,7 +115,7 @@ model-method forms share one primary reference. The table is alphabetical;
 
 ## Root types
 
-Import these 80 named types with `import type` from `@code3d/core`. An interface
+Import these 83 named types with `import type` from `@code3d/core`. An interface
 may inherit members, and a model alias may intersect several capabilities; the
 primary reference covers that full contract. Private brands are not author fields.
 Configuration fields and union branches are documented with the operation that
@@ -151,11 +148,13 @@ uses them rather than split into otherwise empty type pages.
 | `FaceAnchor`                    | [reference elements](reference-elements.md) |
 | `FaceModel`                     | [model types](model-types.md)               |
 | `Font`                          | [font](font.md)                             |
+| `Frame`                         | [frame](frame.md)                           |
 | `FrameAnchor`                   | [reference elements](reference-elements.md) |
 | `GeometryCapabilities`          | [model types](model-types.md)               |
 | `GeometryQueryCapabilities`     | [model types](model-types.md)               |
 | `GoogleFontOptions`             | [google font](google-font.md)               |
 | `GroupModel`                    | [model types](model-types.md)               |
+| `GroupOptions`                  | [group](group.md)                           |
 | `InputOptions`                  | [input](input.md)                           |
 | `InspectCall`                   | [inspectors](inspectors.md)                 |
 | `InspectClosure`                | [inspectors](inspectors.md)                 |
@@ -174,6 +173,7 @@ uses them rather than split into otherwise empty type pages.
 | `ModelForKind`                  | [model types](model-types.md)               |
 | `ModelGeometryKind`             | [model types](model-types.md)               |
 | `ModelKind`                     | [model types](model-types.md)               |
+| `ModelMetadata`                 | [model metadata](model-data.md)             |
 | `NamedElements`                 | [expose](expose.md)                         |
 | `PivotChain`                    | [pivot](pivot.md)                           |
 | `PivotRotation`                 | [pivot](pivot.md)                           |
@@ -213,21 +213,22 @@ Model members are separate from root free-function exports. Some names occur on
 both models and references with different results; use the owner-specific
 contract instead of relying on a method's spelling.
 
-| Owner / capability           | Primary member references                                                                                                                                                                                                                                                                          |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Every model and group        | [frame / origin](reference-elements.md), [directional bounds](directional-bounds.md), [bounds](bounds.md), [position](position.md), [relate](relate.md), [expose](expose.md), [material](material.md), [originOffset](origin-offset.md), [originPoint](origin-point.md), [rotate](model-rotate.md) |
-| Geometric models             | [center](reference-elements.md#center), [originCenter](origin-center.md), [originVertex](origin-vertex.md), [scaled](scaled.md)                                                                                                                                                                    |
-| Vertex topology              | [vertex / vertices](vertex.md)                                                                                                                                                                                                                                                                     |
-| Edge topology                | [edge / edges](edge.md), inherited vertex selection                                                                                                                                                                                                                                                |
-| Surface topology             | [surface / surfaces](surface.md), inherited edge and vertex selection                                                                                                                                                                                                                              |
-| Solid models                 | [cut](cut.md), [fillet](fillet.md), [chamfer](chamfer.md), [shell](shell.md), [area](area.md), [volume](volume.md)                                                                                                                                                                                 |
-| Face models                  | [extrude](extrude.md), [revolve](revolve.md), [sweep](sweep.md), [thicken](thicken.md), [area](area.md), [flip](flip-reverse.md)                                                                                                                                                                   |
-| Edge models                  | [length](length.md), [reverse](flip-reverse.md)                                                                                                                                                                                                                                                    |
-| Finite references and frames | [kind / id and topology](vertex.md), [center / axis / plane / curve points / frame.origin](reference-elements.md), [flip / reverse](flip-reverse.md), [measurements](distance.md)                                                                                                                  |
-| Sketch                       | [point / derive](sketch-derive.md), [face / faces](sketch-faces.md), [plane / relate](sketch-relate.md)                                                                                                                                                                                            |
-| Pivot chains                 | [pivotOffset / rotate](pivot.md), [pivotVertex](pivot-vertex.md), [pivotPoint](pivot-point.md)                                                                                                                                                                                                     |
-| Axis chains                  | [axisOffset / rotate](axis-edge.md), [axisLine](axis-line.md)                                                                                                                                                                                                                                      |
-| Font and query results       | [family / style](font.md), [ModelBounds fields](bounds.md)                                                                                                                                                                                                                                         |
+| Owner / capability           | Primary member references                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every model and group        | [metadata / withMetadata](model-data.md), [frame / origin](reference-elements.md), [directional bounds](directional-bounds.md), [bounds](bounds.md), [position](position.md), [relate](relate.md), [expose](expose.md), [material](material.md), [originOffset](origin-offset.md), [originPoint](origin-point.md), [rotate](model-rotate.md) |
+| Geometric models             | [center](reference-elements.md#center), [originCenter](origin-center.md), [originVertex](origin-vertex.md), [scaled](scaled.md)                                                                                                                                                                                                              |
+| Vertex topology              | [vertex / vertices](vertex.md)                                                                                                                                                                                                                                                                                                               |
+| Edge topology                | [edge / edges](edge.md), inherited vertex selection                                                                                                                                                                                                                                                                                          |
+| Surface topology             | [surface / surfaces](surface.md), inherited edge and vertex selection                                                                                                                                                                                                                                                                        |
+| Solid models                 | [cut](cut.md), [fillet](fillet.md), [chamfer](chamfer.md), [shell](shell.md), [area](area.md), [volume](volume.md)                                                                                                                                                                                                                           |
+| Face models                  | [extrude](extrude.md), [revolve](revolve.md), [sweep](sweep.md), [thicken](thicken.md), [area](area.md), [flip](flip-reverse.md)                                                                                                                                                                                                             |
+| Edge models                  | [length](length.md), [reverse](flip-reverse.md)                                                                                                                                                                                                                                                                                              |
+| Finite references and frames | [kind / id and topology](vertex.md), [center / axis / plane / curve points / frame.origin](reference-elements.md), [flip / reverse](flip-reverse.md), [measurements](distance.md)                                                                                                                                                            |
+| Independent Frame            | [origin / relate](frame.md)                                                                                                                                                                                                                                                                                                                  |
+| Sketch                       | [point / derive](sketch-derive.md), [face / faces](sketch-faces.md), [plane / relate](sketch-relate.md)                                                                                                                                                                                                                                      |
+| Pivot chains                 | [pivotOffset / rotate](pivot.md), [pivotVertex](pivot-vertex.md), [pivotPoint](pivot-point.md)                                                                                                                                                                                                                                               |
+| Axis chains                  | [axisOffset / rotate](axis-edge.md), [axisLine](axis-line.md)                                                                                                                                                                                                                                                                                |
+| Font and query results       | [family / style](font.md), [ModelBounds fields](bounds.md)                                                                                                                                                                                                                                                                                   |
 
 [Model types and capabilities](model-types.md) gives the complete inheritance
 matrix. A finite reference is not an independently placeable model; a group
@@ -235,7 +236,7 @@ has no aggregate solid topology or area/volume properties.
 
 ## Host and interoperability entries
 
-- [Tooling integration](tooling.md) covers all 81 values and 73 type exports of
+- [Tooling integration](tooling.md) covers all 83 values and 73 type exports of
   `@code3d/core/tooling`, including host-only members, lifecycle exits, snapshots
   and every discriminated result branch. Shared author types link to their
   primary references above.

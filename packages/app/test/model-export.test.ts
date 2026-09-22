@@ -153,7 +153,7 @@ test('project runtime retains export geometry and preserves STEP placements, nam
   const source = `import {on, box, group} from '@code3d/core';
 const base = box(10, 20, 30).material('#123456');
 const top = box(2, 4, 6).relate(self => on(self.down, base.up));
-export default group([base, top], 'Assembly');`;
+export default group([base, top], {name: 'Assembly'});`;
   try {
     const module = await compiler.compile(
       {files: [{path: '/model.ts', source}]},
@@ -462,7 +462,7 @@ test('retained geometry shares one owned clone and can be released without consu
 
 test('3MF packages closed welded meshes, escaped names, materials and a fixed assembly', async () => {
   const models = [box(2, 4, 6).material('#f00'), cylinder(2, 8)];
-  const assembly = group(models, 'Assembly');
+  const assembly = group(models, {name: 'Assembly'});
   const occurrences = scene(createModelSnapshotter()(assembly));
   const instances = collectExportInstances(occurrences).map((instance, i) => ({
     ...instance,

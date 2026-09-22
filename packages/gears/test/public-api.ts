@@ -7,6 +7,7 @@ import {
 } from '@code3d/gears';
 import type {
   Gear,
+  GearAssemblyEntry,
   GearAssemblyConfig,
   GearPairConfig,
   Mounting,
@@ -33,6 +34,7 @@ const ring: SolidModel = internalGear({
   outerDiameter: 130,
 });
 spur.gearAxis;
+spur.gearCenter;
 spur.gearFaceUp;
 spur.gearFaceDown;
 const pairConfig: GearPairConfig = {angle: 60};
@@ -45,6 +47,13 @@ const pair: Gear[] = assembleGears(
   assemblyConfig,
 );
 const centerDistance: number = nominalCenterDistance(pair[0], pair[1]);
+const compound: GearAssemblyEntry = [spur, spur.originOffset(0, -12, 0)];
+const compoundTrain: Gear[] = assembleGears([spur.scaled(2), compound, spur]);
+void compoundTrain;
+// @ts-expect-error Compound shafts have exactly two gears.
+assembleGears([[spur, spur, spur]]);
+// @ts-expect-error A one-member tuple is not a compound shaft.
+assembleGears([[spur]]);
 void centerDistance;
 void helical;
 void ring;

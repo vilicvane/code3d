@@ -6,12 +6,15 @@ sourceReview:
   sources:
     - path: packages/core/src/library/text.ts
       sha256: 2640ed1e431083e8755aabf7432c32842d0dc5387f964518b057e4593e01f81c
+      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
     - path: packages/core/src/library/text-geometry.ts
       sha256: 4aae4ade04782c0103239f3a86e76f918a3ce16d6758e6608235cd2309fff308
+      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
     - path: packages/core/src/library/font.ts
       sha256: 7e10fa6ffcdf125a653dd31136cdaace384dbeb00e79cef3515304a84b604087
+      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
 sidebar:
   hidden: true
 head:

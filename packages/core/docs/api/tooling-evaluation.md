@@ -5,14 +5,12 @@ sourceReview:
   packageVersion: 0.0.1-alpha.14
   sources:
     - path: packages/core/src/library/authoring-api.ts
-      sha256: 4f8c76111184f5ef82135934082044ba4438007e70b22061aece643995d76193
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: f19edb7d6875d7e407ff84f7c88ce7392df1aeb21cca65982f08d7ca44dd9f11
     - path: packages/core/src/library/kernel-cache.ts
       sha256: 779d4de9fa63c44633a16aac3c6e1125376dcc7483b0e6cf6d11d6970db87310
       commit: da2824c30b54a50ac216679fff96c67dd3dcee4c
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
 sidebar:
   hidden: true
 head:
@@ -77,13 +75,15 @@ global contexts are not independent concurrent sessions.
 
 `authoringApi` is a frozen map of the built-in authoring functions used by host
 execution and tooling. Its members below reference the ordinary APIs; it is not
-the complete root export namespace (for example, package-data helpers are not
+the complete root export namespace (for example, `inspectGroupMembers` is not
 part of that map). Normal authors import from `@code3d/core`.
 
 ## Runtime identities and graph traversal
 
 `isModelObject(value)` guards Core model objects, including groups.
-`isSolidModel(value)` narrows only solid model values. Neither guard accepts a
+`isSolidModel(value)` narrows only solid model values. `isFrame(value)`
+recognizes independent `Frame` values, including related copies, but not a
+model's `.frame` anchor, exposed frame reference or Sketch. Neither guard accepts a
 plain object merely because it has similarly named properties.
 `modelObjectRuntimeInfo(object)` returns `nodeId`, `name` and source references
 for diagnostics. `relatedModelObjects(object)` reports the runtime's related
@@ -106,6 +106,16 @@ use public [originCenter](origin-center.md) in author code. `previewElement`
 accepts a runtime stored reference and optional forward/both markers; prefer
 [previewAnchorReference](tooling-snapshots.md#previewanchorreference) when holding
 a public anchor. Private brands, fields and protected constructors are not host APIs.
+
+### isFrame
+
+```ts
+function isFrame(value: unknown): value is FrameObject;
+```
+
+The narrowed implementation type is inferred from the guard, not a constructor
+export from this tooling entry. It implements the public [Frame](frame.md)
+contract and the runtime relation-participant members.
 
 ## Geometry ownership
 
@@ -139,6 +149,7 @@ for them. These signatures describe the contract rather than a standalone progra
 
 ```ts
 const authoringApi: Readonly<{
+  frame: typeof frame;
   originCenter: typeof originCenter;
   input: typeof input;
   timeOffset: typeof timeOffset;
@@ -252,6 +263,8 @@ class ModelObject<
   extends RelationObject
   implements Anchor<ModelElementKind<Kind>>
 {
+  readonly metadata: ModelMetadata;
+  withMetadata(metadata: ModelMetadata): RuntimeModel<Elements, Kind>;
   get length(): number;
   get area(): number;
   get volume(): number;

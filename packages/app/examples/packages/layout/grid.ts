@@ -6,4 +6,4 @@ const pins = grid(repeat(cylinder(3, 10), 12), {
   axes: ['x', 'z'],
   gap: 8,
 });
-export default group(pins, 'Grid of pins');
+export default group(pins, {name: 'Grid of pins'});

@@ -1,74 +1,83 @@
 ---
-title: Model package data
-description: Attach symbol-keyed package metadata to model values and understand which operations retain it.
+title: Model metadata
+description: Read and replace symbol-keyed metadata snapshots while preserving model value semantics.
 sourceReview:
   packageVersion: 0.0.1-alpha.14
   sources:
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
 sidebar:
   hidden: true
 head:
   - tag: title
-    content: Model package data — Code3D TypeScript API reference
+    content: Model metadata — Code3D TypeScript API reference
 ---
 
-`setModelData` and `getModelData` let a package associate its own data with a model without adding public geometry members or colliding with another package.
+Every model exposes a readonly `metadata` dictionary. `withMetadata` returns a new model with package-owned entries added or replaced, preserving the original model.
 
 ## Example
 
 ```ts
-import {box, getModelData, setModelData} from '@code3d/core';
+import {box} from '@code3d/core';
 
 type PartData = Readonly<{sku: string}>;
 const partData = Symbol('part-data');
-const part = box(20, 10, 8);
-setModelData(part, partData, {sku: 'bracket-a'} satisfies PartData);
-export const finished = part.material('#9bc7c5');
-const info = getModelData<PartData>(finished, partData); // {sku: 'bracket-a'}
+const part = box(20, 10, 8).withMetadata({
+  [partData]: {sku: 'bracket-a'} satisfies PartData,
+});
+export const finished = part.material('#9bc7c5').originOffset(0, -5, 0);
+const info = finished.metadata[partData] as PartData | undefined;
 ```
 
 ## Signature
 
 ```ts
-setModelData<Value>(model: Model, key: symbol, value: Value): void;
-getModelData<Value>(model: Model, key: symbol): Value | undefined;
+type ModelMetadata = Readonly<Record<symbol, unknown>>;
+// Members of every model, including GroupModel:
+readonly metadata: ModelMetadata;
+withMetadata(entries: ModelMetadata): ModelForKind<Elements, Kind>;
 ```
 
 Import the functions and named types from `@code3d/core`.
 
-## Keys and values
+## Keys, values and replacement
 
-Use a package-owned `symbol` as the key. Two independently created symbols with
-the same description remain different keys. Setting an existing key replaces
-that entry; reading an absent key returns `undefined`. Both functions require a
-real model value, including a group; passing an anchor or a plain object throws.
+Use a package-owned `symbol` as the key. Distinct symbols remain independent,
+even when their descriptions match. Reusing a key replaces that entry; other
+keys remain unchanged. Reading an absent key returns `undefined`.
 
-The `Value` generic is a compile-time assertion at read time, not runtime
-validation. A symbol is not itself associated with a TypeScript value type.
-Wrap these functions in a package-specific getter/setter if consumers need a
-stable typed contract. Values are retained by reference without cloning or freezing.
+The public value type is `unknown`. A symbol does not associate a TypeScript
+value type with the entry; a package-specific accessor can validate or narrow its
+own data. The example's type assertion is not runtime validation.
 
-## Lifetime and model copies
+`withMetadata` copies the dictionary and preserves the original model's entries.
+Stored values are opaque references, not recursively cloned or frozen. Treat
+nested objects and arrays as immutable so later mutations do not affect other
+model values holding those references. No metadata history is replayed.
 
-Attach metadata while constructing a new package model, before exposing it to
-callers. `setModelData` changes that model's metadata association in place; it
-returns `void` and is not an immutable modeling operation. It does not change
-geometry, material or placement and does not trigger UI updates.
+## Inheritance through modeling operations
 
-Only `.relate()` and `.material()` copies retain this data map automatically.
-Other modeling operations, including origin changes, scaling, geometry edits,
-`expose()` and grouping, do not propagate it. A group does not inherit its
-members' package data as its own. Recompute and attach data when an operation
-changes the package's meaning.
+| Operation                                                 | Result metadata                                                   |
+| --------------------------------------------------------- | ----------------------------------------------------------------- |
+| Origin edits, rotate, scaled, material, expose and relate | Retains the input's current entries.                              |
+| Extrude, revolve, sweep and thicken                       | Inherits the profile or face's entries.                           |
+| Wrap and loft                                             | Inherits the first profile's entries.                             |
+| Cut                                                       | Inherits the stock's entries.                                     |
+| Union and intersect                                       | Inherits the first input's entries, without merging other inputs. |
+| Fillet, chamfer and shell                                 | Retains the source solid's entries.                               |
+| A newly constructed group                                 | Starts with empty metadata; children retain their own entries.    |
 
-A copied model initially shares the same immutable map. Later calls to
-`setModelData` replace only the map for the model being written, so already
-created copies keep their earlier entries. However, mutating a stored object
-changes that object wherever it is shared; prefer immutable records.
+`withMetadata` preserves the model kind and named-reference types. Metadata does
+not change geometry, appearance or placement. Core does not interpret units,
+scale numbers in entries or rebind references stored inside them. After a
+package operation changes their meaning, explicitly calculate and write new
+entries. For geometric interfaces use [expose](expose.md), so references follow
+the resulting model's coordinate changes. A package can retain invariant
+metadata and derive dimensions from those current references.
 
-Associations use weak model identity and are runtime-only. They are not a
-serialization, persistent cache, source-tracing or inspection-data mechanism.
-Use [captureInspectData](inspectors.md#call-data) for one invocation's inspector
-facts, and [expose](expose.md) for public placement references.
+## Lifetime and transport
+
+Metadata is in-process model state. Render snapshots, Worker messages and
+geometry exports omit it. It is not a persistence, cache serialization or
+source-inspection data protocol. Use [captureInspectData](inspectors.md#call-data)
+for facts belonging to one inspected invocation.

@@ -75,6 +75,13 @@ before promising a feature.
 
 ## Place a constrained part
 
+Use `frame()` for an independent, non-geometric assembly datum. It can be aligned
+directly (`align(self.frame, base)`) or related to another frame, and exposes
+`.origin` for position-only constraints. Select the assembly coordinates with
+`group(parts, {frame: base, name: 'Assembly'})`; leave the reference out of
+`parts`. Without `frame`, the first member defines the group's coordinates.
+See [independent coordinate frames](../../packages/core/docs/api.md#independent-coordinate-frames).
+
 `part.relate(self => ...)` returns a new value. Every constraint must involve
 the callback value; external variables, including `part`, keep their original
 identity. Select the new value's elements and rotation references through `self`.
@@ -152,6 +159,13 @@ crank reads `input()` or `timeOffset()`. Use cumulative angles without `% 360`
 when a downstream ratio must preserve whole revolutions. See the
 [transmission example](../../packages/app/examples/packages/gears/transmission.ts)
 and [supported motion scope](../../packages/gears/docs/api.md#drive-through-connected-parts).
+
+For a compound shaft, pass `[incomingGear, outgoingGear]` as one entry to
+`assembleGears`. The helper aligns their frames; define layer spacing with
+the gears' origins. See [compound shafts](../../packages/gears/docs/api.md#compound-shafts).
+Package-specific data belongs in the model's symbol-keyed `metadata` snapshot,
+written immutably with `withMetadata`. Geometric references belong in `expose`
+so they follow origin edits and scaling. See [model metadata](../../packages/core/docs/api.md#model-metadata).
 
 ## Reuse expensive computations
 

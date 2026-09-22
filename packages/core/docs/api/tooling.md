@@ -5,14 +5,12 @@ sourceReview:
   packageVersion: 0.0.1-alpha.14
   sources:
     - path: packages/core/src/tooling/index.ts
-      sha256: e9ef503f0a97cd3637764abfd28aa5efeb5767803cd115214172eac5425c8e65
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 540fe0cf5f3ba5f389da9f2a6441b722aac1b7de24530540eedee37eef8765dc
     - path: packages/core/src/node/index.ts
       sha256: 2c314699c2b47768bc4ae14b7713dc9eceb1111a3de7417820bdf4347bda3104
       commit: 5c8979f384280b644263a2d6ba3abacb69697c24
     - path: packages/core/src/library/index.ts
-      sha256: 055071f37f246dbdc5681525823b826eb661dc4ac8dc70a43b676000a5d3448e
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 8f5784bccbc2f8a47139a71af3c3fbfe0c1e767dc9dcd61902fa06413dd40f54
 sidebar:
   hidden: true
 head:
@@ -78,7 +76,7 @@ Import host APIs from `@code3d/core/tooling`; author constructors remain in `@co
 Each topic lists all its exported functions/types, inherited host members,
 configuration fields and result branches. Shared authoring types link back to
 their primary modeling reference. The public declaration inventory currently has
-81 values and 73 types; implementation-only exports absent from this subpath
+83 values and 73 types; implementation-only exports absent from this subpath
 are not additional host APIs.
 
 ## Entry points
@@ -88,3 +86,7 @@ entry and `@code3d/core/tooling` rely on host installation. Native builders use
 [@code3d/core/replicad](define-primitive.md); appearance objects use the shared
 [@code3d/core/three](three.md) exports. These entry points share runtime identity
 and resource ownership within the same Core instance.
+
+Independent frames are recognized by [isFrame](tooling-evaluation.md#isframe).
+[modelOperationObject](tooling-snapshots.md#modeloperationobject) resolves model,
+frame and sketch authoring results into runtime relation participants.

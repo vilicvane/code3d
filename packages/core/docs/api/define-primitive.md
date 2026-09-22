@@ -8,8 +8,7 @@ sourceReview:
       sha256: 937b1c0bcdd8389e9c3724bb8bf867c3703509400a6bebfcfbcc84c8683e17fe
       commit: 5058f1bbd8f9289ad89f0cf6cb19f7b5fa143eae
     - path: packages/core/src/library/runtime.ts
-      sha256: e3658b0ffa55da9d2c612f442ce1d5f190923aea1870122823677faa60fb0b84
-      commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
+      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
     - path: packages/core/src/library/kernel-shapes.ts
       sha256: 4b28f672f9c5ac43a1dfa04ced8d2f1eacce9a2c7eaaaac561d885f7efc95ac8
       commit: 1baef99a1318fc694825ec0a48d4d39635a3a130
