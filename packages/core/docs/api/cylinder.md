@@ -6,8 +6,9 @@ sourceReview:
   sources:
     - path: packages/core/src/library/cylinder.ts
       sha256: 4672d5fe03b17c7458dfa14325df9259336722f80cd3a69de3c44132b9219001
+      commit: 1baef99a1318fc694825ec0a48d4d39635a3a130
     - path: packages/core/src/library/validation.ts
-      sha256: b665c2ba04faed587c7ff4414d6cfc558907355f0c428ac3df75f9cecbcef971
+      sha256: dae9300aea522c8aee83ef09e6716f31cd17f0cf6fb6df537218ecb72c63419d
 sidebar:
   hidden: true
 head:
@@ -100,5 +101,5 @@ Very small dimensions or clearances can also encounter the modeling kernel's tol
 
 - [tube](tube.md) creates a circular wall around a through bore.
 - [frustum](frustum.md) gives the two ends different radii.
-- [circle and extrude](../api.md#profiles-and-curves) build a cylinder from a face, preserving that face's starting plane.
+- [circle](circle.md) and [extrude](../api.md#profiles-and-curves) build a cylinder from a face, preserving that face's starting plane.
 - [Solid primitives](../api.md#solid-primitives) compares the available starting shapes.

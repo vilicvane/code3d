@@ -6,8 +6,9 @@ sourceReview:
   sources:
     - path: packages/core/src/library/ellipsoid.ts
       sha256: 01705a1bbdd2c3bdd1ce262aec1baa27a123d5eea28c65e7bd878c39ea0d4051
+      commit: 1baef99a1318fc694825ec0a48d4d39635a3a130
     - path: packages/core/src/library/validation.ts
-      sha256: b665c2ba04faed587c7ff4414d6cfc558907355f0c428ac3df75f9cecbcef971
+      sha256: dae9300aea522c8aee83ef09e6716f31cd17f0cf6fb6df537218ecb72c63419d
 sidebar:
   hidden: true
 head:
@@ -91,7 +92,7 @@ apply when the three radii differ.
 ## Validation and editing defaults
 
 All three radii must be positive finite numbers. A zero semi-axis does not
-produce a flat face; use an [ellipse](../api.md#profiles-and-curves) for that.
+produce a flat face; use an [ellipse](ellipse.md) for that.
 Invalid values report the parameter name followed by
 `must be a positive finite number.`. Numeric strings and `null` are not converted.
 
@@ -104,6 +105,6 @@ Very small dimensions or clearances can also encounter the modeling kernel's tol
 ## Related APIs
 
 - [sphere](sphere.md) uses one radius in every direction.
-- [ellipse](../api.md#profiles-and-curves) creates a planar elliptical face.
+- [ellipse](ellipse.md) creates a planar elliptical face.
 - [Surface wrapping](../api.md#curved-surface-wrapping) maps a flat layout onto a curved target; see the [wrapping example](../../../app/examples/operations/wrap.ts).
 - [Solid primitives](../api.md#solid-primitives) compares the available starting shapes.

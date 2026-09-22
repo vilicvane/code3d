@@ -1,3 +1,12 @@
+import {circle} from './circle.js';
+import {ellipse} from './ellipse.js';
+import {rectangle} from './rectangle.js';
+import {regularPolygon} from './regular-polygon.js';
+import {point} from './point.js';
+import {line} from './line.js';
+import {arc} from './arc.js';
+import {bezier} from './bezier.js';
+import {spline} from './spline.js';
 import {cylinder} from './cylinder.js';
 import {tube} from './tube.js';
 import {coil} from './coil.js';
@@ -30,16 +39,7 @@ import {
   on,
   align,
   text,
-  circle,
-  ellipse,
   extrude,
-  rectangle,
-  regularPolygon,
-  point,
-  line,
-  arc,
-  bezier,
-  spline,
   loft,
   revolve,
   sweep,

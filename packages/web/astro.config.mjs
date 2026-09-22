@@ -116,6 +116,20 @@ export default defineConfig({
                             {slug: 'docs/packages/core/api/coil'},
                           ],
                         },
+                        {
+                          label: 'Points, curves and profiles',
+                          items: [
+                            {slug: 'docs/packages/core/api/point'},
+                            {slug: 'docs/packages/core/api/line'},
+                            {slug: 'docs/packages/core/api/arc'},
+                            {slug: 'docs/packages/core/api/bezier'},
+                            {slug: 'docs/packages/core/api/spline'},
+                            {slug: 'docs/packages/core/api/circle'},
+                            {slug: 'docs/packages/core/api/ellipse'},
+                            {slug: 'docs/packages/core/api/rectangle'},
+                            {slug: 'docs/packages/core/api/regular-polygon'},
+                          ],
+                        },
                       ],
                     },
                   ]

@@ -1,21 +1,14 @@
-import {assertPositive} from './validation.js';
+import {assertPositive, assertFiniteVector} from './validation.js';
 import {
   assembleWire,
   BoundingBox,
   getOC,
-  makeBezierCurve,
-  makeBSplineApproximation,
   makeFace,
   makeLine,
-  makeThreePointArc,
   makeVertex,
   measureShapeLinearProperties,
   measureShapeSurfaceProperties,
   measureShapeVolumeProperties,
-  sketchCircle,
-  sketchEllipse,
-  sketchPolysides,
-  sketchRectangle,
   Vector,
   type AnyShape,
   type Edge as ReplicadEdge,
@@ -82,6 +75,7 @@ import {sketchRegionFace} from './sketch-face.js';
 import type {SketchRegion} from './sketch-regions.js';
 import {
   addVectors,
+  toPoint,
   composeTransforms,
   frameFromYAxis,
   identityRigidTransform,
@@ -5743,137 +5737,6 @@ export class ModelObject<
   }
 }
 
-/** @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}} */
-export function circle(radius: number): FaceModel;
-export function circle(radius = 5): FaceModel {
-  assertPositive('radius', radius);
-  return planarFaceModel('circle', 'Circle', [radius], () =>
-    sketchCircle(radius, {plane: 'XZ'}),
-  );
-}
-
-/**
- * @code3d.param xRadius {kind: 'length', default: 5, label: 'X radius', constraints: {exclusiveMin: 0}}
- * @code3d.param zRadius {kind: 'length', default: 3, label: 'Z radius', constraints: {exclusiveMin: 0}}
- */
-export function ellipse(xRadius: number, zRadius: number): FaceModel;
-export function ellipse(xRadius = 5, zRadius = 3): FaceModel {
-  assertPositive('xRadius', xRadius);
-  assertPositive('zRadius', zRadius);
-  return planarFaceModel('ellipse', 'Ellipse', [xRadius, zRadius], () =>
-    sketchEllipse(xRadius, zRadius, {plane: 'XZ'}),
-  );
-}
-
-/**
- * @code3d.param x {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- * @code3d.param z {kind: 'length', default: 10, constraints: {exclusiveMin: 0}}
- */
-export function rectangle(x: number, z: number): FaceModel;
-export function rectangle(x = 10, z = 10): FaceModel {
-  assertPositive('x', x);
-  assertPositive('z', z);
-  return planarFaceModel('rectangle', 'Rectangle', [x, z], () =>
-    sketchRectangle(x, z, {plane: 'XZ'}),
-  );
-}
-
-/**
- * @code3d.param radius {kind: 'length', default: 5, constraints: {exclusiveMin: 0}}
- * @code3d.param sides {kind: 'count', default: 6, constraints: {min: 3}}
- * @code3d.param rotation {kind: 'angle', default: 0}
- */
-export function regularPolygon(
-  radius: number,
-  sides: number,
-  rotation?: number,
-): FaceModel;
-export function regularPolygon(radius = 5, sides = 6, rotation = 0): FaceModel {
-  assertPositive('radius', radius);
-  if (!Number.isInteger(sides) || sides < 3) {
-    throw new Error('sides must be an integer greater than or equal to 3.');
-  }
-  if (!Number.isFinite(rotation)) {
-    throw new Error('rotation must be a finite number.');
-  }
-  return planarFaceModel(
-    'regularPolygon',
-    `${sides}-sided polygon`,
-    [radius, sides, rotation],
-    () => sketchPolysides(radius, sides, 0, {plane: 'XZ'}),
-    face =>
-      rotation === 0 ? face : face.rotate(rotation, toPoint(origin), [0, 1, 0]),
-  );
-}
-
-/**
- * @code3d.param x {kind: 'length', label: 'X'}
- * @code3d.param y {kind: 'length', label: 'Y'}
- * @code3d.param z {kind: 'length', label: 'Z'}
- */
-export function point([x, y, z]: Vec3 = origin): VertexModel {
-  const position: Vec3 = [x, y, z];
-  assertFiniteVector('point', position);
-  const geometry = evaluateModelGeometry('point', [position], [], () => ({
-    shape: makeVertex(toPoint(position)),
-  }));
-  return ModelObject.create<{}, 'vertex'>({
-    kind: 'vertex',
-    name: 'Point',
-    geometry,
-    geometryAnchor: {kind: 'point', transform: translation(position)},
-    operation: storedOperation('point'),
-  }) as unknown as VertexModel;
-}
-
-/**
- * @code3d.param x {kind: 'length', label: 'End X'}
- * @code3d.param y {kind: 'length', label: 'End Y'}
- * @code3d.param z {kind: 'length', label: 'End Z'}
- */
-export function line([x, y, z]: Vec3): EdgeModel;
-/**
- * @code3d.param startX {kind: 'length', label: 'Start X'}
- * @code3d.param startY {kind: 'length', label: 'Start Y'}
- * @code3d.param startZ {kind: 'length', label: 'Start Z'}
- * @code3d.param endX {kind: 'length', label: 'End X'}
- * @code3d.param endY {kind: 'length', label: 'End Y'}
- * @code3d.param endZ {kind: 'length', label: 'End Z'}
- */
-export function line(
-  [startX, startY, startZ]: Vec3,
-  [endX, endY, endZ]: Vec3,
-): EdgeModel;
-export function line(startOrEnd: Vec3, end?: Vec3): EdgeModel {
-  const start = end ? startOrEnd : origin;
-  end ??= startOrEnd;
-  assertCurvePoints('line', [start, end], 2);
-  return curveModel('line', 'Line', [start, end], () =>
-    makeLine(toPoint(start), toPoint(end)),
-  );
-}
-
-export function arc(start: Vec3, middle: Vec3, end: Vec3): EdgeModel {
-  assertCurvePoints('arc', [start, middle, end], 3);
-  return curveModel('arc', 'Arc', [start, middle, end], () =>
-    makeThreePointArc(toPoint(start), toPoint(middle), toPoint(end)),
-  );
-}
-
-export function bezier(points: readonly Vec3[]): EdgeModel {
-  assertCurvePoints('bezier', points, 2);
-  return curveModel('bezier', 'Bezier curve', points, () =>
-    makeBezierCurve(points.map(toPoint)),
-  );
-}
-
-export function spline(points: readonly Vec3[]): EdgeModel {
-  assertCurvePoints('spline', points, 2);
-  return curveModel('spline', 'Spline', points, () =>
-    makeBSplineApproximation(points.map(toPoint)),
-  );
-}
-
 export type LoftOptions = Readonly<{
   spine?: EdgeModel<{}>;
   ruled?: boolean;
@@ -7217,7 +7080,8 @@ function evaluateKernelShape<Shape extends AnyShape>(
   ) as KernelArtifact<Shape>;
 }
 
-const evaluateModelGeometry = cachedArtifact(
+/** @internal */
+export const evaluateModelGeometry = cachedArtifact(
   (
     _operation: string,
     _arguments: readonly KernelKeyPart[],
@@ -7390,11 +7254,6 @@ function meshUVs(
   }
 }
 
-type PlanarSketch = Readonly<{
-  face(): ReplicadFace;
-  delete(): void;
-}>;
-
 /** Internal bridge from the kernel-independent sketch definition to model geometry. */
 function sketchFaceModel(
   region: SketchRegion,
@@ -7430,32 +7289,8 @@ function sketchFaceModel(
   }) as unknown as FaceModel;
 }
 
-function planarFaceModel(
-  operation: Extract<
-    ModelOperationKind,
-    'circle' | 'ellipse' | 'rectangle' | 'regularPolygon'
-  >,
-  name: string,
-  arguments_: readonly KernelKeyPart[],
-  buildSketch: () => PlanarSketch,
-  transform?: (face: ReplicadFace) => ReplicadFace,
-): FaceModel {
-  const geometry = evaluateModelGeometry(operation, arguments_, [], () => {
-    const sketch = buildSketch();
-    try {
-      const face = sketch.face();
-      // Replicad's XZ sketches face -Y. Core's planar profiles face +Y;
-      // normalize the native face before normals, offsets and sweeps consume it.
-      face.wrapped.Reverse();
-      return {shape: transform?.(face) ?? face};
-    } finally {
-      sketch.delete();
-    }
-  });
-  return faceModel(operation, name, geometry);
-}
-
-function faceModel(
+/** @internal */
+export function faceModel(
   operation: ModelOperationKind,
   name: string,
   geometry: ModelGeometry,
@@ -7476,39 +7311,11 @@ function faceModel(
   }) as unknown as FaceModel;
 }
 
-function curveModel(
-  operation: Extract<ModelOperationKind, 'line' | 'arc' | 'bezier' | 'spline'>,
-  name: string,
-  arguments_: readonly KernelKeyPart[],
-  build: () => ReplicadEdge,
-): EdgeModel {
-  const geometry = evaluateModelGeometry(operation, arguments_, [], () => ({
-    shape: build(),
-  }));
-  const elements = curveElements(geometry.value.shape as ReplicadEdge);
-  return ModelObject.create<CurveElements, 'edge'>({
-    kind: 'edge',
-    name,
-    geometry,
-    geometryAnchor: {...elements.start, kind: 'line'},
-    elements,
-    operation: storedOperation(operation),
-  }) as unknown as EdgeModel;
-}
-
-function curveElements(curve: ReplicadEdge): Readonly<{
-  start: StoredElement;
-  midpoint: StoredElement;
-  end: StoredElement;
-}> {
-  return {
-    start: curveAnchor(curve, 0),
-    midpoint: curveAnchor(curve, 0.5),
-    end: curveAnchor(curve, 1),
-  };
-}
-
-function curveAnchor(curve: ReplicadEdge, position: number): StoredElement {
+/** @internal */
+export function curveAnchor(
+  curve: ReplicadEdge,
+  position: number,
+): StoredElement {
   const point = curve.pointAt(position);
   const tangent = curve.tangentAt(position);
   try {
@@ -8416,37 +8223,6 @@ function booleanOperands(
     ),
   );
   return {first: runtimeOperands[0], others: runtimeOperands.slice(1)};
-}
-
-function assertFiniteVector(label: string, value: Vec3): void {
-  if (value.some(component => !Number.isFinite(component))) {
-    throw new Error(`${label} must be a finite number.`);
-  }
-}
-
-function assertCurvePoints(
-  label: string,
-  points: readonly Vec3[],
-  minimum: number,
-): void {
-  if (points.length < minimum) {
-    throw new Error(`${label} requires at least ${minimum} points.`);
-  }
-  points.forEach((point, index) =>
-    assertFiniteVector(`${label} point ${index + 1}`, point),
-  );
-  const [first, ...rest] = points;
-  if (
-    rest.every(point =>
-      point.every((component, index) => component === first[index]),
-    )
-  ) {
-    throw new Error(`${label} requires at least two distinct points.`);
-  }
-}
-
-function toPoint(vector: Vec3): [number, number, number] {
-  return [vector[0], vector[1], vector[2]];
 }
 
 function appendUniqueParameters(

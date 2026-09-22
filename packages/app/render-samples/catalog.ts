@@ -406,6 +406,97 @@ export const sourceContextSets: Readonly<
 > = {
   primitives: [
     {
+      id: 'point',
+      image: 'primitives-point',
+      label: 'point',
+      description: 'A vertex at the local origin.',
+      focus: {
+        context: 'export const vertex = point([0, 0, 0])',
+        token: 'point',
+      },
+    },
+    {
+      id: 'line',
+      image: 'primitives-line',
+      label: 'line',
+      description: 'A straight edge of length 12.',
+      focus: {
+        context: 'export const straightLine = line([-6, 0, 0], [6, 0, 0])',
+        token: 'line',
+      },
+    },
+    {
+      id: 'arc',
+      image: 'primitives-arc',
+      label: 'arc',
+      description: 'A radius-6 semicircular edge.',
+      focus: {
+        context:
+          'export const circularArc = arc([-6, 0, 0], [0, 0, -6], [6, 0, 0])',
+        token: 'arc',
+      },
+    },
+    {
+      id: 'bezier',
+      image: 'primitives-bezier',
+      label: 'bezier',
+      description: 'A cubic Bézier edge with four control points.',
+      focus: {
+        context: '= bezier([',
+        token: 'bezier',
+      },
+    },
+    {
+      id: 'spline',
+      image: 'primitives-spline',
+      label: 'spline',
+      description: 'A B-spline fitted to four sample positions.',
+      focus: {
+        context: 'export const fittedSpline = spline([',
+        token: 'spline',
+      },
+    },
+    {
+      id: 'circle',
+      image: 'primitives-circle',
+      label: 'circle',
+      description: 'A filled circular face with radius 6.',
+      focus: {
+        context: 'export const circularFace = circle(6)',
+        token: 'circle',
+      },
+    },
+    {
+      id: 'ellipse',
+      image: 'primitives-ellipse',
+      label: 'ellipse',
+      description: 'A filled elliptical face with X radius 7 and Z radius 4.',
+      focus: {
+        context: 'export const ellipticalFace = ellipse(7, 4)',
+        token: 'ellipse',
+      },
+    },
+    {
+      id: 'rectangle',
+      image: 'primitives-rectangle',
+      label: 'rectangle',
+      description: 'A filled rectangular face measuring 12 by 8.',
+      focus: {
+        context: 'export const rectangularFace = rectangle(12, 8)',
+        token: 'rectangle',
+      },
+    },
+    {
+      id: 'regular-polygon',
+      image: 'primitives-regular-polygon',
+      label: 'regularPolygon',
+      description: 'A filled regular pentagon with circumradius 6.',
+      focus: {
+        context: 'export const pentagonalFace = regularPolygon(6, 5)',
+        token: 'regularPolygon',
+      },
+    },
+    {
       id: 'cylinder',
       image: 'primitives-cylinder',
       label: 'cylinder',

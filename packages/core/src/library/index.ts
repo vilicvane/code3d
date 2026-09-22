@@ -1,3 +1,12 @@
+export {circle} from './circle.js';
+export {ellipse} from './ellipse.js';
+export {rectangle} from './rectangle.js';
+export {regularPolygon} from './regular-polygon.js';
+export {point} from './point.js';
+export {line} from './line.js';
+export {arc} from './arc.js';
+export {bezier} from './bezier.js';
+export {spline} from './spline.js';
 export {cylinder} from './cylinder.js';
 export {tube} from './tube.js';
 export {coil} from './coil.js';
@@ -70,24 +79,15 @@ export {
   coupleRotation,
   on,
   align,
-  arc,
-  bezier,
-  circle,
   cut,
   distance,
-  ellipse,
   extrude,
   text,
   group,
   inspectGroupMembers,
   intersect,
-  line,
   loft,
-  point,
-  rectangle,
-  regularPolygon,
   revolve,
-  spline,
   sweep,
   wrap,
   thicken,

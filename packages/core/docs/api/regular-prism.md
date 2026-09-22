@@ -6,8 +6,9 @@ sourceReview:
   sources:
     - path: packages/core/src/library/regular-prism.ts
       sha256: f90973a4defd557260065b67b36ae178b1f681c2222269e9ab47e2286bbf8e32
+      commit: 1baef99a1318fc694825ec0a48d4d39635a3a130
     - path: packages/core/src/library/validation.ts
-      sha256: b665c2ba04faed587c7ff4414d6cfc558907355f0c428ac3df75f9cecbcef971
+      sha256: dae9300aea522c8aee83ef09e6716f31cd17f0cf6fb6df537218ecb72c63419d
 sidebar:
   hidden: true
 head:
@@ -109,7 +110,7 @@ Very small dimensions or clearances can also encounter the modeling kernel's tol
 
 ## Related APIs
 
-- [regularPolygon](../api.md#profiles-and-curves) creates the corresponding flat face.
+- [regularPolygon](regular-polygon.md) creates the corresponding flat face.
 - [cylinder](cylinder.md) has a smooth circular section.
 - [Standard fasteners](../../../screws/docs/assembly.mdx) provide nominal screw and nut geometry beyond a plain polygonal blank.
 - [Solid primitives](../api.md#solid-primitives) compares the available starting shapes.

@@ -252,3 +252,7 @@ function quaternionFromBasis(x: Vec3, y: Vec3, z: Vec3): Quaternion {
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
+
+export function toPoint(vector: Vec3): [number, number, number] {
+  return [vector[0], vector[1], vector[2]];
+}

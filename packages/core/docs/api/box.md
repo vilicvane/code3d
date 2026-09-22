@@ -6,8 +6,9 @@ sourceReview:
   sources:
     - path: packages/core/src/library/box.ts
       sha256: 7e05f0294168b3eb547552c50af08e990348e881a0a3e3b4c1b3a357ab3c5150
+      commit: 1baef99a1318fc694825ec0a48d4d39635a3a130
     - path: packages/core/src/library/validation.ts
-      sha256: b665c2ba04faed587c7ff4414d6cfc558907355f0c428ac3df75f9cecbcef971
+      sha256: dae9300aea522c8aee83ef09e6716f31cd17f0cf6fb6df537218ecb72c63419d
 sidebar:
   hidden: true
 head:
@@ -60,7 +61,7 @@ units as other Core geometry; the [export scale](../../../web/src/content/docs/d
 determines how those units map to millimetres in an exported file.
 
 Use `box(10, 10, 10)` for a cube or `box(40, 3, 25)` for a thin plate.
-For a flat face with no thickness, use [`rectangle`](../api.md#profiles-and-curves).
+For a flat face with no thickness, use [`rectangle`](rectangle.md).
 
 ## Result and coordinates
 

@@ -85,23 +85,23 @@ To build a solid beyond these primitives, import `definePrimitive` and
 
 Planar profiles lie in the local XZ plane with a +Y normal.
 
-| Function                                   | Meaning                                                                   |
-| ------------------------------------------ | ------------------------------------------------------------------------- |
-| `circle(radius)`                           | Circular face                                                             |
-| `ellipse(xRadius, zRadius)`                | Elliptical face                                                           |
-| `rectangle(x, z)`                          | Rectangular face                                                          |
-| `regularPolygon(radius, sides, rotation?)` | Regular polygonal face                                                    |
-| `point()` or `point([x, y, z])`            | Vertex model                                                              |
-| `line([x, y, z])` or `line(start, end)`    | Straight edge                                                             |
-| `arc(start, middle, end)`                  | Arc through three points                                                  |
-| `bezier(points)`                           | Bézier curve                                                              |
-| `spline(points)`                           | Interpolating spline                                                      |
-| `loft(sections, options?)`                 | Solid through sections; optional curve spine                              |
-| `extrude(faceOrFaces, distance)`           | Solid extruded along one face's local normal                              |
-| `revolve(profile, axis, config)`           | Solid rotated about a straight directed axis, with optional axial advance |
-| `sweep(profile, spine)`                    | Solid formed by carrying one face along an open curve                     |
-| `wrap(profiles, target, options?)`         | Curved faces mapped from one planar layout onto a finite surface          |
-| `thicken(faceOrFaces, thickness)`          | Solids offset along oriented surface normals                              |
+| Function                                                              | Meaning                                                                   |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [`circle(radius)`](api/circle.md)                                     | Circular face                                                             |
+| [`ellipse(xRadius, zRadius)`](api/ellipse.md)                         | Elliptical face                                                           |
+| [`rectangle(x, z)`](api/rectangle.md)                                 | Rectangular face                                                          |
+| [`regularPolygon(radius, sides, rotation?)`](api/regular-polygon.md)  | Regular polygonal face                                                    |
+| [`point()`](api/point.md) or [`point([x, y, z])`](api/point.md)       | Vertex model                                                              |
+| [`line([x, y, z])`](api/line.md) or [`line(start, end)`](api/line.md) | Straight edge                                                             |
+| [`arc(start, middle, end)`](api/arc.md)                               | Arc through three points                                                  |
+| [`bezier(points)`](api/bezier.md)                                     | Bézier curve                                                              |
+| [`spline(points)`](api/spline.md)                                     | B-spline fitted to ordered samples                                        |
+| `loft(sections, options?)`                                            | Solid through sections; optional curve spine                              |
+| `extrude(faceOrFaces, distance)`                                      | Solid extruded along one face's local normal                              |
+| `revolve(profile, axis, config)`                                      | Solid rotated about a straight directed axis, with optional axial advance |
+| `sweep(profile, spine)`                                               | Solid formed by carrying one face along an open curve                     |
+| `wrap(profiles, target, options?)`                                    | Curved faces mapped from one planar layout onto a finite surface          |
+| `thicken(faceOrFaces, thickness)`                                     | Solids offset along oriented surface normals                              |
 
 See [local coordinates and placement](local-coordinates.md) for
 the coordinate frame of a model, reference, or composition.
