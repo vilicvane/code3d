@@ -11,17 +11,19 @@ import {
   normalizeProjectPath,
   projectDirectory,
   type ProjectDirectoryTemplate,
+  type ModelProject,
 } from './project';
 
 const browserProjectRoot = '/workspace';
 const browserManifestPath = '/code3d-project.json';
-const browserStoreName = 'code3d-project-v1';
+export const defaultBrowserProjectDatabaseName = 'code3d-project-v1';
 const directoryProjectRoot = '/';
 const directoryManifestPath = '/.code3d/project.json';
 
 type ProjectManifest = Readonly<{
   version: 1;
   managedDirectories: Readonly<Record<string, string | null>>;
+  initializingSeed?: true;
 }>;
 
 type ProjectFileOperations = {
@@ -69,14 +71,41 @@ export interface ProjectFileSystem extends ProjectFileReader {
   remove(path: string): Promise<void>;
 }
 
+export async function initializeBrowserProjectContents(
+  fileSystem: ProjectFileSystem,
+  contents: {
+    examples: ProjectDirectoryTemplate;
+    starter: ModelProject;
+    createExamples: boolean;
+  },
+  signal?: AbortSignal,
+): Promise<void> {
+  await fileSystem.initialize(
+    contents.createExamples
+      ? async () => {
+          await fileSystem.resetDirectory(contents.examples);
+          signal?.throwIfAborted();
+          await mapProjectIO(contents.starter.files, file =>
+            fileSystem.writeFile(file.path, file.source),
+          );
+          signal?.throwIfAborted();
+        }
+      : undefined,
+  );
+  signal?.throwIfAborted();
+}
+
 let configureBrowserPromise: Promise<void> | undefined;
+let configuredBrowserDatabaseName: string | undefined;
 
 /** Run on the new page before opening ZenFS, after the old page's writers stop. */
-export async function resetBrowserProjectFileSystem(): Promise<void> {
-  if (configureBrowserPromise)
+export async function resetBrowserProjectFileSystem(
+  databaseName = defaultBrowserProjectDatabaseName,
+): Promise<void> {
+  if (configuredBrowserDatabaseName === databaseName)
     throw new Error('Reset browser storage before opening the project.');
   await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.deleteDatabase(browserStoreName);
+    const request = indexedDB.deleteDatabase(databaseName);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
   });
@@ -88,8 +117,10 @@ export interface BrowserProjectFileSystem extends ProjectFileSystem {
   symlink(target: string, path: string): Promise<void>;
 }
 
-export async function openBrowserProjectFileSystem(): Promise<BrowserProjectFileSystem> {
-  await configureBrowserFileSystem();
+export async function openBrowserProjectFileSystem(
+  databaseName = defaultBrowserProjectDatabaseName,
+): Promise<BrowserProjectFileSystem> {
+  await configureBrowserFileSystem(databaseName);
   const store = new ProjectStore(
     fs.promises,
     browserProjectRoot,
@@ -149,10 +180,16 @@ export async function openDirectoryProjectFileSystem(
   );
 }
 
-async function configureBrowserFileSystem(): Promise<void> {
+async function configureBrowserFileSystem(databaseName: string): Promise<void> {
+  if (
+    configuredBrowserDatabaseName !== undefined &&
+    configuredBrowserDatabaseName !== databaseName
+  )
+    throw new Error('Reload the page before opening another browser project.');
+  configuredBrowserDatabaseName = databaseName;
   configureBrowserPromise ??= configureSingle({
     backend: IndexedDB,
-    storeName: browserStoreName,
+    storeName: databaseName,
   });
   await configureBrowserPromise;
 }
@@ -193,10 +230,10 @@ class ProjectStore implements ProjectFileSystem {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** Seed only empty workspaces; initialization never reads project contents. */
+  /** Start seeds only in empty workspaces, and resume interrupted seeds. */
   async initialize(seed?: () => Promise<void>): Promise<void> {
     await this.files.mkdir(this.projectRoot, {recursive: true});
-    const manifest = await this.readManifest();
+    let manifest = await this.readManifest();
     if (!manifest && seed) {
       const entries = await this.list('/');
       if (
@@ -204,8 +241,16 @@ class ProjectStore implements ProjectFileSystem {
           entry =>
             entry.name !== '.code3d' && !isExcludedProjectEntry(entry.name),
         )
-      )
-        await seed();
+      ) {
+        manifest = {...newManifest(), initializingSeed: true};
+        await this.writeManifest(manifest);
+      }
+    }
+    if (manifest?.initializingSeed && seed) {
+      await seed();
+      // A seed can write managed directories; keep their new revisions.
+      const {initializingSeed: _, ...completed} = await this.requireManifest();
+      manifest = completed;
     }
     await this.writeManifest(manifest ?? newManifest());
   }
@@ -328,6 +373,7 @@ class ProjectStore implements ProjectFileSystem {
     // Prototype metadata has one current shape; its marker never selects a format.
     return {
       version: 1,
+      ...(value.initializingSeed === true ? {initializingSeed: true} : {}),
       managedDirectories: Object.fromEntries(
         Object.entries(value.managedDirectories ?? {}).filter(
           (entry): entry is [string, string | null] =>

@@ -1,12 +1,15 @@
 ---
 title: Working with files
-description: Use browser storage or connect the App to a local project folder.
+description: Create and switch browser projects or connect the App to a local project folder.
 ---
 
 ## Browser workspace
 
-The default workspace is stored in your browser. You can create multiple
-TypeScript and JSON files and import between them using ordinary relative imports:
+The App starts with **Default project** in browser storage, with a default model
+and bundled examples ready to try. Existing browser files remain in that project.
+Each browser project has its own files, installed
+packages, build cache and agent connections. You can create multiple TypeScript
+and JSON files and import between them using ordinary relative imports:
 
 ```ts
 import {makeBracket} from './bracket.ts';
@@ -17,7 +20,41 @@ another module needs it; exporting is not required just to inspect a local
 model.
 
 Browser data belongs to that browser profile and site origin. Clearing site
-data removes the browser workspace. Keep copies of work you care about.
+data removes all browser projects. Keep copies of work you care about.
+
+## Create, switch and delete browser projects
+
+Click the project name in the explorer header to open the location menu. The
+**Browser projects** list highlights the current project. Click a project name to
+switch to it. Each project's arrow opens a submenu starting with **Open**,
+followed by its copy, reset and delete actions, including projects that are not open.
+**Open** saves and switches just like clicking the project name.
+You can also hover over a project row or
+focus its name and press **Right arrow** to open these actions.
+Folder commands and **New browser project** appear below the list, separated by a divider,
+with **Open folder** or **Change folder** before **New browser project**.
+Choose **New browser project** and enter a name. The same form has a **Create examples**
+checkbox, selected by default: leave it checked to include the default model and
+bundled `/examples` folder, or clear it to start with an empty project. Choose
+**Create project** to open the new project without another prompt.
+You can add examples later with **Create examples** in the explorer's context menu.
+A new project does not copy the current project's files.
+
+Choose another project from the list in the same menu to open it. The App
+saves the current project before reloading into the selected project. If saving fails, it stays in
+the current project and shows the error. Each project keeps its own workspace
+URL, so separate tabs can open different projects. Switching clears the previous
+file selection.
+
+To remove a browser project, open its arrow, then choose
+**Delete**. Check the project name in the confirmation, then choose **Delete project**.
+Deletion permanently removes that project's files, installed packages, build cache
+and agent connection settings. Deleting the current project also discards its
+unsaved edits and opens another browser project. Deleting another project keeps
+the current page and unsaved edits in place. Deleting the last browser project
+creates a fresh, empty **Default project**. If another tab has the target project
+open, deletion waits and asks you to close that tab. Other projects and App
+settings are preserved.
 
 ## Prompts and confirmations
 
@@ -121,8 +158,9 @@ Changing a dimension or expression does not repeat that preparation.
 
 Try `/examples/npm/model.ts` in the App's file explorer. This
 bundled example has its own `package.json` and uses `@ctrl/tinycolor` from npm to
-lighten a box's material color. Use F12 on `TinyColor` to inspect its declarations. The example is included in every browser
-workspace; it does not depend on files from another browser profile.
+lighten a box's material color. Use F12 on `TinyColor` to inspect its declarations.
+If you skipped examples when creating the project, choose **Create examples** in
+the explorer's context menu first. The example uses the current project's files.
 In a local project, run `npm install` inside `examples/npm`,
 then choose **Reload folder** before running this example.
 
@@ -201,34 +239,44 @@ errors appear in the project explorer; errors do not open a global floating bar.
 
 ## Reset browser storage
 
-Click **Browser storage** in the explorer header, then **Reset browser storage**.
-After confirmation, the App reloads, removes all browser project files and
-installed dependencies, and restores the default model and bundled examples.
-Unsaved edits are discarded too. Copy any files you want to keep to a local
-folder first; the reset cannot be undone.
+Open the location menu in the explorer header, open the arrow beside the browser
+project you want to reset, then choose **Reset**. Check the project name
+in the confirmation. After confirmation, the App removes that project's files and
+installed dependencies, and restores the default model and bundled examples
+without asking again whether to create examples.
+Resetting the current project reloads the page and discards its unsaved edits.
+Resetting another project keeps the current page and unsaved edits in place.
+Copy any files you want to keep to a local folder first; the reset cannot be undone.
 
-Local folders and App settings are preserved. The browser project's build cache
-is cleared; shared geometry and download caches are retained. If another tab
+Other browser projects, local folders and App settings are preserved. The target
+project's build cache is cleared; shared geometry and download caches are retained. If another tab
 still has the browser project open, the reset waits and asks you to close that
-tab. The command is available only while using browser storage.
+tab. Browser project actions are also available while working in a local folder.
 
 ## Local folder
 
-To copy your browser project to disk, click **Browser storage** in the explorer
-header and choose **Copy to local folder and open**, then select an empty folder.
+To copy a browser project to disk, open the location menu in the explorer header,
+open that project's arrow, and choose **Copy to local folder and open**, then select
+an empty folder. You do not need to open the browser project first.
+The App saves your current project before copying. When copying a project that
+is not open in this tab, close other tabs using that project when prompted so the
+copy can proceed.
 The App copies project files, binary resources, configuration, empty directories,
 and examples. It excludes `node_modules`, `.code3d` internal data, and
 `code3d-lock.json` at every level. Install dependencies locally as needed.
-After copying succeeds, the App opens the local project with the current file
-selected when that file was copied. The original browser project remains available. Cancellation or failure
-keeps browser storage open; a failed copy may leave partial files in the target.
+After copying succeeds, the App opens the local project. When copying the current
+project, it keeps the current file selected if that file was copied. The original
+browser project remains available. Cancellation, failure or edits made during
+copying keep the current project open; a failed copy may leave partial files in the target.
 
-Click **Browser storage** in the explorer header and choose **Open folder** to connect
+Click the project name in the explorer header and choose **Open folder** to connect
 the App to a real directory. To switch local projects, click the current folder name
 and choose **Change folder**.
 The selected directory keeps its own files. When opening an empty directory,
-the App asks whether to create the bundled `/examples` folder. Declining is remembered
-for that project, so reloading does not ask again or create examples later.
+the App shows a **Create examples** prompt.
+Accept to add the bundled `/examples` folder, or cancel to keep the directory empty.
+The choice is remembered for that project, so reloading does not ask again.
+You can add examples later through the explorer's context menu.
 Nonempty directories open without this prompt and do not receive examples automatically.
 The **Open folder** command never copies files from the previous project or browser storage.
 Only the App's own `.code3d` metadata is ignored when checking whether a directory is empty.
@@ -256,8 +304,8 @@ the entire directory into memory. **Reload folder** reloads the workspace.
 
 Each connected directory gets its own workspace URL. Click the storage location
 in the explorer header to access **Reload folder**, **Reconnect folder** when the
-browser requires fresh permission, or **Use browser storage** to return the current
-tab to browser persistence. These workspace switches clear the previous file selection.
+browser requires fresh permission, or select a project name from the list
+to return to that browser project. These workspace switches clear the previous file selection.
 
 Local folders require a browser with File System Access support and a secure
 context. Browser storage remains available when folder access is unsupported.
@@ -361,7 +409,8 @@ removed by cache eviction require network access.
 
 The bundled `/examples` folder is managed by Code3D. Right-click that folder and choose
 **Reset examples** to restore it. A new bundled revision refreshes managed examples
-automatically; existing user-owned examples are left alone unless explicitly reset.
+automatically without another creation prompt; existing user-owned examples are
+left alone unless explicitly reset.
 If there is no `/examples` folder, right-click the empty space in the explorer and choose
 **Create examples** to add it later. Keep your own work
 in `/model.ts` or another directory outside `/examples`.

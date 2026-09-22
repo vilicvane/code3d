@@ -26,6 +26,7 @@ import {
 } from '@code3d/core/tooling';
 import {
   File,
+  ChevronRight,
   FilePlus,
   FolderPlus,
   PanelLeftClose,
@@ -42,10 +43,13 @@ import {
 } from 'mobx';
 import {appSettings} from './app-settings';
 import {AppSettingsDialog} from './ui/app-settings';
+import {showNewBrowserProjectDialog} from './ui/new-browser-project';
+import {Submenu} from './ui/submenu';
 import {RenderScenePreference} from './rendering/render-scene';
 import {ViewportSceneSelector} from './ui/viewport-scene-selector';
 import brandMark from '../../../assets/brand/mark.svg?raw';
 import {AgentConnections} from './agent/connections';
+import {AgentPersistence} from './agent/persistence';
 import {AgentObserver} from './agent/observer';
 import {AgentPanel} from './agent/panel';
 import {AgentProjectSession, type AgentUpdate} from './agent/project-session';
@@ -102,6 +106,13 @@ import {
 import {bundledExamples} from './project/bundled-examples';
 import {defaultProject} from './project/default-project';
 import {
+  BrowserProjects,
+  browserProjectDatabaseName,
+  browserProjectWorkspaceId,
+  type BrowserProject,
+} from './project/browser-projects';
+import {runBrowserProjectOperation} from './project/browser-project-operation';
+import {
   pickProjectDirectory,
   projectDirectoryPermission,
   rememberProjectDirectory,
@@ -122,10 +133,9 @@ import {filePathFromRoute, fileRoute} from './project/file-route';
 import type {BrowserProjectFileSystem} from './project/filesystem';
 import {
   openBrowserProjectFileSystem,
-  resetBrowserProjectFileSystem,
   openDirectoryProjectFileSystem,
+  initializeBrowserProjectContents,
 } from './project/filesystem';
-import {mapProjectIO} from './project/io';
 import {
   addPackageDependency,
   packageInstallDirectory,
@@ -184,32 +194,55 @@ import {
   type TopologySelectionEvent,
 } from './viewport';
 
-const directoryWorkspaceId = new URL(window.location.href).searchParams.get(
-  'workspace',
-);
+const workspaceUrl = new URL(window.location.href);
+const directoryWorkspaceId = workspaceUrl.searchParams.get('workspace');
+const browserProjects = new BrowserProjects();
 const browserResetStorageKey = 'code3d-reset-browser-project';
+const browserDeleteStorageKey = 'code3d-delete-browser-project';
 let browserProjectReset = false;
-if (!directoryWorkspaceId && sessionStorage.getItem(browserResetStorageKey)) {
-  // Keep the confirmed command until startup completes, including across reloads
-  // while another tab blocks deletion. It never lives in a shareable URL.
+const pendingDelete = sessionStorage.getItem(browserDeleteStorageKey);
+const pendingReset = sessionStorage.getItem(browserResetStorageKey);
+if (pendingDelete || pendingReset) {
+  // Confirmed destructive commands belong to this tab, never to a shareable URL.
+  const deleting = pendingDelete !== null;
+  const title = deleting ? 'Deleting project' : 'Resetting project';
   const progress = new AppDialog({
-    title: 'Resetting browser storage',
+    title,
     className: 'message-dialog',
     canDismiss: () => false,
   });
-  // A delete queued behind an earlier page's request need not fire "blocked".
-  // Keep the instruction visible throughout the pending operation.
-  progress.element.innerHTML =
-    '<div class="app-dialog-content"><h2>Resetting browser storage</h2><p role="status">Removing browser project files and installed dependencies…</p><p>Close other Code3D tabs using this browser storage to allow the reset to finish. Local folders will not be changed.</p></div>';
+  progress.element.innerHTML = `<div class="app-dialog-content"><h2>${title}</h2><p role="status">Removing project files and installed dependencies…</p><p>Close other Code3D tabs using this browser storage project to allow the operation to finish. Other projects and local folders will not be changed.</p></div>`;
   progress.open();
   try {
-    await resetBrowserProjectFileSystem();
-    browserProjectReset = true;
+    if (deleting) {
+      await browserProjects.remove(pendingDelete, () =>
+        clearBrowserProjectState(pendingDelete, true),
+      );
+      browserProjects.signal.throwIfAborted();
+      sessionStorage.removeItem(browserDeleteStorageKey);
+    } else {
+      const resettingCurrentProject =
+        !directoryWorkspaceId &&
+        workspaceUrl.searchParams.get('project') === pendingReset;
+      await browserProjects.reset(
+        pendingReset!,
+        resettingCurrentProject ? undefined : resetUnopenedBrowserProject,
+      );
+      browserProjects.signal.throwIfAborted();
+      browserProjectReset = resettingCurrentProject;
+      if (!resettingCurrentProject)
+        sessionStorage.removeItem(browserResetStorageKey);
+    }
   } catch (error) {
+    // A closing page must leave its confirmed command for the next page.
+    browserProjects.signal.throwIfAborted();
+    sessionStorage.removeItem(browserDeleteStorageKey);
     sessionStorage.removeItem(browserResetStorageKey);
     progress.close();
     await dialogs.alert({
-      title: 'Could not reset browser storage',
+      title: deleting
+        ? 'Could not delete browser project'
+        : 'Could not reset browser storage',
       message: error instanceof Error ? error.message : String(error),
     });
   } finally {
@@ -222,36 +255,62 @@ const storedDirectoryHandle = directoryWorkspaceId
 const directoryConnected =
   storedDirectoryHandle !== undefined &&
   (await projectDirectoryPermission(storedDirectoryHandle)) === 'granted';
-const projectFileSystem = directoryConnected
-  ? await openDirectoryProjectFileSystem(storedDirectoryHandle)
-  : await openBrowserProjectFileSystem();
-await projectFileSystem.initialize(
-  directoryConnected
-    ? undefined
-    : async () => {
-        await mapProjectIO(defaultProject.files, file =>
-          projectFileSystem.writeFile(file.path, file.source),
-        );
+const browserProject = directoryConnected
+  ? undefined
+  : await browserProjects.open(
+      workspaceUrl.searchParams.get('project') ?? undefined,
+    );
+if (browserProject && !directoryWorkspaceId) {
+  workspaceUrl.searchParams.set('project', browserProject.id);
+  window.history.replaceState(null, '', workspaceUrl);
+}
+const initializeProject = async () => {
+  const projectFileSystem = directoryConnected
+    ? await openDirectoryProjectFileSystem(storedDirectoryHandle)
+    : await openBrowserProjectFileSystem(
+        browserProjectDatabaseName(browserProject!.id),
+      );
+  browserProjects.signal.throwIfAborted();
+  if (browserProject) {
+    await initializeBrowserProjectContents(
+      projectFileSystem,
+      {
+        examples: bundledExamples,
+        starter: defaultProject,
+        createExamples:
+          browserProjectReset || browserProject.template === 'examples',
       },
-);
-await projectFileSystem.syncDirectory(
-  bundledExamples,
-  directoryConnected
-    ? async () => {
-        const entries = await projectFileSystem.list('/');
-        return (
-          entries.every(entry => entry.name === '.code3d') &&
-          (await dialogs.confirm({
-            title: 'Create examples',
-            message:
-              'This folder is empty. Create bundled examples in /examples?',
-            submit: 'Create examples',
-          }))
-        );
-      }
-    : undefined,
-);
-const localPackageFiles = directoryWorkspaceId
+      browserProjects.signal,
+    );
+  } else {
+    await projectFileSystem.initialize();
+  }
+  browserProjects.signal.throwIfAborted();
+  await projectFileSystem.syncDirectory(bundledExamples, async () => {
+    if (!directoryConnected) return false;
+    const entries = await projectFileSystem.list('/');
+    browserProjects.signal.throwIfAborted();
+    if (!entries.every(entry => entry.name === '.code3d')) return false;
+    const createExamples = await dialogs.confirm({
+      title: 'Create examples',
+      message: 'This project is empty. Create bundled examples in /examples?',
+      submit: 'Create examples',
+    });
+    browserProjects.signal.throwIfAborted();
+    return createExamples;
+  });
+  browserProjects.signal.throwIfAborted();
+  return projectFileSystem;
+};
+// Mount only after earlier initialization finishes, so a second tab loads current metadata.
+const projectFileSystem = browserProject
+  ? await navigator.locks.request(
+      `code3d-browser-project-initialize:${browserProject.id}`,
+      {signal: browserProjects.signal},
+      initializeProject,
+    )
+  : await initializeProject();
+const localPackageFiles = directoryConnected
   ? new WorkspaceFileReader(
       projectFileSystem,
       browserPackageFiles,
@@ -268,6 +327,7 @@ if (
 }
 let initialFileError: unknown;
 const initialProject: ModelProject = await loadInitialProject();
+browserProjects.signal.throwIfAborted();
 const app = document.querySelector<HTMLDivElement>('#app');
 
 if (!app) {
@@ -296,14 +356,18 @@ app.innerHTML = `
         <div class="editor-workspace">
           <aside class="project-explorer" id="project-explorer" aria-label="Project files">
             <header>
-              <button class="project-location" id="project-location" type="button" aria-expanded="false" aria-controls="project-storage-menu"></button>
-              <div class="project-context-menu project-storage-menu" id="project-storage-menu" popover="auto" role="group" aria-label="Project storage">
-                <button id="open-folder-button" type="button">Open folder</button>
-                <button id="copy-local-folder-button" type="button" hidden>Copy to local folder and open</button>
-                <button id="reconnect-folder-button" type="button" hidden>Reconnect folder</button>
-                <button id="reload-folder-button" type="button" hidden>Reload folder</button>
-                <button id="browser-storage-button" type="button" hidden>Use browser storage</button>
-                <button id="reset-browser-storage-button" type="button" hidden>Reset browser storage</button>
+              <button class="project-location" id="project-location" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="project-storage-menu"></button>
+              <div class="project-context-menu project-storage-menu" id="project-storage-menu" popover="auto" role="menu" aria-label="Project storage">
+                <section class="project-storage-section" role="group" aria-labelledby="browser-project-list-label">
+                  <div class="project-storage-label" id="browser-project-list-label">Browser projects</div>
+                  <div id="browser-project-list"></div>
+                </section>
+                <section class="project-storage-section" role="group" aria-label="Open a project">
+                  <button id="open-folder-button" type="button" role="menuitem" tabindex="-1">Open folder</button>
+                  <button id="new-browser-project-button" type="button" role="menuitem" tabindex="-1">New browser project</button>
+                  <button id="reconnect-folder-button" type="button" role="menuitem" tabindex="-1" hidden>Reconnect folder</button>
+                  <button id="reload-folder-button" type="button" role="menuitem" tabindex="-1" hidden>Reload folder</button>
+                </section>
               </div>
               <div class="project-actions">
                 <button id="new-file-button" type="button" title="New file" aria-label="New file"></button>
@@ -437,15 +501,10 @@ const reconnectFolderButton = requiredElement<HTMLButtonElement>(
 const reloadFolderButton = requiredElement<HTMLButtonElement>(
   'reload-folder-button',
 );
-const browserStorageButton = requiredElement<HTMLButtonElement>(
-  'browser-storage-button',
-);
-const copyLocalFolderButton = requiredElement<HTMLButtonElement>(
-  'copy-local-folder-button',
-);
 const projectLocationBusy = observable.box(false);
-const resetBrowserStorageButton = requiredElement<HTMLButtonElement>(
-  'reset-browser-storage-button',
+const browserProjectList = requiredElement('browser-project-list');
+const newBrowserProjectButton = requiredElement<HTMLButtonElement>(
+  'new-browser-project-button',
 );
 const newFileButton = requiredElement<HTMLButtonElement>('new-file-button');
 const newFolderButton = requiredElement<HTMLButtonElement>('new-folder-button');
@@ -461,11 +520,72 @@ projectLocation.addEventListener('click', () => {
     projectStorageMenu.hidePopover();
     return;
   }
-  projectStorageMenu.showPopover();
+  openProjectStorageMenu();
+});
+projectLocation.addEventListener('keydown', event => {
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  event.preventDefault();
+  openProjectStorageMenu();
+  const buttons = projectStorageButtons();
+  const current = buttons.find(
+    button => button.getAttribute('aria-current') === 'true',
+  );
+  (event.key === 'ArrowUp' ? buttons.at(-1) : (current ?? buttons[0]))?.focus();
+});
+
+function openProjectStorageMenu(): void {
+  if (!projectStorageMenu.matches(':popover-open'))
+    projectStorageMenu.showPopover();
   const anchor = projectLocation.getBoundingClientRect();
   const menu = projectStorageMenu.getBoundingClientRect();
   projectStorageMenu.style.left = `${Math.max(8, Math.min(anchor.left, innerWidth - menu.width - 8))}px`;
   projectStorageMenu.style.top = `${Math.max(8, Math.min(anchor.bottom + 6, innerHeight - menu.height - 8))}px`;
+  const buttons = projectStorageButtons();
+  const current = buttons.find(
+    button => button.getAttribute('aria-current') === 'true',
+  );
+  (current ?? buttons[0])?.focus();
+}
+
+function projectStorageButtons(): HTMLButtonElement[] {
+  return [
+    ...projectStorageMenu.querySelectorAll<HTMLButtonElement>(
+      'button:not(:disabled):not(.browser-project-manage)',
+    ),
+  ].filter(
+    button =>
+      button.closest('[popover]') === projectStorageMenu &&
+      button.checkVisibility(),
+  );
+}
+
+projectStorageMenu.addEventListener('keydown', event => {
+  if (event.key === 'Escape' || event.key === 'Tab') {
+    if (event.key === 'Escape') event.preventDefault();
+    event.stopPropagation();
+    projectStorageMenu.hidePopover();
+    projectLocation.focus();
+    return;
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const buttons = projectStorageButtons();
+  const focused = document.activeElement as HTMLButtonElement;
+  const item = focused.classList.contains('browser-project-manage')
+    ? focused.parentElement!.querySelector<HTMLButtonElement>(
+        '.browser-project-select',
+      )!
+    : focused;
+  const index = buttons.indexOf(item);
+  const next =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? buttons.length - 1
+        : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) %
+          buttons.length;
+  buttons[next]?.focus();
 });
 projectStorageMenu.addEventListener('toggle', () => {
   projectLocation.setAttribute(
@@ -473,10 +593,17 @@ projectStorageMenu.addEventListener('toggle', () => {
     String(projectStorageMenu.matches(':popover-open')),
   );
 });
-projectStorageMenu.addEventListener('click', event => {
-  if ((event.target as Element).closest('button'))
-    projectStorageMenu.hidePopover();
-});
+projectStorageMenu.addEventListener(
+  'click',
+  event => {
+    const button = (event.target as Element).closest('button');
+    if (button && button.getAttribute('aria-haspopup') !== 'menu') {
+      projectStorageMenu.hidePopover();
+      projectLocation.focus();
+    }
+  },
+  {capture: true},
+);
 window.addEventListener('resize', () => projectStorageMenu.hidePopover());
 
 const projectExplorerStorageKey = 'code3d:project-explorer-expanded';
@@ -517,7 +644,7 @@ const codeEditor = new CodeEditor(
   () => previewState.editorDiagnostics,
 );
 replaceFileRoute(codeEditor.currentFile());
-const packageManager = !directoryWorkspaceId
+const packageManager = !directoryConnected
   ? new BrowserPackageManager(
       projectFileSystem as BrowserProjectFileSystem,
       progress => projectDirectory.setPackageProgress(progress),
@@ -567,7 +694,9 @@ const preparePackages = async (_project: ModelProject, file: string) => {
 const compiler = new ModelCompilerClient(
   packageFiles,
   preparePackages,
-  directoryWorkspaceId ? `directory:${directoryWorkspaceId}` : 'browser',
+  directoryConnected
+    ? `directory:${directoryWorkspaceId}`
+    : browserProjectWorkspaceId(browserProject!.id),
 );
 const stopLanguage = autorun(() =>
   codeEditor.setProjectLanguage(compiler.language),
@@ -637,7 +766,7 @@ const agentConnections = new AgentConnections(
     ? directoryConnected
       ? `directory:${directoryWorkspaceId}`
       : undefined
-    : 'browser',
+    : browserProjectWorkspaceId(browserProject!.id),
 );
 const agentRenderView = new AgentRenderView(
   viewportHost,
@@ -700,7 +829,9 @@ retrySaveButton.addEventListener('click', () => {
 window.addEventListener('beforeunload', event => {
   if (
     agentProject.hasUnsaved &&
-    (directoryConnected || !sessionStorage.getItem(browserResetStorageKey))
+    (directoryConnected ||
+      (sessionStorage.getItem(browserResetStorageKey) !== browserProject?.id &&
+        sessionStorage.getItem(browserDeleteStorageKey) !== browserProject?.id))
   ) {
     event.preventDefault();
     event.returnValue = '';
@@ -1651,14 +1782,8 @@ reconnectFolderButton.addEventListener('click', () => {
 reloadFolderButton.addEventListener('click', () => {
   void reloadProjectDirectory();
 });
-copyLocalFolderButton.addEventListener('click', () => {
-  void copyToLocalDirectory();
-});
-browserStorageButton.addEventListener('click', () => {
-  void useBrowserStorage();
-});
-resetBrowserStorageButton.addEventListener('click', () => {
-  void resetBrowserStorage();
+newBrowserProjectButton.addEventListener('click', () => {
+  void createBrowserProject();
 });
 
 window.addEventListener('keydown', event => {
@@ -1682,13 +1807,133 @@ window.addEventListener('keydown', event => {
   }
 });
 
+// Preserve button identity across busy changes and cross-tab list updates.
+const projectButtons = new Map<
+  string,
+  {
+    row: HTMLDivElement;
+    button: HTMLButtonElement;
+    label: HTMLSpanElement;
+    manage: HTMLButtonElement;
+    submenu: Submenu;
+  }
+>();
+const stopBrowserProjects = autorun(() => {
+  const projects = browserProjects.projects;
+  const busy = projectLocationBusy.get();
+  const ids = new Set(projects.map(project => project.id));
+  let restoreProjectFocus = false;
+  for (const [id, item] of projectButtons) {
+    if (!ids.has(id)) {
+      restoreProjectFocus ||= item.row.contains(document.activeElement);
+      item.submenu.dispose();
+      item.row.remove();
+      projectButtons.delete(id);
+    }
+  }
+  for (const project of projects) {
+    const current = project.id === browserProject?.id;
+    let item = projectButtons.get(project.id);
+    if (!item) {
+      const row = document.createElement('div');
+      row.className = 'browser-project-row';
+      row.dataset.projectId = project.id;
+      row.setAttribute('role', 'none');
+      const button = document.createElement('button');
+      button.className = 'browser-project-select';
+      button.type = 'button';
+      button.tabIndex = -1;
+      button.setAttribute('role', 'menuitem');
+      button.dataset.projectId = project.id;
+      const label = document.createElement('span');
+      label.className = 'browser-project-name';
+      button.append(label);
+      button.addEventListener(
+        'click',
+        () => void useBrowserStorage(project.id),
+      );
+      const manage = document.createElement('button');
+      manage.className = 'browser-project-manage';
+      manage.type = 'button';
+      manage.tabIndex = -1;
+      manage.setAttribute('role', 'menuitem');
+      manage.append(createIcon(ChevronRight));
+      const actions = document.createElement('div');
+      actions.className = 'project-context-menu project-storage-submenu';
+      actions.id = `browser-project-actions-${project.id}`;
+      actions.popover = 'auto';
+      actions.innerHTML = `
+        <button type="button" role="menuitem" tabindex="-1" data-action="open">Open</button>
+        <button type="button" role="menuitem" tabindex="-1" data-action="copy">Copy to local folder and open</button>
+        <div class="project-menu-separator" role="separator"></div>
+        <button type="button" role="menuitem" tabindex="-1" data-action="reset">Reset</button>
+        <button type="button" role="menuitem" tabindex="-1" data-action="delete" data-danger>Delete</button>
+      `;
+      actions.addEventListener('click', event => {
+        const action = (event.target as Element).closest('button')?.dataset
+          .action;
+        const target = browserProjects.projects.find(
+          entry => entry.id === project.id,
+        );
+        if (!target) return;
+        if (action === 'open') void useBrowserStorage(target.id);
+        else if (action === 'copy') void copyToLocalDirectory(target);
+        else if (action === 'reset') void resetBrowserStorage(target);
+        else if (action === 'delete') void deleteBrowserProject(target);
+      });
+      row.append(button, manage, actions);
+      browserProjectList.append(row);
+      item = {
+        row,
+        button,
+        label,
+        manage,
+        submenu: new Submenu(manage, actions, button),
+      };
+      projectButtons.set(project.id, item);
+    }
+    const {button, label} = item;
+    if (label.textContent !== project.name) label.textContent = project.name;
+    button.title = project.name;
+    button.setAttribute('aria-label', project.name);
+    button.disabled = busy;
+    button.setAttribute('aria-current', String(current));
+    item.row.dataset.current = String(current);
+    item.manage.disabled = busy;
+    item.manage.setAttribute('aria-label', `Manage ${project.name}`);
+    item.submenu.root.setAttribute('aria-label', project.name);
+    for (const action of item.submenu.root.querySelectorAll('button'))
+      action.disabled =
+        busy ||
+        (action.dataset.action === 'copy' && !supportsProjectDirectories());
+  }
+  if (restoreProjectFocus && projectStorageMenu.matches(':popover-open')) {
+    const buttons = projectStorageButtons();
+    (
+      buttons.find(button => button.getAttribute('aria-current') === 'true') ??
+      buttons[0]
+    )?.focus();
+  }
+});
+window.addEventListener(
+  'pagehide',
+  () => {
+    stopBrowserProjects();
+    for (const item of projectButtons.values()) item.submenu.dispose();
+  },
+  {once: true},
+);
 const stopProjectLocation = autorun(renderProjectLocation);
 window.addEventListener('pagehide', stopProjectLocation, {once: true});
 renderProjectNavigation();
 void projectDirectory.refresh();
 if (initialFileError) projectDirectory.showError(initialFileError);
 if (browserProjectReset) {
-  await compiler.clearBuildCache().catch(showProjectIssue);
+  await compiler.clearBuildCache().catch(error => {
+    browserProjects.signal.throwIfAborted();
+    showProjectIssue(error);
+  });
+  browserProjects.signal.throwIfAborted();
   sessionStorage.removeItem(browserResetStorageKey);
 }
 runModel();
@@ -1696,14 +1941,10 @@ runModel();
 function renderProjectLocation(): void {
   const busy = projectLocationBusy.get();
   projectLocation.disabled = busy;
+  newBrowserProjectButton.disabled = busy;
   openFolderButton.disabled = busy || !supportsProjectDirectories();
   reconnectFolderButton.disabled = busy;
   reloadFolderButton.disabled = busy;
-  browserStorageButton.disabled = busy;
-  resetBrowserStorageButton.disabled = busy;
-  resetBrowserStorageButton.hidden = directoryConnected;
-  copyLocalFolderButton.disabled = busy || !supportsProjectDirectories();
-  copyLocalFolderButton.hidden = directoryConnected;
   if (directoryConnected) {
     projectLocation.textContent = storedDirectoryHandle.name;
     projectLocation.dataset.kind = 'local';
@@ -1711,20 +1952,18 @@ function renderProjectLocation(): void {
     openFolderButton.textContent = 'Change folder';
     reconnectFolderButton.hidden = true;
     reloadFolderButton.hidden = false;
-    browserStorageButton.hidden = false;
     return;
   }
 
-  projectLocation.textContent = 'Browser storage';
+  projectLocation.textContent = browserProject!.name;
   projectLocation.dataset.kind = 'browser';
-  projectLocation.title = 'Files are stored in this browser';
+  projectLocation.title = `${browserProject!.name} · Browser storage`;
   openFolderButton.textContent = 'Open folder';
   reconnectFolderButton.hidden = storedDirectoryHandle === undefined;
   reconnectFolderButton.textContent = storedDirectoryHandle
     ? `Reconnect ${storedDirectoryHandle.name}`
     : 'Reconnect folder';
   reloadFolderButton.hidden = true;
-  browserStorageButton.hidden = true;
 }
 
 async function openProjectDirectory(): Promise<void> {
@@ -1742,12 +1981,33 @@ async function openProjectDirectory(): Promise<void> {
   }
 }
 
-async function copyToLocalDirectory(): Promise<void> {
+async function copyToLocalDirectory(project: BrowserProject): Promise<void> {
   setProjectLocationBusy(true);
   try {
     // Invoke the picker before awaiting saves, while the click still has activation.
     const handle = await pickProjectDirectory();
     if (!handle) return;
+    if (project.id !== browserProject?.id) {
+      await agentProject.flush();
+      const revision = agentProject.currentRevision;
+      await withBrowserProjectProgress('Copying project', project.name, () =>
+        browserProjects.runExclusive(project.id, target =>
+          runBrowserProjectOperation(
+            target,
+            {kind: 'copy', target: handle},
+            {examples: bundledExamples, starter: defaultProject},
+            browserProjects.signal,
+          ),
+        ),
+      );
+      const workspaceId = await rememberProjectDirectory(handle);
+      if (agentProject.currentRevision !== revision)
+        throw new Error(
+          'The current project changed while copying. It remains open with your latest changes; the selected folder contains the copied project.',
+        );
+      openDirectoryWorkspace(workspaceId);
+      return;
+    }
     await agentProject.update(async () => {
       const revision = agentProject.currentRevision;
       const target = await openDirectoryProjectFileSystem(handle);
@@ -1802,50 +2062,180 @@ async function reloadProjectDirectory(): Promise<void> {
   }
 }
 
-async function useBrowserStorage(): Promise<void> {
+async function createBrowserProject(): Promise<void> {
+  setProjectLocationBusy(true);
+  try {
+    await showNewBrowserProjectDialog(async ({name, createExamples}) => {
+      await agentProject.flush();
+      const project = await browserProjects.create(name, createExamples);
+      openBrowserWorkspace(project.id);
+    });
+  } catch (error) {
+    showProjectIssue(error);
+  } finally {
+    setProjectLocationBusy(false);
+    projectLocation.focus();
+  }
+}
+
+async function deleteBrowserProject(project: BrowserProject): Promise<void> {
+  const current = project.id === browserProject?.id;
+  setProjectLocationBusy(true);
+  try {
+    if (
+      !(await dialogs.confirm({
+        title: 'Delete project',
+        message: `Permanently delete “${project.name}” and all its files, ${current ? 'unsaved edits and ' : ''}installed dependencies? This cannot be undone.${browserProjects.projects.length === 1 ? (current ? ' A new empty default project will open.' : ' A new empty default project will be available.') : ''}`,
+        submit: 'Delete project',
+        danger: true,
+      }))
+    )
+      return;
+    sessionStorage.setItem(browserDeleteStorageKey, project.id);
+    if (current) {
+      openBrowserWorkspace(project.id);
+    } else {
+      await withBrowserProjectProgress('Deleting project', project.name, () =>
+        browserProjects.remove(project.id, () =>
+          clearBrowserProjectState(project.id, true),
+        ),
+      );
+      browserProjects.signal.throwIfAborted();
+      sessionStorage.removeItem(browserDeleteStorageKey);
+    }
+  } catch (error) {
+    if (browserProjects.signal.aborted) return;
+    sessionStorage.removeItem(browserDeleteStorageKey);
+    showProjectIssue(error);
+  } finally {
+    setProjectLocationBusy(false);
+    projectLocation.focus();
+  }
+}
+
+async function useBrowserStorage(projectId: string): Promise<void> {
+  if (!directoryWorkspaceId && projectId === browserProject?.id) return;
   setProjectLocationBusy(true);
   try {
     await agentProject.flush();
-    openBrowserWorkspace();
+    openBrowserWorkspace(projectId);
   } catch (error) {
     showProjectIssue(error);
     setProjectLocationBusy(false);
   }
 }
 
-async function resetBrowserStorage(): Promise<void> {
+async function resetBrowserStorage(project: BrowserProject): Promise<void> {
+  const current = project.id === browserProject?.id;
   setProjectLocationBusy(true);
   try {
     if (
       !(await dialogs.confirm({
-        title: 'Reset browser storage',
-        message:
-          'Permanently delete all browser project files, unsaved edits and installed dependencies, then restore the default model and bundled examples? Copy any files you want to keep to a local folder first. Local folders and App settings will not change.',
-        submit: 'Reset browser storage',
+        title: 'Reset project',
+        message: `Replace all files, ${current ? 'unsaved edits and ' : ''}installed dependencies in “${project.name}” with the starter model and bundled examples? This cannot be undone.`,
+        submit: 'Reset project',
         danger: true,
       }))
     )
       return;
-    sessionStorage.setItem(browserResetStorageKey, 'reset');
-    openBrowserWorkspace();
+    sessionStorage.setItem(browserResetStorageKey, project.id);
+    if (current) {
+      openBrowserWorkspace(project.id);
+    } else {
+      await withBrowserProjectProgress('Resetting project', project.name, () =>
+        browserProjects.reset(project.id, resetUnopenedBrowserProject),
+      );
+      browserProjects.signal.throwIfAborted();
+      sessionStorage.removeItem(browserResetStorageKey);
+    }
   } catch (error) {
+    if (browserProjects.signal.aborted) return;
     sessionStorage.removeItem(browserResetStorageKey);
     showProjectIssue(error);
   } finally {
     setProjectLocationBusy(false);
+    projectLocation.focus();
+  }
+}
+
+async function resetUnopenedBrowserProject(
+  project: BrowserProject,
+): Promise<void> {
+  await clearBrowserProjectState(project.id, false);
+  await runBrowserProjectOperation(
+    project,
+    {kind: 'reset'},
+    {examples: bundledExamples, starter: defaultProject},
+    browserProjects.signal,
+  );
+}
+
+async function clearBrowserProjectState(
+  id: string,
+  removeAgents: boolean,
+): Promise<void> {
+  const identity = browserProjectWorkspaceId(id);
+  const compiler = new ModelCompilerClient(
+    browserPackageFiles,
+    undefined,
+    identity,
+  );
+  try {
+    await compiler.clearBuildCache();
+    browserProjects.signal.throwIfAborted();
+  } finally {
+    compiler.dispose();
+  }
+  if (!removeAgents) return;
+  const agents = await AgentPersistence.open(identity);
+  try {
+    browserProjects.signal.throwIfAborted();
+    await agents.save();
+  } finally {
+    await agents.close();
+  }
+}
+
+async function withBrowserProjectProgress<T>(
+  title: string,
+  name: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const progress = new AppDialog({
+    title,
+    className: 'message-dialog',
+    canDismiss: () => false,
+  });
+  const content = document.createElement('div');
+  content.className = 'app-dialog-content';
+  const heading = document.createElement('h2');
+  heading.textContent = title;
+  const status = document.createElement('p');
+  status.setAttribute('role', 'status');
+  status.textContent = `Working on “${name}”. Close other Code3D tabs using this project to allow the operation to finish.`;
+  content.append(heading, status);
+  progress.element.append(content);
+  progress.open();
+  try {
+    return await operation();
+  } finally {
+    progress.dispose();
   }
 }
 
 function openDirectoryWorkspace(workspaceId: string, file?: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set('workspace', workspaceId);
+  url.searchParams.delete('project');
   url.hash = file ? fileRoute(file) : '';
   window.location.replace(url);
 }
 
-function openBrowserWorkspace(): void {
+function openBrowserWorkspace(projectId?: string): void {
   const url = new URL(window.location.href);
   url.searchParams.delete('workspace');
+  if (projectId) url.searchParams.set('project', projectId);
+  else url.searchParams.delete('project');
   url.hash = '';
   window.history.replaceState(null, '', url);
   window.location.reload();

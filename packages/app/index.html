@@ -10,6 +10,25 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module">
+      let leaving = false;
+      const stop = () => {
+        leaving = true;
+      };
+      window.addEventListener('pagehide', stop, {once: true});
+      try {
+        await import('/src/main.ts');
+      } catch (error) {
+        // Stop an abandoned startup without reporting a failure in the next page.
+        if (
+          !leaving ||
+          !(error instanceof DOMException) ||
+          error.name !== 'AbortError'
+        )
+          throw error;
+      } finally {
+        window.removeEventListener('pagehide', stop);
+      }
+    </script>
   </body>
 </html>

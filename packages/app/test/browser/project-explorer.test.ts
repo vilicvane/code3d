@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {after, before, test, type TestContext} from 'node:test';
-import {chromium, type Browser, type Page} from './browser-connection.ts';
+import {
+  chromium,
+  type Browser,
+  type Locator,
+  type Page,
+} from './browser-connection.ts';
 
 declare const window: Window & {
   clearCachePhases: string[];
   releaseExportRead?: () => void;
+  restoreProjectWrites?: () => void;
   explorerAccess: {lists: string[]; reads: string[]};
   explorerApp: {
     codeEditor: import('../../src/editor.ts').CodeEditor;
@@ -13,6 +19,8 @@ declare const window: Window & {
     agentProject: import('../../src/agent/project-session.ts').AgentProjectSession;
     projectDirectory: import('../../src/ui/project-tree.ts').ProjectTree;
     compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
+    browserProject: {id: string; name: string} | undefined;
+    browserProjects: import('../../src/project/browser-projects.ts').BrowserProjects;
     activateProjectFile(path: string): Promise<void>;
   };
 };
@@ -34,10 +42,19 @@ async function open(
     viewport: {width: 1440, height: 900},
   });
   t.after(() => context.close());
-  const page = await context.newPage();
-  page.setDefaultTimeout(15_000);
+  context.setDefaultTimeout(15_000);
   const errors: string[] = [];
-  page.on('pageerror', error => errors.push(error.message));
+  context.on('page', page => {
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (
+        ['warning', 'error'].includes(message.type()) &&
+        /mobx/i.test(message.text())
+      )
+        errors.push(message.text());
+    });
+  });
+  const page = await context.newPage();
   t.after(() => assert.deepEqual(errors, []));
   const files = [
     {
@@ -49,25 +66,25 @@ async function open(
     {path: '/README.md', source: '# Project\n'},
     {path: '/settings.json', source: '{"size": 3}\n'},
   ];
-  await page.route('**/src/project/default-project.ts*', route =>
+  await context.route('**/src/project/default-project.ts*', route =>
     route.fulfill({
       contentType: 'text/javascript',
       body: `export const defaultProject = ${JSON.stringify({files})};`,
     }),
   );
-  await page.route('**/src/project/bundled-examples.ts*', route =>
+  await context.route('**/src/project/bundled-examples.ts*', route =>
     route.fulfill({
       contentType: 'text/javascript',
       body: `export const bundledExamples = ${JSON.stringify({directory: '/examples', revision: 'explorer-test', files: examples})};`,
     }),
   );
-  await page.route('**/src/main.ts*', async route => {
+  await context.route('**/src/main.ts*', async route => {
     const response = await route.fetch();
     await route.fulfill({
       response,
       body:
         (await response.text()) +
-        '\nwindow.explorerApp = {codeEditor, projectFileSystem, agentProject, projectDirectory, compiler, activateProjectFile};\n',
+        '\nwindow.explorerApp = {codeEditor, projectFileSystem, agentProject, projectDirectory, compiler, browserProject, browserProjects, activateProjectFile};\n',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL!);
@@ -78,6 +95,1024 @@ async function open(
 
 const row = (page: Page, name: string) =>
   page.getByRole('treeitem', {name, exact: true});
+
+async function browserProjectReady(page: Page, name: string): Promise<void> {
+  await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
+  assert.equal(await page.locator('#project-location').innerText(), name);
+  assert.equal(
+    new URL(page.url()).searchParams.get('project'),
+    await page.evaluate(() => window.explorerApp.browserProject!.id),
+  );
+}
+
+function compilerProjectIdentity(page: Page): Promise<string> {
+  return page.evaluate(
+    () =>
+      (window.explorerApp.compiler as unknown as {projectIdentity: string})
+        .projectIdentity,
+  );
+}
+
+const emptyProjectExamplesMessage =
+  'This project is empty. Create bundled examples in /examples?';
+
+async function beginBrowserProject(page: Page, name: string): Promise<void> {
+  await page.locator('#project-location').click();
+  await page.locator('#new-browser-project-button').click();
+  const dialog = page.getByRole('dialog', {
+    name: 'New browser project',
+    exact: true,
+  });
+  await dialog
+    .getByRole('textbox', {name: 'Project name', exact: true})
+    .fill(name);
+  assert.equal(
+    await dialog
+      .getByRole('checkbox', {name: 'Create examples', exact: true})
+      .isChecked(),
+    true,
+  );
+}
+
+async function answerExamplesPrompt(
+  page: Page,
+  create: boolean,
+): Promise<void> {
+  await page
+    .getByRole('dialog', {name: 'Create examples', exact: true})
+    .getByRole('button', {
+      name: create ? 'Create examples' : 'Cancel',
+      exact: true,
+    })
+    .click();
+}
+
+async function newBrowserProject(
+  page: Page,
+  name: string,
+  createExamples = true,
+): Promise<void> {
+  await beginBrowserProject(page, name);
+  const dialog = page.getByRole('dialog', {
+    name: 'New browser project',
+    exact: true,
+  });
+  await dialog
+    .getByRole('checkbox', {name: 'Create examples', exact: true})
+    .setChecked(createExamples);
+  await Promise.all([
+    page.waitForEvent('load'),
+    dialog.getByRole('button', {name: 'Create project', exact: true}).click(),
+  ]);
+  await browserProjectReady(page, name);
+  assert.equal(
+    await page
+      .getByRole('dialog', {name: 'Create examples', exact: true})
+      .count(),
+    0,
+  );
+}
+
+async function selectBrowserProject(page: Page, name: string): Promise<void> {
+  await page.locator('#project-location').click();
+  await Promise.all([
+    page.waitForEvent('load'),
+    page
+      .locator('#browser-project-list')
+      .getByRole('menuitem', {name, exact: true})
+      .click(),
+  ]);
+  await browserProjectReady(page, name);
+}
+
+async function openBrowserProjectMenu(
+  page: Page,
+  name?: string,
+): Promise<Locator> {
+  await page.locator('#project-location').click();
+  const project = name
+    ? page.locator('.browser-project-row').filter({
+        has: page.getByRole('menuitem', {name, exact: true}),
+      })
+    : page.locator('.browser-project-row[data-current="true"]');
+  await project.locator('.browser-project-manage').click();
+  const menu = project.locator('.project-storage-submenu');
+  await menu.waitFor();
+  return menu;
+}
+
+test(
+  'new browser projects can skip examples, remember the choice and create examples from the menu',
+  {timeout: 150_000},
+  async t => {
+    const example = {
+      path: '/examples/demo.ts',
+      source: 'export const size = 5;\n',
+    };
+    const page = await open(t, [example]);
+    await newBrowserProject(page, 'Empty project', false);
+    const assertEmpty = async () => {
+      await active(page, undefined);
+      assert.deepEqual(
+        await page.evaluate(async () => {
+          const files = window.explorerApp.projectFileSystem;
+          return {
+            entries: await files.list('/'),
+            model: await files.stat('/model.ts'),
+            examples: await files.stat('/examples'),
+          };
+        }),
+        {entries: [], model: undefined, examples: undefined},
+      );
+      assert.equal(
+        await page
+          .getByRole('dialog', {name: 'Create examples', exact: true})
+          .count(),
+        0,
+      );
+    };
+    await assertEmpty();
+    await page.reload();
+    await browserProjectReady(page, 'Empty project');
+    await assertEmpty();
+    await selectBrowserProject(page, 'Default project');
+    await selectBrowserProject(page, 'Empty project');
+    await assertEmpty();
+
+    await page
+      .locator('#project-tree')
+      .dispatchEvent('contextmenu', {clientX: 50, clientY: 240, button: 2});
+    await page
+      .getByRole('menuitem', {name: 'Create examples', exact: true})
+      .click();
+    await answerExamplesPrompt(page, true);
+    await row(page, 'examples').waitFor();
+    assert.equal(
+      await page.evaluate(async () =>
+        new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile(
+            '/examples/demo.ts',
+          ),
+        ),
+      ),
+      example.source,
+    );
+    // Explicit example creation preserves the user's decision to start empty.
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.projectFileSystem.stat('/model.ts'),
+      ),
+      undefined,
+    );
+    await page.reload();
+    await browserProjectReady(page, 'Empty project');
+    await active(page, undefined);
+    await row(page, 'examples').waitFor();
+    assert.equal(
+      await page
+        .getByRole('dialog', {name: 'Create examples', exact: true})
+        .count(),
+      0,
+    );
+  },
+);
+
+test(
+  'new browser projects create examples and the starter model from the creation form',
+  {timeout: 120_000},
+  async t => {
+    const example = {
+      path: '/examples/demo.ts',
+      source: 'export const size = 5;\n',
+    };
+    const page = await open(t, [example]);
+    await newBrowserProject(page, 'Example project');
+    await active(page, '/model.ts');
+    assert.deepEqual(
+      await page.evaluate(async () => {
+        const files = window.explorerApp.projectFileSystem;
+        return {
+          model: (await files.stat('/model.ts'))?.kind,
+          example: new TextDecoder().decode(
+            await files.readFile('/examples/demo.ts'),
+          ),
+        };
+      }),
+      {model: 'file', example: example.source},
+    );
+    await page.reload();
+    await browserProjectReady(page, 'Example project');
+    await active(page, '/model.ts');
+    await row(page, 'examples').waitFor();
+    assert.equal(
+      await page
+        .getByRole('dialog', {name: 'Create examples', exact: true})
+        .count(),
+      0,
+    );
+  },
+);
+
+test(
+  'new browser project forms validate names, preserve options and cancel without creating a project',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    const projectUrl = page.url();
+    await beginBrowserProject(page, '   ');
+    const dialog = page.getByRole('dialog', {
+      name: 'New browser project',
+      exact: true,
+    });
+    const name = dialog.getByRole('textbox', {
+      name: 'Project name',
+      exact: true,
+    });
+    const examples = dialog.getByRole('checkbox', {
+      name: 'Create examples',
+      exact: true,
+    });
+    await examples.uncheck();
+    await dialog
+      .getByRole('button', {name: 'Create project', exact: true})
+      .click();
+    await dialog.getByRole('alert').waitFor();
+    assert.equal((await name.inputValue()).trim(), '');
+    assert.equal(await examples.isChecked(), false);
+    assert.equal(page.url(), projectUrl);
+    await name.fill('Cancelled project');
+    await name.press('Escape');
+    await dialog.waitFor({state: 'hidden'});
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.explorerApp.browserProjects.projects.map(
+          project => project.name,
+        ),
+      ),
+      ['Default project'],
+    );
+    await active(page, '/model.ts');
+    assert.equal(page.url(), projectUrl);
+  },
+);
+
+test(
+  'browser projects save before switching and isolate source, dependencies and binary files',
+  {timeout: 180_000},
+  async t => {
+    const page = await open(t);
+    await browserProjectReady(page, 'Default project');
+    const firstId = new URL(page.url()).searchParams.get('project');
+    assert.equal(firstId, 'browser');
+    assert.equal(await compilerProjectIdentity(page), 'browser');
+    await page.evaluate(async () => {
+      const {projectFileSystem: files, codeEditor} = window.explorerApp;
+      await files.writeFile('/asset.bin', new Uint8Array([0, 255, 3]));
+      await files.writeFile(
+        '/node_modules/custom/index.js',
+        "export default 'first';",
+      );
+      codeEditor.applyFiles([
+        {
+          path: '/model.ts',
+          content:
+            "import {box} from '@code3d/core';\nexport default box(21, 6, 8);\n",
+        },
+      ]);
+    });
+    await newBrowserProject(page, 'Second project');
+    const secondId = new URL(page.url()).searchParams.get('project');
+    assert.notEqual(secondId, firstId);
+    assert.equal(await compilerProjectIdentity(page), `browser:${secondId}`);
+    assert.deepEqual(
+      await page.evaluate(async () => {
+        const files = window.explorerApp.projectFileSystem;
+        return [
+          await files.stat('/asset.bin'),
+          await files.stat('/node_modules/custom/index.js'),
+        ];
+      }),
+      [undefined, undefined],
+    );
+    assert.match(
+      await page.evaluate(async () =>
+        new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile('/model.ts'),
+        ),
+      ),
+      /box\(10, 6, 8\)/,
+    );
+    await page.evaluate(async () => {
+      const {
+        projectFileSystem: files,
+        codeEditor,
+        agentProject,
+      } = window.explorerApp;
+      await files.writeFile('/asset.bin', new Uint8Array([128, 4, 0, 17]));
+      await files.writeFile(
+        '/node_modules/custom/index.js',
+        "export default 'second';",
+      );
+      codeEditor.applyFiles([
+        {
+          path: '/model.ts',
+          content:
+            "import {box} from '@code3d/core';\nexport default box(32, 6, 8);\n",
+        },
+      ]);
+      await agentProject.flush();
+    });
+    const contents = () =>
+      page.evaluate(async () => {
+        const files = window.explorerApp.projectFileSystem;
+        return {
+          model: new TextDecoder().decode(await files.readFile('/model.ts')),
+          dependency: new TextDecoder().decode(
+            await files.readFile('/node_modules/custom/index.js'),
+          ),
+          binary: [...(await files.readFile('/asset.bin'))!],
+        };
+      });
+    await page.reload();
+    await browserProjectReady(page, 'Second project');
+    const second = await contents();
+    assert.match(second.model, /box\(32, 6, 8\)/);
+    assert.equal(second.dependency, "export default 'second';");
+    assert.deepEqual(second.binary, [128, 4, 0, 17]);
+    await selectBrowserProject(page, 'Default project');
+    assert.equal(await compilerProjectIdentity(page), 'browser');
+    const first = await contents();
+    assert.match(first.model, /box\(21, 6, 8\)/);
+    assert.equal(first.dependency, "export default 'first';");
+    assert.deepEqual(first.binary, [0, 255, 3]);
+    await selectBrowserProject(page, 'Second project');
+    assert.deepEqual(await contents(), second);
+    assert.equal(new URL(page.url()).searchParams.get('project'), secondId);
+  },
+);
+
+test(
+  'browser project tabs keep their identity, react to the catalog and scope reset and deletion',
+  {timeout: 180_000},
+  async t => {
+    const page = await open(t);
+    await page.locator('#project-location').click();
+    await page.locator('#new-browser-project-button').click();
+    const creation = page.getByRole('dialog', {
+      name: 'New browser project',
+      exact: true,
+    });
+    await creation
+      .getByRole('textbox', {name: 'Project name', exact: true})
+      .fill('Cancelled project');
+    await creation.getByRole('button', {name: 'Cancel', exact: true}).click();
+    assert.equal(
+      await page.evaluate(
+        () => window.explorerApp.browserProjects.projects.length,
+      ),
+      1,
+    );
+
+    const other = await page.context().newPage();
+    await other.goto(page.url());
+    await browserProjectReady(other, 'Default project');
+    const firstUrl = other.url();
+    await other.locator('#project-location').click();
+    await newBrowserProject(page, 'Second project');
+    const projectIdentities = [
+      await compilerProjectIdentity(other),
+      await compilerProjectIdentity(page),
+    ];
+    assert.notEqual(projectIdentities[0], projectIdentities[1]);
+    await other
+      .locator('#browser-project-list')
+      .getByRole('menuitem', {
+        name: 'Second project',
+        exact: true,
+      })
+      .waitFor();
+    assert.equal(other.url(), firstUrl);
+    assert.equal(
+      await other.locator('#project-location').innerText(),
+      'Default project',
+    );
+    await other.keyboard.press('Escape');
+    await page.evaluate(() =>
+      window.explorerApp.projectFileSystem.writeFile('/tab.txt', 'second tab'),
+    );
+    await other.evaluate(() =>
+      window.explorerApp.projectFileSystem.writeFile('/tab.txt', 'first tab'),
+    );
+    await other.reload();
+    await browserProjectReady(other, 'Default project');
+    assert.equal(other.url(), firstUrl);
+    const tabFile = (target: Page) =>
+      target.evaluate(async () =>
+        new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile('/tab.txt'),
+        ),
+      );
+    assert.equal(await tabFile(other), 'first tab');
+    assert.equal(await tabFile(page), 'second tab');
+
+    await (
+      await openBrowserProjectMenu(page)
+    )
+      .locator('[data-action="reset"]')
+      .click();
+    await Promise.all([
+      page.waitForEvent('load'),
+      page
+        .getByRole('dialog', {name: 'Reset project', exact: true})
+        .getByRole('button', {name: 'Reset project', exact: true})
+        .click(),
+    ]);
+    await browserProjectReady(page, 'Second project');
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.projectFileSystem.stat('/tab.txt'),
+      ),
+      undefined,
+    );
+    assert.equal(await tabFile(other), 'first tab');
+    await page.evaluate(() =>
+      window.explorerApp.projectFileSystem.writeFile(
+        '/keep-until-deleted.txt',
+        'keep',
+      ),
+    );
+    const deletion = async () => {
+      await (
+        await openBrowserProjectMenu(page)
+      )
+        .locator('[data-action="delete"]')
+        .click();
+      return page.getByRole('dialog', {
+        name: 'Delete project',
+        exact: true,
+      });
+    };
+    await (
+      await deletion()
+    )
+      .getByRole('button', {name: 'Cancel', exact: true})
+      .click();
+    assert.equal(
+      await page.evaluate(
+        async () =>
+          (
+            await window.explorerApp.projectFileSystem.stat(
+              '/keep-until-deleted.txt',
+            )
+          )?.kind,
+      ),
+      'file',
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem('code3d-delete-browser-project'),
+      ),
+      null,
+    );
+    // Valid empty sessions let us verify authorization storage ownership
+    // without creating network connections or fabricating agent credentials.
+    await page.evaluate(async identities => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open('code3d-agents');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const transaction = database.transaction('sessions', 'readwrite');
+          for (const identity of identities)
+            transaction.objectStore('sessions').put(
+              {
+                sessionId: `session:${identity}`,
+                grants: [],
+              },
+              identity,
+            );
+          transaction.oncomplete = () => resolve();
+          transaction.onerror = () => reject(transaction.error);
+          transaction.onabort = () => reject(transaction.error);
+        });
+      } finally {
+        database.close();
+      }
+    }, projectIdentities);
+    await other.locator('#project-location').click();
+    const confirmation = await deletion();
+    assert.match(await confirmation.innerText(), /Second project/);
+    await Promise.all([
+      page.waitForEvent('load'),
+      confirmation
+        .getByRole('button', {name: 'Delete project', exact: true})
+        .click(),
+    ]);
+    await browserProjectReady(page, 'Default project');
+    await other
+      .locator('#browser-project-list')
+      .getByRole('menuitem', {
+        name: 'Second project',
+        exact: true,
+      })
+      .waitFor({state: 'detached'});
+    assert.equal(await tabFile(page), 'first tab');
+    assert.deepEqual(
+      await page.evaluate(async identities => {
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+          const request = indexedDB.open('code3d-agents');
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        try {
+          const sessions = database
+            .transaction('sessions')
+            .objectStore('sessions');
+          return await Promise.all(
+            identities.map(
+              identity =>
+                new Promise((resolve, reject) => {
+                  const request = sessions.get(identity);
+                  request.onsuccess = () => resolve(request.result);
+                  request.onerror = () => reject(request.error);
+                }),
+            ),
+          );
+        } finally {
+          database.close();
+        }
+      }, projectIdentities),
+      [{sessionId: `session:${projectIdentities[0]}`, grants: []}, undefined],
+    );
+
+    // The last project's real connection in the other tab blocks deletion.
+    await (
+      await deletion()
+    )
+      .getByRole('button', {name: 'Delete project', exact: true})
+      .click();
+    const blocked = page.getByRole('dialog', {
+      name: 'Deleting project',
+      exact: true,
+    });
+    await blocked
+      .getByText('Close other Code3D tabs', {exact: false})
+      .waitFor();
+    await page.reload({waitUntil: 'commit'});
+    await blocked
+      .getByText('Close other Code3D tabs', {exact: false})
+      .waitFor();
+    assert.equal(await tabFile(other), 'first tab');
+    await other.close();
+    await browserProjectReady(page, 'Default project');
+    await active(page, undefined);
+    assert.deepEqual(
+      await page.evaluate(() => window.explorerApp.projectFileSystem.list('/')),
+      [],
+    );
+    assert.equal(
+      await page
+        .getByRole('dialog', {name: 'Create examples', exact: true})
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        window.explorerApp.projectFileSystem.stat('/tab.txt'),
+      ),
+      undefined,
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem('code3d-delete-browser-project'),
+      ),
+      null,
+    );
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.explorerApp.browserProjects.projects.map(
+          project => project.name,
+        ),
+      ),
+      ['Default project'],
+    );
+  },
+);
+
+test(
+  'unopened browser projects reset and delete without disturbing the active browser or local workspace',
+  {timeout: 180_000},
+  async t => {
+    const example = {
+      path: '/examples/demo.ts',
+      source: 'export const restoredExample = 1;',
+    };
+    const page = await open(t, [example]);
+    await newBrowserProject(page, 'Background project', false);
+    const targetURL = page.url();
+    await page.evaluate(async () => {
+      const files = window.explorerApp.projectFileSystem;
+      await files.writeFile('/discard.txt', 'belongs to background project');
+      await files.writeFile('/examples/demo.ts', 'changed');
+    });
+    await selectBrowserProject(page, 'Default project');
+    const activeURL = page.url();
+    await page.evaluate(async () => {
+      document.body.dataset.backgroundOperation = 'same document';
+      const {projectFileSystem, codeEditor, agentProject} = window.explorerApp;
+      const write = projectFileSystem.writeFile.bind(projectFileSystem);
+      window.restoreProjectWrites = () => {
+        projectFileSystem.writeFile = write;
+      };
+      projectFileSystem.writeFile = async () => {
+        throw new Error('Keep the active project draft unsaved');
+      };
+      codeEditor.editor.setValue(
+        "import {box} from '@code3d/core';\nexport default box(23, 6, 8);\n",
+      );
+      await agentProject.flush().catch(() => {});
+    });
+    const assertActiveDraft = async () => {
+      assert.equal(page.url(), activeURL);
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          document: document.body.dataset.backgroundOperation,
+          project: window.explorerApp.browserProject!.name,
+          source: window.explorerApp.codeEditor.editor.getValue(),
+          unsaved: window.explorerApp.agentProject.hasUnsaved,
+        })),
+        {
+          document: 'same document',
+          project: 'Default project',
+          source:
+            "import {box} from '@code3d/core';\nexport default box(23, 6, 8);\n",
+          unsaved: true,
+        },
+      );
+    };
+
+    // The unopened target can still be held by another tab. Reset waits for
+    // that tab's lease without reloading or saving the active workspace.
+    const other = await page.context().newPage();
+    await other.goto(targetURL);
+    await browserProjectReady(other, 'Background project');
+    await (
+      await openBrowserProjectMenu(page, 'Background project')
+    )
+      .locator('[data-action="reset"]')
+      .click();
+    const reset = page.getByRole('dialog', {
+      name: 'Reset project',
+      exact: true,
+    });
+    assert.match(await reset.innerText(), /Background project/);
+    await reset
+      .getByRole('button', {name: 'Reset project', exact: true})
+      .click();
+    await page
+      .getByRole('dialog', {name: 'Resetting project', exact: true})
+      .getByText('Close other Code3D tabs', {exact: false})
+      .waitFor();
+    await assertActiveDraft();
+    assert.equal(
+      await page.evaluate(() => {
+        const event = new Event('beforeunload', {cancelable: true});
+        window.dispatchEvent(event);
+        return event.defaultPrevented;
+      }),
+      true,
+      'A pending operation on another project must preserve active draft protection',
+    );
+    await other.close();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector<HTMLButtonElement>('#project-location')!
+          .disabled,
+    );
+    await assertActiveDraft();
+
+    const resetProject = await page.context().newPage();
+    await resetProject.goto(targetURL);
+    await browserProjectReady(resetProject, 'Background project');
+    assert.deepEqual(
+      await resetProject.evaluate(async () => {
+        const files = window.explorerApp.projectFileSystem;
+        return {
+          model: new TextDecoder().decode(await files.readFile('/model.ts')),
+          example: new TextDecoder().decode(
+            await files.readFile('/examples/demo.ts'),
+          ),
+          discarded: await files.stat('/discard.txt'),
+        };
+      }),
+      {
+        model:
+          "import {box} from '@code3d/core';\nexport default box(10, 6, 8);\n",
+        example: example.source,
+        discarded: undefined,
+      },
+    );
+    await resetProject.close();
+
+    await (
+      await openBrowserProjectMenu(page, 'Background project')
+    )
+      .locator('[data-action="delete"]')
+      .click();
+    const deletion = page.getByRole('dialog', {
+      name: 'Delete project',
+      exact: true,
+    });
+    assert.match(await deletion.innerText(), /Background project/);
+    await deletion
+      .getByRole('button', {name: 'Delete project', exact: true})
+      .click();
+    await page.waitForFunction(() =>
+      window.explorerApp.browserProjects.projects.every(
+        project => project.name !== 'Background project',
+      ),
+    );
+    await assertActiveDraft();
+    await page.evaluate(async () => {
+      window.restoreProjectWrites!();
+      await window.explorerApp.agentProject.retrySaves();
+    });
+    assert.deepEqual(
+      await page.evaluate(async () => ({
+        unsaved: window.explorerApp.agentProject.hasUnsaved,
+        source: new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile('/model.ts'),
+        ),
+      })),
+      {
+        unsaved: false,
+        source:
+          "import {box} from '@code3d/core';\nexport default box(23, 6, 8);\n",
+      },
+    );
+
+    await mockLocalDirectories(page);
+    const localURL = new URL(process.env.CODE3D_TEST_URL!);
+    localURL.searchParams.set('workspace', 'background-local');
+    await page.goto(localURL.href);
+    await answerExamplesPrompt(page, false);
+    await active(page, undefined);
+    await page.evaluate(async () => {
+      document.body.dataset.localOperation = 'same local document';
+      await window.explorerApp.projectFileSystem.writeFile(
+        '/keep.txt',
+        'local content',
+      );
+      await window.explorerApp.browserProjects.create(
+        'Local-managed project',
+        false,
+      );
+    });
+    await (
+      await openBrowserProjectMenu(page, 'Local-managed project')
+    )
+      .locator('[data-action="delete"]')
+      .click();
+    const localDeletion = page.getByRole('dialog', {
+      name: 'Delete project',
+      exact: true,
+    });
+    assert.match(await localDeletion.innerText(), /Local-managed project/);
+    await localDeletion
+      .getByRole('button', {name: 'Delete project', exact: true})
+      .click();
+    await page.waitForFunction(() =>
+      window.explorerApp.browserProjects.projects.every(
+        project => project.name !== 'Local-managed project',
+      ),
+    );
+    assert.equal(
+      new URL(page.url()).searchParams.get('workspace'),
+      'background-local',
+    );
+    assert.deepEqual(
+      await page.evaluate(async () => ({
+        document: document.body.dataset.localOperation,
+        content: new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile('/keep.txt'),
+        ),
+      })),
+      {document: 'same local document', content: 'local content'},
+    );
+  },
+);
+
+test(
+  'a pending background reset resumes after refresh and returns to the original local workspace',
+  {timeout: 150_000},
+  async t => {
+    const example = {
+      path: '/examples/resumed.ts',
+      source: 'export const resumed = true;',
+    };
+    const page = await open(t, [example]);
+    await newBrowserProject(page, 'Reset after refresh', false);
+    const targetURL = page.url();
+    const targetId = new URL(targetURL).searchParams.get('project');
+    await page.evaluate(() =>
+      window.explorerApp.projectFileSystem.writeFile(
+        '/discard.txt',
+        'old target data',
+      ),
+    );
+    const other = await page.context().newPage();
+    await other.goto(targetURL);
+    await browserProjectReady(other, 'Reset after refresh');
+
+    await mockLocalDirectories(page);
+    const localURL = new URL(process.env.CODE3D_TEST_URL!);
+    localURL.searchParams.set('workspace', 'resume-background-reset');
+    await page.goto(localURL.href);
+    await answerExamplesPrompt(page, false);
+    await active(page, undefined);
+    await page.evaluate(async () => {
+      await window.explorerApp.projectFileSystem.writeFile(
+        '/keep.txt',
+        'keep local data',
+      );
+      await window.explorerApp.agentProject.flush();
+    });
+    const workspaceURL = page.url();
+    await (
+      await openBrowserProjectMenu(page, 'Reset after refresh')
+    )
+      .locator('[data-action="reset"]')
+      .click();
+    await page
+      .getByRole('dialog', {name: 'Reset project', exact: true})
+      .getByRole('button', {name: 'Reset project', exact: true})
+      .click();
+    const blocked = page
+      .getByRole('dialog', {name: 'Resetting project', exact: true})
+      .getByText('Close other Code3D tabs', {exact: false});
+    await blocked.waitFor();
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem('code3d-reset-browser-project'),
+      ),
+      targetId,
+    );
+    await page.reload({waitUntil: 'commit'});
+    await blocked.waitFor();
+    assert.equal(page.url(), workspaceURL);
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem('code3d-reset-browser-project'),
+      ),
+      targetId,
+    );
+    await other.close();
+    await page.locator('#project-location[data-kind="local"]').waitFor();
+    await page.waitForFunction(() => !!window.explorerApp);
+    assert.equal(page.url(), workspaceURL);
+    assert.equal(
+      await page.locator('#project-location').innerText(),
+      'resume-background-reset',
+    );
+    assert.deepEqual(
+      await page.evaluate(async () => ({
+        pending: sessionStorage.getItem('code3d-reset-browser-project'),
+        content: new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile('/keep.txt'),
+        ),
+        model: await window.explorerApp.projectFileSystem.stat('/model.ts'),
+        examples: await window.explorerApp.projectFileSystem.stat('/examples'),
+      })),
+      {
+        pending: null,
+        content: 'keep local data',
+        model: undefined,
+        examples: undefined,
+      },
+    );
+
+    const restored = await page.context().newPage();
+    await restored.goto(targetURL);
+    await browserProjectReady(restored, 'Reset after refresh');
+    assert.deepEqual(
+      await restored.evaluate(async () => {
+        const files = window.explorerApp.projectFileSystem;
+        return {
+          model: new TextDecoder().decode(await files.readFile('/model.ts')),
+          example: new TextDecoder().decode(
+            await files.readFile('/examples/resumed.ts'),
+          ),
+          discarded: await files.stat('/discard.txt'),
+        };
+      }),
+      {
+        model:
+          "import {box} from '@code3d/core';\nexport default box(10, 6, 8);\n",
+        example: example.source,
+        discarded: undefined,
+      },
+    );
+  },
+);
+
+test(
+  'failed saves prevent creating or switching browser projects',
+  {timeout: 90_000},
+  async t => {
+    const page = await open(t);
+    await newBrowserProject(page, 'Second project');
+    const url = page.url();
+    await page.evaluate(async () => {
+      const {projectFileSystem, codeEditor, agentProject} = window.explorerApp;
+      projectFileSystem.writeFile = async () => {
+        throw new Error('Test project switch save failure');
+      };
+      codeEditor.applyFiles([
+        {
+          path: '/model.ts',
+          content:
+            "import {box} from '@code3d/core';\nexport default box(43, 6, 8);\n",
+        },
+      ]);
+      await agentProject.flush().catch(() => {});
+    });
+    await page.locator('#project-location').click();
+    await page.locator('#new-browser-project-button').click();
+    const dialog = page.getByRole('dialog', {
+      name: 'New browser project',
+      exact: true,
+    });
+    await dialog
+      .getByRole('textbox', {name: 'Project name', exact: true})
+      .fill('Must not be created');
+    await dialog
+      .getByRole('checkbox', {name: 'Create examples', exact: true})
+      .uncheck();
+    await dialog
+      .getByRole('button', {name: 'Create project', exact: true})
+      .click();
+    await dialog
+      .getByRole('alert')
+      .filter({hasText: 'unsaved changes'})
+      .waitFor();
+    assert.equal(
+      await dialog
+        .getByRole('textbox', {name: 'Project name', exact: true})
+        .inputValue(),
+      'Must not be created',
+    );
+    assert.equal(
+      await dialog
+        .getByRole('checkbox', {name: 'Create examples', exact: true})
+        .isChecked(),
+      false,
+    );
+    assert.equal(page.url(), url);
+    assert.deepEqual(
+      await page.evaluate(() =>
+        window.explorerApp.browserProjects.projects.map(
+          project => project.name,
+        ),
+      ),
+      ['Default project', 'Second project'],
+    );
+    assert.equal(
+      await dialog
+        .getByRole('button', {name: 'Create project', exact: true})
+        .isEnabled(),
+      true,
+    );
+    await dialog.getByRole('button', {name: 'Cancel', exact: true}).click();
+    await dialog.waitFor({state: 'hidden'});
+    await page.locator('#project-location').click();
+    await page
+      .locator('#browser-project-list')
+      .getByRole('menuitem', {name: 'Default project', exact: true})
+      .click();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector<HTMLButtonElement>('#project-location')!
+          .disabled,
+    );
+    await page
+      .getByText(
+        'Project files have unsaved changes. Retry saving before leaving this project.',
+        {exact: true},
+      )
+      .waitFor();
+    assert.equal(page.url(), url);
+    assert.equal(
+      await page.locator('#project-location').innerText(),
+      'Second project',
+    );
+    assert.equal(
+      await page.evaluate(() => window.explorerApp.agentProject.hasUnsaved),
+      true,
+    );
+  },
+);
 
 test(
   'browser storage reset confirms deletion and restores the initial project',
@@ -109,12 +1144,13 @@ test(
       localStorage.setItem('code3d-reset-test-preference', 'keep');
     });
     const reset = async () => {
-      await page.locator('#project-location').click();
-      await page
-        .getByRole('button', {name: 'Reset browser storage', exact: true})
+      await (
+        await openBrowserProjectMenu(page)
+      )
+        .locator('[data-action="reset"]')
         .click();
       return page.getByRole('dialog', {
-        name: 'Reset browser storage',
+        name: 'Reset project',
         exact: true,
       });
     };
@@ -158,7 +1194,7 @@ test(
     await Promise.all([
       page.waitForEvent('load'),
       approved
-        .getByRole('button', {name: 'Reset browser storage', exact: true})
+        .getByRole('button', {name: 'Reset project', exact: true})
         .click(),
     ]);
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
@@ -223,13 +1259,14 @@ test(
         request.onerror = () => reject(request.error);
       });
     });
-    await page.locator('#project-location').click();
-    await page
-      .getByRole('button', {name: 'Reset browser storage', exact: true})
+    await (
+      await openBrowserProjectMenu(page)
+    )
+      .locator('[data-action="reset"]')
       .click();
     await page
-      .getByRole('dialog', {name: 'Reset browser storage', exact: true})
-      .getByRole('button', {name: 'Reset browser storage', exact: true})
+      .getByRole('dialog', {name: 'Reset project', exact: true})
+      .getByRole('button', {name: 'Reset project', exact: true})
       .click();
     const blocked = page.getByText(
       'Close other Code3D tabs using this browser storage',
@@ -269,13 +1306,14 @@ test(
         return original(name);
       };
     });
-    await page.locator('#project-location').click();
-    await page
-      .getByRole('button', {name: 'Reset browser storage', exact: true})
+    await (
+      await openBrowserProjectMenu(page)
+    )
+      .locator('[data-action="reset"]')
       .click();
     await page
-      .getByRole('dialog', {name: 'Reset browser storage', exact: true})
-      .getByRole('button', {name: 'Reset browser storage', exact: true})
+      .getByRole('dialog', {name: 'Reset project', exact: true})
+      .getByRole('button', {name: 'Reset project', exact: true})
       .click();
     const error = page.getByRole('dialog', {
       name: 'Could not reset browser storage',
@@ -656,7 +1694,9 @@ test(
       sessionStorage.setItem('nextFolder', 'create-local');
     });
     await page.locator('#project-location').click();
-    await page.getByRole('button', {name: 'Open folder', exact: true}).click();
+    await page
+      .getByRole('menuitem', {name: 'Open folder', exact: true})
+      .click();
     await page
       .getByRole('dialog', {name: 'Create examples', exact: true})
       .getByRole('button', {name: 'Cancel', exact: true})
@@ -753,8 +1793,17 @@ test(
     const page = await open(t);
     const explorer = page.getByRole('complementary', {name: 'Project files'});
     const location = explorer.locator('#project-location');
-    const actions = page.getByRole('group', {name: 'Project storage'});
-    assert.equal(await location.innerText(), 'Browser storage');
+    const actions = page.getByRole('menu', {
+      name: 'Project storage',
+      exact: true,
+    });
+    const currentRow = actions.locator(
+      '.browser-project-row[data-current="true"]',
+    );
+    const currentProject = currentRow.locator('.browser-project-select');
+    const currentManage = currentRow.locator('.browser-project-manage');
+    const projectActions = currentRow.locator('.project-storage-submenu');
+    assert.equal(await location.innerText(), 'Default project');
     assert.equal(
       await page
         .getByRole('button', {name: 'Search files', exact: true})
@@ -767,6 +1816,131 @@ test(
         .count(),
       0,
     );
+    await location.focus();
+    await location.press('Enter');
+    const current = actions
+      .locator('#browser-project-list')
+      .getByRole('menuitem', {name: 'Default project', exact: true});
+    assert.equal(await current.getAttribute('aria-current'), 'true');
+    assert.equal(await current.isEnabled(), true);
+    assert.equal(
+      await current.evaluate(element => element === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('Tab');
+    await actions.waitFor({state: 'hidden'});
+    await location.focus();
+    await location.press('ArrowDown');
+    assert.equal(
+      await current.evaluate(element => element === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('ArrowDown');
+    assert.equal(
+      await actions
+        .locator('#open-folder-button')
+        .evaluate(element => element === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('End');
+    assert.equal(
+      await actions
+        .locator('#new-browser-project-button')
+        .evaluate(element => element === document.activeElement),
+      true,
+    );
+    assert.equal(await projectActions.isHidden(), true);
+    await page.keyboard.press('Home');
+    await page.keyboard.press('ArrowRight');
+    assert.equal(
+      await projectActions
+        .getByRole('menuitem', {name: 'Open', exact: true})
+        .evaluate(element => element === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('ArrowDown');
+    assert.equal(
+      await projectActions
+        .locator('[data-action="copy"]')
+        .evaluate(element => element === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('ArrowDown');
+    assert.equal(
+      await projectActions
+        .locator('[data-action="reset"]')
+        .evaluate(element => element === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('ArrowDown');
+    assert.equal(
+      await projectActions
+        .locator('[data-action="delete"]')
+        .evaluate(element => element === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('Escape');
+    await projectActions.waitFor({state: 'hidden'});
+    assert.equal(await actions.isVisible(), true);
+    assert.equal(
+      await currentProject.evaluate(
+        element => element === document.activeElement,
+      ),
+      true,
+    );
+    await page.keyboard.press('ArrowRight');
+    await projectActions.waitFor();
+    await page.keyboard.press('ArrowLeft');
+    await projectActions.waitFor({state: 'hidden'});
+    assert.equal(
+      await currentProject.evaluate(
+        element => element === document.activeElement,
+      ),
+      true,
+    );
+    await page.keyboard.press('Home');
+    assert.equal(
+      await current.evaluate(element => element === document.activeElement),
+      true,
+    );
+    await currentProject.hover();
+    await projectActions.waitFor();
+    await currentManage.click();
+    assert.equal(await projectActions.isVisible(), true);
+    await projectActions.locator('[data-action="reset"]').hover();
+    await projectActions.locator('[data-action="delete"]').hover();
+    assert.equal(await projectActions.isVisible(), true);
+    await actions.locator('#new-browser-project-button').hover();
+    await projectActions.waitFor({state: 'hidden'});
+    assert.equal(await actions.isVisible(), true);
+    assert.equal(
+      await page
+        .getByRole('dialog', {name: 'Delete project', exact: true})
+        .count(),
+      0,
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        sessionStorage.getItem('code3d-delete-browser-project'),
+      ),
+      null,
+    );
+    await page.evaluate(() => {
+      document.body.dataset.projectSelection = 'unchanged';
+    });
+    await current.click();
+    await projectActions.waitFor({state: 'hidden'});
+    await actions.waitFor({state: 'hidden'});
+    assert.equal(
+      await page.evaluate(() => document.body.dataset.projectSelection),
+      'unchanged',
+    );
+    await location.press('ArrowDown');
+    await page.keyboard.press('ArrowRight');
+    await projectActions.waitFor();
+    await page.keyboard.press('Tab');
+    await projectActions.waitFor({state: 'hidden'});
+    await actions.waitFor({state: 'hidden'});
     await page.evaluate(() => {
       Object.defineProperty(window, 'showDirectoryPicker', {
         configurable: true,
@@ -782,7 +1956,7 @@ test(
     );
     await location.click();
     await actions
-      .getByRole('button', {name: 'Open folder', exact: true})
+      .getByRole('menuitem', {name: 'Open folder', exact: true})
       .click();
     await page.waitForFunction(
       () => document.body.dataset.folderPickerCalled === 'true',
@@ -818,10 +1992,9 @@ test(
       );
     }
     assert.ok(await location.isEnabled());
-    await location.click();
-    await actions
-      .getByRole('button', {name: 'Copy to local folder and open', exact: true})
-      .waitFor();
+    await openBrowserProjectMenu(page);
+    await projectActions.locator('[data-action="copy"]').waitFor();
+    await page.keyboard.press('Escape');
     await page.keyboard.press('Escape');
     await separator.press('End');
     await mockLocalDirectories(page);
@@ -835,23 +2008,32 @@ test(
     await active(page, undefined);
     assert.equal(await location.innerText(), 'explorer-folder');
     await location.click();
-    assert.equal(
-      await page.locator('#reset-browser-storage-button').isHidden(),
-      true,
-    );
+    assert.equal(await currentProject.isHidden(), true);
+    assert.equal(await projectActions.isHidden(), true);
+    const storedProject = actions.locator('.browser-project-row').filter({
+      has: page.getByRole('menuitem', {
+        name: 'Default project',
+        exact: true,
+      }),
+    });
+    await storedProject.locator('.browser-project-manage').click();
+    const storedActions = storedProject.locator('.project-storage-submenu');
+    await storedActions.locator('[data-action="reset"]').waitFor();
+    await page.keyboard.press('Escape');
+    await storedActions.waitFor({state: 'hidden'});
     await actions
-      .getByRole('button', {name: 'Change folder', exact: true})
+      .getByRole('menuitem', {name: 'Change folder', exact: true})
       .waitFor();
     assert.equal(
       await explorer.locator('.project-actions #open-folder-button').count(),
       0,
     );
     await actions
-      .getByRole('button', {name: 'Reload folder', exact: true})
+      .getByRole('menuitem', {name: 'Reload folder', exact: true})
       .waitFor();
     assert.equal(
       await actions
-        .getByRole('button', {name: 'Reset examples', exact: true})
+        .getByRole('menuitem', {name: 'Reset examples', exact: true})
         .count(),
       0,
     );
@@ -859,18 +2041,77 @@ test(
     await actions.waitFor({state: 'hidden'});
     await location.click();
     await actions
-      .getByRole('button', {name: 'Use browser storage', exact: true})
+      .locator('#browser-project-list')
+      .getByRole('menuitem', {name: 'Default project', exact: true})
       .click();
     await page.waitForURL(url => !url.searchParams.has('workspace'));
     await location.click();
     await actions
-      .getByRole('button', {name: 'Open folder', exact: true})
+      .getByRole('menuitem', {name: 'Open folder', exact: true})
       .waitFor();
-    await actions
-      .getByRole('button', {name: 'Reset browser storage', exact: true})
-      .waitFor();
+    await currentManage.click();
+    await projectActions.locator('[data-action="reset"]').waitFor();
     await page.keyboard.press('Escape');
-    assert.equal(await location.innerText(), 'Browser storage');
+    await projectActions.waitFor({state: 'hidden'});
+    assert.equal(await actions.isVisible(), true);
+    await page.keyboard.press('Escape');
+    await actions.waitFor({state: 'hidden'});
+    assert.equal(
+      await location.evaluate(element => element === document.activeElement),
+      true,
+    );
+    assert.equal(await location.innerText(), 'Default project');
+
+    const lastProject = await page.evaluate(async () => {
+      for (let index = 1; index <= 12; index++)
+        await window.explorerApp.browserProjects.create(
+          `Project ${index}`,
+          false,
+        );
+      return window.explorerApp.browserProjects.projects.at(-1)!.name;
+    });
+    const lastProjectActions = await openBrowserProjectMenu(page, lastProject);
+    await Promise.all([
+      page.waitForEvent('load'),
+      lastProjectActions
+        .getByRole('menuitem', {name: 'Open', exact: true})
+        .click(),
+    ]);
+    await browserProjectReady(page, lastProject);
+    await location.click();
+    const projectList = actions.locator('#browser-project-list');
+    assert.equal(
+      await currentProject.evaluate(element => {
+        const item = element.getBoundingClientRect();
+        const list = document
+          .getElementById('browser-project-list')!
+          .getBoundingClientRect();
+        return item.top >= list.top && item.bottom <= list.bottom;
+      }),
+      true,
+    );
+    await currentManage.click();
+    await projectActions.waitFor();
+    await projectList.evaluate(element => {
+      element.scrollTop = 0;
+    });
+    await projectActions.waitFor({state: 'hidden'});
+    assert.equal(await actions.isVisible(), true);
+    assert.equal(
+      await currentProject.evaluate(
+        element => element === document.activeElement,
+      ),
+      true,
+    );
+    await page.keyboard.press('ArrowDown');
+    assert.equal(
+      await actions
+        .locator('#open-folder-button')
+        .evaluate(element => element === document.activeElement),
+      true,
+    );
+    await page.keyboard.press('Escape');
+    await actions.waitFor({state: 'hidden'});
   },
 );
 
@@ -961,7 +2202,8 @@ test(
     );
     await page.locator('#project-location').click();
     await page
-      .getByRole('button', {name: 'Use browser storage', exact: true})
+      .locator('#browser-project-list')
+      .getByRole('menuitem', {name: 'Default project', exact: true})
       .click();
     await page.waitForURL(url => !url.searchParams.has('workspace'));
     await active(page, '/model.ts');
@@ -1016,9 +2258,7 @@ test(
       await active(page, undefined);
     };
     await visit('examples-skipped', false);
-    assert.deepEqual(prompts, [
-      'This folder is empty. Create bundled examples in /examples?',
-    ]);
+    assert.deepEqual(prompts, [emptyProjectExamplesMessage]);
     assert.deepEqual(
       await page.evaluate(async () =>
         (await window.explorerApp.projectFileSystem.list('/')).map(
@@ -1116,7 +2356,7 @@ test(
     await row(page, 'src').click({button: 'right'});
     assert.equal(
       await page
-        .getByRole('menuitem', {name: 'Reset examples', exact: true})
+        .getByRole('button', {name: 'Reset examples', exact: true})
         .count(),
       0,
     );
@@ -1984,12 +3224,108 @@ test(
 );
 
 test(
+  'an unopened browser project copies to a local folder without switching the source first',
+  {timeout: 150_000},
+  async t => {
+    const page = await open(t, [
+      {path: '/examples/sample.ts', source: 'export const sample = 1;'},
+    ]);
+    await newBrowserProject(page, 'Unopened copy source');
+    const sourceId = new URL(page.url()).searchParams.get('project');
+    await page.evaluate(async () => {
+      const files = window.explorerApp.projectFileSystem;
+      await files.createDirectory('/assets/empty');
+      await files.writeFile(
+        '/assets/source.bin',
+        new Uint8Array([4, 0, 255, 18]),
+      );
+      await files.writeFile(
+        '/examples/sample.ts',
+        'export const copiedExample = 7;',
+      );
+      await files.writeFile('/node_modules/custom/ignored.js', 'ignored');
+    });
+    await selectBrowserProject(page, 'Default project');
+    await mockLocalDirectories(page);
+    await page.reload();
+    await browserProjectReady(page, 'Default project');
+    await page.evaluate(() => {
+      sessionStorage.setItem('nextFolder', 'unopened-copy');
+      window.explorerApp.codeEditor.editor.setValue(
+        "import {box} from '@code3d/core';\nexport default box(31, 6, 8);\n",
+      );
+    });
+    await (
+      await openBrowserProjectMenu(page, 'Unopened copy source')
+    )
+      .locator('[data-action="copy"]')
+      .click();
+    await page.waitForURL(
+      url => url.searchParams.get('workspace') === 'unopened-copy',
+    );
+    await page.locator('#project-location[data-kind="local"]').waitFor();
+    await page.waitForFunction(() => !!window.explorerApp);
+    assert.deepEqual(
+      await page.evaluate(async () => {
+        const files = window.explorerApp.projectFileSystem;
+        return {
+          model: new TextDecoder().decode(await files.readFile('/model.ts')),
+          example: new TextDecoder().decode(
+            await files.readFile('/examples/sample.ts'),
+          ),
+          bytes: [...(await files.readFile('/assets/source.bin'))!],
+          empty: (await files.stat('/assets/empty'))?.kind,
+          generated: await files.stat('/node_modules/custom/ignored.js'),
+        };
+      }),
+      {
+        model:
+          "import {box} from '@code3d/core';\nexport default box(10, 6, 8);\n",
+        example: 'export const copiedExample = 7;',
+        bytes: [4, 0, 255, 18],
+        empty: 'directory',
+        generated: undefined,
+      },
+    );
+    await selectBrowserProject(page, 'Default project');
+    assert.match(
+      await page.evaluate(() =>
+        window.explorerApp.codeEditor.editor.getValue(),
+      ),
+      /box\(31, 6, 8\)/,
+    );
+    await selectBrowserProject(page, 'Unopened copy source');
+    assert.equal(new URL(page.url()).searchParams.get('project'), sourceId);
+    assert.deepEqual(
+      await page.evaluate(async () => [
+        ...(await window.explorerApp.projectFileSystem.readFile(
+          '/assets/source.bin',
+        ))!,
+      ]),
+      [4, 0, 255, 18],
+    );
+    assert.equal(
+      await page.evaluate(async () =>
+        new TextDecoder().decode(
+          await window.explorerApp.projectFileSystem.readFile(
+            '/node_modules/custom/ignored.js',
+          ),
+        ),
+      ),
+      'ignored',
+    );
+  },
+);
+
+test(
   'browser storage copies project bytes and examples to a local folder without generated files',
   {timeout: 90_000},
   async t => {
     const page = await open(t, [
       {path: '/examples/sample.ts', source: 'export const sample = 1;'},
     ]);
+    await newBrowserProject(page, 'Copy source');
+    const browserId = new URL(page.url()).searchParams.get('project');
     await mockLocalDirectories(page);
     await page.reload();
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
@@ -2014,9 +3350,10 @@ test(
       await window.explorerApp.activateProjectFile('/src/part.ts');
       codeEditor.editor.setValue('export const size = 42;\n');
     });
-    await page.locator('#project-location').click();
-    await page
-      .getByRole('button', {name: 'Copy to local folder and open', exact: true})
+    await (
+      await openBrowserProjectMenu(page)
+    )
+      .locator('[data-action="copy"]')
       .click();
     await page.waitForURL(
       url => url.searchParams.get('workspace') === 'exported-project',
@@ -2089,18 +3426,16 @@ test(
     );
     await page.locator('#project-location').click();
     assert.equal(
-      await page
-        .getByRole('button', {
-          name: 'Copy to local folder and open',
-          exact: true,
-        })
-        .count(),
+      await page.locator('.project-storage-submenu:popover-open').count(),
       0,
     );
     await page
-      .getByRole('button', {name: 'Use browser storage', exact: true})
+      .locator('#browser-project-list')
+      .getByRole('menuitem', {name: 'Copy source', exact: true})
       .click();
     await page.locator('#project-location[data-kind="browser"]').waitFor();
+    await browserProjectReady(page, 'Copy source');
+    assert.equal(new URL(page.url()).searchParams.get('project'), browserId);
     assert.equal(
       await page.evaluate(async () =>
         new TextDecoder().decode(
@@ -2130,12 +3465,10 @@ test(
     await page.getByText('Ready', {exact: true}).waitFor({timeout: 60_000});
     const originalUrl = page.url();
     const copy = async () => {
-      await page.locator('#project-location').click();
-      await page
-        .getByRole('button', {
-          name: 'Copy to local folder and open',
-          exact: true,
-        })
+      await (
+        await openBrowserProjectMenu(page)
+      )
+        .locator('[data-action="copy"]')
         .click();
       await page.waitForFunction(
         () =>
@@ -2226,9 +3559,10 @@ test(
         return read(path);
       };
     });
-    await page.locator('#project-location').click();
-    await page
-      .getByRole('button', {name: 'Copy to local folder and open', exact: true})
+    await (
+      await openBrowserProjectMenu(page)
+    )
+      .locator('[data-action="copy"]')
       .click();
     await page.waitForFunction(() => !!window.releaseExportRead);
     assert.equal(await page.locator('#open-folder-button').isDisabled(), true);
