@@ -458,7 +458,7 @@ kbd {
   grid-column: 1;
   grid-row: 1;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 30px minmax(0, 1fr) auto;
+  grid-template-rows: 30px minmax(0, 1fr) auto auto;
   width: var(--project-explorer-width);
   min-width: 0;
   min-height: 0;
@@ -746,26 +746,131 @@ kbd {
 
 .package-status {
   min-width: 0;
+  max-height: min(45vh, 360px);
   color: var(--muted);
-  flex-shrink: 0;
 }
 
-.package-status > div + div {
+.package-status[hidden],
+.package-status [hidden] {
+  display: none;
+}
+
+.package-compatibility-notice > strong {
+  color: #d6ad7e;
+  font-weight: 500;
+}
+
+.package-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.package-status button {
+  max-width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: #c9cdc2;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.package-status button[data-primary] {
+  border-color: #454b3d;
+  background: var(--soft);
+  color: #e8e9e1;
+}
+
+.package-status button:hover:not(:disabled) {
+  background: var(--editor-selection);
+}
+
+.package-status :is(button, summary):focus-visible {
+  outline: 1px solid var(--editor-focus);
+  outline-offset: 2px;
+}
+
+.package-status button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.package-status details > summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.package-status p {
+  margin: 8px 0;
+  white-space: pre-line;
+}
+
+.package-version {
+  margin-top: 10px;
+}
+
+.package-version > code {
+  color: #c9cdc2;
+  font-size: 10px;
+}
+
+.package-version dl {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 2px 6px;
+  margin: 4px 0 8px;
+  font-size: 10px;
+}
+
+.package-version dd {
+  margin: 0;
+  color: #c9cdc2;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.package-compatibility-manifests > div {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.package-compatibility-manifests code {
+  font-size: 10px;
+}
+
+.package-compatibility-notice:not([hidden]) + .package-downloads:not([hidden]) {
   margin-top: 6px;
 }
 
-.package-status > div > span {
+.package-download + .package-download {
+  margin-top: 8px;
+}
+
+.package-download > span {
   display: block;
+}
+
+.package-status-directory {
+  color: #c9cdc2;
+}
+
+.package-download[data-state='busy'] .package-download-message {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.package-status-directory {
-  color: #e8e9e1;
+.package-download button {
+  margin-top: 4px;
 }
 
-.package-status [data-state='error'] {
+.package-status [data-state='error'],
+.package-compatibility-status[data-error='true'] {
   color: #d6ad7e;
 }
 

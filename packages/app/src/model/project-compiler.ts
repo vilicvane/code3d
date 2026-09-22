@@ -5,9 +5,16 @@ import {isBuiltinPackageSpecifier} from '../project/builtin-packages';
 import {ProjectFileCache} from '../project/file-cache';
 import {
   decodeProjectFile,
+  statProjectFiles,
   type ProjectFileReader,
 } from '../project/file-reader';
 import {patchModelPackages} from '../project/model-package-patches';
+import {
+  findPackageCompatibility,
+  findResolvedPackageCompatibility,
+  resolvedPackageDirectory,
+  type PackageCompatibilityIssue,
+} from '../project/package-compatibility';
 import {
   isSourceFile,
   normalizeProjectPath,
@@ -15,7 +22,10 @@ import {
   type ProjectSourceFile,
 } from '../project/project';
 import {ProjectAssets} from '../project/project-assets';
-import {ProjectBuilder} from '../project/project-builder';
+import {
+  ProjectBuilder,
+  dependencyFileIdentity,
+} from '../project/project-builder';
 import {
   ProjectLanguageLoader,
   type ProjectLanguage,
@@ -50,18 +60,26 @@ export class ProjectCompiler {
   private dependencies: DependencyBuilder;
   private restoredDependencies?: DependencyArtifact;
   private refreshRequested?: symbol;
+  private readonly checkedPackages = new Map<string, Promise<void>>();
 
   constructor(
-    files: ProjectFileReader,
-    builtinFiles: ProjectFileReader,
+    private readonly sourceFiles: ProjectFileReader,
+    private readonly builtinSourceFiles: ProjectFileReader,
     engine: Pick<typeof esbuild, 'build' | 'context'>,
   ) {
-    this.files = new ProjectFileCache(patchModelPackages(files));
-    this.builtinFiles = new ProjectFileCache(patchModelPackages(builtinFiles));
+    this.files = new ProjectFileCache(patchModelPackages(sourceFiles));
+    this.builtinFiles = new ProjectFileCache(
+      patchModelPackages(builtinSourceFiles),
+    );
     this.packages = new ProjectPackages(this.files, this.builtinFiles);
     this.assets = new ProjectAssets(this.packages);
     this.language = new ProjectLanguageLoader(this.packages);
-    this.builder = new ProjectBuilder(this.packages, engine, this.assets);
+    this.builder = new ProjectBuilder(
+      this.packages,
+      engine,
+      this.assets,
+      (path, importer) => this.checkResolvedPackage(path, importer),
+    );
     this.dependencies = new DependencyBuilder(
       this.packages,
       this.builder,
@@ -88,6 +106,7 @@ export class ProjectCompiler {
     ) => Promise<DependencyArtifact | undefined>,
   ): Promise<ProjectBuildArtifact> {
     checkCancelled();
+    this.checkedPackages.clear();
     onProgress?.('reading-files');
     const refreshRequest = this.refreshRequested;
     const refresh = !!refreshRequest;
@@ -198,6 +217,13 @@ export class ProjectCompiler {
           : [];
       });
     })[0];
+    const issue = await findPackageCompatibility(
+      this.packages,
+      this.builtinFiles,
+      rootPath,
+    );
+    checkCancelled();
+    if (issue) throw packageCompatibilityError(issue, runtimeSourceRef);
     const languageProject = {
       files: [
         ...overrides.files.filter(file => !entryPaths.includes(file.path)),
@@ -301,11 +327,95 @@ export class ProjectCompiler {
     return this.builder.cancel();
   }
 
+  private async checkResolvedPackage(
+    path: string,
+    importer: string,
+  ): Promise<void> {
+    const directory = resolvedPackageDirectory(path);
+    if (!directory) return;
+    let pending = this.checkedPackages.get(directory);
+    if (!pending) {
+      pending = findResolvedPackageCompatibility(
+        this.packages,
+        this.builtinFiles,
+        path,
+        importer,
+      ).then(issue => {
+        if (issue) throw packageCompatibilityError(issue);
+      });
+      this.checkedPackages.set(directory, pending);
+    }
+    await pending;
+  }
+
   restoreDependencies(artifact: DependencyArtifact): DependencyArtifact {
     return (this.restoredDependencies = this.dependencies.reuse(artifact));
+  }
+
+  /** A saved view may only execute against the currently selected installation. */
+  async canRestoreDependencies(
+    artifact: Pick<DependencyArtifact, 'metadata'>,
+    project: ModelProject,
+    rootPath: string,
+  ): Promise<boolean> {
+    // Restoration runs alongside compilation. Its package selection must not
+    // mutate the active compiler's reader or reuse unrefreshed file metadata.
+    const packages = new ProjectPackages(
+      this.sourceFiles,
+      this.builtinSourceFiles,
+    );
+    await packages.update(project, rootPath);
+    if (
+      await findPackageCompatibility(
+        packages,
+        this.builtinSourceFiles,
+        rootPath,
+      )
+    )
+      return false;
+    for (const [path, info] of artifact.metadata) {
+      if (
+        info?.kind === 'file' &&
+        path.endsWith('/package.json') &&
+        (await findResolvedPackageCompatibility(
+          packages,
+          this.builtinSourceFiles,
+          path,
+          rootPath,
+        ))
+      )
+        return false;
+    }
+    const metadata = await statProjectFiles(
+      packages,
+      artifact.metadata.map(([path]) => path),
+    );
+    return artifact.metadata.every(
+      ([, expected], index) =>
+        JSON.stringify(expected) ===
+        JSON.stringify(dependencyFileIdentity(metadata[index])),
+    );
   }
 
   refreshProject(): void {
     this.refreshRequested = Symbol('refresh');
   }
+}
+
+function packageCompatibilityError(
+  issue: PackageCompatibilityIssue,
+  sourceRef?: SourceRef,
+): ModelDiagnosticError {
+  return new ModelDiagnosticError({
+    kind: 'project',
+    summary: 'Code3D package version mismatch',
+    details: issue.packages
+      .map(
+        pkg =>
+          `${pkg.name}: installed ${pkg.installed}; this App requires ${pkg.expected}.`,
+      )
+      .join('\n'),
+    sourceRef,
+    packageCompatibility: issue,
+  });
 }

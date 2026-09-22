@@ -69,6 +69,7 @@ type WorkerRequest =
       kind: 'restore';
       id: number;
       cancellation: CompilationCancellation;
+      project: ModelProject;
       projectIdentity: string;
       rootPath: string;
       designContext?: DesignContext;

@@ -18,6 +18,7 @@ declare const window: Window & {
     projectFileSystem: import('../../src/project/filesystem.ts').ProjectFileSystem;
     agentProject: import('../../src/agent/project-session.ts').AgentProjectSession;
     projectDirectory: import('../../src/ui/project-tree.ts').ProjectTree;
+    packageStatus: import('../../src/ui/package-status.ts').PackageStatusView;
     compiler: import('../../src/model/compiler-client.ts').ModelCompilerClient;
     browserProject: {id: string; name: string} | undefined;
     browserProjects: import('../../src/project/browser-projects.ts').BrowserProjects;
@@ -84,7 +85,7 @@ async function open(
       response,
       body:
         (await response.text()) +
-        '\nwindow.explorerApp = {codeEditor, projectFileSystem, agentProject, projectDirectory, compiler, browserProject, browserProjects, activateProjectFile};\n',
+        '\nwindow.explorerApp = {codeEditor, projectFileSystem, agentProject, projectDirectory, packageStatus, compiler, browserProject, browserProjects, activateProjectFile};\n',
     });
   });
   await page.goto(process.env.CODE3D_TEST_URL!);
@@ -2022,15 +2023,12 @@ test(
     await page.keyboard.press('Escape');
     await storedActions.waitFor({state: 'hidden'});
     await actions
-      .getByRole('menuitem', {name: 'Change folder', exact: true})
+      .getByRole('menuitem', {name: 'Open folder', exact: true})
       .waitFor();
     assert.equal(
       await explorer.locator('.project-actions #open-folder-button').count(),
       0,
     );
-    await actions
-      .getByRole('menuitem', {name: 'Reload folder', exact: true})
-      .waitFor();
     assert.equal(
       await actions
         .getByRole('menuitem', {name: 'Reset examples', exact: true})
@@ -3163,9 +3161,9 @@ test(
     const time = new Date('2026-01-01T00:00:00Z');
     await page.clock.install({time});
     await page.clock.pauseAt(time.getTime() + 60_000);
-    const status = page.getByRole('status', {name: 'Package installation'});
+    const status = page.getByRole('status', {name: 'Packages', exact: true});
     await page.evaluate(() =>
-      window.explorerApp.projectDirectory.setPackageProgress({
+      window.explorerApp.packageStatus.setProgress({
         directory: '/a',
         state: 'ready',
         message: 'Packages installed',
@@ -3174,23 +3172,40 @@ test(
     assert.equal(await status.isVisible(), true);
     await page.clock.runFor(2000);
     await page.evaluate(() => {
-      const tree = window.explorerApp.projectDirectory;
-      tree.setPackageProgress({
+      const {packageStatus} = window.explorerApp;
+      packageStatus.setProgress({
         directory: '/a',
         state: 'busy',
         message: 'Downloading newer package',
       });
-      tree.setPackageProgress({
+      packageStatus.setProgress({
         directory: '/b',
         state: 'error',
         message: 'Package not found',
       });
-      tree.setPackageProgress({
+      packageStatus.setProgress({
         directory: '/c',
         state: 'ready',
         message: 'Dependencies updated',
       });
     });
+    const retry = status
+      .locator('[data-state="error"]')
+      .filter({hasText: 'Package not found'})
+      .getByRole('button', {name: 'Retry', exact: true});
+    await retry.focus();
+    await page.evaluate(() =>
+      window.explorerApp.packageStatus.setProgress({
+        directory: '/a',
+        state: 'busy',
+        message: 'Downloading newer package (2 of 3)',
+      }),
+    );
+    assert.equal(
+      await retry.evaluate(button => button === document.activeElement),
+      true,
+      'another directory’s progress preserves Retry focus',
+    );
     await page.clock.runFor(2000);
     assert.match(await status.innerText(), /Downloading newer package/);
     assert.match(await status.innerText(), /Package not found/);
@@ -3200,8 +3215,13 @@ test(
     assert.doesNotMatch(await status.innerText(), /Dependencies updated/);
     assert.match(await status.innerText(), /Downloading newer package/);
     assert.match(await status.innerText(), /Package not found/);
+    assert.equal(
+      await retry.evaluate(button => button === document.activeElement),
+      true,
+      'another directory’s success expiry preserves Retry focus',
+    );
     await page.evaluate(() =>
-      window.explorerApp.projectDirectory.setPackageProgress({
+      window.explorerApp.packageStatus.setProgress({
         directory: '/a',
         state: 'ready',
         message: 'Packages installed',
@@ -3212,7 +3232,7 @@ test(
     assert.match(await status.innerText(), /Package not found/);
     assert.doesNotMatch(await status.innerText(), /Packages installed/);
     await page.evaluate(() =>
-      window.explorerApp.projectDirectory.setPackageProgress({
+      window.explorerApp.packageStatus.setProgress({
         directory: '/b',
         state: 'ready',
         message: 'Packages ready',

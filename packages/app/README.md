@@ -55,8 +55,10 @@ Every project has these actions, including projects that are not open. Resetting
 or deleting another project keeps the current page and unsaved edits in place.
 Copying saves the current project and opens the local folder only after the copy
 succeeds. Background operations wait for other tabs using the target project to close.
-Folder commands and **New browser project** appear below the project list,
-separated by a divider, with **Open folder** or **Change folder** before **New browser project**.
+**Open folder** and **New browser project** appear below the project list,
+in that order and separated from it by a divider. **Open folder** keeps the same
+name when a local project is open. Use the toolbar's **Refresh files and dependencies**
+to reread the project and rebuild the current model.
 The App's file service owns full-source writes, version checks, and persistence for both user
 and agent edits. Model preparation resolves project dependencies before compiling
 source. The [file guide](../web/src/content/docs/docs/getting-started/files.md)
@@ -67,6 +69,25 @@ this checkout's package builds. Rebuild packages after changing their source.
 Explicit versions keep normal resolution; production uses published packages.
 See [package environment and resolution](../../.agents/docs/architecture/runtime.md#包环境与模块解析)
 for the shared Browser storage and local-folder rules.
+
+After an App update, projects with their own Code3D packages must match the
+modeling package versions shipped with the App. The **Packages** area at the
+bottom of the file explorer brings together download and installation progress,
+installation errors with **Retry**, and version recovery. A **Code3D version
+mismatch** status offers **Update Code3D packages** for Browser storage or
+**Refresh** for local folders. Expand **Details** for installed and required
+versions, package files and recovery instructions. Success notices disappear
+independently after three seconds.
+For Browser storage, **Update Code3D packages** preserves `latest` declarations,
+including npm aliases, and resolves them again. Fixed older declarations change
+to the required versions before installation. Local folders show the owning
+package files: keep `latest` and use your package manager's update command, or
+change fixed older versions and install, then choose **Refresh**. Built-in
+packages need no manual upgrade. If `latest` installs packages newer than the App,
+reload the App to check for a newer release; an unresolved mismatch stays visible
+without pinning `latest` to an older version.
+Clearing the build cache does not upgrade installed packages; see the
+[upgrade guide](../web/src/content/docs/docs/getting-started/files.md#after-a-code3d-update).
 
 Open **Settings → Cache** to set the **Disk cache threshold (ms)**, which defaults
 to 1 ms. It accepts fractional values; 0 removes the computation-time threshold.

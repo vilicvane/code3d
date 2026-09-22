@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {test} from 'node:test';
+import {gzipSync} from 'node:zlib';
+import {packTar} from 'modern-tar';
 import {chromium} from './browser-connection.ts';
 
 declare const window: Window & {
@@ -789,7 +792,7 @@ test(
       );
       await page.getByText('Ready', {exact: true}).waitFor();
       await page
-        .getByRole('status', {name: 'Package installation'})
+        .getByRole('status', {name: 'Packages'})
         .waitFor({state: 'hidden'});
     } finally {
       release();
@@ -847,7 +850,7 @@ test(
       .getByRole('textbox', {name: 'Package', exact: true})
       .fill('mistyped-code3d-package');
     await dialog.getByRole('button', {name: 'Install', exact: true}).click();
-    const status = page.getByRole('status', {name: 'Package installation'});
+    const status = page.getByRole('status', {name: 'Packages'});
     await status.locator('[data-state="error"]').waitFor();
     assert.match(
       await status.innerText(),
@@ -889,6 +892,163 @@ test(
     assert.equal(
       await page.locator('.project-status:not(.package-status)').isVisible(),
       false,
+    );
+  },
+);
+
+test(
+  'package Retry restores the current model after a transient download failure without changing its manifest',
+  {timeout: 120_000},
+  async t => {
+    assert.ok(process.env.CODE3D_TEST_URL);
+    const browser = await chromium.connectOverCDP(
+      process.env.CODE3D_CDP_URL ?? 'http://localhost:9222',
+    );
+    t.after(() => browser.close());
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    page.setDefaultTimeout(15_000);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (
+        ['warning', 'error'].includes(message.type()) &&
+        /mobx/i.test(message.text())
+      )
+        errors.push(message.text());
+    });
+    t.after(() => assert.deepEqual(errors, []));
+    await exposePackageApp(page);
+    const name = 'code3d-retry-fixture';
+    const version = '1.0.0';
+    const packageManifest = {
+      name,
+      version,
+      type: 'module',
+      main: './index.js',
+      types: './index.d.ts',
+    };
+    const archive = gzipSync(
+      await packTar(
+        Object.entries({
+          'package.json': JSON.stringify(packageManifest),
+          'index.js': 'export const size = 6;\n',
+          'index.d.ts': 'export declare const size: number;\n',
+        }).map(([path, source]) => {
+          const body = new TextEncoder().encode(source);
+          return {
+            header: {
+              name: 'package/' + path,
+              type: 'file' as const,
+              size: body.length,
+            },
+            body,
+          };
+        }),
+      ),
+    );
+    const tarball = `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`;
+    const metadata = {
+      ...packageManifest,
+      dist: {
+        tarball,
+        integrity:
+          'sha512-' + createHash('sha512').update(archive).digest('base64'),
+      },
+    };
+    let failDownload = true;
+    let failedDownloads = 0;
+    let completedDownloads = 0;
+    await page.route('https://registry.npmjs.org/**', async route => {
+      const url = route.request().url();
+      const headers = {'Access-Control-Allow-Origin': '*'};
+      if (url === tarball) {
+        if (failDownload) {
+          failedDownloads++;
+          await route.fulfill({status: 503, body: 'Unavailable', headers});
+        } else {
+          completedDownloads++;
+          await route.fulfill({
+            body: archive,
+            contentType: 'application/octet-stream',
+            headers,
+          });
+        }
+        return;
+      }
+      const path = new URL(url).pathname.replace(/\/$/, '');
+      if (path === `/${name}`) {
+        await route.fulfill({
+          json: {
+            versions: {[version]: metadata},
+            'dist-tags': {latest: version},
+          },
+          headers,
+        });
+        return;
+      }
+      assert.equal(path, `/${name}/${version}`);
+      await route.fulfill({json: metadata, headers});
+    });
+    const manifest =
+      JSON.stringify(
+        {private: true, type: 'module', dependencies: {[name]: version}},
+        null,
+        2,
+      ) + '\n';
+    const source = `import {box} from '@code3d/core';\nimport {size} from '${name}';\nexport default box(size, 3, 2);\n`;
+    await page.route('**/src/project/default-project.ts*', route =>
+      route.fulfill({
+        contentType: 'text/javascript',
+        body: `export const defaultProject = ${JSON.stringify({
+          files: [
+            {path: '/model.ts', source},
+            {path: '/package.json', source: manifest},
+          ],
+        })};`,
+      }),
+    );
+    await page.goto(process.env.CODE3D_TEST_URL);
+    const status = page.getByRole('status', {name: 'Packages', exact: true});
+    await status.locator('[data-state="error"]').waitFor({timeout: 60_000});
+    assert.match(await status.innerText(), /Unable to download .*HTTP 503/);
+    await page.waitForFunction(
+      () =>
+        window.packageApp?.previewState.status === 'error' &&
+        !!window.packageApp.previewState.diagnostic,
+    );
+    assert.ok(failedDownloads > 0);
+    assert.equal(completedDownloads, 0);
+
+    failDownload = false;
+    await status.getByRole('button', {name: 'Retry', exact: true}).click();
+    await page.waitForFunction(
+      () =>
+        window.packageApp.previewState.status === 'ready' &&
+        !!window.packageApp.previewState.module &&
+        !window.packageApp.previewState.diagnostic,
+      undefined,
+      {timeout: 60_000},
+    );
+    assert.equal(await page.locator('#viewport-status').innerText(), 'Ready');
+    assert.equal(await status.locator('[data-state="error"]').count(), 0);
+    assert.ok(completedDownloads > 0);
+    assert.deepEqual(
+      await page.evaluate(async () => {
+        const {projectFileSystem: files, codeEditor} = window.packageApp;
+        return {
+          currentFile: codeEditor.currentFile(),
+          manifest: new TextDecoder().decode(
+            await files.readFile('/package.json'),
+          ),
+          source: new TextDecoder().decode(await files.readFile('/model.ts')),
+          installed: (
+            await files.stat('/node_modules/code3d-retry-fixture/index.js')
+          )?.kind,
+        };
+      }),
+      {currentFile: '/model.ts', manifest, source, installed: 'file'},
     );
   },
 );

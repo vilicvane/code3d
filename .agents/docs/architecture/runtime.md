@@ -17,8 +17,9 @@ Access handle 按需访问。编译时通过 overlay 读取尚未保存的源码
 以及分隔线后的 Reset、Delete。
 所有操作绑定该行项目，不要求先打开，也可从本地目录管理浏览器项目。
 项目名称与命令文字统一对齐，不预留无图标缩进；菜单命令不带省略号，长名称仍可截断。
-Open/Change folder、New browser project 等入口置于项目列表之外，以分隔线区分，
-文件夹入口排在新建浏览器项目之前。
+文件夹及新建入口置于项目列表之外，以分隔线区分；按 Open folder、New browser project
+排列，打开本地项目后仍使用 Open folder 文案。重新读取文件和依赖统一使用工具栏
+Refresh files and dependencies，位置菜单不重复提供整页重载入口。
 从本地目录返回浏览器时直接选择项目名。新建表单同时填写必填名称和
 默认勾选的 Create examples，一次提交后进入项目，不再弹出示例确认。
 新建和切换先保存当前项目，再重新加载页面；保存失败留在原项目并显示错误。
@@ -113,6 +114,37 @@ Reset 保留身份与名称，先持久记录 `template: 'examples'`，再删除
 使用项目的整套建模依赖；否则以只读内置包提供 Core、Screws 和 Materials 的
 零安装入口。内置闭包经普通分层路径隔离，不能出现第二份公共 Core 实例。
 已声明的包缺失、exports 禁止或内容不兼容时明确报错。
+
+App 原型期按随附包清单中的精确 npm 版本检查项目选用的公共建模包，
+不使用 App 私有 package.json 版本，也不引入兼容协议号。
+`package-compatibility.ts` 沿有效包文件系统读取实际安装，保留每个不匹配依赖的
+声明清单归属。检查在语言与 tooling 出口加载前完成，避免旧 Core 先触发难以理解的
+出口或运行时错误；内置包直接使用随附版本，开发 workspace 覆盖沿原有 reader 生效。
+不匹配通过结构化模型诊断跨 Worker 和 agent 观察返回，携带实际版本、所需版本与
+清单路径。缓存预览恢复同样核对当前包环境和依赖元数据，不能重新执行已过时的安装。
+真实模块解析继续检查抵达的建模包，覆盖 npm alias、未声明但提升可见的包以及第三方
+依赖的嵌套安装。未声明或传递依赖的诊断标记人工修复原因及导入方，不通过自动添加
+顶层同名包伪装升级成功；构建器只提供解析路径回调，检查策略仍归项目编译器。
+
+文件管理器底部的统一 Packages 状态区由
+[PackageStatusView](../../../packages/app/src/ui/package-status.ts) 呈现下载/安装进度、
+安装失败与 Retry、版本不匹配和升级失败。它接收按目录的进度事件，拥有呈现所需的
+operation/failure 与生命周期，直接观察当前模型诊断，不另存一份兼容性状态。
+原 ProjectTree 的手动进度刷新路径已移除；每个成功通知独立在 3 秒后消失，不隐藏
+其他目录的进行中任务或错误。版本状态默认只显示 Code3D version mismatch、浏览器
+Update Code3D packages 或本地 Refresh 主操作，以及折叠的 Details。展开后展示
+Installed/Required、清单打开入口、本地包管理器指引、浏览器 Refresh、Reload app 和
+Clear build cache；不在 viewport 放置浮层。
+
+Browser storage 的 Update Code3D packages 在原项目保存队列中更新
+对应清单，保留原有 `latest` 和 `npm:@code3d/...@latest` 声明；固定旧版声明改为 App
+匹配版本，依赖字段、npm alias 和其他配置保留。无论声明是否变化，均通过现有强制更新
+入口重新解析依赖图，再沿安装事务安装和重编译，不沿用旧 lock 锁定的版本。
+本地目录提供清单与更新指引：`latest` 保留，使用包管理器的 update 命令实际更新安装；
+仅 install 可能复用旧 lock。固定旧版修改为所需版本后安装，完成后经共享刷新命令重读。
+若 latest 解析到比 App 更新的包，指引重载 App；仍不匹配则继续提示，不强行改为固定版本。
+现有 compiler recipe 内容指纹继续隔离 App 更新前后的构建缓存；清缓存属于辅助恢复，
+不能替代升级依赖，不清理作者文件、已安装包及其他工作区缓存。
 
 Vite 开发模式将 `latest` 的 `@code3d/*` 请求优先解析到仓库中存在的可发布
 workspace，直接依赖、传递依赖和 npm alias 使用同一规则。明确版本、其他范围或

@@ -31,8 +31,10 @@ followed by its copy, reset and delete actions, including projects that are not 
 **Open** saves and switches just like clicking the project name.
 You can also hover over a project row or
 focus its name and press **Right arrow** to open these actions.
-Folder commands and **New browser project** appear below the list, separated by a divider,
-with **Open folder** or **Change folder** before **New browser project**.
+**Open folder** and **New browser project** appear below the list, in that order
+and separated from it by a divider. **Open folder** keeps the same name in a local project.
+Use the toolbar's **Refresh files and dependencies** to reread files and dependencies
+and rebuild the current model.
 Choose **New browser project** and enter a name. The same form has a **Create examples**
 checkbox, selected by default: leave it checked to include the default model and
 bundled `/examples` folder, or clear it to start with an empty project. Choose
@@ -133,7 +135,8 @@ an update queued for a corrected manifest.
 An interrupted installation is recovered before the next attempt. Once packages
 and their lock are replaced successfully, retrying backup cleanup does not
 repeat the installation.
-The file explorer shows package progress separately from the model preview.
+The **Packages** area at the bottom of the file explorer shows downloads,
+installation progress, errors with **Retry**, and package version issues.
 Success messages disappear after three seconds, including when you have switched
 to another file. Ongoing downloads and errors remain visible; each folder's
 status clears independently.
@@ -162,7 +165,7 @@ lighten a box's material color. Use F12 on `TinyColor` to inspect its declaratio
 If you skipped examples when creating the project, choose **Create examples** in
 the explorer's context menu first. The example uses the current project's files.
 In a local project, run `npm install` inside `examples/npm`,
-then choose **Reload folder** before running this example.
+then choose **Refresh files and dependencies** in the toolbar before running this example.
 
 ```json
 {
@@ -271,7 +274,7 @@ copying keep the current project open; a failed copy may leave partial files in 
 
 Click the project name in the explorer header and choose **Open folder** to connect
 the App to a real directory. To switch local projects, click the current folder name
-and choose **Change folder**.
+and choose **Open folder**.
 The selected directory keeps its own files. When opening an empty directory,
 the App shows a **Create examples** prompt.
 Accept to add the bundled `/examples` folder, or cancel to keep the directory empty.
@@ -300,10 +303,10 @@ even if their timestamps and sizes are unchanged. It also discards cached file
 reads and rebuilds from the current entry, rereading the source, configuration,
 dependencies, and local resources required by that entry, as when reopening
 the page. It refreshes the directory listing too. Unused files load when needed; refresh does not read
-the entire directory into memory. **Reload folder** reloads the workspace.
+the entire directory into memory.
 
 Each connected directory gets its own workspace URL. Click the storage location
-in the explorer header to access **Reload folder**, **Reconnect folder** when the
+in the explorer header to choose **Open folder**, **Reconnect folder** when the
 browser requires fresh permission, or select a project name from the list
 to return to that browser project. These workspace switches clear the previous file selection.
 
@@ -324,7 +327,8 @@ Declaring `@code3d/core` in `dependencies`, `devDependencies`, `peerDependencies
 or `optionalDependencies` switches the complete modeling runtime to your
 project's installed packages. Install `@code3d/layout`, `@code3d/screws`, `@code3d/gears` or
 `@code3d/materials` too if your model imports them. Missing declared packages produce an error; the App does not silently use
-its built-in copies. Choose **Reload folder** after external dependency changes.
+its built-in copies. Choose **Refresh files and dependencies** in the toolbar
+after external dependency changes.
 
 Other browser-compatible npm packages resolve from the project's `node_modules`
 in either case. Running the same source directly in Node requires installing
@@ -336,7 +340,7 @@ For example, install a browser-compatible utility in your own project directory:
 npm install @ctrl/tinycolor
 ```
 
-Open that folder in the App (or choose **Reload folder** if it is already open),
+Open that folder in the App (or choose **Refresh files and dependencies** in the toolbar if it is already open),
 then use the package in a TypeScript file:
 
 ```ts
@@ -404,6 +408,64 @@ Models await `googleFont(...)` or `font(...)` when they need a font. Fonts load
 while running the model, including the first execution of a saved module.
 Compiling and saving a module does not download its fonts. First use and fonts
 removed by cache eviction require network access.
+
+## After a Code3D update
+
+During the prototype, projects with their own Code3D modeling packages must use
+the versions required by the current App. Before running a model, the App checks
+the selected installed packages. The **Packages** area at the bottom of the file
+explorer shows **Code3D version mismatch**, with **Update Code3D packages** for
+Browser storage or **Refresh** for a local folder. Expand **Details** to see each
+affected package's **Installed** and **Required** versions, open its `package.json`,
+and read the update instructions. **Details** also provides **Refresh** for
+Browser storage, **Reload app**, and **Clear build cache**. This status shares
+the explorer's package progress and error area, leaving the model view clear.
+If your packages are newer than the open App, try **Details → Reload app** first.
+
+For **Browser storage**, choose **Update Code3D packages** in the Packages area.
+Existing `latest` declarations stay `latest`, including aliases such as
+`npm:@code3d/core@latest`; the command resolves them again instead of reusing
+the old lock. Fixed older Code3D declarations change to the App's required
+versions. It installs the newly resolved dependencies and rebuilds the model.
+Existing dependency sections, other dependency declarations and your source files are preserved.
+The ordinary **Update dependencies** command still follows your existing ranges,
+so it cannot upgrade a dependency pinned to an older version.
+
+For a **local folder**, expand **Details**, use **Open package.json**, and work
+in that manifest's directory:
+
+- Keep `latest` declarations and use your package manager's update command to
+  resolve them again. With npm, for example, run `npm update --save=false @code3d/core`;
+  use the dependency's alias name if it has one. Merely running `npm install`
+  can reuse the older version recorded in the lock.
+- For a fixed older version, change the declaration to the required version,
+  then run your package manager's install command, such as `npm install`.
+
+Return to the App and choose **Refresh** after installation. The App does not
+run a package manager on your computer. For a nested project, follow the path
+shown in **Details** rather than editing an unrelated root manifest.
+
+If resolving `latest` installs packages newer than this App, keep `latest` and
+try **Details → Reload app**. If the versions still do not match, the status
+remains; the App does not pin `latest` to an older version to hide it.
+
+If another library brings in an incompatible Code3D package, **Details** names
+that library. Upgrade it, or the project dependency that brings it in, to a
+release using the required Code3D version; changing
+only a top-level Code3D dependency may leave the library's nested copy unchanged.
+For an imported package missing from your dependency declarations, add the
+required version to the indicated manifest. These cases show manual guidance
+instead of an automatic update button.
+
+Projects using the App's built-in modeling packages already use matching
+versions. In development, `latest` still uses this checkout's package builds.
+
+Builds are automatically invalidated when the App or package inputs change.
+If problems remain after the versions match, use **Clear build cache** from the
+explorer's empty-space menu, or from the version status's **Details** section.
+This rebuilds the active model while keeping source files, installed packages,
+geometry caches and other projects. Clearing the cache does **not** fix an
+installed package version mismatch, and you do not need to reset the project.
 
 ## The examples directory
 
