@@ -76,6 +76,8 @@ export type ProjectEditorChange =
       path: string;
       source: string;
       origin: ContentChangeOrigin;
+      /** A tool edit and its deferred formatting share the same transaction. */
+      undoGroup?: string;
     }>
   | Readonly<{kind: 'create'; path: string; source: string}>
   | Readonly<{kind: 'rename'; from: string; to: string}>
@@ -587,6 +589,7 @@ export class CodeEditor {
   private readonly pendingToolFormats = new Map<string, string | undefined>();
   private completionFocusVersion = 0;
   private contentChangeOrigin: 'user' | 'tool' | 'agent' = 'user';
+  private contentChangeUndoGroup?: string;
   private readonly sourceEditUndoGroups = new Map<string, string>();
   private readonly sourceDecoration: monaco.editor.IEditorDecorationsCollection;
   private activePath: string | undefined;
@@ -1613,79 +1616,85 @@ export class CodeEditor {
       if (!model || !validEdits(model, fileEdits)) return false;
     }
     this.withSuppressedCursorEvents(() =>
-      this.withContentChangeOrigin('tool', () => {
-        for (const [path, fileEdits] of grouped) {
-          const model = this.requireDocument(path).model;
-          const focused =
-            fileEdits.find(edit => edit.focusOffset !== undefined) ??
-            [...fileEdits].sort(
-              (a, b) => b.sourceRef.start - a.sourceRef.start,
-            )[0];
-          const nextSource = [...fileEdits]
-            .sort((a, b) => b.sourceRef.start - a.sourceRef.start)
-            .reduce(
-              (source, edit) =>
-                source.slice(0, edit.sourceRef.start) +
-                edit.text +
-                source.slice(edit.sourceRef.end),
-              model.getValue(),
-            );
-          const changedOffset =
-            focused.sourceRef.start +
-            fileEdits
-              .filter(
-                edit =>
-                  edit !== focused &&
-                  edit.sourceRef.end <= focused.sourceRef.start,
-              )
+      this.withContentChangeOrigin(
+        'tool',
+        () => {
+          for (const [path, fileEdits] of grouped) {
+            const model = this.requireDocument(path).model;
+            const focused =
+              fileEdits.find(edit => edit.focusOffset !== undefined) ??
+              [...fileEdits].sort(
+                (a, b) => b.sourceRef.start - a.sourceRef.start,
+              )[0];
+            const nextSource = [...fileEdits]
+              .sort((a, b) => b.sourceRef.start - a.sourceRef.start)
               .reduce(
-                (delta, edit) =>
-                  delta +
-                  edit.text.length -
-                  (edit.sourceRef.end - edit.sourceRef.start),
-                0,
+                (source, edit) =>
+                  source.slice(0, edit.sourceRef.start) +
+                  edit.text +
+                  source.slice(edit.sourceRef.end),
+                model.getValue(),
               );
-          const focusOffset = options.preserveCursor
-            ? undefined
-            : focused.focusOffset !== undefined
-              ? changedOffset + focused.focusOffset
-              : (callIdentifierOffset(
-                  nextSource,
-                  changedOffset + Math.max(0, focused.text.length - 1),
-                ) ??
-                (() => {
-                  const reference = this.sourceContext?.()?.tool.at(-1);
-                  const current = reference && this.resolveSourceRef(reference);
-                  if (!current || current.file !== path) return undefined;
-                  const rebased = rebaseSourceRef(
-                    current,
-                    fileEdits.map(edit => ({
-                      rangeOffset: edit.sourceRef.start,
-                      rangeLength: edit.sourceRef.end - edit.sourceRef.start,
-                      text: edit.text,
-                    })),
-                    false,
-                  );
-                  return (
-                    rebased && callIdentifierOffset(nextSource, rebased.end - 1)
-                  );
-                })());
-          this.pushSourceEdits(
-            path,
-            [...fileEdits]
-              .sort(
-                (left, right) => right.sourceRef.start - left.sourceRef.start,
-              )
-              .map(edit => ({
-                range: sourceRange(model, edit.sourceRef),
-                text: edit.text,
-                forceMoveMarkers: true,
-              })),
-            options.undoGroup,
-            focusOffset,
-          );
-        }
-      }),
+            const changedOffset =
+              focused.sourceRef.start +
+              fileEdits
+                .filter(
+                  edit =>
+                    edit !== focused &&
+                    edit.sourceRef.end <= focused.sourceRef.start,
+                )
+                .reduce(
+                  (delta, edit) =>
+                    delta +
+                    edit.text.length -
+                    (edit.sourceRef.end - edit.sourceRef.start),
+                  0,
+                );
+            const focusOffset = options.preserveCursor
+              ? undefined
+              : focused.focusOffset !== undefined
+                ? changedOffset + focused.focusOffset
+                : (callIdentifierOffset(
+                    nextSource,
+                    changedOffset + Math.max(0, focused.text.length - 1),
+                  ) ??
+                  (() => {
+                    const reference = this.sourceContext?.()?.tool.at(-1);
+                    const current =
+                      reference && this.resolveSourceRef(reference);
+                    if (!current || current.file !== path) return undefined;
+                    const rebased = rebaseSourceRef(
+                      current,
+                      fileEdits.map(edit => ({
+                        rangeOffset: edit.sourceRef.start,
+                        rangeLength: edit.sourceRef.end - edit.sourceRef.start,
+                        text: edit.text,
+                      })),
+                      false,
+                    );
+                    return (
+                      rebased &&
+                      callIdentifierOffset(nextSource, rebased.end - 1)
+                    );
+                  })());
+            this.pushSourceEdits(
+              path,
+              [...fileEdits]
+                .sort(
+                  (left, right) => right.sourceRef.start - left.sourceRef.start,
+                )
+                .map(edit => ({
+                  range: sourceRange(model, edit.sourceRef),
+                  text: edit.text,
+                  forceMoveMarkers: true,
+                })),
+              options.undoGroup,
+              focusOffset,
+            );
+          }
+        },
+        options.undoGroup,
+      ),
     );
     for (const path of grouped.keys()) {
       this.pendingToolFormats.set(path, options.undoGroup);
@@ -2046,6 +2055,9 @@ export class CodeEditor {
           path: normalized,
           source: model.getValue(),
           origin,
+          ...(origin === 'tool' && this.contentChangeUndoGroup !== undefined
+            ? {undoGroup: this.contentChangeUndoGroup}
+            : {}),
         });
       }),
     };
@@ -2282,15 +2294,18 @@ export class CodeEditor {
           continue;
         }
       }
-      this.withContentChangeOrigin(options.origin ?? 'user', () =>
-        this.withSuppressedCursorEvents(() => {
-          this.pushSourceEdits(
-            path,
-            formattingEdits(model, source, result.formatted),
-            options.undoGroup,
-            cursorOffset !== undefined ? result.cursorOffset : undefined,
-          );
-        }),
+      this.withContentChangeOrigin(
+        options.origin ?? 'user',
+        () =>
+          this.withSuppressedCursorEvents(() => {
+            this.pushSourceEdits(
+              path,
+              formattingEdits(model, source, result.formatted),
+              options.undoGroup,
+              cursorOffset !== undefined ? result.cursorOffset : undefined,
+            );
+          }),
+        options.undoGroup,
       );
       return true;
     }
@@ -2308,13 +2323,17 @@ export class CodeEditor {
   private withContentChangeOrigin<T>(
     origin: 'user' | 'tool' | 'agent',
     action: () => T,
+    undoGroup?: string,
   ): T {
     const previous = this.contentChangeOrigin;
+    const previousUndoGroup = this.contentChangeUndoGroup;
     this.contentChangeOrigin = origin;
+    this.contentChangeUndoGroup = undoGroup;
     try {
       return action();
     } finally {
       this.contentChangeOrigin = previous;
+      this.contentChangeUndoGroup = previousUndoGroup;
     }
   }
 

@@ -31,6 +31,20 @@ const profile = base.derive(
 const sleeve = profile.face().extrude(10);
 ```
 
+Direct source edits can leave a successful constraint solution different from
+the authored geometry inputs, as in this example. The App reports a source
+mismatch warning and offers **Fix** when it can safely synchronize local literal
+coordinates and radii. Preserve expressions and upstream geometry; do not choose
+one solution to write back when the same definition has multiple independent
+evaluations.
+
+When a user changes or adds dimensions or geometric constraints in the sketch
+editor, the App automatically applies that safe synchronization after a successful
+solve. The constraint change and synchronized geometry share one Undo or Redo.
+An unsafe synchronization leaves the warning in place; a failed solve retains
+diagnostics and the last successful sketch, when available, as a read-only reference
+in the editor.
+
 For a source binding named `profile`, a cursor-only observation can be:
 
 ```json

@@ -996,9 +996,17 @@ const sketchEditor = new SketchEditorController(viewportHost, {
     const current = codeEditor.resolveSourceRef(ref);
     return current && codeEditor.readSource(current);
   },
-  commit: intent =>
+  sourceVersion: () => codeEditor.sourceVersion(),
+  cancelEditGroup: (file, undoGroup) => {
+    codeEditor.discardPendingToolFormat(file, undoGroup);
+    codeEditor.endSourceEditGroup(undoGroup);
+  },
+  resumeEditGroup: (file, undoGroup) =>
+    codeEditor.resumeSourceEditGroup(file, undoGroup),
+  commit: (intent, undoGroup) =>
     commitToolSession(toolEngine.begin(`sketch:${intent.layer}`), intent, {
       preserveCursor: true,
+      undoGroup,
     }),
 });
 const spatialToolbar = new SpatialToolbar(
@@ -1301,7 +1309,8 @@ codeEditor.onChange(change => {
     historyChange && handleContextualEditingHistory(change);
   if (!toolChange && !editingHistoryChange) abandonContextualTool();
   if (toolChange) renderContextualToolPanel();
-  if (!toolChange) sketchEditor.invalidate();
+  if (toolChange) sketchEditor.sourceEdited(change.undoGroup);
+  else sketchEditor.invalidate();
   agentProject.recordEditorChange(change);
   if (!toolChange) sourceEditPopover.dismiss();
   if (change.kind !== 'content') renderProjectNavigation();
@@ -2125,6 +2134,7 @@ async function runModel(
     const nextModule = await compilation;
     if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
       return false;
+    if (sketchEditor.synchronizeSource(nextModule.warnings)) return false;
     let cursor = codeEditor.cursorSource();
     let selection: ReturnType<typeof sourceInspectionSelection> | undefined;
     let scene: Awaited<ReturnType<typeof compiler.inspect>>;
@@ -2271,8 +2281,8 @@ function activatePreviewFile(reload = false): void {
   });
   codeEditor.setDesignArguments([]);
   codeEditor.trackSourceRefs([]);
-  if (previewState.retainingView) sketchEditor.invalidate();
-  else clearPresentedView();
+  sketchEditor.invalidate();
+  if (!previewState.retainingView) clearPresentedView();
   renderElementsPanel();
 }
 

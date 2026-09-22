@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
+import type {SketchSnapshot} from '@code3d/core/tooling';
+import type {Page} from './browser-connection.ts';
 import {open, point, text, waitForSource} from './sketch-test.ts';
 
 const cases = [
@@ -58,16 +60,87 @@ const cases = [
     next: 120,
     selected: 'path',
   },
-];
+] as const;
+
+async function assertGeometry(
+  page: Page,
+  c: (typeof cases)[number],
+  expected: number,
+): Promise<void> {
+  await page.waitForFunction(() => {
+    const {codeEditor, previewState} = window.sketchTestRuntime;
+    return previewState.sourceVersion === codeEditor.sourceVersion();
+  });
+  assert.equal(
+    await page.locator('.viewport-diagnostic[data-severity="warning"]').count(),
+    0,
+  );
+  const geometry = await page.evaluate(({kind, target}) => {
+    const {previewState, sketchEditor} = window.sketchTestRuntime;
+    const snapshot = [...previewState.module!.sketches.values()].at(-1)!;
+    const canvas = document.querySelector<SVGSVGElement>('.sketch-canvas')!;
+    const {center, scale} = sketchEditor.navigation.pose;
+    const rendered: SketchSnapshot = {
+      ...snapshot,
+      entities: snapshot.entities.map(entity => {
+        if (entity.kind !== 'point' && entity.kind !== 'circle') return entity;
+        const shape = canvas.querySelector<SVGCircleElement>(
+          `circle.local[data-id="${entity.id}"]`,
+        )!;
+        return entity.kind === 'circle'
+          ? {...entity, radius: Number(shape.getAttribute('r')) / scale}
+          : {
+              ...entity,
+              position: [
+                center[0] +
+                  (Number(shape.getAttribute('cx')) - canvas.clientWidth / 2) /
+                    scale,
+                center[1] -
+                  (Number(shape.getAttribute('cy')) - canvas.clientHeight / 2) /
+                    scale,
+              ] as const,
+            };
+      }),
+    };
+    const measure = (sketch: SketchSnapshot): number => {
+      const entity = sketch.entities.find(entity => entity.id === target)!;
+      const position = (id: number) =>
+        sketch.entities
+          .filter(entity => entity.kind === 'point')
+          .find(entity => entity.id === id)!.position;
+      if (entity.kind === 'point') return entity.position[kind === 'x' ? 0 : 1];
+      if (entity.kind === 'circle') return entity.radius;
+      const [a, b] = entity.points.map(point => position(point.id));
+      if (entity.kind === 'line')
+        return kind === 'length'
+          ? Math.hypot(b[0] - a[0], b[1] - a[1])
+          : (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+      const origin = position(entity.center.id);
+      const angles = [a, b].map(point =>
+        Math.atan2(point[1] - origin[1], point[0] - origin[0]),
+      );
+      const direction = entity.direction === 'ccw' ? 1 : -1;
+      const sweep = (direction * (angles[1] - angles[0]) * 180) / Math.PI;
+      return ((sweep % 360) + 360) % 360;
+    };
+    return {compiled: measure(snapshot), rendered: measure(rendered)};
+  }, c);
+  for (const [source, actual] of Object.entries(geometry))
+    assert.ok(
+      Math.abs(actual - expected) < 1e-5,
+      `${c.name} ${source} geometry: expected ${expected}, received ${actual}`,
+    );
+}
 
 for (const c of cases)
-  test(`${c.name} marker selects its geometry, focuses its value and edits in place with undo`, async t => {
+  test(`${c.name} marker selects its geometry and solves edits, undo and redo`, async t => {
     const page = await open(
       t,
       `import {sketch} from '@code3d/core';
 const value = sketch([${c.entries}], {constraints: [/* keep */ ['${c.kind}',${c.target},${c.value}]]});`,
     );
     const before = await text(page);
+    await assertGeometry(page, c, c.value);
     await page.getByRole('button', {name: 'Trim', exact: true}).click();
     const badge = page.locator(`.constraint-badge[data-kind="${c.kind}"]`);
     assert.equal(await badge.getAttribute('role'), 'button');
@@ -103,6 +176,7 @@ const value = sketch([${c.entries}], {constraints: [/* keep */ ['${c.kind}',${c.
     const expected = new RegExp(`'${c.kind}',\\s*${c.target},\\s*${c.next}\\]`);
     await waitForSource(page, expected);
     await page.getByText('Ready', {exact: true}).waitFor();
+    await assertGeometry(page, c, c.next);
     assert.equal(await input.count(), 0);
     assert.match(await text(page), /\/\* keep \*\//);
     assert.equal(
@@ -118,6 +192,10 @@ const value = sketch([${c.entries}], {constraints: [/* keep */ ['${c.kind}',${c.
       new RegExp(`'${c.kind}',\\s*${c.target},\\s*${c.value}\\]`),
     );
     assert.equal(await text(page), before);
+    await assertGeometry(page, c, c.value);
+    await page.keyboard.press('Control+y');
+    await waitForSource(page, expected);
+    await assertGeometry(page, c, c.next);
   });
 
 test('a midpoint marker selects all three points and its active relation can be removed', async t => {

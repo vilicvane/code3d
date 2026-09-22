@@ -55,10 +55,16 @@ test('length expressions add, edit and recompile in source scope with one undo p
   await waitForSource(page, /'length',\s*3,\s*Math.max\(width \/ 2, 30\)/);
   await page.getByText('Ready', {exact: true}).waitFor();
   assert.ok(Math.abs((await length(page)) - originalLength * 1.5) < 0.01);
+  assert.match(await text(page), /'point',\s*2,\s*\[30,\s*0\]/);
+  assert.equal(
+    await page.locator('.viewport-diagnostic[data-severity="warning"]').count(),
+    0,
+  );
   await page.keyboard.press('Control+z');
   await waitForSource(page, /'length',\s*3,\s*width \/ 2/);
   await page.getByText('Ready', {exact: true}).waitFor();
   assert.ok(Math.abs((await length(page)) - originalLength) < 0.01);
+  assert.match(await text(page), /'point',\s*2,\s*\[20,\s*0\]/);
   await page.keyboard.press('Control+z');
   await badge(page).waitFor({state: 'detached'});
   await page.getByText('Ready', {exact: true}).waitFor();
@@ -68,6 +74,67 @@ test('length expressions add, edit and recompile in source scope with one undo p
   await badge(page).click();
   assert.equal(await input(page).inputValue(), 'width / 2');
 });
+
+test('undo before compilation cancels automatic geometry synchronization', async t => {
+  const page = await open(t, source);
+  const before = await text(page);
+  await addLength(page);
+  await input(page).fill('30');
+  await form(page).evaluate(form => {
+    (form as HTMLFormElement).requestSubmit();
+    window.sketchTestRuntime.codeEditor.runHistoryAction('undo');
+  });
+  await page.waitForFunction(() => {
+    const {previewState, codeEditor} = window.sketchTestRuntime;
+    return previewState.sourceVersion === codeEditor.sourceVersion();
+  });
+  assert.equal(await text(page), before);
+  assert.equal(await badge(page).count(), 0);
+  await page.keyboard.press('Control+y');
+  await page.getByText('Ready', {exact: true}).waitFor();
+  // Redo restores exactly the undone source edit. It must not revive the
+  // canceled synchronization command or merge a late write into user history.
+  assert.match(await text(page), /'length',\s*3,\s*30/);
+  assert.match(await text(page), /'point',\s*2,\s*\[20,\s*0\]/);
+  await page.locator('.viewport-diagnostic[data-severity="warning"]').waitFor();
+});
+
+for (const immediate of [false, true])
+  test(`formatting ${immediate ? 'during' : 'after'} constraint synchronization shares one undo`, async t => {
+    const page = await open(t, source);
+    const before = await page.evaluate(() =>
+      window.sketchTestEditor.getValue(),
+    );
+    await addLength(page);
+    await input(page).fill('30');
+    if (immediate)
+      await form(page).evaluate(form => {
+        (form as HTMLFormElement).requestSubmit();
+        window.sketchTestEditor.focus();
+      });
+    else {
+      await page.keyboard.press('Enter');
+      await page.getByText('Ready', {exact: true}).waitFor();
+      await page.evaluate(() => window.sketchTestEditor.focus());
+    }
+    await page.waitForFunction(() =>
+      window.sketchTestEditor.getValue().includes("['point', 2, [30, 0]]"),
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    await page.keyboard.press('Control+z');
+    await page.waitForFunction(
+      before => window.sketchTestEditor.getValue() === before,
+      before,
+    );
+    await page.getByText('Ready', {exact: true}).waitFor();
+    assert.equal(await badge(page).count(), 0);
+    await page.keyboard.press('Control+y');
+    await page.getByText('Ready', {exact: true}).waitFor();
+    assert.match(
+      await page.evaluate(() => window.sketchTestEditor.getValue()),
+      /'point',\s*2,\s*\[30,\s*0\]/,
+    );
+  });
 
 test('expression syntax errors and cancellation preserve source and native input history', async t => {
   const page = await open(t, source);

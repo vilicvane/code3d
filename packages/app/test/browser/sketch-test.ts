@@ -39,6 +39,13 @@ export async function openPage(t: TestContext): Promise<Page> {
   page.setDefaultTimeout(15_000);
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
+  page.on('console', message => {
+    if (
+      (message.type() === 'error' || message.type() === 'warning') &&
+      /\[mobx\]/i.test(message.text())
+    )
+      errors.push(message.text());
+  });
   t.after(() => assert.deepEqual(errors, []));
   // A cold Vite module graph needs the same initialization budget as compilation.
   await page.route('**/src/main.ts*', async route => {

@@ -70,12 +70,6 @@ export type SketchDraftConstraint = DraftConstraint<
   SketchConstraint<SketchPointAddress>
 >;
 
-export function isNumericSketchConstraint(
-  constraint: SketchDraftConstraint,
-): constraint is SketchConstraint<SketchPointAddress> {
-  return typeof constraint[2] !== 'string';
-}
-
 function dimensionSource(value: SketchDimensionValue): string {
   if (typeof value === 'number') return formatSourceNumber(value);
   const error = sourceExpressionError(value);

@@ -27,7 +27,13 @@ the same source geometry. Selecting a face does not automatically create a sketc
 
 The companion `sketches/constraints.ts` shows one rectangular plate with a hole.
 Horizontal and vertical constraints preserve its shape while its height and hole
-position remain editable.
+position remain editable. Click the hole's **R** label and change its radius from
+4 to 6. After solving, the App updates the constraint and safely writable local
+geometry inputs together; one Undo restores both. The same synchronization applies
+when adding dimensions or geometric constraints. Expressions and upstream geometry
+stay unchanged. Direct source edits still offer an explicit **Fix** when needed;
+see [sketch editing](../../../../../../core/docs/sketches.md#editing-dimensions-and-constraints-in-the-app)
+for synchronization limits and failed solves.
 
 ## Turn lettering into geometry
 
