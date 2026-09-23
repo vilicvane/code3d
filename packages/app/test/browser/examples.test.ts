@@ -814,6 +814,7 @@ test(
     );
     await page.waitForFunction(
       () =>
+        window.exampleApp &&
         window.exampleApp.codeEditor.currentFile() ===
           '/examples/primitives/primitives.ts' &&
         !window.exampleApp.previewState.busy,
@@ -839,6 +840,7 @@ test(
     );
     await page.waitForFunction(
       () =>
+        window.exampleApp &&
         window.exampleApp.codeEditor.currentFile() ===
           '/examples/website/first-model.ts' &&
         !window.exampleApp.previewState.busy,
