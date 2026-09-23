@@ -262,7 +262,11 @@ output member. Without this option, the first member defines the coordinates.
 See [independent coordinate frames](#independent-coordinate-frames).
 
 Relations are resolved at composition and geometry evaluation boundaries.
-[`stock.cut(tools)`](api/cut.md) is equivalent to the free function. Arrays in booleans and
+Solids also provide [`.union(operands)`](api/union.md),
+[`.intersect(operands)`](api/intersect.md) and [`.cut(tools)`](api/cut.md).
+These methods accept a single solid or a nonempty readonly array, with the
+receiver as the first operand. Free boolean functions take arrays.
+Arrays in booleans and
 loft describe the inputs of one operation; they do not automatically map it.
 `intersect()` requires a common solid volume across all inputs. Disjoint inputs
 or inputs that only touch produce a diagnostic rather than an empty solid.

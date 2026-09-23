@@ -2,13 +2,13 @@
 title: thicken
 description: 'Code3D thicken API: Offset a face along its surface normals and close the boundary walls to produce a solid. Learn parameters, coordinates, results and limits.'
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/thicken.ts
       sha256: 30a3ae8c82e7980dd74253a25981958f0e7a4e69e38deb8bc81127942b28ea07
       commit: 2e2cf49d64dba98b613224b6ae39aa632d6d2eb0
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
     - path: packages/core/src/library/thicken-geometry.ts
       sha256: e34622c71d4ff8bd42ca7cb2b0ce0f17f653b9f76fcf9464ce3061feeccdfa1d
       commit: 2e2cf49d64dba98b613224b6ae39aa632d6d2eb0

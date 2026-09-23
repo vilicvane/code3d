@@ -2,13 +2,13 @@
 title: extrude
 description: 'Code3D extrude API: Create solids by extending planar profiles along their oriented normals. Learn parameters, coordinates, results and limits.'
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/extrude.ts
       sha256: 0f718a935fac0eee27111c58f9aab763135eb9488208b6d70d80a14f2a1209a4
       commit: 2e2cf49d64dba98b613224b6ae39aa632d6d2eb0
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
     - path: packages/core/src/library/extrude-geometry.ts
       sha256: d40306254ae087b4d327fd7b4ad37a15d13fbd6925073cd0a7fe8aaa28fc34f6
       commit: 2e2cf49d64dba98b613224b6ae39aa632d6d2eb0

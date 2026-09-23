@@ -15,7 +15,7 @@ declare const window: Window & {
 };
 
 test(
-  'nested cut constructors keep their preview through caret and array changes',
+  'solid boolean methods and nested cut constructors preserve parameter previews',
   {timeout: 90_000},
   async t => {
     const browser = await chromium.connectOverCDP(
@@ -42,7 +42,12 @@ body.cut([tool.originOffset(-1,0,0)]);
 body = body.cut([
   box(DRAWER_CLIENT_HEIGHT, DRAWER_CLIENT_THICKNESS, DRAWER_CLIENT_WIDTH)
     .relate(self => on(self.up, body.up)),
-]);`;
+]);
+const stock = box(20, 20, 20);
+const operand = box(8, 30, 8).originOffset(-8, 0, 0);
+stock.union(operand); stock.union([operand]);
+stock.intersect(operand); stock.intersect([operand]);
+stock.cut(operand); stock.cut([operand]);`;
     const files = [
       {path: '/model.ts', source},
       {
@@ -74,6 +79,21 @@ body = body.cut([
       ['box(DRAWER_CLIENT_HEIGHT', 4, 'inspect', 2, 0],
       ['cut([', 5, 'inspect', 2, 1],
       ['tool.originOffset', 0, 'preview', 1, 0],
+      ['stock.union(operand)', 'stock.union('.length, 'inspect', 2, 0],
+      ['stock.union([operand])', 'stock.union(['.length, 'inspect', 2, 0],
+      ['stock.union(operand)', 0, 'inspect', 2, 0],
+      ['stock.intersect(operand)', 'stock.intersect('.length, 'inspect', 2, 1],
+      [
+        'stock.intersect([operand])',
+        'stock.intersect(['.length,
+        'inspect',
+        2,
+        1,
+      ],
+      ['stock.intersect(operand)', 0, 'inspect', 2, 1],
+      ['stock.cut(operand)', 'stock.cut('.length, 'inspect', 2, 1],
+      ['stock.cut([operand])', 'stock.cut(['.length, 'inspect', 2, 1],
+      ['stock.cut(operand)', 0, 'inspect', 1, 1],
       ['box(DRAWER_CLIENT_HEIGHT', 3, 'preview', 1, 0],
     ] as const) {
       const offset = source.lastIndexOf(token) + delta;
@@ -101,6 +121,10 @@ body = body.cut([
         ),
         undefined,
       );
+      if (token === 'stock.intersect(operand)' && delta > 0)
+        await page.screenshot({path: '/tmp/code3d-245-intersect-method.png'});
+      if (token === 'stock.cut(operand)' && delta > 0)
+        await page.screenshot({path: '/tmp/code3d-245-cut-method.png'});
       if (kind === 'preview') {
         const width = await page.evaluate(() => {
           const item =

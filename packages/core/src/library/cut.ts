@@ -1,5 +1,6 @@
 import {
   ModelObject,
+  combineModels,
   requireModelKind,
   type SolidModel,
   type CompositionInspectData,
@@ -18,7 +19,7 @@ export function cut(
     'solid',
     'The cut stock must be a solid model.',
   );
-  return runtimeStock.cut(tools);
+  return runtimeStock[combineModels]('cut', tools);
 }
 /** @internal */
 export namespace cut {
@@ -56,23 +57,29 @@ export namespace cut {
     );
   }
   export function inspectReceiver(
-    [tools]: [readonly SolidModel<{}>[]],
+    [tools]: [SolidModel<{}> | readonly SolidModel<{}>[]],
     context: InspectContext<
       SolidModel,
       SolidModel<{}>,
       CompositionInspectData | undefined
     >,
   ): InspectResult | undefined {
-    return inspectStock([context.receiver, tools], context);
+    const operands = (
+      Array.isArray(tools) ? tools : [tools]
+    ) as readonly SolidModel<{}>[];
+    return inspectStock([context.receiver, operands], context);
   }
   export function inspectMethodTools(
-    [tools]: [readonly SolidModel<{}>[]],
+    [tools]: [SolidModel<{}> | readonly SolidModel<{}>[]],
     context: InspectContext<
       SolidModel,
       SolidModel<{}>,
       CompositionInspectData | undefined
     >,
   ): InspectResult | undefined {
-    return inspectTools([context.receiver, tools], context);
+    const operands = (
+      Array.isArray(tools) ? tools : [tools]
+    ) as readonly SolidModel<{}>[];
+    return inspectTools([context.receiver, operands], context);
   }
 }

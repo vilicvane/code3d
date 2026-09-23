@@ -413,6 +413,22 @@ groupModel
 union([solid, exposed]);
 cut(solid, [exposed]);
 intersect([solid, exposed]);
+for (const operation of ['union', 'intersect', 'cut'] as const) {
+  solid[operation](exposed).fillet(1);
+  solid[operation]([solid, exposed] as const).center;
+  // @ts-expect-error Boolean methods require another solid or an array.
+  solid[operation]();
+  // @ts-expect-error Boolean operands must be solid models.
+  solid[operation](faceModel);
+  // @ts-expect-error Groups do not provide solid boolean methods.
+  groupModel[operation](solid);
+}
+// @ts-expect-error Free boolean functions keep their array contract.
+union(solid);
+// @ts-expect-error Free boolean functions keep their array contract.
+intersect(solid);
+// @ts-expect-error Only the chained cut accepts a single tool.
+cut(solid, exposed);
 loft([faceModel, faceModel.relate(self => on(self, solid.down))], {
   spine: edgeModel,
 });

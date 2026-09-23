@@ -8,17 +8,17 @@ export function booleanOperands(
   operands: readonly SolidModel<{}>[],
 ): Readonly<{
   first: ModelObject<{}, 'solid'>;
-  others: readonly ModelObject<{}, 'solid'>[];
+  others: readonly SolidModel<{}>[];
 }> {
   if (operands.length < 2) {
     throw new Error(`${operation} requires at least two model operands.`);
   }
-  const runtimeOperands = operands.map(operand =>
-    requireModelKind(
-      operand,
+  return {
+    first: requireModelKind(
+      operands[0],
       'solid',
       `Every ${operation} operand must be a solid model.`,
     ),
-  );
-  return {first: runtimeOperands[0], others: runtimeOperands.slice(1)};
+    others: operands.slice(1),
+  };
 }
