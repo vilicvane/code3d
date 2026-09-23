@@ -19,8 +19,7 @@ sourceReview:
       sha256: 2c314699c2b47768bc4ae14b7713dc9eceb1111a3de7417820bdf4347bda3104
       commit: 5c8979f384280b644263a2d6ba3abacb69697c24
     - path: packages/core/package.json
-      sha256: 08eda9195ce21309b89fd6c2389dbfa90ec202a872ab727df62dadc8736dd986
-      commit: ee4042753e83baed2a25f681ef7ad657291ac60a
+      sha256: ce0a5db65405e7e592d2e75a7cccb181c0f40f2063b0d638dd94feb4e6661029
 sidebar:
   hidden: true
 head:
