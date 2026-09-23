@@ -9,7 +9,7 @@ import {
   sketchEntityParameters,
   withSketchEntityParameters,
   sketchPointResolver,
-  assertSketchDragConnections,
+  sketchConnectionsPreserved,
 } from '@code3d/core/tooling';
 
 /** Evaluated author parameters, distinct from the constrained display. */
@@ -50,19 +50,63 @@ export type SketchDragPreview = Readonly<{
   }>;
 }>;
 
+export type SketchConstraintEdit = Readonly<{
+  editable: SketchEditableParameters;
+  data: readonly SketchGeometryData[];
+  reference: SketchSnapshot;
+}>;
+export type SketchConstraintEditPreview = Pick<
+  SketchDragPreview,
+  'snapshot' | 'data'
+>;
+
+/** Constraint values have already been evaluated by the project's runtime.
+ * Repair geometry from the edit-start display, then replay only authored data. */
+export function previewSketchConstraintEdit(
+  runtime: Pick<typeof CoreTooling, 'solveSketchSnapshot'>,
+  layers: readonly SketchSnapshot[],
+  edit: SketchConstraintEdit,
+): SketchConstraintEditPreview {
+  const local = layers.at(-1)!;
+  const seed = {...local, entities: edit.reference.entities};
+  const solved = runtime.solveSketchSnapshot([...layers.slice(0, -1), seed], {
+    reference: edit.reference,
+    locks: sketchParameterLocks(edit),
+  });
+  const data = solvedSketchData(solved, edit);
+  const snapshot = runtime.solveSketchSnapshot([
+    ...layers.slice(0, -1),
+    withSketchData(local, data),
+  ]);
+  assertConnections([...layers.slice(0, -1), snapshot], edit.reference);
+  return {snapshot, data};
+}
+
+function sketchParameterLocks(edit: Pick<SketchDrag, 'data' | 'editable'>) {
+  return edit.data.flatMap(entity =>
+    entity.parameters.flatMap((value, parameter) =>
+      edit.editable.get(entity.id)?.[parameter]
+        ? []
+        : [{id: entity.id, parameter, value}],
+    ),
+  );
+}
+
+function assertConnections(
+  layers: readonly SketchSnapshot[],
+  reference: SketchSnapshot,
+) {
+  if (!sketchConnectionsPreserved(layers, reference))
+    throw new Error('The source replay could not retain a point on its curve.');
+}
+
 export function previewSketchDrag(
   runtime: Pick<typeof CoreTooling, 'solveSketchSnapshot'>,
   layers: readonly SketchSnapshot[],
   drag: SketchDrag,
 ): SketchDragPreview {
   const local = layers.at(-1)!;
-  const locks = drag.data.flatMap(entity =>
-    entity.parameters.flatMap((value, parameter) =>
-      drag.editable.get(entity.id)?.[parameter]
-        ? []
-        : [{id: entity.id, parameter, value}],
-    ),
-  );
+  const locks = sketchParameterLocks(drag);
   if (drag.mergeTarget) {
     const preview = previewPointMerge(runtime, layers, drag, locks);
     if (preview) return preview;
@@ -73,7 +117,7 @@ export function previewSketchDrag(
     ...layers.slice(0, -1),
     authored,
   ]);
-  assertSketchDragConnections(
+  assertConnections(
     [...layers.slice(0, -1), snapshot],
     drag.reference ?? local,
   );
@@ -158,10 +202,7 @@ function previewPointMerge(
       ),
     },
   ]);
-  assertSketchDragConnections(
-    [...layers.slice(0, -1), snapshot],
-    remainingReference,
-  );
+  assertConnections([...layers.slice(0, -1), snapshot], remainingReference);
   // Identity changes must not silently redefine fixed points or consume
   // expression-driven coordinates. Reject the entire transaction if needed.
   const positions = new Map(
@@ -220,9 +261,19 @@ function movedSketchData(
   // an anchor whose original source seed differed from its displayed position.
   // Applying displacement to an unsolved seed would reintroduce its old error.
   // A zero-motion gesture leaves author data untouched; expressions stay intact.
-  const data = drag.data.map(entity => {
-    const editable = drag.editable.get(entity.id);
-    if (!changed || !editable?.some(Boolean)) return entity;
+  return changed ? solvedSketchData(moved, drag) : drag.data;
+}
+
+function solvedSketchData(
+  snapshot: SketchSnapshot,
+  edit: Pick<SketchDrag, 'data' | 'editable'>,
+): readonly SketchGeometryData[] {
+  const after = new Map(
+    snapshot.entities.map(e => [e.id, sketchEntityParameters(e)]),
+  );
+  return edit.data.map(entity => {
+    const editable = edit.editable.get(entity.id);
+    if (!editable?.some(Boolean)) return entity;
     const parameters = after.get(entity.id)!;
     return {
       ...entity,
@@ -231,7 +282,6 @@ function movedSketchData(
       ),
     };
   });
-  return data;
 }
 
 function withSketchData(

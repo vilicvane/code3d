@@ -9,6 +9,7 @@ import {
   snapshotSketch,
   solveSketchSnapshot,
   sketchDragRequiresSolver,
+  sketchConnectionsPreserved,
   type SketchSnapshot,
 } from '../bld/tooling/index.js';
 import {
@@ -52,6 +53,115 @@ const arc: readonly SketchEntry[] = [
   ['arc', 4, [1, 10, 2, 3, 'ccw']],
   ['point', 5, [6, 8]],
 ];
+
+test('perpendicular editing retains circular and linear contacts on construction geometry', () => {
+  const initial = make(
+    [
+      ['point', 1, [0, 0]],
+      ['circle', 2, [1, 8]],
+      ['aux:line', 4, [1, 5]],
+      ['point', 5, [-5.65685424949, 5.65685424949]],
+      ['point', 6, [0, 8]],
+      ['point', 7, [-7.5, 8]],
+      ['line', 8, [6, 7]],
+      ['point', 9, [-3.75, 8]],
+      ['line', 10, [5, 9]],
+    ],
+    [
+      ['fixed', 1],
+      ['radius', 2, 8],
+      ['angle', 4, 135],
+      ['horizontal', 8],
+    ],
+  );
+  const constrained: SketchSnapshot = {
+    ...initial,
+    constraints: [...initial.constraints, ['perpendicular', [4, 10]]],
+  };
+  assert.equal(
+    sketchConnectionsPreserved([solveSketchSnapshot([constrained])], initial),
+    false,
+  );
+  const solved = solveSketchSnapshot([constrained], {reference: initial});
+  near(point(solved, 5), point(initial, 5));
+  near(point(solved, 9), [8 - 8 * Math.SQRT2, 8]);
+  online(solved, 5, 2);
+  online(solved, 6, 2);
+  online(solved, 9, 8);
+  assert.deepEqual(solved.constraints, constrained.constraints);
+  assert.equal(solved.entities.find(e => e.id === 4)?.kind, 'line');
+  const replay = solveSketchSnapshot([solved]);
+  assert.deepEqual(replay.entities, solved.entities);
+  assert.equal(sketchConnectionsPreserved([replay], initial), true);
+});
+
+test('constraint edits retain finite arc contacts and reject incompatible coordinates', () => {
+  const initial = make(arc, [
+    ['fixed', 1],
+    ['fixed', 2],
+    ['fixed', 3],
+    ['radius', 4, 10],
+  ]);
+  const constrained: SketchSnapshot = {
+    ...initial,
+    constraints: [...initial.constraints, ['x', {layer: 's', id: 5}, 8]],
+  };
+  const solved = solveSketchSnapshot([constrained], {reference: initial});
+  near(point(solved, 5), [8, 6]);
+  online(solved, 5, 4);
+  assert.equal(
+    sketchConnectionsPreserved([solveSketchSnapshot([solved])], initial),
+    true,
+  );
+  const outside: SketchSnapshot = {
+    ...initial,
+    constraints: [...initial.constraints, ['x', {layer: 's', id: 5}, -5]],
+  };
+  assert.throws(
+    () => solveSketchSnapshot([outside], {reference: initial}),
+    /constraint/i,
+  );
+  assert.throws(
+    () =>
+      solveSketchSnapshot([constrained], {
+        reference: initial,
+        locks: [{id: 5, parameter: 1, value: 8}],
+      }),
+    /constraint/i,
+  );
+  near(point(initial, 5), [6, 8]);
+});
+
+test('constraint edits respect read-only upstream contacts and canonical point aliases', () => {
+  const base = sketch(circle.slice(0, 2));
+  const local = base.derive([
+    ['point', 3, [6, 8]],
+    ['point', 4, 3],
+  ]);
+  const layers = [base, local].map(value =>
+    snapshotSketch(value, s => (s === base ? 'base' : 'local')),
+  );
+  const initial = layers[1];
+  const constrained: SketchSnapshot = {
+    ...initial,
+    constraints: [['x', {layer: 'local', id: 4}, 8]],
+  };
+  const solved = solveSketchSnapshot([layers[0], constrained], {
+    reference: initial,
+  });
+  near(point(solved, 3), [8, 6]);
+  near(point(solved, 4), [8, 6]);
+  assert.equal(sketchConnectionsPreserved([layers[0], solved], initial), true);
+  const outside: SketchSnapshot = {
+    ...initial,
+    constraints: [['x', {layer: 'local', id: 3}, 12]],
+  };
+  assert.throws(
+    () => solveSketchSnapshot([layers[0], outside], {reference: initial}),
+    /constraint/i,
+  );
+  near(point(layers[0], 1), [0, 0]);
+});
 
 test('a point slides on a fixed circle through half turns and a full turn without changing source topology', () => {
   const initial = make(circle, [

@@ -33,10 +33,13 @@ import {
 } from '@code3d/core/tooling';
 import {
   applySketchEmphasis,
+  sketchAppearance,
   applySourceEmphasis,
   modelRenderOrder,
   type SourceEmphasis,
 } from './source-appearance';
+
+import {ScreenSpaceDashedLines} from './screen-space-lines';
 
 const defaultSurfaceOpacity = 0.68;
 const boundaryColor = '#080a07';
@@ -280,6 +283,11 @@ export class ModelRenderer {
     focus = this.grid.focus,
   ): void {
     renderer.getSize(this.renderSize);
+    camera.updateMatrixWorld();
+    this.scene.traverseVisible(child => {
+      if (child instanceof ScreenSpaceDashedLines)
+        child.update(camera, this.renderSize.x, this.renderSize.y);
+    });
     this.grid.update(
       camera,
       this.renderSize.y,
@@ -428,18 +436,17 @@ export function createRenderedSketch(
   const seen = new Set<string>();
   for (const layer of layers)
     for (const entity of layer.entities) {
-      const geometry = new THREE.BufferGeometry();
-      let primitive: THREE.Points | THREE.LineSegments;
+      let primitive: THREE.Points | THREE.LineSegments | ScreenSpaceDashedLines;
       let role = emphasis;
       if (entity.kind === 'point') {
         const ref = {layer: layer.id, id: entity.id};
         const key = addressKey(ref);
         if (seen.has(key)) {
-          geometry.dispose();
           continue;
         }
         seen.add(key);
         role = selected.get(key) ?? role;
+        const geometry = new THREE.BufferGeometry();
         geometry.setAttribute(
           'position',
           new THREE.Float32BufferAttribute(coordinate(point(ref)), 3),
@@ -468,14 +475,22 @@ export function createRenderedSketch(
             ...coordinate(sketchCurvePosition(curve, i / count)),
             ...coordinate(sketchCurvePosition(curve, (i + 1) / count)),
           );
-        geometry.setAttribute(
-          'position',
-          new THREE.Float32BufferAttribute(positions, 3),
-        );
-        primitive = new THREE.LineSegments(
-          geometry,
-          createModelMaterial(undefined, 'edge'),
-        );
+        if (entity.construction)
+          primitive = new ScreenSpaceDashedLines(
+            new Float32Array(positions),
+            sketchAppearance.color,
+          );
+        else {
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute(
+            'position',
+            new THREE.Float32BufferAttribute(positions, 3),
+          );
+          primitive = new THREE.LineSegments(
+            geometry,
+            createModelMaterial(undefined, 'edge'),
+          );
+        }
       }
       primitive.userData.sketchEntity = {layer: layer.id, id: entity.id};
       applySketchEmphasis(primitive, role);

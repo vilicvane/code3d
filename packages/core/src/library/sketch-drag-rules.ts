@@ -3,7 +3,6 @@ import {
   type SketchSolveObjective,
   type SketchSolveProblem,
   type SketchSolveTarget,
-  type SketchSolveConstraint,
   type SketchSolveResult,
 } from './sketch-solver.js';
 import type {SketchPosition} from './sketch.js';
@@ -12,7 +11,8 @@ import {
   sketchIncidenceGeometry,
   sketchIncidencePoints,
   sketchIncidenceCurve,
-  sketchIncidenceBoundary,
+  sketchIncidenceConstraints,
+  solveSketchIncidenceBounds,
   type SketchIncidence,
   type SketchIncidenceGeometry,
 } from './sketch-incidence.js';
@@ -86,29 +86,11 @@ export function solveSketchDrag(
         ),
     },
   ];
-  const bounds = new Map<SketchIncidence, number>();
-  for (;;) {
-    const problem = {
-      ...plan.problem,
-      constraints: [
-        ...plan.problem.constraints,
-        ...[...bounds].map(([contact, endpoint]) => ({
-          kind: 'coincident' as const,
-          points: [contact.point, endpoint] as const,
-        })),
-      ],
-    };
-    const result = solveSketchDragPlan({...plan, problem, stages});
-    const solved = sketchIncidenceGeometry(problem, result);
-    const outside = plan.incidences?.flatMap(contact => {
-      const endpoint = bounds.has(contact)
-        ? undefined
-        : sketchIncidenceBoundary(solved, contact);
-      return endpoint === undefined ? [] : [{contact, endpoint}];
-    })[0];
-    if (!outside) return result;
-    bounds.set(outside.contact, outside.endpoint);
-  }
+  return solveSketchIncidenceBounds(
+    plan.problem,
+    plan.incidences ?? [],
+    problem => solveSketchDragPlan({...plan, problem, stages}),
+  );
 }
 
 /** Each stage keeps the preceding stage's chosen parameter values, not all
@@ -301,24 +283,7 @@ const incidenceRule: SketchDragRule = ({reference, target, geometry}) => {
   const original = geometry ?? sketchIncidenceGeometry(reference);
   const contacts = sketchIncidences(original);
   if (!contacts.length) return;
-  const constraints = contacts.map((contact): SketchSolveConstraint =>
-    contact.kind === 'line'
-      ? {
-          kind: 'pointOnLine',
-          points: [contact.point, ...original.lines[contact.index]],
-        }
-      : {
-          kind: 'pointOnCircle',
-          points: [
-            contact.point,
-            (contact.kind === 'circle' ? original.circles : original.arcs)[
-              contact.index
-            ].center,
-          ],
-          curve: contact.kind,
-          index: contact.index,
-        },
-  );
+  const constraints = sketchIncidenceConstraints(original, contacts);
   const session = createSketchDragSession(
     {
       reference: {

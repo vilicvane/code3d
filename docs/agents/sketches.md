@@ -10,6 +10,12 @@ expression with `"type": true` before choosing operations. Keep useful intermedi
 profiles named, use constraints to express design intent, and build faces or solids
 from those profiles with the core API.
 
+Reference curves use the `aux:` type prefix, such as
+`['aux:line', 5, [1, 2]]`. `aux:line`, `aux:circle` and `aux:arc`
+still solve and remain observable, but `face()` and `faces()` exclude them in all
+layers. Remove the prefix to restore an ordinary boundary. Use it for diagonals, axes or other guides that must not change the material
+regions. See [construction geometry](../../packages/core/docs/api/sketch-entities.md#construction-geometry).
+
 For example, a derived profile can reuse an upstream center while adding its own
 constrained circle. The source radius `3` is a starting value; the constraint
 solves it to `8`:
@@ -41,6 +47,11 @@ evaluations.
 When a user changes or adds dimensions or geometric constraints in the sketch
 editor, the App automatically applies that safe synchronization after a successful
 solve. The constraint change and synchronized geometry share one Undo or Redo.
+The edit also retains existing point-on-line, point-on-circle and finite
+point-on-arc connections, including construction curves, in the resulting
+coordinates. It does not persist extra constraint tuples. Direct source edits
+still solve only the authored constraints. An incompatible connection or a repair
+that would replace an expression reports an error and retains the previous view.
 An unsafe synchronization leaves the warning in place; a failed solve retains
 diagnostics and the last successful sketch, when available, as a read-only reference
 in the editor.
@@ -85,7 +96,8 @@ are ordered as local entities, local constraints, then region summaries:
 
 - Points, lines, circles and arcs retain layer-local IDs and explicit point
   addresses `{layer, id}`. Points include their solved `position` and any alias;
-  curves include solved analytic `geometry`. Arc `start` / signed `sweep` use
+  curves include solved analytic `geometry` and optional `construction: true` for
+  reference curves excluded from regions. Arc `start` / signed `sweep` use
   radians; angular constraint values use degrees. Units are model units.
 - `authoredParameters`, when present, are evaluated source inputs, which may
   differ from the solved geometry. Preserve expressions and constraints when
@@ -97,10 +109,10 @@ are ordered as local entities, local constraints, then region summaries:
   not persistent IDs. Entity IDs belong to their layer; two layers can use the
   same number. Runtime layer IDs also belong to the current snapshot.
 - Region summaries include outer-curve counts, holes and bounds for the layer
-  together with its upstream geometry. Empty sketches have zero regions. Open or
-  otherwise unfillable contours remain observable: `regions.available: false`
-  includes the reason, and `counts.region` is `null`. Such a contour must be
-  completed before creating a face.
+  together with its upstream geometry. Empty and open-only sketches have zero
+  regions. Intersections delimit closed regions; open tails do not invalidate them.
+  Overlapping boundaries remain observable: `regions.available: false` includes
+  the reason, and `counts.region` is `null`. Trim overlaps before creating a face.
 
 Use actual source bindings for references such as `base.point(1)`; `references`
 only lists upstream names available in the defining scope. B-rep `.edge()` and

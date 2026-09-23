@@ -2,11 +2,10 @@
 title: sketch
 description: Define immutable two-dimensional sketch geometry and constraints before building faces.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: d50769e828b4ab70584e1a217c6022d3a1c254a825bcc24bd5444039ef0e6488
-      commit: e29dfd1ac9d22a728186d68bdd9129b60c908091
+      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
     - path: packages/core/src/library/sketch-solver.ts
       sha256: 176f9f8a38507100328aaba71a2ef226b6e914e5718cf3a00b2bc018a7bab565
       commit: 63b63837410721d7f9c44db1e721e5c52250f8d4
@@ -58,7 +57,9 @@ Import the functions and named types from `@code3d/core`.
 ## Definition and options
 
 `entries` defaults to an empty array. Each [entity tuple](sketch-entities.md)
-contains its kind, positive safe-integer ID and geometry data. IDs share one
+contains its kind, positive safe-integer ID and geometry data. Curves also accept
+the `aux:` type prefix (`aux:line`, `aux:circle`, `aux:arc`) for reference geometry excluded
+from face boundaries. IDs share one
 namespace per layer. `options.constraints` defaults to `[]`; its tuples express
 conditions that must remain true during solving and editing. Geometry inputs are
 current values or starting guesses, not automatically fixed dimensions.

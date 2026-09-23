@@ -1181,6 +1181,8 @@ const sketchEditor = new SketchEditorController(viewportHost, {
   reportResult: (operation, error) =>
     toolFeedback.report(`sketch:${operation}`, error),
   solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
+  solveConstraints: (layers, edit) =>
+    compiler.previewSketchConstraintEdit(layers, edit),
   resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
   readSource: ref => {
     const current = codeEditor.resolveSourceRef(ref);
@@ -2567,7 +2569,15 @@ async function runModel(
     const nextModule = await compilation;
     if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
       return false;
-    if (sketchEditor.synchronizeSource(nextModule.warnings)) return false;
+    if (
+      await sketchEditor.synchronizeSource(
+        nextModule.warnings,
+        nextModule.sketches,
+      )
+    )
+      return false;
+    if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
+      return false;
     let cursor = codeEditor.cursorSource();
     let selection: ReturnType<typeof sourceInspectionSelection> | undefined;
     let scene: Awaited<ReturnType<typeof compiler.inspect>>;

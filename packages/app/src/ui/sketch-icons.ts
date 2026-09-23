@@ -14,6 +14,9 @@ export const LineSegment: IconNode = [
   ['path', {d: 'm5.5 18.5 13-13'}],
   ...points([4, 20], [20, 4]),
 ];
+export const ConstructionLine: IconNode = [
+  ['path', {d: 'm4 20 16-16', 'stroke-dasharray': '4 4'}],
+];
 export const Rectangle: IconNode = [
   ['path', {d: 'M6 6h12M20 8v8M18 18H6M4 16V8'}],
   ...points([4, 6], [20, 6], [20, 18], [4, 18]),

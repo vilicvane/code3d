@@ -1,5 +1,9 @@
 import type {SketchPosition} from './sketch.js';
-import type {SketchSolveProblem, SketchSolveResult} from './sketch-solver.js';
+import type {
+  SketchSolveConstraint,
+  SketchSolveProblem,
+  SketchSolveResult,
+} from './sketch-solver.js';
 import {
   sketchCurveTolerance,
   sketchArcGeometry,
@@ -22,6 +26,62 @@ export type SketchIncidence = Readonly<{
   kind: 'line' | 'circle' | 'arc';
   index: number;
 }>;
+
+/** Connections are scoped to one GUI edit and never become author constraints. */
+export function sketchIncidenceConstraints(
+  geometry: SketchIncidenceGeometry,
+  contacts: readonly SketchIncidence[],
+): SketchSolveConstraint[] {
+  return contacts.map(contact =>
+    contact.kind === 'line'
+      ? {
+          kind: 'pointOnLine',
+          points: [contact.point, ...geometry.lines[contact.index]],
+        }
+      : {
+          kind: 'pointOnCircle',
+          points: [
+            contact.point,
+            (contact.kind === 'circle' ? geometry.circles : geometry.arcs)[
+              contact.index
+            ].center,
+          ],
+          curve: contact.kind,
+          index: contact.index,
+        },
+  );
+}
+
+/** Clamp a solved contact to the finite segment or arc it started on. */
+export function solveSketchIncidenceBounds(
+  original: SketchSolveProblem,
+  contacts: readonly SketchIncidence[],
+  solve: (problem: SketchSolveProblem) => SketchSolveResult,
+): SketchSolveResult {
+  const bounds = new Map<SketchIncidence, number>();
+  for (;;) {
+    const problem = {
+      ...original,
+      constraints: [
+        ...original.constraints,
+        ...[...bounds].map(([contact, endpoint]) => ({
+          kind: 'coincident' as const,
+          points: [contact.point, endpoint] as const,
+        })),
+      ],
+    };
+    const result = solve(problem);
+    const solved = sketchIncidenceGeometry(problem, result);
+    const outside = contacts.flatMap(contact => {
+      const endpoint = bounds.has(contact)
+        ? undefined
+        : sketchIncidenceBoundary(solved, contact);
+      return endpoint === undefined ? [] : [{contact, endpoint}];
+    })[0];
+    if (!outside) return result;
+    bounds.set(outside.contact, outside.endpoint);
+  }
+}
 
 export function sketchIncidenceGeometry(
   problem: SketchSolveProblem,
@@ -122,7 +182,7 @@ export function sketchIncidenceBoundary(
   return;
 }
 
-/** Recognition is gesture-local and shares finite geometry/tolerance with trimming. */
+/** Recognition is edit-local and shares finite geometry/tolerance with trimming. */
 export function sketchIncidences(
   geometry: SketchIncidenceGeometry,
 ): readonly SketchIncidence[] {

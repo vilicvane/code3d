@@ -94,6 +94,73 @@ export function createScreenSpaceEdgeLines(
   return lines;
 }
 
+/** Continuous pixel dashes on a polyline, updated before geometry upload. */
+export class ScreenSpaceDashedLines extends LineSegments2 {
+  private readonly projection = new THREE.Matrix4();
+  private readonly start = new THREE.Vector4();
+  private readonly end = new THREE.Vector4();
+
+  constructor(
+    positions: Float32Array,
+    color: string,
+    width = 1,
+    opacity = 1,
+    depthTest = true,
+    renderOrder = 0,
+  ) {
+    const geometry = new LineSegmentsGeometry();
+    geometry.setPositions(positions);
+    super(geometry, screenSpaceLineMaterial(color, width, opacity, depthTest));
+    this.renderOrder = renderOrder;
+    this.raycast = () => undefined;
+    this.material.dashed = true;
+    this.material.dashSize = 6;
+    this.material.gapSize = 4;
+    this.computeLineDistances();
+    // Cancel perspective interpolation of the screen-distance attributes.
+    this.material.vertexShader = this.material.vertexShader.replace(
+      'vec3 ndcEnd = clipEnd.xyz / clipEnd.w;',
+      `vec3 ndcEnd = clipEnd.xyz / clipEnd.w;
+      vLineDistance *= position.y < 0.5 ? clipStart.w : clipEnd.w;`,
+    );
+    this.material.fragmentShader = this.material.fragmentShader.replace(
+      'vLineDistance + dashOffset',
+      'vLineDistance * gl_FragCoord.w + dashOffset',
+    );
+  }
+
+  update(camera: THREE.Camera, width: number, height: number): void {
+    this.updateWorldMatrix(true, false);
+    this.projection
+      .copy(camera.projectionMatrix)
+      .multiply(camera.matrixWorldInverse)
+      .multiply(this.matrixWorld);
+    const starts = this.geometry.getAttribute('instanceStart');
+    const ends = this.geometry.getAttribute('instanceEnd');
+    const distances = (
+      this.geometry.getAttribute(
+        'instanceDistanceStart',
+      ) as THREE.InterleavedBufferAttribute
+    ).data;
+    let length = 0;
+    for (let i = 0; i < starts.count; i++) {
+      this.start
+        .set(starts.getX(i), starts.getY(i), starts.getZ(i), 1)
+        .applyMatrix4(this.projection);
+      this.end
+        .set(ends.getX(i), ends.getY(i), ends.getZ(i), 1)
+        .applyMatrix4(this.projection);
+      distances.array[2 * i] = length;
+      length += Math.hypot(
+        ((this.end.x / this.end.w - this.start.x / this.start.w) * width) / 2,
+        ((this.end.y / this.end.w - this.start.y / this.start.w) * height) / 2,
+      );
+      distances.array[2 * i + 1] = length;
+    }
+    distances.needsUpdate = true;
+  }
+}
+
 function screenSpaceLineMaterial(
   color: string,
   width: number,

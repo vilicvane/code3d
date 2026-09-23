@@ -40,7 +40,12 @@ import type {InspectionSnapshot} from './inspection-snapshot';
 import ExecutorWorker from './executor.worker?worker';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {ProjectBuildArtifact} from './project-compiler';
-import type {SketchDrag, SketchDragPreview} from './sketch-drag';
+import type {
+  SketchDrag,
+  SketchDragPreview,
+  SketchConstraintEdit,
+  SketchConstraintEditPreview,
+} from './sketch-drag';
 
 type PendingRequest = {
   id: number;
@@ -55,6 +60,10 @@ type PendingRequest = {
   | {kind: 'export'; resolve(blob: Blob): void}
   | {kind: 'topology'; resolve(topology: TopologyInspection): void}
   | {kind: 'sketch'; resolve(preview: SketchDragPreview): void}
+  | {
+      kind: 'sketch-constraints';
+      resolve(preview: SketchConstraintEditPreview): void;
+    }
 );
 
 type ExecuteRequest = Omit<
@@ -144,6 +153,7 @@ export class ModelCompilerClient {
         clearBuildCache: action,
         export: action,
         previewSketchDrag: action,
+        previewSketchConstraintEdit: action,
         inspectTopology: action,
       },
     );
@@ -422,6 +432,19 @@ export class ModelCompilerClient {
         reject,
       };
       this.sendExecution({kind: 'sketch', id, layers, drag});
+    });
+  }
+
+  previewSketchConstraintEdit(
+    layers: readonly SketchSnapshot[],
+    edit: SketchConstraintEdit,
+  ): Promise<SketchConstraintEditPreview> {
+    if (this.pending || !this.exportable)
+      return Promise.reject(new Error('Waiting for the updated sketch.'));
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      this.pending = {kind: 'sketch-constraints', id, resolve, reject};
+      this.sendExecution({kind: 'sketch-constraints', id, layers, edit});
     });
   }
 
@@ -704,6 +727,11 @@ export class ModelCompilerClient {
         else if (pending.kind === 'topology' && data.kind === 'topology')
           pending.resolve(data.topology);
         else if (pending.kind === 'sketch' && data.kind === 'sketch')
+          pending.resolve(data.preview);
+        else if (
+          pending.kind === 'sketch-constraints' &&
+          data.kind === 'sketch-constraints'
+        )
           pending.resolve(data.preview);
       });
     worker.onerror = ({message}) =>

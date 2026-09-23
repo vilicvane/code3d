@@ -51,6 +51,97 @@ function segments(...layers) {
   );
 }
 
+test('trimming construction geometry retains its role on every surviving interval', async () => {
+  const {sketchDraftEntity} = await server.ssrLoadModule(
+    '/src/tools/sketch-source.ts',
+  );
+  const local = snapshot([
+    point(1, 0, 0),
+    point(2, 30, 0),
+    point(3, 10, 0),
+    point(4, 20, 0),
+    {...line(5, 1, 2), construction: true},
+  ]);
+  const change = trimSketchSegment([local], segments(local)[1]);
+  const curves = change.entries.filter(entry => entry[0] === 'aux:line');
+  assert.equal(curves.length, 2);
+  for (const entry of curves)
+    assert.equal(sketchDraftEntity(entry).construction, true);
+  const source =
+    "[['point',1,[0,0]],['point',2,[30,0]],['point',3,[10,0]],['point',4,[20,0]],['aux:line',5,[1,2]]]";
+  const sourceRef = {file: '/model.ts', start: 0, end: source.length};
+  const result = new SketchEditResolver().resolve(
+    {
+      kind: 'sketch.edit',
+      sourceRef,
+      expectedText: source,
+      layer: 'local',
+      references: {},
+      change,
+    },
+    {
+      toolId: 'trim',
+      baseVersion: 1,
+      resolveSourceRef: ref => ref,
+      readSource: ref => source.slice(ref.start, ref.end),
+    },
+  );
+  assert.equal(result.status, 'ready');
+  assert.equal((result.plan.edits[0].text.match(/aux:/g) ?? []).length, 2);
+});
+
+for (const kind of ['circle', 'arc'])
+  test(`trimming a construction ${kind} preserves its role and radius expression on the remaining arc`, async () => {
+    const {sketchDraftEntity} = await server.ssrLoadModule(
+      '/src/tools/sketch-source.ts',
+    );
+    const curve = {
+      kind,
+      id: 5,
+      center: ref(1),
+      radius: 10,
+      construction: true,
+      ...(kind === 'arc' ? {points: [ref(2), ref(4)], direction: 'ccw'} : {}),
+    };
+    const points = [
+      point(1, 0, 0),
+      point(2, 10, 0),
+      point(3, 0, 10),
+      point(4, -10, 0),
+    ];
+    const local = snapshot([...points, curve]);
+    const parts = sketchSegments(
+      [local],
+      points.map(p => ({...p, layer: 'local'})),
+    );
+    const change = trimSketchSegment([local], parts[0]);
+    const arcs = change.entries.filter(entry => entry[0] === 'aux:arc');
+    assert.equal(arcs.length, 1);
+    assert.equal(sketchDraftEntity(arcs[0]).construction, true);
+    const data = kind === 'circle' ? '[1,radius]' : "[1,radius,2,4,'ccw']";
+    const source = `[['point',1,[0,0]],['point',2,[10,0]],['point',3,[0,10]],['point',4,[-10,0]],['aux:${kind}',5,${data}]]`;
+    const sourceRef = {file: '/model.ts', start: 0, end: source.length};
+    const result = new SketchEditResolver().resolve(
+      {
+        kind: 'sketch.edit',
+        sourceRef,
+        expectedText: source,
+        layer: 'local',
+        references: {},
+        change,
+      },
+      {
+        toolId: 'trim',
+        baseVersion: 1,
+        resolveSourceRef: ref => ref,
+        readSource: ref => source.slice(ref.start, ref.end),
+      },
+    );
+    assert.equal(result.status, 'ready');
+    assert.match(result.plan.edits[0].text, /'aux:arc',5,\[1,radius/);
+    assert.equal((result.plan.edits[0].text.match(/aux:/g) ?? []).length, 1);
+  });
+
 test('trimming both lines distributes pair relations across every survivor; deleting either line removes them', () => {
   const local = snapshot(
     [

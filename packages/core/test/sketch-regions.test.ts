@@ -30,6 +30,11 @@ afterEach(() => disposeModelObjects(models.splice(0)));
 const keep = <T extends Model>(model: T): T => (models.push(model), model);
 const volume = (model: Model) =>
   replicad.measureVolume(modelGeometry(model).value.shape.asShape3D());
+function area(model: Model) {
+  const shape = modelGeometry(model).value.shape;
+  assert.ok(shape instanceof replicad.Face);
+  return replicad.measureArea(shape);
+}
 function near(actual: number, expected: number) {
   assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
 }
@@ -67,6 +72,77 @@ test('empty sketches have zero faces, single points are not boundaries, face req
   assert.equal('extrude' in faces, false);
   assert.throws(() => multi.face(), /exactly one.*found 2/);
   faces.map(f => keep(f.extrude(3))).forEach(m => near(volume(m), 300));
+});
+
+test('construction lines, circles and arcs never split, invalidate or add face regions', () => {
+  const profile = sketch([
+    ...square(),
+    ['aux:line', 9, [1, 3]],
+    ['point', 10, [5, 5]],
+    ['aux:circle', 11, [10, 2]],
+    ['point', 12, [7, 5]],
+    ['point', 13, [5, 7]],
+    ['aux:arc', 14, [10, 2, 12, 13, 'ccw']],
+    ['point', 15, [30, 0]],
+    ['aux:circle', 16, [15, 3]],
+    ['aux:line', 17, [2, 15]],
+  ]);
+  const regions = sketchRegions([snapshotSketch(profile, () => 'local')]);
+  assert.equal(regions.length, 1);
+  assert.equal(regions[0].outer.length, 4);
+  assert.equal(regions[0].holes.length, 0);
+  const face = keep(profile.face());
+  near(area(face), 100);
+  near(volume(keep(face.extrude(2))), 200);
+  assert.equal(profile.faces().map(keep).length, 1);
+});
+
+test('construction-only sketches stay solvable and upstream construction points can define real boundaries', () => {
+  const base = sketch(
+    [
+      ['point', 1, [0, 0]],
+      ['point', 2, [8, 1]],
+      ['point', 3, [10, 10]],
+      ['aux:line', 4, [1, 2]],
+    ],
+    {
+      constraints: [
+        ['fixed', 1],
+        ['horizontal', 4],
+        ['length', 4, 10],
+      ],
+    },
+  );
+  assert.deepEqual(base.faces(), []);
+  assert.throws(() => base.face(), /found 0/);
+  const child = base.derive([
+    ['line', 1, [base.point(1), base.point(2)]],
+    ['line', 2, [base.point(2), base.point(3)]],
+    ['line', 3, [base.point(3), base.point(1)]],
+  ]);
+  const face = keep(child.face());
+  near(area(face), 50);
+  const snapshot = snapshotSketch(base, () => 'base');
+  const endpoint = snapshot.entities.find(e => e.id === 2);
+  assert.equal(endpoint?.kind, 'point');
+  near(endpoint.position[0], 10);
+  near(endpoint.position[1], 0);
+  const reference = snapshot.entities.find(e => e.id === 4);
+  assert.equal(reference?.kind, 'line');
+  assert.equal(reference.construction, true);
+  assert.equal(snapshot.constraints.length, 3);
+  assert.deepEqual(base.faces(), []);
+});
+
+test('auxiliary type names preserve value semantics and ordinary names restore boundaries', () => {
+  const entries: SketchEntry[] = [
+    ['point', 1, [0, 0]],
+    ['aux:circle', 2, [1, 5]],
+  ];
+  const reference = sketch(entries);
+  entries[1] = ['circle', 2, [1, 5]];
+  assert.deepEqual(reference.faces(), []);
+  near(area(keep(sketch(entries).face())), 25 * Math.PI);
 });
 
 test('sketch faces retain authored coordinates, their plane and actual closed topology', () => {
@@ -214,38 +290,145 @@ test('derived boundaries close across upstream point references without changing
     ['line', 5, [2, base.point(1)]],
   ]);
   near(volume(keep(keep(child.face()).extrude(2))), 200);
-  assert.throws(() => base.face(), /open/);
+  assert.throws(() => base.face(), /found 0/);
 });
 
-test('invalid boundaries diagnose open, branched, crossing, tangent and overlapping contours', () => {
-  const cases: SketchEntry[][] = [
-    square().filter(e => e[1] !== 8),
-    [...square(), ['point', 9, [15, 5]], ['line', 10, [1, 9]]],
-    polygon([
-      [0, 0],
-      [10, 10],
-      [0, 10],
-      [10, 0],
-    ]),
-    [...square(), ...square(5, 5, 10, 20)],
-    [...square(), ['line', 9, [1, 2]]],
+test('intersections form bounded cells while open tails enclose no extra area', () => {
+  const cases: [SketchEntry[], number, number][] = [
+    [square().filter(e => e[1] !== 8), 0, 0],
+    [[...square(), ['point', 9, [15, 5]], ['line', 10, [1, 9]]], 2, 100],
+    [
+      polygon([
+        [0, 0],
+        [10, 10],
+        [0, 10],
+        [10, 0],
+      ]),
+      2,
+      50,
+    ],
+    [[...square(), ...square(5, 5, 10, 20)], 3, 175],
+    [
+      [
+        ...square(),
+        ['point', 9, [5, 15]],
+        ['point', 10, [5, 10]],
+        ['line', 11, [9, 10]],
+      ],
+      1,
+      100,
+    ],
+    // A bridge between disconnected boundaries does not destroy either region.
+    [[...square(), ...square(20, 0, 10, 20), ['line', 40, [2, 20]]], 2, 200],
+    [
+      [...square(0, 0, 20), ...square(5, 5, 10, 20), ['line', 40, [1, 20]]],
+      1,
+      300,
+    ],
+    [
+      [...square(0, 0, 20), ...square(5, 5, 10, 20), ['line', 40, [20, 22]]],
+      1,
+      300,
+    ],
+  ];
+  for (const [entries, count, expected] of cases) {
+    const profile = sketch(entries);
+    const before = snapshotSketch(profile, () => 's');
+    const faces = profile.faces().map(keep);
+    assert.equal(faces.length, count);
+    near(
+      faces.reduce((sum, face) => sum + area(face), 0),
+      expected,
+    );
+    assert.deepEqual(
+      snapshotSketch(profile, () => 's'),
+      before,
+    );
+  }
+});
+
+test('the reported arc endpoint on a line closes a face without absorbing its tiny tail', () => {
+  const profile = sketch(
     [
       ['point', 1, [0, 0]],
-      ['point', 2, [10, 0]],
+      ['arc', 2, [1, 10, 15, 10, 'cw']],
+      ['aux:line', 4, [1, 10]],
+      ['point', 6, [0.0033782497, 9.99999942867]],
+      ['line', 8, [6, 11]],
+      ['point', 10, [-7.07106781204, 7.0710678113]],
+      ['point', 11, [-4.1421361947, 9.99999942867]],
+      ['line', 12, [10, 11]],
+      ['point', 13, [0.0033782497, -10]],
+      ['line', 14, [6, 13]],
+      ['point', 15, [0.0033782497, -9.99999942937]],
+    ],
+    {
+      constraints: [
+        ['fixed', 1],
+        ['radius', 2, 10],
+        ['angle', 4, 135],
+        ['horizontal', 8],
+        ['perpendicular', [4, 12]],
+      ],
+    },
+  );
+  const snapshot = snapshotSketch(profile, () => 's');
+  const regions = sketchRegions([snapshot]);
+  assert.equal(regions.length, 1);
+  assert.equal(regions[0].outer.length, 4);
+  const face = keep(profile.face());
+  near(area(face), contourArea(regions[0].outer));
+  near(volume(keep(face.extrude(3))), 3 * area(face));
+  assert.deepEqual(
+    snapshotSketch(profile, () => 's'),
+    snapshot,
+  );
+});
+
+test('circular intersections and tangent contacts keep analytic bounded regions', () => {
+  for (const separation of [6, 10]) {
+    const profile = sketch([
+      ['point', 1, [0, 0]],
+      ['point', 2, [separation, 0]],
       ['circle', 3, [1, 5]],
       ['circle', 4, [2, 5]],
-    ],
+    ]);
+    const faces = profile.faces().map(keep);
+    assert.equal(faces.length, separation === 6 ? 3 : 2);
+    const lens =
+      separation === 10
+        ? 0
+        : 50 * Math.acos(separation / 10) -
+          (separation / 2) * Math.sqrt(100 - separation ** 2);
+    near(
+      faces.reduce((sum, face) => sum + area(face), 0),
+      50 * Math.PI - lens,
+    );
+  }
+  const bisected = sketch([
+    ['point', 1, [0, 0]],
+    ['circle', 2, [1, 5]],
+    ['point', 3, [-10, 0]],
+    ['point', 4, [10, 0]],
+    ['line', 5, [3, 4]],
+  ])
+    .faces()
+    .map(keep);
+  assert.equal(bisected.length, 2);
+  bisected.forEach(face => near(area(face), 12.5 * Math.PI));
+});
+
+test('duplicate and partially overlapping boundaries remain explicit errors', () => {
+  for (const entries of [
+    [...square(), ['line', 9, [1, 2]]],
     [
       ['point', 1, [0, 0]],
       ['circle', 2, [1, 5]],
       ['circle', 3, [1, 5]],
     ],
-  ];
-  for (const entries of cases)
-    assert.throws(
-      () => sketch(entries).faces(),
-      /open|branching|intersect|overlap/,
-    );
+    [...square(), ['point', 9, [5, 0]], ['line', 10, [1, 9]]],
+  ] as SketchEntry[][])
+    assert.throws(() => sketch(entries).faces(), /overlap/);
 });
 
 test('extrusion follows rotated face normal and does not mutate or recenter its input', () => {

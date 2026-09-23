@@ -143,8 +143,18 @@ test('empty and open sketches remain observable, with finite analytic arcs and e
   const geometry = open.items.find(item => item.kind === 'arc')!.geometry;
   assert.equal(geometry.kind, 'arc');
   assert.ok(Math.abs(geometry.sweep - Math.PI / 2) < 1e-10);
-  assert.equal(open.regions.available, false);
-  assert.ok(open.regions.reason);
-  assert.equal(open.counts.region, null);
+  assert.equal(open.regions.available, true);
+  assert.equal(open.counts.region, 0);
   assert.deepEqual(open.bounds, {min: [0, 0], max: [10, 10], size: [10, 10]});
+  const duplicate = {
+    ...arc,
+    entities: [...arc.entities, {...arc.entities.at(-1)!, id: 5}],
+  };
+  const overlap = inspectSketch(
+    observeSketch('arc', new Map([['arc', duplicate]]))[0],
+    {},
+  );
+  assert.equal(overlap.regions.available, false);
+  assert.match(overlap.regions.reason!, /overlap/);
+  assert.equal(overlap.counts.region, null);
 });

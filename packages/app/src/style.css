@@ -2428,6 +2428,9 @@ kbd {
 .sketch-canvas .trim-preview {
   stroke: #ed897b;
 }
+.sketch-canvas .entity.construction {
+  stroke-dasharray: 6 4;
+}
 .sketch-canvas .constraint-badge {
   color: #bac78f;
   cursor: pointer;

@@ -21,6 +21,9 @@ import type {ProjectBuildArtifact} from './project-compiler';
 import {ProjectRuntime} from './project-runtime';
 import {
   previewSketchDrag,
+  previewSketchConstraintEdit,
+  type SketchConstraintEdit,
+  type SketchConstraintEditPreview,
   type SketchDrag,
   type SketchDragPreview,
 } from './sketch-drag';
@@ -148,6 +151,14 @@ export class ProjectExecutor {
   ): SketchDragPreview {
     if (!this.runtime) throw new Error('The sketch runtime is not ready.');
     return previewSketchDrag(this.runtime.tooling, layers, drag);
+  }
+
+  previewSketchConstraintEdit(
+    layers: readonly SketchSnapshot[],
+    edit: SketchConstraintEdit,
+  ): SketchConstraintEditPreview {
+    if (!this.runtime) throw new Error('The sketch runtime is not ready.');
+    return previewSketchConstraintEdit(this.runtime.tooling, layers, edit);
   }
 
   dispose(): void {

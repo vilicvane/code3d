@@ -56,6 +56,31 @@ steps and completed geometry. Circle and rectangle tools follow the same rule.
 Inside a numeric field, Undo and Redo edit the text. **Escape** cancels the current
 draft; switching tools or editing the source ends that drawing history.
 
+### Construction geometry
+
+Select one or more local lines, circles or arcs and click **Construction** in the
+Modify toolbar group. They appear dashed in the editor and 3D view and stay available for snapping,
+constraints and editing, but do not contribute boundaries to `face()`, `faces()`
+or the filled region preview. For example, a rectangle can have a construction
+diagonal without losing its single face. Click **Construction** again to restore
+ordinary boundaries; a mixed selection first makes all selected curves construction.
+The toggle affects each complete authored curve, even when you select one of its
+displayed intervals. Selected points keep their identity and geometry.
+
+The change is saved in source, and Undo/Redo restores it as one operation. Trimming
+construction geometry preserves that role on the surviving pieces. Upstream curves
+remain read-only; computed entity type names must be changed in code.
+
+Authors use `['aux:line', 5, [1, 2]]`, `aux:circle` or `aux:arc`. Turning the toggle
+off removes the `aux:` prefix and restores the ordinary type name. See
+[construction geometry](api/sketch-entities.md#construction-geometry).
+
+Closed areas are detected at line, circle and arc intersections, including an arc
+endpoint that meets the middle of a line. Open line tails do not prevent a closed
+area from becoming a face. An ordinary diagonal divides a rectangle into two
+regions; making it auxiliary restores one. Nested contours retain their holes and
+islands. Overlapping duplicate boundaries require trimming.
+
 ### Editing dimensions and constraints in the App
 
 Click a dimension label, such as a circle's **R** label, to edit its value or
@@ -64,9 +89,17 @@ constraint in the sketch editor, a successful solve also synchronizes safely
 writable local geometry inputs. One Undo or Redo restores both the constraint
 and those geometry inputs.
 
+Existing points on lines, circles and finite arcs stay connected during these
+edits, including construction geometry. For example, making a line perpendicular
+to a construction radius keeps their shared endpoint on the circle and moves
+other free points as needed. These connections are preserved in the written
+coordinates; the operation does not add extra constraint tuples.
+
 Synchronization preserves expressions and upstream geometry. It does not choose
 between independent evaluations of the same source definition. When the source
 cannot be safely synchronized, the App keeps the source mismatch warning.
+If keeping a connection conflicts with the new constraint or requires replacing
+an expression, the edit reports an error and retains the last successful view.
 Direct source edits also retain this warning and an explicit **Fix** action
 where safe. A failed solve shows diagnostics and keeps the last successful
 sketch, when available, as a read-only reference.

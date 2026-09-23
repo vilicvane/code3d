@@ -63,6 +63,7 @@ import {
   CenterArc,
   CenterCircle,
   CenterRectangle,
+  ConstructionLine,
   LineSegment,
   Rectangle,
 } from './sketch-icons';
@@ -101,6 +102,7 @@ export type SketchEditorView = Readonly<{
   layers: readonly SketchSnapshot[];
   data: readonly SketchGeometryData[];
   editable: SketchEditableParameters;
+  constructionEditable: ReadonlySet<number>;
   constraintValues: ReadonlyMap<number, string>;
   referenceable: ReadonlySet<string>;
   readOnlyReason?: string;
@@ -275,13 +277,15 @@ export class SketchEditor {
       | 'snapping'
       | 'bypassSnap'
       | 'snapTargets'
+      | 'selection'
+      | 'constructionSelection'
+      | 'toggleConstruction'
       | 'pointerDown'
       | 'pointerUp'
       | 'pointerMove'
       | 'place'
       | 'keyDown'
       | 'escape'
-      | 'selectConstraint'
     >(this, {
       view: observableRef,
       gesture: observableRef,
@@ -289,13 +293,15 @@ export class SketchEditor {
       snapping: observableRef,
       bypassSnap: observableRef,
       snapTargets: computed,
+      selection: observableRef,
+      constructionSelection: computed,
+      toggleConstruction: action,
       dragPreview: computed,
       pointerDown: action,
       pointerUp: action,
       pointerMove: action,
       place: action,
       keyDown: action,
-      selectConstraint: action,
       escape: action,
       runHistoryAction: action,
       sourceHistoryChanged: action,
@@ -402,7 +408,13 @@ export class SketchEditor {
     });
     this.resize.observe(this.svg);
     this.stopDrawing = reaction(
-      () => [this.view, this.navigation.pose, this.tool, this.snapping],
+      () => [
+        this.view,
+        this.navigation.pose,
+        this.tool,
+        this.snapping,
+        this.selection,
+      ],
       () => this.draw(),
     );
     this.stopDraft = autorun(() => this.drawDraft());
@@ -644,6 +656,57 @@ export class SketchEditor {
     );
   }
 
+  private get constructionSelection() {
+    const view = this.view;
+    const selected = this.selection.filter(
+      (pick): pick is SketchSegment => 'start' in pick,
+    );
+    const ids = new Set(selected.map(pick => pick.id));
+    const curves =
+      view?.layers
+        .at(-1)
+        ?.entities.filter(
+          entity => entity.kind !== 'point' && ids.has(entity.id),
+        ) ?? [];
+    const count = curves.filter(
+      entity => entity.kind !== 'point' && entity.construction,
+    ).length;
+    const locked = selected.some(
+      pick =>
+        pick.layer !== view?.id || !view.constructionEditable.has(pick.id),
+    );
+    return {
+      ids: [...ids],
+      pressed:
+        count > 0 && count < curves.length ? ('mixed' as const) : count > 0,
+      disabled:
+        !view ||
+        !!view.readOnlyReason ||
+        this.mode !== 'Select' ||
+        !selected.length ||
+        locked,
+      title: !selected.length
+        ? 'Construction · Select lines, circles or arcs'
+        : locked
+          ? 'Construction · Upstream curves and expression-controlled roles must be changed in their source'
+          : count === curves.length
+            ? 'Construction · Restore selected curves as face boundaries'
+            : 'Construction · Use selected curves as references excluded from faces',
+    };
+  }
+
+  private toggleConstruction(): void {
+    const selection = this.constructionSelection;
+    if (selection.disabled) return;
+    this.cancel();
+    this.commit({
+      kind: 'construction',
+      ids: selection.ids,
+      construction: selection.pressed !== true,
+    });
+    this.svg.focus();
+  }
+
   private snapContext() {
     return {
       ...this.snapTargets,
@@ -708,11 +771,19 @@ export class SketchEditor {
     this.toolbar.add(drawing, actions[0]);
     this.toolbar.variants(drawing, 'Rectangle tools', actions.slice(1, 3));
     for (const action of actions.slice(3)) this.toolbar.add(drawing, action);
-    this.toolbar.add(this.toolbar.group('Modify'), {
+    const modify = this.toolbar.group('Modify');
+    this.toolbar.add(modify, {
       name: 'Trim',
       icon: Scissors,
       title: 'Trim · Click segments or standalone points · Esc exits',
       run: select(() => 'Trim'),
+    });
+    this.toolbar.add(modify, {
+      name: 'Construction',
+      icon: ConstructionLine,
+      title:
+        'Construction · Toggle selected curves as reference geometry excluded from faces',
+      run: () => this.toggleConstruction(),
     });
     const viewing = this.toolbar.group('View');
     viewing.classList.add('sketch-view-options');
@@ -765,7 +836,6 @@ export class SketchEditor {
 
   private circularCurves() {
     const points = this.points();
-    this.drawRegions();
     return this.layers().flatMap(layer =>
       layer.entities.flatMap(entity => {
         if (entity.kind !== 'circle' && entity.kind !== 'arc') return [];
@@ -930,20 +1000,20 @@ export class SketchEditor {
         this.svg.setPointerCapture(event.pointerId);
       }
     }
-    this.draw();
   }
 
   private selectConstraint(display: SketchConstraintDisplay): void {
     if (!this.view) return;
-    this.cancel();
-    this.tool = 'Select';
-    this.selection = display.curves.length
-      ? this.segments().filter(segment =>
-          display.curves.some(curve => same(segment, curve)),
-        )
-      : [...display.points];
-    this.svg.focus();
-    this.draw();
+    runInAction(() => {
+      this.cancel();
+      this.tool = 'Select';
+      this.selection = display.curves.length
+        ? this.segments().filter(segment =>
+            display.curves.some(curve => same(segment, curve)),
+          )
+        : [...display.points];
+      this.svg.focus();
+    });
     const source = this.view.constraintValues.get(display.index);
     const value = this.view.layers.at(-1)!.constraints[display.index]?.[2];
     if (
@@ -1108,13 +1178,11 @@ export class SketchEditor {
       const change = trimSketchSegment(this.view.layers, segment);
       this.cancel();
       if (this.commit(change)) this.selection = [];
-      this.draw();
       return;
     }
     const change = deleteSketchEntity(this.view.layers, selected.id);
     this.cancel();
     if (this.commit(change)) this.selection = [];
-    this.draw();
   }
 
   private deleteSelection(): void {
@@ -1135,7 +1203,6 @@ export class SketchEditor {
       : removal;
     this.cancel();
     if (this.commit(change)) this.selection = [];
-    this.draw();
   }
 
   private fit(): void {
@@ -1259,6 +1326,7 @@ export class SketchEditor {
     );
     const trimmedSegments =
       trim && 'start' in trim ? overlappingSketchSegments(segments, trim) : [];
+    this.drawRegions();
     for (const curve of this.circularCurves()) {
       const shape = this.shape(
         JSON.stringify([curve.layer, curve.geometry.kind, curve.id]),
@@ -1336,6 +1404,7 @@ export class SketchEditor {
         this.shapes.delete(key);
       }
     this.toolbar.update(name => {
+      if (name === 'Construction') return this.constructionSelection;
       const drawingTool = drawingTools.some(([tool]) => tool === name);
       return {
         pressed:
@@ -1436,7 +1505,12 @@ export class SketchEditor {
   }
 
   private entityClass(layer: string, id: number): string {
-    return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${this.constraints.related(layer, id) || this.constraintTools.related(layer, id) ? ' constraint-related' : ''}${this.selection.some(p => !('start' in p) && same(p, {layer, id})) ? ' selected' : ''}`;
+    const entity = this.layers()
+      .find(value => value.id === layer)
+      ?.entities.find(entity => entity.id === id);
+    const construction =
+      entity && entity.kind !== 'point' && entity.construction;
+    return `entity ${layer === this.view!.id ? 'local' : 'upstream'}${construction ? ' construction' : ''}${this.constraints.related(layer, id) || this.constraintTools.related(layer, id) ? ' constraint-related' : ''}${this.selection.some(p => !('start' in p) && same(p, {layer, id})) ? ' selected' : ''}`;
   }
   private drawDraft(): void {
     if (!this.drawing || !this.view || this.root.hidden) {

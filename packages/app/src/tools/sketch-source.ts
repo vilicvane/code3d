@@ -23,10 +23,18 @@ import type {
 
 export type SketchDraftEntry =
   | readonly ['point', number, SketchPosition]
-  | readonly ['line', number, readonly [SketchPointAddress, SketchPointAddress]]
-  | readonly ['circle', number, readonly [SketchPointAddress, number]]
   | readonly [
-      'arc',
+      'line' | 'aux:line',
+      number,
+      readonly [SketchPointAddress, SketchPointAddress],
+    ]
+  | readonly [
+      'circle' | 'aux:circle',
+      number,
+      readonly [SketchPointAddress, number],
+    ]
+  | readonly [
+      'arc' | 'aux:arc',
       number,
       readonly [
         SketchPointAddress,
@@ -42,21 +50,26 @@ export function sketchDraftEntity([
   id,
   data,
 ]: SketchDraftEntry): SketchEntitySnapshot {
+  const role = kind.startsWith('aux:') ? {construction: true} : {};
   switch (kind) {
     case 'point':
       return {kind, id, position: data};
     case 'line':
-      return {kind, id, points: data};
+    case 'aux:line':
+      return {kind: 'line', id, points: data, ...role};
     case 'circle':
-      return {kind, id, center: data[0], radius: data[1]};
+    case 'aux:circle':
+      return {kind: 'circle', id, center: data[0], radius: data[1], ...role};
     case 'arc':
+    case 'aux:arc':
       return {
-        kind,
+        kind: 'arc',
         id,
         center: data[0],
         radius: data[1],
         points: [data[2], data[3]],
         direction: data[4],
+        ...role,
       };
   }
 }
@@ -79,6 +92,11 @@ function dimensionSource(value: SketchDimensionValue): string {
 }
 
 export type SketchChange =
+  | Readonly<{
+      kind: 'construction';
+      ids: readonly number[];
+      construction: boolean;
+    }>
   | Readonly<{kind: 'dimension'; index: number; value: SketchDimensionValue}>
   | Readonly<{
       kind: 'constrain';
@@ -214,35 +232,37 @@ export function analyzeSketchSource(source: string): {
   for (const node of array.elements) {
     if (!ts.isArrayLiteralExpression(node) || node.elements.length !== 3)
       return unsupported();
-    const [kind, idNode, data] = node.elements;
+    const [kindNode, idNode, data] = node.elements;
+    if (!ts.isStringLiteral(kindNode) || !ts.isNumericLiteral(idNode))
+      return unsupported();
+    const kind = kindNode.text.replace(/^aux:/, '');
     if (
-      !ts.isStringLiteral(kind) ||
-      (kind.text !== 'point' &&
-        kind.text !== 'line' &&
-        kind.text !== 'circle' &&
-        kind.text !== 'arc') ||
-      !ts.isNumericLiteral(idNode)
+      (kind !== 'point' &&
+        kind !== 'line' &&
+        kind !== 'circle' &&
+        kind !== 'arc') ||
+      kindNode.text === 'aux:point'
     )
       return unsupported();
     const id = Number(idNode.text);
     if (!Number.isSafeInteger(id) || id < 1 || entries.has(id))
       return unsupported();
-    if (kind.text === 'point' && !ts.isArrayLiteralExpression(data)) {
+    if (kind === 'point' && !ts.isArrayLiteralExpression(data)) {
       entries.set(id, {id, kind: 'point', node, data, parameters: []});
       continue;
     }
     if (
       !ts.isArrayLiteralExpression(data) ||
-      data.elements.length !== (kind.text === 'arc' ? 5 : 2)
+      data.elements.length !== (kind === 'arc' ? 5 : 2)
     )
       return unsupported();
     const parameters =
-      kind.text === 'point'
+      kind === 'point'
         ? [...data.elements]
-        : kind.text === 'circle' || kind.text === 'arc'
+        : kind === 'circle' || kind === 'arc'
           ? [data.elements[1]]
           : [];
-    entries.set(id, {id, kind: kind.text, node, data, parameters});
+    entries.set(id, {id, kind: kind, node, data, parameters});
     if (parameters.length)
       editable.set(
         id,
@@ -389,24 +409,38 @@ export class SketchEditResolver implements ToolIntentResolver {
         );
       return `${name}.point(${ref.id})`;
     };
-    const entryText = ([kind, id, data]: SketchDraftEntry) => {
+    const entryText = (entry: SketchDraftEntry) => {
+      const entity = sketchDraftEntity(entry);
       const content =
-        kind === 'point'
-          ? data.map(formatSourceNumber)
-          : kind === 'circle'
-            ? [point(data[0]), formatSourceNumber(data[1])]
-            : kind === 'arc'
-              ? [
-                  point(data[0]),
-                  formatSourceNumber(data[1]),
-                  point(data[2]),
-                  point(data[3]),
-                  `'${data[4]}'`,
-                ]
-              : data.map(point);
-      return `['${kind}', ${id}, [${content.join(', ')}]]`;
+        entity.kind === 'point'
+          ? entity.position.map(formatSourceNumber)
+          : entity.kind === 'line'
+            ? entity.points.map(point)
+            : [
+                point(entity.center),
+                formatSourceNumber(entity.radius),
+                ...(entity.kind === 'arc'
+                  ? [...entity.points.map(point), `'${entity.direction}'`]
+                  : []),
+              ];
+      return `['${entry[0]}', ${entity.id}, [${content.join(', ')}]]`;
     };
     const {change} = intent;
+    if (change.kind === 'construction') {
+      for (const id of new Set(change.ids)) {
+        const entry = parsed.entries.get(id);
+        if (!entry || entry.kind === 'point')
+          return {
+            status: 'unsupported',
+            reason:
+              'Construction requires local curves with literal type names.',
+          };
+        const kind = entry.node.elements[0] as ts.StringLiteral;
+        const next = `${change.construction ? 'aux:' : ''}${entry.kind}`;
+        if (kind.text !== next)
+          replace(kind, `${kind.getText()[0]}${next}${kind.getText()[0]}`);
+      }
+    }
     if (change.kind === 'dimension') {
       const node = parsed.constraints?.elements[change.index];
       const value =
@@ -510,8 +544,13 @@ export class SketchEditResolver implements ToolIntentResolver {
             node.end - prefix.length,
           );
         const replacementText = (entry: SketchDraftEntry) => {
+          const replacement = sketchDraftEntity(entry);
           const original = copiesOf.get(entry[1]);
-          if (!original || entry[0] === 'point' || entry[0] === 'circle')
+          if (
+            !original ||
+            replacement.kind === 'point' ||
+            replacement.kind === 'circle'
+          )
             return entryText(entry);
           const parsedEntry = original.entry;
           const entity = original.entity;
@@ -525,16 +564,15 @@ export class SketchEditResolver implements ToolIntentResolver {
             });
           if (entry[1] !== entity.id)
             patch(parsedEntry.node.elements[1], String(entry[1]));
-          if (entity.kind === 'circle' && entry[0] === 'arc') {
-            patch(parsedEntry.node.elements[0], "'arc'");
+          if (entity.kind === 'circle' && replacement.kind === 'arc') {
+            patch(parsedEntry.node.elements[0], `'${entry[0]}'`);
             const data = raw(parsedEntry.data).slice(0, -1);
             patch(
               parsedEntry.data,
-              `${data}${parsedEntry.data.elements.hasTrailingComma ? '' : ','} ${point(entry[2][2])}, ${point(entry[2][3])}, 'cw']`,
+              `${data}${parsedEntry.data.elements.hasTrailingComma ? '' : ','} ${point(replacement.points[0])}, ${point(replacement.points[1])}, 'cw']`,
             );
           } else if (entity.kind === 'line' || entity.kind === 'arc') {
-            const refs =
-              entry[0] === 'line' ? entry[2] : [entry[2][2], entry[2][3]];
+            const refs = replacement.points;
             refs.forEach((ref, i) => {
               if (!sameSketchPoint(ref, entity.points[i]))
                 patch(
@@ -722,7 +760,7 @@ export class SketchEditResolver implements ToolIntentResolver {
       plan: {
         toolId: context.toolId,
         baseVersion: context.baseVersion,
-        summary: `${change.kind === 'dimension' ? 'Edit constraint value' : change.kind === 'move' ? 'Edit geometry' : change.kind === 'constrain' ? 'Constrain selection' : change.kind === 'delete' ? 'Delete entities' : change.kind === 'trim' ? 'Delete segment' : 'Add entities'} in sketch`,
+        summary: `${change.kind === 'construction' ? 'Toggle construction geometry' : change.kind === 'dimension' ? 'Edit constraint value' : change.kind === 'move' ? 'Edit geometry' : change.kind === 'constrain' ? 'Constrain selection' : change.kind === 'delete' ? 'Delete entities' : change.kind === 'trim' ? 'Delete segment' : 'Add entities'} in sketch`,
         intent,
         edits,
         preview: {kind: 'source-edits', edits},

@@ -373,9 +373,9 @@ export function trimSketchSegment(
       ids.push(id);
       entries.push(
         curve.kind === 'line'
-          ? ['line', id, points]
+          ? [curve.construction ? 'aux:line' : 'line', id, points]
           : [
-              'arc',
+              curve.construction ? 'aux:arc' : 'arc',
               id,
               [
                 curve.center,

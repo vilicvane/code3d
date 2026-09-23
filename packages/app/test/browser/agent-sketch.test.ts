@@ -276,7 +276,8 @@ export default design();
       topology: true,
       render: true,
     });
-    assert.equal(unfinished.data.observation.topology.regions.available, false);
+    assert.equal(unfinished.data.observation.topology.regions.available, true);
+    assert.equal(unfinished.data.observation.topology.counts.region, 0);
     assert.ok(unfinished.artifacts[0].path);
     const emptyFile = '/empty-sketch.ts';
     const empty = await apply({

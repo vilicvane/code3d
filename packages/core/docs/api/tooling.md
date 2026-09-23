@@ -2,15 +2,16 @@
 title: Tooling integration API
 description: Browse every Core host integration API for evaluation, resources, snapshots, geometry, inspection and cache ownership.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/tooling/index.ts
-      sha256: 540fe0cf5f3ba5f389da9f2a6441b722aac1b7de24530540eedee37eef8765dc
+      sha256: 60d91eaa40d822c84dca66e7792af9072bccc8e8c6a9c738f18011bf2174bf73
     - path: packages/core/src/node/index.ts
       sha256: 2c314699c2b47768bc4ae14b7713dc9eceb1111a3de7417820bdf4347bda3104
       commit: 5c8979f384280b644263a2d6ba3abacb69697c24
     - path: packages/core/src/library/index.ts
       sha256: 8f5784bccbc2f8a47139a71af3c3fbfe0c1e767dc9dcd61902fa06413dd40f54
+      commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
 sidebar:
   hidden: true
 head:

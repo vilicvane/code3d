@@ -2,14 +2,12 @@
 title: Sketch point and derive
 description: Reference defining-layer points and add immutable local geometry over an upstream sketch.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: d50769e828b4ab70584e1a217c6022d3a1c254a825bcc24bd5444039ef0e6488
-      commit: e29dfd1ac9d22a728186d68bdd9129b60c908091
+      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
     - path: packages/core/src/library/sketch-regions.ts
-      sha256: 62233d8c0216d2c4106b4b62a46b7a161f3a7da842f55ec130697869989c9d90
-      commit: 05622140a97db31781700f6cb55e6ac7a36029ad
+      sha256: 3519e575f6eaccc71b549176e937e86d3dd077df100829a9b3d5928e6a163c01
     - path: packages/core/src/library/sketch-solver.ts
       sha256: 176f9f8a38507100328aaba71a2ef226b6e914e5718cf3a00b2bc018a7bab565
       commit: 63b63837410721d7f9c44db1e721e5c52250f8d4
@@ -55,6 +53,10 @@ sketchValue.derive(entries?: readonly SketchEntry[], options?: SketchOptions): S
 
 Import the functions and named types from `@code3d/core`.
 
+Construction roles belong to their defining layer. Upstream construction curves
+stay excluded from face boundaries, while their points can still be referenced by
+ordinary local curves. Edit the upstream definition to change an upstream role.
+
 ## point
 
 `point(id)` returns a registered reference to a point defined in this sketch
@@ -88,7 +90,7 @@ original point references still identify the upstream geometry.
 
 ## Layering and extracted geometry
 
-Upstream curves participate in [region extraction](sketch-faces.md) together
+Ordinary upstream curves participate in [region extraction](sketch-faces.md) together
 with local curves. A derived layer does not automatically trim or replace them;
 overlapping new boundaries can make extraction invalid. Constraints cannot move
 upstream points to satisfy local conditions. Derived layers inherit the upstream

@@ -21,7 +21,12 @@ import type {InspectSelection} from './inspection';
 import type {InspectionSnapshot} from './inspection-snapshot';
 import type {ModelExportInstance, ModelExportOptions} from './model-export';
 import type {ProjectBuildArtifact} from './project-compiler';
-import type {SketchDrag, SketchDragPreview} from './sketch-drag';
+import type {
+  SketchDrag,
+  SketchDragPreview,
+  SketchConstraintEdit,
+  SketchConstraintEditPreview,
+} from './sketch-drag';
 
 export type CompileRequest = Readonly<{
   kind: 'compile';
@@ -97,6 +102,12 @@ type WorkerRequest =
       drag: SketchDrag;
     }>
   | Readonly<{
+      kind: 'sketch-constraints';
+      id: number;
+      layers: readonly SketchSnapshot[];
+      edit: SketchConstraintEdit;
+    }>
+  | Readonly<{
       kind: 'export';
       id: number;
       compileId: number;
@@ -146,6 +157,12 @@ type WorkerResponse =
   | Readonly<{kind: 'export'; id: number; ok: true; blob: Blob}>
   | Readonly<{kind: 'sketch'; id: number; ok: true; preview: SketchDragPreview}>
   | Readonly<{
+      kind: 'sketch-constraints';
+      id: number;
+      ok: true;
+      preview: SketchConstraintEditPreview;
+    }>
+  | Readonly<{
       kind: 'result';
       id: number;
       ok: false;
@@ -156,7 +173,15 @@ export type ExecutorRequest =
   | ArtifactStoreInitialization
   | Extract<
       WorkerRequest,
-      {kind: 'execute' | 'export' | 'topology' | 'sketch' | 'inspect'}
+      {
+        kind:
+          | 'execute'
+          | 'export'
+          | 'topology'
+          | 'sketch'
+          | 'sketch-constraints'
+          | 'inspect';
+      }
     >;
 export type CompilerRequest =
   ArtifactStoreInitialization | Exclude<WorkerRequest, ExecutorRequest>;
@@ -168,6 +193,7 @@ export type ExecutorResponse = Extract<
       | 'export'
       | 'topology'
       | 'sketch'
+      | 'sketch-constraints'
       | 'inspect'
       | 'progress'
       | 'cancelled';
@@ -175,7 +201,7 @@ export type ExecutorResponse = Extract<
 >;
 export type CompilerResponse = Exclude<
   WorkerResponse,
-  | {kind: 'export' | 'topology' | 'sketch' | 'inspect'}
+  | {kind: 'export' | 'topology' | 'sketch' | 'sketch-constraints' | 'inspect'}
   | {kind: 'result'; ok: true}
 >;
 
