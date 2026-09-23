@@ -2,7 +2,7 @@
 title: text
 description: Shape a loaded font into connected planar faces for solid lettering and engraving.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/text.ts
       sha256: 2640ed1e431083e8755aabf7432c32842d0dc5387f964518b057e4593e01f81c
@@ -14,7 +14,7 @@ sourceReview:
       sha256: 7e10fa6ffcdf125a653dd31136cdaace384dbeb00e79cef3515304a84b604087
       commit: 3d2db0c82c1ae0e6723ecd77fa6f571b326d1681
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
 sidebar:
   hidden: true
 head:

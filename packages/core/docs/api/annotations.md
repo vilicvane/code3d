@@ -2,16 +2,16 @@
 title: Inspection annotations
 description: Create passive dimension, bounds and anchor-direction annotations in an owner model’s local coordinates.
 sourceReview:
-  packageVersion: 0.0.1-alpha.15
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/app/src/rendering/parameter-dimension.ts
       sha256: b166988b7f2f948432fb6b7504f6c47c074e322b0af69d7fc64d88adc68212ab
       commit: da2824c30b54a50ac216679fff96c67dd3dcee4c
     - path: packages/core/src/library/inspect.ts
       sha256: 3a2b79225efc60bde43e1ed6b7fead901376689b03a190bf5884920d8c5bb870
+      commit: 4dc8ded34fd1910b01e014c2cb58cf2bd60e813a
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
-      commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
 sidebar:
   hidden: true
 head:

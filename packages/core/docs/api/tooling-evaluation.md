@@ -2,15 +2,16 @@
 title: Model evaluation and lifetimes
 description: Own serial evaluation scopes, identify model objects, retain geometry and dispose native resources.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/authoring-api.ts
       sha256: f19edb7d6875d7e407ff84f7c88ce7392df1aeb21cca65982f08d7ca44dd9f11
+      commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
     - path: packages/core/src/library/kernel-cache.ts
       sha256: 779d4de9fa63c44633a16aac3c6e1125376dcc7483b0e6cf6d11d6970db87310
       commit: da2824c30b54a50ac216679fff96c67dd3dcee4c
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
 sidebar:
   hidden: true
 head:
@@ -314,9 +315,17 @@ class ModelObject<
     config?: RevolveConfig,
   ): SolidModel;
   sweep(this: ModelObject<Elements, 'face'>, spine: EdgeModel<{}>): SolidModel;
+  union(
+    this: ModelObject<Elements, 'solid'>,
+    operands: SolidModel<{}> | readonly SolidModel<{}>[],
+  ): SolidModel;
+  intersect(
+    this: ModelObject<Elements, 'solid'>,
+    operands: SolidModel<{}> | readonly SolidModel<{}>[],
+  ): SolidModel;
   cut(
     this: ModelObject<Elements, 'solid'>,
-    tools: readonly SolidModel<{}>[],
+    tools: SolidModel<{}> | readonly SolidModel<{}>[],
   ): SolidModel;
   fillet(
     this: ModelObject<Elements, 'solid'>,

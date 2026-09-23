@@ -2,13 +2,13 @@
 title: wrap
 description: 'Code3D wrap API: Map a planar face or coplanar face array onto one finite curved surface. Learn parameters, coordinates, results and limits.'
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/wrap.ts
       sha256: fca4f7cea51e760d45a74ec669118e6879cd2f0c8854368a89a546d4c6716e4f
       commit: 2e2cf49d64dba98b613224b6ae39aa632d6d2eb0
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
     - path: packages/core/src/library/wrap-geometry.ts
       sha256: 9efd5c78f099e4cb5b38f976738528b22669e42ecd1e53fbebbc32c392f8bdc0
       commit: 2e2cf49d64dba98b613224b6ae39aa632d6d2eb0

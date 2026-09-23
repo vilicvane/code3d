@@ -2,13 +2,13 @@
 title: axisEdge
 description: Rotate a placed model about one of its own straight topology edges.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/axis-edge.ts
       sha256: 78760cbd39c9647ec89e57f0d35f3adf83c96fcd491b62ddfe6dea59dcbddff0
       commit: 757c8003e4ef2c3e4b4e85561e186a82a1dd1c39
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
     - path: packages/core/src/library/topology.ts
       sha256: f9f0d048fe30cc80046a25123aa8101ca51e85cdb5b2e66260c6a68f43f84715
       commit: 67228dd8559d584852df7bfbd47ed89f1d8003e9

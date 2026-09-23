@@ -2,13 +2,13 @@
 title: pivotPoint
 description: Use a positioned point reference as a placement rotation center.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/pivot-point.ts
       sha256: 65201ff5dade0bcccdf9797e38ce89246dde449d5772a7f9083c740a7d0d74b9
       commit: 757c8003e4ef2c3e4b4e85561e186a82a1dd1c39
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
     - path: packages/core/src/library/spatial.ts
       sha256: 810c4fa69352c26c32fb04a0e7867f6327698e02f3212669f17d777784322a78
       commit: 69d231fb775befdb3cd098291b4097ccd52d8966

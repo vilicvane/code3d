@@ -184,17 +184,23 @@ test('a failed callback can inspect its entered closure and captured parent cont
 });
 
 test('failed intersection and zero extrusion retain complete original input scopes', async () => {
-  const common = await compile(
-    `import {box, intersect} from '@code3d/core';
-    const a = box(4, 4, 4);
-    const b = box(4, 4, 4).originOffset(-20, 0, 0);
-    intersect([a, b]);`,
-    /no common solid volume/,
-  );
-  const scene = defined(await common('[a, b]', 1));
-  assert.equal(scene.ambient.length, 1);
-  assert.equal(scene.target.length, 1);
-  assert.equal(scene.target[0].focused, true);
+  for (const call of [
+    'intersect([a, b])',
+    'a.intersect(b)',
+    'a.intersect([b])',
+  ]) {
+    const common = await compile(
+      `import {box, intersect} from '@code3d/core';
+      const a = box(4, 4, 4);
+      const b = box(4, 4, 4).originOffset(-20, 0, 0);
+      ${call};`,
+      /no common solid volume/,
+    );
+    const scene = defined(await common(call, call.lastIndexOf('b')));
+    assert.equal(scene.ambient.length, 1);
+    assert.equal(scene.target.length, 1);
+    assert.equal(scene.target[0].focused, true);
+  }
   for (const call of ['a.extrude(0)', 'extrude([a, b], 0)']) {
     const inspect = await compile(
       `import {on, align, rectangle, extrude} from '@code3d/core';
@@ -1182,6 +1188,8 @@ test('boolean inspectors preserve original placement and generate only the focus
     const b = box(4,40,4).relate(self => [align(self.center, stock.center), offset(5,0,0)]);
     const result = cut(stock, [a,b]);
     stock.cut([a,b]); union([stock,a]); intersect([stock,a]);
+    stock.cut(a); stock.union(a); stock.union([a]);
+    stock.intersect(a); stock.intersect([a]);
     const far = box(2,2,2).originOffset(-100,0,0);
     cut(stock, [far]); export default result;`);
   const centerX = (item: InspectionItem) => {
@@ -1199,11 +1207,12 @@ test('boolean inspectors preserve original placement and generate only the focus
   assert.equal(stock.target.length, 1);
   assert.equal(centerX(stock.target[0]), 30);
   assert.deepEqual(stock.ambient.map(centerX), [25, 35]);
-  for (const [token, delta, size, center, selected] of [
-    ['[a,b]', 0, 14, 30, 2],
-    ['[a,b]', 1, 4, 25, 1],
-    ['[a,b]', 3, 4, 35, 1],
-    ['stock.cut([a,b])', 'stock.cut(['.length, 4, 25, 1],
+  for (const [token, delta, size, center, selected, ambient] of [
+    ['[a,b]', 0, 14, 30, 2, 1],
+    ['[a,b]', 1, 4, 25, 1, 2],
+    ['[a,b]', 3, 4, 35, 1, 2],
+    ['stock.cut([a,b])', 'stock.cut(['.length, 4, 25, 1, 2],
+    ['stock.cut(a)', 'stock.cut('.length, 4, 25, 1, 1],
   ] as const) {
     const scene = defined(await inspect(token, delta));
     assert.equal(scene.target.length, selected + 1);
@@ -1211,7 +1220,7 @@ test('boolean inspectors preserve original placement and generate only the focus
       scene.target.map(item => item.focused),
       [...Array(selected).fill(true), false],
     );
-    assert.equal(scene.ambient.length, 3 - selected);
+    assert.equal(scene.ambient.length, ambient);
     const region = scene.target.at(-1)!;
     assert.equal(region.kind, 'model');
     if (region.kind === 'model')
@@ -1225,21 +1234,30 @@ test('boolean inspectors preserve original placement and generate only the focus
   assert.equal(noVolume.target.length, 1);
   assert.equal(noVolume.target[0].focused, true);
   assert.equal(noVolume.ambient.length, 1);
-  const union = defined(
-    await inspect('union([stock,a])', 'union([stock,'.length),
-  );
-  assert.deepEqual(union.target.map(centerX), [30, 25]);
-  assert.deepEqual(
-    union.target.map(value => value.focused),
-    [false, true],
-  );
-  for (const delta of [
-    'intersect('.length,
-    'intersect(['.length,
-    'intersect([stock,'.length,
-  ]) {
-    const common = defined(await inspect('intersect([stock,a])', delta));
-    const selected = delta === 'intersect('.length ? 2 : 1;
+  for (const [token, delta, focus] of [
+    ['union([stock,a])', 'union([stock,'.length, [false, true]],
+    ['stock.union(a)', 'stock.union('.length, [false, true]],
+    ['stock.union([a])', 'stock.union(['.length, [false, true]],
+    ['stock.union(a)', 0, [true, false]],
+    ['stock.union([a])', 0, [true, false]],
+  ] as const) {
+    const joined = defined(await inspect(token, delta));
+    assert.deepEqual(joined.target.map(centerX), [30, 25]);
+    assert.deepEqual(
+      joined.target.map(value => value.focused),
+      focus,
+    );
+  }
+  for (const [token, delta, selected] of [
+    ['intersect([stock,a])', 'intersect('.length, 2],
+    ['intersect([stock,a])', 'intersect(['.length, 1],
+    ['intersect([stock,a])', 'intersect([stock,'.length, 1],
+    ['stock.intersect(a)', 'stock.intersect('.length, 1],
+    ['stock.intersect([a])', 'stock.intersect(['.length, 1],
+    ['stock.intersect(a)', 0, 1],
+    ['stock.intersect([a])', 0, 1],
+  ] as const) {
+    const common = defined(await inspect(token, delta));
     assert.equal(common.target.length, selected + 1);
     assert.equal(common.ambient.length, 2 - selected);
     assert.deepEqual(

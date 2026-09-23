@@ -2,16 +2,14 @@
 title: intersect
 description: Keep the solid volume shared by all operands.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/intersect.ts
-      sha256: bbf42b8c684bd4c3db743c40856218a649677b24c6641981b3bcff0d3a8472ab
-      commit: bb707e248ef98fe97db48020a396fd20bf3265ec
+      sha256: c7610a11c456cf6c1d15eaa03c7ebad5b72eea38a07e251823716ff8500bf640
     - path: packages/core/src/library/boolean-model.ts
-      sha256: 18916d45eb837447a6b92b876fb045a6da7f00f8a7056071fc6e908b851e97f6
-      commit: bb707e248ef98fe97db48020a396fd20bf3265ec
+      sha256: b905146426cbbfc467a67c8191a0e3f8b914b3ad3e82d67644503023d2f78013
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
     - path: packages/core/src/library/topology.ts
       sha256: f9f0d048fe30cc80046a25123aa8101ca51e85cdb5b2e66260c6a68f43f84715
       commit: 67228dd8559d584852df7bfbd47ed89f1d8003e9
@@ -45,13 +43,21 @@ Complete example: [solid operations](../../../app/examples/operations/solid-oper
 
 ```ts
 function intersect(operands: readonly SolidModel<{}>[]): SolidModel;
+
+// SolidModel method:
+solid.intersect(operands: SolidModel<{}> | readonly SolidModel<{}>[]): SolidModel;
 ```
 
 Import the functions and named types from `@code3d/core`.
 
+`block.intersect(ball)` and `block.intersect([ball])` are equivalent to
+`intersect([block, ball])`. The method accepts one solid or a nonempty array of
+additional solids, with the receiver as the first operand. The free function
+continues to take an array containing all operands.
+
 ## Operands and result
 
-`operands` must contain at least two solid models. All inputs participate in the
+The free function's `operands` array must contain at least two solid models. All inputs participate in the
 same intersection: with three operands, only volume inside all three survives.
 The result is not a list of pairwise intersections.
 
@@ -75,6 +81,7 @@ For more than two operands, overlap must survive each additional input.
 Coincident or degenerate features can also prevent the kernel from completing
 an intersection.
 
-There is no `model.intersect()` method. Use [cut](cut.md) to remove shared volume,
+Use [cut](cut.md) to remove shared volume,
 or [union](union.md) to keep every operand's volume. Select the operands argument
-in the App to inspect the positioned inputs and highlighted common region.
+or the method receiver in the App to inspect the positioned inputs and
+highlighted common region. An empty array of method operands throws.

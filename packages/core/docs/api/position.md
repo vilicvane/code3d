@@ -2,10 +2,10 @@
 title: position
 description: Read the model origin in another model’s solved local frame.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
     - path: packages/core/src/library/spatial.ts
       sha256: 810c4fa69352c26c32fb04a0e7867f6327698e02f3212669f17d777784322a78
       commit: 69d231fb775befdb3cd098291b4097ccd52d8966

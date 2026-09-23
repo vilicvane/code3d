@@ -57,7 +57,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Solid primitives](docs/api.md#solid-primitives): individual references for box, cylinder, sphere, ellipsoid, frustum, regularPrism, tube and coil.
 - [Points, curves and profiles](docs/api.md#profiles-and-curves): point, line, arc, bezier, spline and four filled planar profile constructors.
 - [Shape construction](docs/api/extrude.md): extrude, revolve, sweep, loft, wrap and thicken profiles.
-- [Booleans and solid modifications](docs/api/union.md): union, cut, intersect, fillet, chamfer and shell.
+- [Booleans and solid modifications](docs/api/union.md): union, cut, intersect, fillet, chamfer and shell. Solid boolean methods accept one solid or an array; free functions take arrays.
 - [Origins and local transforms](docs/api/origin-offset.md): choose local zero, rotate and scale geometry.
 - [Groups and placement](docs/api/group.md): groups, exposed references, relations, transforms and rotation coupling.
 - [Complete API export index](docs/api/exports.md): all public functions, types, members and integration entries.

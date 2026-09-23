@@ -2,7 +2,7 @@
 title: Three.js integration
 description: Use Core’s Three.js dependency for serializable materials and loaded textures.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/three.ts
       sha256: 14b4c9030e071ecd8a39dfc28a27ca7da6c2999c869a860b44525309613d7ba6
@@ -14,7 +14,7 @@ sourceReview:
       sha256: 93be1c0d5df9c862d4ffc45ab88ff0ec3b0d5313466e553c62edc1675c112529
       commit: a7ca31b3b4369eb13e15604c281f99c7751ccc82
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
 sidebar:
   hidden: true
 head:

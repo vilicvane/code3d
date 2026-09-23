@@ -2,16 +2,14 @@
 title: union
 description: Fuse two or more solid models, including their solved placements.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/union.ts
-      sha256: dd71a24f65badfcffdd63a2be2d9a5c426f3f2ce7acb32b1235433124e20389c
-      commit: bb707e248ef98fe97db48020a396fd20bf3265ec
+      sha256: 8218fdee3593f7583797aacc52280f61a7c427f03df951e24ad06c9c721541ad
     - path: packages/core/src/library/boolean-model.ts
-      sha256: 18916d45eb837447a6b92b876fb045a6da7f00f8a7056071fc6e908b851e97f6
-      commit: bb707e248ef98fe97db48020a396fd20bf3265ec
+      sha256: b905146426cbbfc467a67c8191a0e3f8b914b3ad3e82d67644503023d2f78013
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
     - path: packages/core/src/library/topology.ts
       sha256: f9f0d048fe30cc80046a25123aa8101ca51e85cdb5b2e66260c6a68f43f84715
       commit: 67228dd8559d584852df7bfbd47ed89f1d8003e9
@@ -45,13 +43,21 @@ Complete example: [solid operations](../../../app/examples/operations/solid-oper
 
 ```ts
 function union(operands: readonly SolidModel<{}>[]): SolidModel;
+
+// SolidModel method:
+solid.union(operands: SolidModel<{}> | readonly SolidModel<{}>[]): SolidModel;
 ```
 
 Import the functions and named types from `@code3d/core`.
 
+`base.union(boss)` and `base.union([boss])` are equivalent to
+`union([base, boss])`. The method also accepts several additional solids in an
+array. Only the method accepts a single solid argument; the free function takes
+an array containing the complete operation.
+
 ## Operands and result
 
-`operands` must contain at least two solid models. Groups, faces, curves and points
+The free function's `operands` array must contain at least two solid models. Groups, faces, curves and points
 are rejected. The result contains the combined volume with shared volume counted
 once. For the example, the boss overlaps the base by 2 units and the total volume
 is `4800 + 200 * Math.PI`.
@@ -76,6 +82,9 @@ one connected solid. Arrange operands with a genuine shared volume when building
 a single body. Coincident, tangent or very small features can make kernel boolean
 operations fail; adjust the placement or dimensions when construction fails.
 
-The free function is the public union entry; there is no `model.union()` method.
+The method requires at least one additional solid; an empty array throws.
+Its receiver is the first operand, so its local frame, material and metadata
+belong to the result. Selecting the receiver or operands in the App previews
+their solved composition while preserving the focused input.
 For material removal use [cut](cut.md), or retain only the shared volume with
 [intersect](intersect.md).

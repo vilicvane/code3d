@@ -13,6 +13,20 @@ export function union(operands: readonly SolidModel<{}>[]): SolidModel {
 }
 /** @internal */
 export namespace union {
+  export function inspectMethod(
+    [operands]: [SolidModel<{}> | readonly SolidModel<{}>[]],
+    context: InspectContext<
+      SolidModel,
+      SolidModel<{}>,
+      CompositionInspectData | undefined
+    >,
+  ): InspectResult | undefined {
+    const others = (
+      Array.isArray(operands) ? operands : [operands]
+    ) as readonly SolidModel<{}>[];
+    return inspectOperands([[context.receiver, ...others]], context);
+  }
+
   export function inspectOperands(
     [operands]: [readonly SolidModel<{}>[]],
     context: InspectContext<

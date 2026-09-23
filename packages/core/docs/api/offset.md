@@ -2,13 +2,13 @@
 title: offset
 description: Translate a placement result along fixed composition axes.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/offset.ts
       sha256: bb50275bba37e361cafd3bdf16229f809323e6b89bf1cd55dc2e6c0993c34288
       commit: 757c8003e4ef2c3e4b4e85561e186a82a1dd1c39
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
     - path: packages/core/src/library/relation-solver.ts
       sha256: 57d7233eb74cba8255805756053b2385a4dca8a78dad6a9a09590bda68630e47
       commit: 91ff6d31aa4440565eb7ffc4ef30dd1ffd50707a

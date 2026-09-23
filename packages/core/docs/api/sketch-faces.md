@@ -2,7 +2,7 @@
 title: Sketch face and faces
 description: Extract finite faces from closed sketch boundaries, including holes and separate regions.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/sketch.ts
       sha256: d50769e828b4ab70584e1a217c6022d3a1c254a825bcc24bd5444039ef0e6488
@@ -14,7 +14,7 @@ sourceReview:
       sha256: d7e04ff3e3e17766080f0c4916114d2ec97b42b0bcfd57c9df88d3726c2ba51c
       commit: 05622140a97db31781700f6cb55e6ac7a36029ad
     - path: packages/core/src/library/runtime.ts
-      sha256: 1caf8c92de983f0c22b4da70e0af4216472b9ff8fe8e2f0ebc34ec9a84e259b0
+      sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
 sidebar:
   hidden: true
 head:

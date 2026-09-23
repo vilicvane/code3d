@@ -1092,12 +1092,24 @@ export interface SurfaceTopologyCapabilities extends EdgeTopologyCapabilities {
 }
 
 export interface SolidModificationCapabilities<Elements extends NamedElements> {
-  /** Subtracts all tools in one boolean operation, equivalent to cut(stock, tools). */
   /**
+   * Fuse this solid with one or more operands in its local coordinate frame.
+   * @code3d.inspect this union.inspectMethod
+   * @code3d.inspect operands union.inspectMethod
+   */
+  union(operands: SolidModel<{}> | readonly SolidModel<{}>[]): SolidModel;
+  /**
+   * Keep the common volume of this solid and one or more operands.
+   * @code3d.inspect this intersect.inspectMethod
+   * @code3d.inspect operands intersect.inspectMethod
+   */
+  intersect(operands: SolidModel<{}> | readonly SolidModel<{}>[]): SolidModel;
+  /**
+   * Subtract one or more tools, equivalent to cut(stock, tools).
    * @code3d.inspect this cut.inspectReceiver
    * @code3d.inspect tools cut.inspectMethodTools
    */
-  cut(tools: readonly SolidModel<{}>[]): SolidModel;
+  cut(tools: SolidModel<{}> | readonly SolidModel<{}>[]): SolidModel;
   /**
    * @code3d.param radius {kind: 'length', default: 1, label: 'Fillet radius', constraints: {exclusiveMin: 0}}
    * @code3d.param edgeIds {kind: 'edge', actions: [{label: 'Use all', action: 'remove-argument'}]}
@@ -4148,20 +4160,31 @@ export class ModelObject<
     return result as unknown as SolidModel;
   }
 
+  union(
+    this: ModelObject<Elements, 'solid'>,
+    operands: SolidModel<{}> | readonly SolidModel<{}>[],
+  ): SolidModel {
+    return this[combineModels](
+      'fuse',
+      Array.isArray(operands) ? operands : [operands],
+    );
+  }
+
+  intersect(
+    this: ModelObject<Elements, 'solid'>,
+    operands: SolidModel<{}> | readonly SolidModel<{}>[],
+  ): SolidModel {
+    return this[combineModels](
+      'intersect',
+      Array.isArray(operands) ? operands : [operands],
+    );
+  }
+
   cut(
     this: ModelObject<Elements, 'solid'>,
-    tools: readonly SolidModel<{}>[],
+    tools: SolidModel<{}> | readonly SolidModel<{}>[],
   ): SolidModel {
-    const stock = requireModelKind(
-      this,
-      'solid',
-      'The cut stock must be a solid model.',
-    );
-    if (tools.length === 0) throw new Error('cut requires at least one tool.');
-    const operands = tools.map(tool =>
-      requireModelKind(tool, 'solid', 'Every cut tool must be a solid model.'),
-    );
-    return stock[combineModels]('cut', operands);
+    return this[combineModels]('cut', Array.isArray(tools) ? tools : [tools]);
   }
 
   fillet(
@@ -4482,9 +4505,27 @@ export class ModelObject<
   [combineModels](
     this: ModelObject<Elements, 'solid'>,
     operation: BooleanOperation,
-    others: readonly ModelObject<{}, 'solid'>[],
+    inputs: readonly unknown[],
     context?: SolveContext,
   ): SolidModel {
+    const name = operation === 'fuse' ? 'union' : operation;
+    const role = operation === 'cut' ? 'tool' : 'operand';
+    requireModelKind(
+      this,
+      'solid',
+      operation === 'cut'
+        ? 'The cut stock must be a solid model.'
+        : `The ${name} receiver must be a solid model.`,
+    );
+    if (inputs.length === 0)
+      throw new Error(`${name} requires at least one ${role}.`);
+    const others = inputs.map(input =>
+      requireModelKind(
+        input,
+        'solid',
+        `Every ${name} ${role} must be a solid model.`,
+      ),
+    );
     const evaluation = this.evaluateBoolean(operation, others, context);
     let transferred = false;
     try {
