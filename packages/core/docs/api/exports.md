@@ -2,7 +2,7 @@
 title: Core API export index
 description: Find the primary reference for every Core function, type, model member and integration entry point.
 sourceReview:
-  packageVersion: 0.0.1-alpha.15
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/index.ts
       sha256: 8f5784bccbc2f8a47139a71af3c3fbfe0c1e767dc9dcd61902fa06413dd40f54
@@ -20,8 +20,7 @@ sourceReview:
       sha256: 2c314699c2b47768bc4ae14b7713dc9eceb1111a3de7417820bdf4347bda3104
       commit: 5c8979f384280b644263a2d6ba3abacb69697c24
     - path: packages/core/package.json
-      sha256: b3a6ebe8a3696b9ea4cf0bc679a24c525c63c6c1f1bd7a36237c047c898119d7
-      commit: 46e4c98f6beadc8982ffc3362ad7c6ece7585f95
+      sha256: 08eda9195ce21309b89fd6c2389dbfa90ec202a872ab727df62dadc8736dd986
 sidebar:
   hidden: true
 head:
