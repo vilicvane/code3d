@@ -2,6 +2,7 @@ import type {ToolDragPreview} from './tool-drag-preview';
 import {gridStep, majorGridCells} from '../grid-scale';
 import {
   action,
+  autorun,
   computed,
   runInAction,
   makeObservable,
@@ -36,6 +37,10 @@ import {SketchRectangleDrawing} from '../tools/sketch-rectangle-drawing';
 import {SketchCircleDrawing} from '../tools/sketch-circle-drawing';
 import {SketchArcDrawing} from '../tools/sketch-arc-drawing';
 import {
+  SketchDrawingHistory,
+  type SketchDrawingSourceHistory,
+} from '../tools/sketch-drawing-history';
+import {
   sketchSegments,
   sketchSegmentDistance,
   sameSketchSegment,
@@ -49,6 +54,7 @@ import {
   sameSketchPoint as same,
   sketchDistance as distance,
   snapSketchPointer,
+  sketchSnapTargets,
   type SketchPoint as Point,
 } from '../tools/sketch-snap';
 import {DrawingInputs} from './drawing-inputs';
@@ -160,13 +166,14 @@ export class SketchEditor {
   private readonly snapLabel = svgElement('text');
   private readonly snapText = document.createTextNode('');
   private readonly drawingInputs = new DrawingInputs(
-    () => this.drawDraft(),
     () => this.place(),
     () => this.escape(),
   );
   private readonly abort = new AbortController();
   private readonly resize: ResizeObserver;
   private readonly stopDrawing: IReactionDisposer;
+  private readonly stopDraft: IReactionDisposer;
+  private readonly drawingHistory = new SketchDrawingHistory();
   readonly navigation = new SketchNavigation();
   private view?: SketchEditorView;
   private tool: 'Select' | 'Trim' | SketchDrawing = 'Select';
@@ -258,20 +265,44 @@ export class SketchEditor {
       mergeTarget?: SketchPointAddress,
     ) => Promise<SketchDragPreview>,
     private readonly reportMove: (error?: string) => void,
+    private readonly sourceHistory: SketchDrawingSourceHistory,
   ) {
-    makeObservable<this, 'view' | 'gesture' | 'pointerDown' | 'pointerUp'>(
+    makeObservable<
       this,
-      {
-        view: observableRef,
-        gesture: observableRef,
-        dragPreview: computed,
-        pointerDown: action,
-        pointerUp: action,
-        cancel: action,
-        show: action,
-        hide: action,
-      },
-    );
+      | 'view'
+      | 'gesture'
+      | 'tool'
+      | 'snapping'
+      | 'bypassSnap'
+      | 'snapTargets'
+      | 'pointerDown'
+      | 'pointerUp'
+      | 'pointerMove'
+      | 'place'
+      | 'keyDown'
+      | 'escape'
+      | 'selectConstraint'
+    >(this, {
+      view: observableRef,
+      gesture: observableRef,
+      tool: observableRef,
+      snapping: observableRef,
+      bypassSnap: observableRef,
+      snapTargets: computed,
+      dragPreview: computed,
+      pointerDown: action,
+      pointerUp: action,
+      pointerMove: action,
+      place: action,
+      keyDown: action,
+      selectConstraint: action,
+      escape: action,
+      runHistoryAction: action,
+      sourceHistoryChanged: action,
+      cancel: action,
+      show: action,
+      hide: action,
+    });
     this.root.className = 'sketch-editor';
     this.root.setAttribute('aria-label', 'Sketch editor');
     this.root.hidden = true;
@@ -312,30 +343,35 @@ export class SketchEditor {
     });
     this.root.addEventListener('pointerdown', event => event.stopPropagation());
     this.root.addEventListener('keydown', event => this.keyDown(event));
-    this.root.addEventListener('keyup', event => {
-      if (event.code === 'Space') this.space = false;
-      if (event.key === 'Alt') {
-        this.bypassSnap = false;
-        this.drawDraft();
-      }
-    });
-    this.root.addEventListener('focusout', event => {
-      if (
-        event.relatedTarget instanceof Node &&
-        this.root.contains(event.relatedTarget)
-      )
-        return;
-      this.space = false;
-      this.bypassSnap = false;
-      this.cancel();
-    });
-    window.addEventListener(
-      'blur',
-      () => {
+    this.root.addEventListener(
+      'keyup',
+      action(event => {
+        if (event.code === 'Space') this.space = false;
+        if (event.key === 'Alt') {
+          this.bypassSnap = false;
+        }
+      }),
+    );
+    this.root.addEventListener(
+      'focusout',
+      action(event => {
+        if (
+          event.relatedTarget instanceof Node &&
+          this.root.contains(event.relatedTarget)
+        )
+          return;
         this.space = false;
         this.bypassSnap = false;
         this.cancel();
-      },
+      }),
+    );
+    window.addEventListener(
+      'blur',
+      action(() => {
+        this.space = false;
+        this.bypassSnap = false;
+        this.cancel();
+      }),
       {signal: this.abort.signal},
     );
     const stage = document.createElement('div');
@@ -360,12 +396,16 @@ export class SketchEditor {
     this.toolbar.root.classList.add('sketch-toolbar');
     this.root.append(this.toolbar.root, this.constraintTools.root, stage);
     container.append(this.root);
-    this.resize = new ResizeObserver(() => this.draw());
+    this.resize = new ResizeObserver(() => {
+      this.draw();
+      this.drawDraft();
+    });
     this.resize.observe(this.svg);
     this.stopDrawing = reaction(
-      () => [this.view, this.navigation.pose],
+      () => [this.view, this.navigation.pose, this.tool, this.snapping],
       () => this.draw(),
     );
+    this.stopDraft = autorun(() => this.drawDraft());
   }
 
   show(view: SketchEditorView): void {
@@ -483,6 +523,7 @@ export class SketchEditor {
   dispose(): void {
     this.cancel();
     this.stopDrawing();
+    this.stopDraft();
     this.toolbar.dispose();
     this.constraintTools.dispose();
     this.navigation.reset();
@@ -498,7 +539,21 @@ export class SketchEditor {
     this.gesture = undefined;
     this.trimPointer = undefined;
     this.drawing?.reset();
+    this.drawingHistory.clear();
     this.draw();
+  }
+
+  runHistoryAction(action: 'undo' | 'redo'): boolean {
+    return (
+      !!this.drawing && !this.root.hidden && this.drawingHistory.run(action)
+    );
+  }
+
+  sourceHistoryChanged(
+    action: 'undo' | 'redo',
+    history: {before: number; after: number},
+  ): boolean {
+    return !!this.drawing && this.drawingHistory.sourceChanged(action, history);
   }
 
   private escape(): void {
@@ -521,7 +576,6 @@ export class SketchEditor {
     if (event.ctrlKey || event.metaKey) return;
     if (event.key === 'Alt') {
       this.bypassSnap = true;
-      this.drawDraft();
     }
     const canvas = event.target === this.svg;
     const input =
@@ -539,7 +593,6 @@ export class SketchEditor {
         if (!event.repeat) {
           this.drawing.toggleAxis(axis);
           this.drawingInputs.clearError();
-          this.drawDraft();
         }
       } else if (
         this.drawing.toggleDirection &&
@@ -549,7 +602,6 @@ export class SketchEditor {
         event.preventDefault();
         if (!event.repeat) {
           this.drawing.toggleDirection();
-          this.drawDraft();
         }
       } else if (
         event.key === 'Tab' &&
@@ -585,9 +637,16 @@ export class SketchEditor {
     }
   }
 
+  private get snapTargets() {
+    return sketchSnapTargets(
+      this.view?.layers ?? [],
+      this.gesture?.kind === 'move' ? this.gesture.target : undefined,
+    );
+  }
+
   private snapContext() {
     return {
-      points: this.points().reverse(),
+      ...this.snapTargets,
       scale: this.scale,
       gridStep: gridStep(this.scale),
       enabled: this.snapping && !this.bypassSnap,
@@ -609,24 +668,20 @@ export class SketchEditor {
       );
       return;
     }
-    const error = drawing.place(
-      endpoint,
-      this.view.id,
-      this.nextId(),
-      this.commit,
+    const error = this.drawingHistory.place(drawing, this.sourceHistory, () =>
+      drawing.place(endpoint, this.view!.id, this.nextId(), this.commit),
     );
-    this.draw();
     if (error) this.drawingInputs.report(error);
   }
 
   private createToolbar(): void {
-    const select = (create: () => 'Select' | 'Trim' | SketchDrawing) => () => {
-      this.cancel();
-      this.tool = create();
-      this.selection = [];
-      this.svg.focus();
-      this.draw();
-    };
+    const select = (create: () => 'Select' | 'Trim' | SketchDrawing) =>
+      action(() => {
+        this.cancel();
+        this.tool = create();
+        this.selection = [];
+        this.svg.focus();
+      });
     this.toolbar.add(this.toolbar.group('Select'), {
       name: 'Select',
       icon: MousePointer2,
@@ -670,12 +725,12 @@ export class SketchEditor {
     this.toolbar.add(viewing, {
       name: 'Snap',
       icon: Magnet,
-      title: 'Snap to points, origin, grid and directions · Hold Alt to bypass',
-      run: () => {
+      title:
+        'Snap to endpoints, centers, intersections, midpoints, quadrants, origin, grid and directions · Hold Alt to bypass',
+      run: action(() => {
         this.snapping = !this.snapping;
         this.svg.focus();
-        this.draw();
-      },
+      }),
     });
     this.toolbar.add(viewing, {
       name: 'Constraints',
@@ -934,9 +989,6 @@ export class SketchEditor {
       if (this.drawing) this.drawing.pointer = pointer;
       const gesture = this.gesture;
       if (gesture?.kind === 'move' && !gesture.released) {
-        // A snapped preview can alias the dragged point; candidate ownership
-        // still belongs to the unchanged gesture-start topology.
-        const resolve = sketchPointResolver(this.view!.layers);
         const endpoint = snapSketchPointer(
           [
             gesture.target.position[0] + pointer[0] - gesture.start[0],
@@ -945,11 +997,10 @@ export class SketchEditor {
           {kind: 'cartesian'},
           {
             ...this.snapContext(),
-            points: this.points().filter(
+            points: this.snapTargets.points.filter(
               point =>
-                !same(resolve(point), gesture.target) &&
-                (point.layer === this.view!.id ||
-                  this.view!.referenceable.has(point.layer)),
+                point.layer === this.view!.id ||
+                this.view!.referenceable.has(point.layer),
             ),
           },
         ).endpoint;
@@ -963,7 +1014,6 @@ export class SketchEditor {
       }
     }
     if (this.gesture || this.mode === 'Trim') this.draw();
-    else this.drawDraft();
   }
 
   private previewMove(gesture: Extract<Gesture, {kind: 'move'}>): void {
@@ -1285,7 +1335,6 @@ export class SketchEditor {
         shape.remove();
         this.shapes.delete(key);
       }
-    this.drawDraft();
     this.toolbar.update(name => {
       const drawingTool = drawingTools.some(([tool]) => tool === name);
       return {

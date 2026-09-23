@@ -14,7 +14,6 @@ export class DrawingInputs {
   private inputs: HTMLInputElement[] = [];
 
   constructor(
-    private readonly changed: () => void,
     apply: () => void,
     cancel: () => void,
     labels = {
@@ -98,7 +97,6 @@ export class DrawingInputs {
           measuredText.data = (input.value || input.placeholder) + ' ';
           input.dataset.entered = String(input.value.trim() !== '');
           this.clearError();
-          this.changed();
         });
         label.append(name, control);
         if (field.unit) label.append(field.unit);

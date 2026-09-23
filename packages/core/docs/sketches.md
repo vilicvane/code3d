@@ -37,6 +37,25 @@ derived layers, observations, and failure diagnostics. Use the [entity](api/sket
 [derived-layer](api/sketch-derive.md) and [region](api/sketch-faces.md) references
 for complete API rules.
 
+### Drawing and snapping in the App
+
+Select a sketch to draw continuous lines, rectangles, circles and arcs. **Snap**
+includes existing points (endpoints and centers), intersections of lines, circles
+and arcs, line and arc midpoints, and the four quadrant points of a circle.
+Geometry features take priority over the grid. Hold **Alt** to bypass snapping,
+or turn **Snap** off. Entered dimensions and X/Y direction locks remain in effect.
+Computed snap positions do not add persistent constraints; snapping to an existing
+point reuses that point's identity.
+
+With focus on the drawing canvas, **Undo** returns to the previous drawing step.
+Undoing a line segment restores its starting point so you can draw a replacement
+segment immediately. Undoing an arc restores its center, start point, direction
+and numeric inputs so you can choose a new endpoint. Unfinished steps, such as
+choosing an arc's center or start, can also be undone. **Redo** restores these
+steps and completed geometry. Circle and rectangle tools follow the same rule.
+Inside a numeric field, Undo and Redo edit the text. **Escape** cancels the current
+draft; switching tools or editing the source ends that drawing history.
+
 ### Editing dimensions and constraints in the App
 
 Click a dimension label, such as a circle's **R** label, to edit its value or

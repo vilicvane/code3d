@@ -140,6 +140,7 @@ function fixture(
             path: file.path,
             source: file.content,
             origin: 'agent',
+            history: {before: clock - 1, after: clock},
           });
         }
       }
@@ -193,6 +194,7 @@ function fixture(
         path,
         source: content,
         origin: 'user',
+        history: {before: clock - 1, after: clock},
       });
     },
   };

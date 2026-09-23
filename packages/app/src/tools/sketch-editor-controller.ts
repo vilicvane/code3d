@@ -59,6 +59,7 @@ export class SketchEditorController {
       readSource(ref: SourceRef): string | undefined;
       resolveSourceRef(ref: SourceRef): SourceRef | undefined;
       sourceVersion(): number;
+      sourceHistoryVersion(file: string): number;
       commit(intent: SketchEditIntent, undoGroup?: string): boolean;
       cancelEditGroup(file: string, undoGroup: string): void;
       resumeEditGroup(file: string, undoGroup: string): void;
@@ -102,6 +103,7 @@ export class SketchEditorController {
       retain: action,
       synchronizeSource: action,
       sourceEdited: action,
+      sourceHistoryChanged: action,
       commit: action,
       dispose: action,
     });
@@ -111,6 +113,11 @@ export class SketchEditorController {
       (id, position, previous, mergeTarget) =>
         this.preview(id, position, previous, mergeTarget),
       error => this.host.reportResult('move', error),
+      {
+        version: () =>
+          this.host.sourceHistoryVersion(this.active!.definitionRef!.file),
+        checkpoint: () => this.checkpointGeometry(),
+      },
     );
     this.stopView = reaction(
       () => this.view,
@@ -263,6 +270,33 @@ export class SketchEditorController {
     this.cancelSynchronization();
     this.stale = true;
     this.editor.cancel();
+  }
+
+  runHistoryAction(action: 'undo' | 'redo'): boolean {
+    return this.editor.runHistoryAction(action);
+  }
+
+  sourceHistoryChanged(
+    file: string,
+    action: 'undo' | 'redo',
+    history: {before: number; after: number},
+  ): void {
+    const restored =
+      this.active?.definitionRef?.file === file &&
+      this.editor.sourceHistoryChanged(action, history);
+    if (restored) {
+      this.revision++;
+      this.cancelSynchronization();
+    } else this.invalidate();
+  }
+
+  private checkpointGeometry(): () => void {
+    const {layers, data} = this;
+    return action(() => {
+      this.layers = layers;
+      this.data = data;
+      this.stale = false;
+    });
   }
 
   /** Formatting is part of the same source operation; other tool edits supersede it. */

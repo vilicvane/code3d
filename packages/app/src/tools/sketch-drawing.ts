@@ -6,6 +6,7 @@ import type {
   SketchArcDirection,
 } from '@code3d/core/tooling';
 import {DrawingDimensions} from './drawing-dimensions';
+import {action, computed, makeObservable, observableRef} from 'mobx';
 import type {SketchChange, SketchDraftEntry} from './sketch-source';
 import {
   endpointPosition,
@@ -37,6 +38,8 @@ export interface SketchDrawing {
   toggleAxis?(axis: SketchAxis): void;
   toggleDirection?(): void;
   reset(): void;
+  /** Restore a transient tool step; persisted geometry belongs to source history. */
+  checkpoint(): () => void;
   resolve(context: SketchSnapContext): SketchSnap;
   measurements(position: SketchPosition): Readonly<Record<string, number>>;
   preview(position: SketchPosition): readonly SketchDrawingCurve[];
@@ -103,6 +106,29 @@ export class SketchLineDrawing implements SketchDrawing {
   pointer: SketchPosition = [0, 0];
   axis?: SketchAxis;
   private startCoordinates: {axis: 'x' | 'y'; value: number}[] = [];
+
+  constructor() {
+    makeObservable(this, {
+      start: observableRef,
+      pointer: observableRef,
+      dimensions: observableRef,
+      axis: observableRef,
+      title: computed,
+      hasDraft: computed,
+      reset: action,
+      toggleAxis: action,
+      place: action,
+    });
+  }
+
+  checkpoint(): () => void {
+    const {start, axis, startCoordinates, dimensions} = this;
+    const restoreDimensions = dimensions.checkpoint();
+    return action(() => {
+      Object.assign(this, {start, axis, startCoordinates, dimensions});
+      restoreDimensions();
+    });
+  }
 
   get title(): string {
     return this.start

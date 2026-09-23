@@ -1,4 +1,5 @@
 import {sourceExpressionError} from './source-expression';
+import {action, computed, makeObservable, observableRef} from 'mobx';
 
 export type DrawingDimension = Readonly<{
   id: string;
@@ -10,18 +11,34 @@ export type DrawingDimension = Readonly<{
 
 /** Text in progress and accepted preview values have separate lifetimes. */
 export class DrawingDimensions {
-  private readonly drafts = new Map<string, {text: string; value?: number}>();
+  private drafts: ReadonlyMap<string, {text: string; value?: number}> =
+    new Map();
 
   constructor(
     readonly definitions: readonly DrawingDimension[],
     private readonly changed?: (id: string) => void,
     readonly expressions = false,
   ) {
+    makeObservable<this, 'drafts'>(this, {
+      drafts: observableRef,
+      edited: computed,
+      clear: action,
+      set: action,
+    });
     this.clear();
   }
 
   clear(): void {
-    for (const field of this.definitions) this.drafts.set(field.id, {text: ''});
+    this.drafts = new Map(
+      this.definitions.map(field => [field.id, {text: ''}]),
+    );
+  }
+
+  checkpoint(): () => void {
+    const drafts = this.drafts;
+    return action(() => {
+      this.drafts = drafts;
+    });
   }
 
   get edited(): boolean {
@@ -38,11 +55,18 @@ export class DrawingDimensions {
 
   set(id: string, text: string): void {
     const draft = this.drafts.get(id)!;
-    draft.text = text;
+    const next = new Map(this.drafts);
+    next.set(id, {...draft, text});
+    this.drafts = next;
     // Keep the last valid preview while the user enters a sign or exponent.
     if (!this.error(id))
-      draft.value =
-        text.trim() && Number.isFinite(Number(text)) ? Number(text) : undefined;
+      next.set(id, {
+        text,
+        value:
+          text.trim() && Number.isFinite(Number(text))
+            ? Number(text)
+            : undefined,
+      });
     this.changed?.(id);
   }
 

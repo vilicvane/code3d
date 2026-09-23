@@ -1,4 +1,12 @@
-import type {SketchPointAddress, SketchPosition} from '@code3d/core/tooling';
+import {
+  sketchCurveGeometry,
+  sketchCurveIntersections,
+  sketchCurvePosition,
+  sketchPointResolver,
+  type SketchPointAddress,
+  type SketchPosition,
+  type SketchSnapshot,
+} from '@code3d/core/tooling';
 
 export type SketchPoint = SketchPointAddress & {position: SketchPosition};
 export type SketchEndpoint = {point: SketchPoint} | {position: SketchPosition};
@@ -15,14 +23,91 @@ export type SketchInputGeometry =
     };
 export type SketchSnap = {
   endpoint: SketchEndpoint;
-  hint?: 'Point' | 'Origin' | 'Horizontal' | 'Vertical' | 'Grid';
+  hint?:
+    | 'Point'
+    | 'Origin'
+    | 'Horizontal'
+    | 'Vertical'
+    | 'Grid'
+    | SketchSnapFeature['hint'];
+};
+export type SketchSnapFeature = {
+  position: SketchPosition;
+  hint: 'Intersection' | 'Midpoint' | 'Quadrant';
 };
 export type SketchSnapContext = {
   points: readonly SketchPoint[];
+  features: readonly SketchSnapFeature[];
   scale: number;
   gridStep: number;
   enabled: boolean;
 };
+
+/** Model-space features, independent of the pointer and view scale. */
+export function sketchSnapTargets(
+  layers: readonly SketchSnapshot[],
+  excluded?: SketchPointAddress,
+): Pick<SketchSnapContext, 'points' | 'features'> {
+  const allPoints = layers.flatMap(layer =>
+    layer.entities.flatMap(entity =>
+      entity.kind === 'point'
+        ? [{layer: layer.id, id: entity.id, position: entity.position}]
+        : [],
+    ),
+  );
+  const resolve = sketchPointResolver(layers);
+  const excludedPoint =
+    excluded && allPoints.some(point => sameSketchPoint(point, excluded))
+      ? resolve(excluded)
+      : undefined;
+  const excludes = (point: SketchPointAddress) =>
+    !!excludedPoint && sameSketchPoint(resolve(point), excludedPoint);
+  const curves = layers.flatMap(layer =>
+    layer.entities.flatMap(entity => {
+      if (
+        (excluded &&
+          sameSketchPoint(excluded, {layer: layer.id, id: entity.id})) ||
+        (entity.kind === 'line' && entity.points.some(excludes)) ||
+        (entity.kind === 'arc' &&
+          (excludes(entity.center) || entity.points.some(excludes))) ||
+        (entity.kind === 'circle' && excludes(entity.center))
+      )
+        return [];
+      const curve = sketchCurveGeometry(
+        entity,
+        ref => allPoints.find(point => sameSketchPoint(point, ref))!.position,
+      );
+      return curve ? [curve] : [];
+    }),
+  );
+  const features: SketchSnapFeature[] = [];
+  curves.forEach((curve, index) => {
+    for (const other of curves.slice(index + 1))
+      for (const contact of sketchCurveIntersections(curve, other))
+        features.push({position: contact.position, hint: 'Intersection'});
+  });
+  for (const curve of curves) {
+    if (curve.kind === 'circle') {
+      const [x, y] = curve.center;
+      for (const position of [
+        [x + curve.radius, y],
+        [x, y + curve.radius],
+        [x - curve.radius, y],
+        [x, y - curve.radius],
+      ] as const)
+        features.push({position, hint: 'Quadrant'});
+    } else
+      features.push({
+        position: sketchCurvePosition(curve, 0.5),
+        hint: 'Midpoint',
+      });
+  }
+  // Actual point identities (including curve endpoints and centers) win ties.
+  return {
+    points: allPoints.filter(point => !excludes(point)).reverse(),
+    features,
+  };
+}
 
 export const endpointPosition = (endpoint: SketchEndpoint): SketchPosition =>
   'point' in endpoint ? endpoint.point.position : endpoint.position;
@@ -119,6 +204,15 @@ export function snapSketchPointer(
         sketchDistance(position, b.position),
     )[0];
   if (point) return {endpoint: {point}, hint: 'Point'};
+  const feature = context.features
+    .filter(feature => close(feature.position) && compatible(feature.position))
+    .sort(
+      (a, b) =>
+        sketchDistance(position, a.position) -
+        sketchDistance(position, b.position),
+    )[0];
+  if (feature)
+    return {endpoint: {position: feature.position}, hint: feature.hint};
   if (close([0, 0]) && compatible([0, 0]))
     return {endpoint: {position: [0, 0]}, hint: 'Origin'};
 

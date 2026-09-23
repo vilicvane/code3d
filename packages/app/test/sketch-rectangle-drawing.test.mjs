@@ -14,7 +14,13 @@ before(async () => {
   ));
 });
 after(async () => server?.close());
-const context = {points: [], scale: 10, gridStep: 1, enabled: false};
+const context = {
+  points: [],
+  features: [],
+  scale: 10,
+  gridStep: 1,
+  enabled: false,
+};
 const position = snap =>
   snap.endpoint.point?.position ?? snap.endpoint.position;
 function place(drawing, point, commit, nextId = 1) {

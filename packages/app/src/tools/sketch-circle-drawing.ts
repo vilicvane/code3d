@@ -4,6 +4,7 @@ import type {
   SketchConstraint,
 } from '@code3d/core/tooling';
 import {DrawingDimensions} from './drawing-dimensions';
+import {action, computed, makeObservable, observableRef} from 'mobx';
 import {
   SketchDrawingGeometry,
   sketchCoordinateInputs,
@@ -27,6 +28,27 @@ export class SketchCircleDrawing implements SketchDrawing {
   pointer: SketchPosition = [0, 0];
   dimensions = sketchCoordinateInputs();
   private centerCoordinates: {axis: 'x' | 'y'; value: number}[] = [];
+
+  constructor() {
+    makeObservable(this, {
+      start: observableRef,
+      pointer: observableRef,
+      dimensions: observableRef,
+      title: computed,
+      hasDraft: computed,
+      reset: action,
+      place: action,
+    });
+  }
+
+  checkpoint(): () => void {
+    const {start, centerCoordinates, dimensions} = this;
+    const restoreDimensions = dimensions.checkpoint();
+    return action(() => {
+      Object.assign(this, {start, centerCoordinates, dimensions});
+      restoreDimensions();
+    });
+  }
 
   get title() {
     return this.start ? 'Radius' : 'Center';

@@ -104,6 +104,7 @@ test('entered sweep projects the endpoint, preserves compatible references and c
     };
     const resolved = tool.resolve({
       points: [end],
+      features: [],
       scale: 10,
       gridStep: 1,
       enabled: true,
@@ -149,7 +150,13 @@ test('sweep field rejects zero/full turns, retains valid preview during incomple
   assert.equal(tool.dimensions.value('sweep'), undefined);
   tool.pointer = [0, 10];
   assert.deepEqual(
-    tool.resolve({points: [], scale: 10, gridStep: 1, enabled: false}).endpoint,
+    tool.resolve({
+      points: [],
+      features: [],
+      scale: 10,
+      gridStep: 1,
+      enabled: false,
+    }).endpoint,
     {position: [0, 10]},
   );
   tool.reset();
@@ -321,6 +328,7 @@ test('arc drawing projects to its finite radius, preserves compatible point refe
   tool.pointer = [0, 12];
   const resolved = tool.resolve({
     points: [center, start, end],
+    features: [],
     scale: 10,
     gridStep: 1,
     enabled: true,
