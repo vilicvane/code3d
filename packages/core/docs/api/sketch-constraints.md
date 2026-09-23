@@ -2,17 +2,15 @@
 title: Sketch constraints
 description: Constrain sketch points and curves while preserving explicit geometric freedom.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: d50769e828b4ab70584e1a217c6022d3a1c254a825bcc24bd5444039ef0e6488
-      commit: e29dfd1ac9d22a728186d68bdd9129b60c908091
+      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
     - path: packages/core/src/library/sketch-solver.ts
       sha256: 176f9f8a38507100328aaba71a2ef226b6e914e5718cf3a00b2bc018a7bab565
       commit: 63b63837410721d7f9c44db1e721e5c52250f8d4
     - path: packages/core/src/library/sketch-drag-rules.ts
-      sha256: a85e12b735456ebc6963da7269fdf21a4ffca53ce8e16cdc6499fbb03691efd1
-      commit: 5fbd2667b4a0867cf099d0a3501cfbd94e7f3ab5
+      sha256: 457db01f4c7812790d57687d6e033f9a683c03258c6f53023338f541404dd80f
 sidebar:
   hidden: true
 head:
@@ -80,7 +78,9 @@ Pass constraints in the second argument of [sketch](sketch.md) or
 [derive](sketch-derive.md). They have no persistent IDs; an array index identifies
 a condition only in the current definition. Numbers referring to points or
 curves are local IDs. Point targets may also be upstream `SketchPoint` values;
-curve targets must be local curves of the required kind.
+curve targets must be local curves of the required kind. Construction curves
+participate in the same constraint solve; the auxiliary type prefix only excludes
+them from face boundaries.
 
 | Tuple                                | Condition and allowed targets                                |
 | ------------------------------------ | ------------------------------------------------------------ |
@@ -143,3 +143,8 @@ Dragging uses temporary preferences in addition to these hard conditions; it
 does not silently add `fixed` or `radius` tuples. Read-only upstream geometry and
 hard constraints take precedence over the pointer. See the [editor workflow](../sketches.md)
 for selection, dimension tools and drag behavior.
+
+GUI constraint edits also preserve existing point-on-curve connections, including
+construction geometry, by synchronizing the solved editable coordinates in the
+same undo step. Ordinary source evaluation applies only the authored constraints;
+coordinates that happen to lie on a circle do not define a persistent relation.

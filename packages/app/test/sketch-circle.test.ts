@@ -22,7 +22,13 @@ before(async () => {
   )) as typeof geometry;
 });
 after(async () => server?.close());
-const context = {points: [], scale: 10, gridStep: 1, enabled: false};
+const context = {
+  points: [],
+  features: [],
+  scale: 10,
+  gridStep: 1,
+  enabled: false,
+};
 const ref = (id: number, layer = 'local') => ({id, layer});
 const near = (a: number, b: number) =>
   assert.ok(Math.abs(a - b) < 1e-6, `${a} != ${b}`);

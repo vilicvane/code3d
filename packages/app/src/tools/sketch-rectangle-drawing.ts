@@ -4,6 +4,7 @@ import type {
   SketchPointAddress,
 } from '@code3d/core/tooling';
 import {DrawingDimensions} from './drawing-dimensions';
+import {action, computed, makeObservable, observableRef} from 'mobx';
 import {
   enteredSketchCoordinates,
   sketchCoordinateInputs,
@@ -20,7 +21,26 @@ import type {SketchChange} from './sketch-source';
 
 /** Rectangle construction modes persist only ordinary points, lines and constraints. */
 export class SketchRectangleDrawing implements SketchDrawing {
-  constructor(private readonly mode: 'corner' | 'center' = 'corner') {}
+  constructor(private readonly mode: 'corner' | 'center' = 'corner') {
+    makeObservable(this, {
+      start: observableRef,
+      pointer: observableRef,
+      dimensions: observableRef,
+      title: computed,
+      hasDraft: computed,
+      reset: action,
+      place: action,
+    });
+  }
+
+  checkpoint(): () => void {
+    const {start, startCoordinates, dimensions} = this;
+    const restoreDimensions = dimensions.checkpoint();
+    return action(() => {
+      Object.assign(this, {start, startCoordinates, dimensions});
+      restoreDimensions();
+    });
+  }
 
   get name(): string {
     return this.mode === 'center' ? 'Center rectangle' : 'Rectangle';

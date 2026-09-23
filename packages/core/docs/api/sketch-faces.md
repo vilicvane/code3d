@@ -5,11 +5,9 @@ sourceReview:
   packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: d50769e828b4ab70584e1a217c6022d3a1c254a825bcc24bd5444039ef0e6488
-      commit: e29dfd1ac9d22a728186d68bdd9129b60c908091
+      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
     - path: packages/core/src/library/sketch-regions.ts
-      sha256: 62233d8c0216d2c4106b4b62a46b7a161f3a7da842f55ec130697869989c9d90
-      commit: 05622140a97db31781700f6cb55e6ac7a36029ad
+      sha256: 3519e575f6eaccc71b549176e937e86d3dd077df100829a9b3d5928e6a163c01
     - path: packages/core/src/library/sketch-face.ts
       sha256: d7e04ff3e3e17766080f0c4916114d2ec97b42b0bcfd57c9df88d3726c2ba51c
       commit: 05622140a97db31781700f6cb55e6ac7a36029ad
@@ -69,17 +67,23 @@ as [extrude](extrude.md).
 
 ## Boundaries, holes and islands
 
-Extraction includes all local and upstream-layer boundaries. Separate contours
+Extraction includes all ordinary local and upstream-layer boundaries.
+[Construction curves](sketch-entities.md#construction-geometry) are excluded before
+contour validation: they cannot split regions, create holes or prevent a unique
+face. A sketch containing only construction geometry returns `[]` from `faces()`
+and reports zero regions from `face()`. Separate contours
 produce separate faces. Nested contours alternate material, holes and islands:
 an outer circle with an inner circle gives one annular face; a third circle
 inside that hole adds another material island. Standalone point entities do not
 create regions, and aliases do not duplicate boundaries.
 
-Lines and arcs must form closed, nonbranching contours. Open, crossing, touching,
-overlapping, degenerate or branching boundaries report an error; extraction does
-not infer arbitrary trims or split a crossing into regions. Complete or trim
-these boundaries before requesting a face. An unfinished sketch remains useful
-for editing and inspection even when face construction cannot succeed.
+Line, circle and arc intersections divide boundaries into finite regions without
+changing the authored entities or IDs. An endpoint can meet the interior of another
+curve; open tails and bridges do not add regions or invalidate closed areas.
+Crossings can create multiple faces: a square with an ordinary diagonal has two,
+while making that diagonal auxiliary leaves one. A sketch with only open curves
+returns `[]`. Duplicate or partially overlapping boundaries still report an error;
+trim the duplicate portions before requesting a face.
 
 ## Coordinates and model operations
 

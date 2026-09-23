@@ -3,7 +3,10 @@ import * as THREE from 'three';
 import {spatialAxisColors} from '../spatial-axis-colors';
 import type {ViewportMeasurementDecoration} from '../viewport-decoration';
 import type {LineSegments2} from 'three/addons/lines/LineSegments2.js';
-import {createScreenSpaceEdgeLines} from './screen-space-lines';
+import {
+  createScreenSpaceEdgeLines,
+  ScreenSpaceDashedLines,
+} from './screen-space-lines';
 import {worldUnitsPerPixel} from './screen-space';
 
 const labelStyle = {
@@ -16,7 +19,7 @@ const labelStyle = {
   background: '#252525',
 } as const;
 
-const lineStyle = {width: 1, dash: 6, gap: 4, tick: 12} as const;
+const lineStyle = {width: 1, tick: 12} as const;
 
 /** Passive dimension: a measured segment or highlighted edge with a value label. */
 export class MeasurementDecorationObject extends THREE.Group {
@@ -48,7 +51,12 @@ export class MeasurementDecorationObject extends THREE.Group {
     this.midpoint = this.start.clone().add(this.end).multiplyScalar(0.5);
     const {color, opacity} = decoration.appearance;
     if (this.start.distanceToSquared(this.end) > 0) {
-      const line = createScreenSpaceEdgeLines(
+      const createLine =
+        decoration.style === 'edge'
+          ? createScreenSpaceEdgeLines
+          : (...args: ConstructorParameters<typeof ScreenSpaceDashedLines>) =>
+              new ScreenSpaceDashedLines(...args);
+      const line = createLine(
         new Float32Array([...this.start.toArray(), ...this.end.toArray()]),
         color,
         lineStyle.width,
@@ -57,24 +65,6 @@ export class MeasurementDecorationObject extends THREE.Group {
         30,
       );
       line.name = 'distance-line';
-      line.material.dashed = decoration.style !== 'edge';
-      if (line.material.dashed) {
-        line.material.dashSize = lineStyle.dash;
-        line.material.gapSize = lineStyle.gap;
-        line.computeLineDistances();
-        // LineMaterial's default distances are in model units. Interpolate pixel
-        // distance without perspective correction so even a receding line keeps
-        // the same dash length. gl_FragCoord.w cancels the varying's correction.
-        line.material.vertexShader = line.material.vertexShader.replace(
-          'vec3 ndcEnd = clipEnd.xyz / clipEnd.w;',
-          `vec3 ndcEnd = clipEnd.xyz / clipEnd.w;
-        vLineDistance = position.y < 0.5 ? 0.0 : length((ndcEnd.xy - ndcStart.xy) * resolution * 0.5) * clipEnd.w;`,
-        );
-        line.material.fragmentShader = line.material.fragmentShader.replace(
-          'vLineDistance + dashOffset',
-          'vLineDistance * gl_FragCoord.w + dashOffset',
-        );
-      }
       this.add(line);
     }
     this.ticks = createScreenSpaceEdgeLines(

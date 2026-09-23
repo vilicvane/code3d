@@ -77,7 +77,7 @@ Complete example: [part placement and rotation](../app/examples/constraints/rela
 - [Shells](docs/shells.mdx): hollow solids and choose openings.
 - [Topology references](docs/api/vertex.md): select vertices, edges and surfaces; [reference elements](docs/api/reference-elements.md) and [directional bounds](docs/api/directional-bounds.md) define placement interfaces.
 - [Topology workflow](docs/topology.md): visual selection and stable IDs across modeling operations.
-- [Editable sketches](docs/sketches.md): draw and constrain planar geometry.
+- [Editable sketches](docs/sketches.md): draw and constrain planar geometry, with construction curves for reference.
 - [Text and fonts](docs/text.md): build planar or curved lettering.
 - [Curved surface wrapping](docs/api.md#curved-surface-wrapping): wrap profiles and thicken along surface normals.
 - [Reusable models](../web/src/content/docs/docs/guides/reusable-models.mdx): compose model functions.

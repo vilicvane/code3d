@@ -528,8 +528,29 @@ export const body = profile.face().extrude(10);`;
     '/model.ts',
   );
   assert.equal(module.diagnostic.kind, 'evaluation');
-  assert.match(module.diagnostic.summary, /open/);
+  assert.match(module.diagnostic.summary, /found 0/);
   const ref = module.diagnostic.sourceRef;
   assert.match(source.slice(ref.start, ref.end), /face/);
   assert.equal(module.sketches.size, 1);
+});
+
+test('auxiliary circles and arcs retain authored radius parameters for edits and source synchronization', async () => {
+  const module = await compile(`const r = 5;
+const profile = sketch([
+  ['point',1,[0,0]],['aux:circle',2,[1,r]],
+  ['point',3,[5,0]],['point',4,[0,5]],['aux:arc',5,[1,r,3,4,'ccw']],
+]);`);
+  const value = [...module.sketches.values()][0];
+  assert.deepEqual(
+    value.data.filter(e => [2, 5].includes(e.id)),
+    [
+      {id: 2, parameters: [5]},
+      {id: 5, parameters: [5]},
+    ],
+  );
+  assert.ok(
+    value.entities
+      .filter(e => e.kind === 'circle' || e.kind === 'arc')
+      .every(e => e.construction && e.radius === 5),
+  );
 });

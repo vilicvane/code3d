@@ -101,6 +101,22 @@ async function handle(
         diagnostic: diagnosticFromError(error),
       });
     }
+  } else if (data.kind === 'sketch-constraints') {
+    try {
+      send({
+        kind: 'sketch-constraints',
+        id: data.id,
+        ok: true,
+        preview: executor.previewSketchConstraintEdit(data.layers, data.edit),
+      });
+    } catch (error) {
+      send({
+        kind: 'result',
+        id: data.id,
+        ok: false,
+        diagnostic: diagnosticFromError(error),
+      });
+    }
   } else if (data.kind === 'export' || data.kind === 'topology') {
     try {
       if (compileId !== data.compileId)

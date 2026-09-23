@@ -27,7 +27,7 @@ export {
   installSketchSolver,
 } from '../library/sketch-solver.js';
 export {
-  assertSketchDragConnections,
+  sketchConnectionsPreserved,
   isSketch,
   sketchDefinition,
   sketchDragRequiresSolver,

@@ -79,6 +79,43 @@ function setup(source, before = '') {
   };
 }
 
+test('construction toggles only the type prefix and round-trips expressions, comments and constraints', () => {
+  const source =
+    "[['point',1,[width,0]],['point',2,[0,height]],['line',3,[1,2]],[ /* reference */ 'circle',4,[1,r]]], {constraints: [['radius',4,r]]}";
+  const model = setup(source);
+  assert.equal(
+    model.edit({kind: 'construction', ids: [3, 4, 3], construction: true})
+      .status,
+    'committed',
+  );
+  assert.equal(
+    model.source(),
+    source.replace("'line'", "'aux:line'").replace("'circle'", "'aux:circle'"),
+  );
+  assert.equal(model.undo.length, 1);
+  assert.equal(model.undo[0], source);
+  assert.equal(
+    model.edit({kind: 'construction', ids: [3, 4], construction: false}).status,
+    'committed',
+  );
+  assert.equal(model.source(), source);
+});
+
+test('computed type names cannot be overwritten by a construction toggle', () => {
+  for (const kind of ['kind', "flag ? 'aux:line' : 'line'", "'aux:' + type"]) {
+    const source = `[['point',1,[0,0]],['point',2,[5,0]],['line',3,[1,2]],[${kind},4,[1,2]]]`;
+    assert.ok(analyzeSketchSource(source).reason);
+    const model = setup(source);
+    assert.equal(
+      model.edit({kind: 'construction', ids: [3, 4], construction: true})
+        .status,
+      'unsupported',
+    );
+    assert.equal(model.source(), source);
+    assert.equal(model.undo.length, 0);
+  }
+});
+
 test('line relation additions share one source transaction and preserve orientation and angle values separately', () => {
   const model = setup(
     "[['point',1,[width,0]]], {constraints: [['angle',3,theta]]}",

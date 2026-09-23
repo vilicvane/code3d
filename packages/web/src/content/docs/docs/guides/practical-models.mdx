@@ -25,6 +25,22 @@ context; it is not a snapping or external-constraint source. Select `mountingPla
 to inspect the cut, or return to the sketch and move an endpoint. Undo restores
 the same source geometry. Selecting a face does not automatically create a sketch.
 
+When drawing, **Snap** finds endpoints, centers, intersections and midpoints as
+well as the grid. **Undo** restores the previous construction step, so a line or
+arc can continue from its earlier anchor. See [drawing and snapping](../../../../../../core/docs/sketches.md#drawing-and-snapping-in-the-app)
+for the full snap targets, keyboard controls and step-by-step undo behavior.
+
+Select reference lines, circles or arcs and click **Construction** to show them as
+dashed geometry in both the sketch editor and 3D view. They still support snapping and constraints, while `face()` and
+`faces()` ignore them. Source uses `aux:line`, `aux:circle` or `aux:arc`; clicking again
+removes the `aux:` prefix. Closed regions are detected at intersections, and open
+line tails do not prevent face creation. See
+[construction geometry](../../../../../../core/docs/sketches.md#construction-geometry).
+
+Adding or editing sketch constraints keeps existing points connected to their
+lines, circles and arcs, including construction curves. The constraint and the
+updated coordinates share one Undo step. See [editing constraints](../../../../../../core/docs/sketches.md#editing-dimensions-and-constraints-in-the-app).
+
 The companion `sketches/constraints.ts` shows one rectangular plate with a hole.
 Horizontal and vertical constraints preserve its shape while its height and hole
 position remain editable. Click the hole's **R** label and change its radius from

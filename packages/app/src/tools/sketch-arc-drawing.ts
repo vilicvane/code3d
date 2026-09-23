@@ -6,6 +6,7 @@ import {
   type SketchPosition,
 } from '@code3d/core/tooling';
 import {DrawingDimensions} from './drawing-dimensions';
+import {action, computed, makeObservable, observableRef} from 'mobx';
 import {
   enteredSketchCoordinates,
   sketchCoordinateInputs,
@@ -32,6 +33,38 @@ export class SketchArcDrawing implements SketchDrawing {
   private radius?: number;
   pointer: SketchPosition = [0, 0];
   dimensions = sketchCoordinateInputs();
+
+  constructor() {
+    makeObservable<this, 'arcStart' | 'direction'>(this, {
+      start: observableRef,
+      arcStart: observableRef,
+      direction: observableRef,
+      pointer: observableRef,
+      dimensions: observableRef,
+      title: computed,
+      hasDraft: computed,
+      reset: action,
+      toggleDirection: action,
+      place: action,
+    });
+  }
+
+  checkpoint(): () => void {
+    const {start, arcStart, direction, centerCoordinates, radius, dimensions} =
+      this;
+    const restoreDimensions = dimensions.checkpoint();
+    return action(() => {
+      Object.assign(this, {
+        start,
+        arcStart,
+        direction,
+        centerCoordinates,
+        radius,
+        dimensions,
+      });
+      restoreDimensions();
+    });
+  }
 
   get title() {
     return this.arcStart

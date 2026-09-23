@@ -18,7 +18,6 @@ export class SketchConstraintTools {
   readonly root = document.createElement('div');
   private toolbar = new Toolbar('Selection constraints');
   private readonly inputs = new DrawingInputs(
-    () => {},
     () => this.apply(),
     () => this.cancel(),
     {

@@ -1181,6 +1181,8 @@ const sketchEditor = new SketchEditorController(viewportHost, {
   reportResult: (operation, error) =>
     toolFeedback.report(`sketch:${operation}`, error),
   solve: (layers, drag) => compiler.previewSketchDrag(layers, drag),
+  solveConstraints: (layers, edit) =>
+    compiler.previewSketchConstraintEdit(layers, edit),
   resolveSourceRef: ref => codeEditor.resolveSourceRef(ref),
   readSource: ref => {
     const current = codeEditor.resolveSourceRef(ref);
@@ -1191,6 +1193,7 @@ const sketchEditor = new SketchEditorController(viewportHost, {
     codeEditor.discardPendingToolFormat(file, undoGroup);
     codeEditor.endSourceEditGroup(undoGroup);
   },
+  sourceHistoryVersion: file => codeEditor.sourceHistoryVersion(file),
   resumeEditGroup: (file, undoGroup) =>
     codeEditor.resumeSourceEditGroup(file, undoGroup),
   commit: (intent, undoGroup) =>
@@ -1500,6 +1503,12 @@ codeEditor.onChange(change => {
   if (!toolChange && !editingHistoryChange) abandonContextualTool();
   if (toolChange) renderContextualToolPanel();
   if (toolChange) sketchEditor.sourceEdited(change.undoGroup);
+  else if (historyChange)
+    sketchEditor.sourceHistoryChanged(
+      change.path,
+      change.origin as 'undo' | 'redo',
+      change.history,
+    );
   else sketchEditor.invalidate();
   agentProject.recordEditorChange(change);
   if (!toolChange) sourceEditPopover.dismiss();
@@ -1858,7 +1867,8 @@ window.addEventListener('keydown', event => {
   }
   const historyAction = sourceHistoryAction(event);
   if (historyAction && !codeEditor.ownsFocus()) {
-    codeEditor.runHistoryAction(historyAction);
+    if (!sketchEditor.runHistoryAction(historyAction))
+      codeEditor.runHistoryAction(historyAction);
     event.preventDefault();
     return;
   }
@@ -2559,7 +2569,15 @@ async function runModel(
     const nextModule = await compilation;
     if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
       return false;
-    if (sketchEditor.synchronizeSource(nextModule.warnings)) return false;
+    if (
+      await sketchEditor.synchronizeSource(
+        nextModule.warnings,
+        nextModule.sketches,
+      )
+    )
+      return false;
+    if (!previewState.isCurrent(request, codeEditor.sourceVersion()))
+      return false;
     let cursor = codeEditor.cursorSource();
     let selection: ReturnType<typeof sourceInspectionSelection> | undefined;
     let scene: Awaited<ReturnType<typeof compiler.inspect>>;

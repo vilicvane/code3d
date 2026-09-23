@@ -2,14 +2,15 @@
 title: Sketch snapshots and solving
 description: Snapshot sketch layers, retain point identities and run the same constrained solver used for evaluation and dragging.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/sketch-solver.ts
       sha256: 176f9f8a38507100328aaba71a2ef226b6e914e5718cf3a00b2bc018a7bab565
       commit: 63b63837410721d7f9c44db1e721e5c52250f8d4
     - path: packages/core/src/library/sketch.ts
-      sha256: d50769e828b4ab70584e1a217c6022d3a1c254a825bcc24bd5444039ef0e6488
-      commit: e29dfd1ac9d22a728186d68bdd9129b60c908091
+      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
+    - path: packages/core/src/library/sketch-incidence.ts
+      sha256: 187cca5b0b2c8fd49713400de40911f04cf7d0878e77dd0a97483e26977166db
 sidebar:
   hidden: true
 head:
@@ -77,17 +78,28 @@ points and detects alias cycles; it does not itself return point coordinates.
 ## Solving and dragging
 
 `installSketchSolver(instance)` installs the initialized PlaneGCS module before
-constrained solves. `solveSketchSnapshot(layers, drag?)` solves the final local
+constrained solves. `solveSketchSnapshot(layers, edit?)` solves the final local
 layer with upstream layers available as fixed references. It returns a new local
 snapshot, with solved parameters, degrees of freedom and redundant constraints.
 The arrays must contain at least the local layer in base-to-derived order.
 
 A drag specifies a local point `id` and 2D `position`. Its optional `reference`
 is gesture-start geometry, while the current snapshot supplies the numeric seed.
-Optional `locks` are gesture-only `{id, parameter, value}` parameter locks;
+Optional `locks` are edit-only `{id, parameter, value}` parameter locks;
 they are not new authored constraints. Source replay should call
-`assertSketchDragConnections(layers, reference)` before accepting the edit; it
-throws if a gesture-start point-on-curve connection was lost.
+`sketchConnectionsPreserved(layers, reference)` before accepting the edit; it
+returns false if an edit-start point-on-curve connection was lost. The reference
+and replay must share the same entity topology and layer identities.
+
+An edit with `reference` and no pointer `id` / `position` applies the current
+snapshot's constraints while retaining connections from that reference. Seed
+the snapshot with the edit-start geometry and the newly evaluated constraints.
+Lines and arcs retain finite bounds; points and radii prefer their original
+values where the constraints leave freedom. Both interactive modes keep the input
+snapshot's constraint metadata. Persist only editable parameters, replay the
+ordinary source solve, and use that replay's constraint metadata and geometry
+for the final view. Neither edit-only connections nor parameter locks become
+persistent constraints.
 
 `sketchDragRequiresSolver(layers)` detects local constraints, arcs or incidences
 requiring the solver. It is not a test that the sketch is fully constrained.
@@ -107,7 +119,10 @@ numbers; this helper is not a high-level validation or constraint solver.
 
 `SketchEntitySnapshot` is the point/line/circle/arc union below. Points have
 `position` and optional `alias`; lines hold two point addresses; circles have a
-center address and radius; arcs add endpoint addresses and `direction`.
+center address and radius; arcs add endpoint addresses and `direction`. All three
+curve snapshots normalize the authored `aux:` prefix to optional `construction`,
+retained by solving and numeric
+parameter updates. It affects region extraction, not solver participation.
 `SketchSnapshot` has `id`, optional `base`, local `entities`, address-based
 `constraints`, `degreesOfFreedom` and `redundant` indices.
 
@@ -139,13 +154,13 @@ class SketchConstraintError extends Error {
 function installSketchSolver(instance: ModuleStatic): void;
 ```
 
-### assertSketchDragConnections
+### sketchConnectionsPreserved
 
 ```ts
-function assertSketchDragConnections(
+function sketchConnectionsPreserved(
   layers: readonly SketchSnapshot[],
   reference: SketchSnapshot,
-): void;
+): boolean;
 ```
 
 ### isSketch
@@ -208,18 +223,20 @@ function snapshotSketch(
 ```ts
 function solveSketchSnapshot(
   layers: readonly SketchSnapshot[],
-  drag?: Readonly<{
-    id: number;
-    position: SketchPosition;
-    /** Gesture-start geometry; previous-frame geometry remains the numeric seed. */
+  edit?: Readonly<{
+    /** Edit-start geometry; previous-frame geometry remains the numeric seed. */
     reference?: SketchSnapshot;
-    /** Numeric, gesture-only parameter locks; never author constraints. */
+    /** Numeric, edit-only parameter locks; never author constraints. */
     locks?: readonly Readonly<{
       id: number;
       parameter: number;
       value: number;
     }>[];
-  }>,
+  }> &
+    (
+      | Readonly<{id: number; position: SketchPosition}>
+      | Readonly<{reference: SketchSnapshot}>
+    ),
 ): SketchSnapshot;
 ```
 
@@ -250,6 +267,7 @@ type SketchArcSnapshot = Readonly<{
   radius: number;
   points: readonly [SketchPointAddress, SketchPointAddress];
   direction: SketchArcDirection;
+  construction?: boolean;
 }>;
 ```
 
@@ -261,6 +279,7 @@ type SketchCircleSnapshot = Readonly<{
   id: number;
   center: SketchPointAddress;
   radius: number;
+  construction?: boolean;
 }>;
 ```
 
@@ -289,6 +308,7 @@ type SketchLineSnapshot = Readonly<{
   kind: 'line';
   id: number;
   points: readonly [SketchPointAddress, SketchPointAddress];
+  construction?: boolean;
 }>;
 ```
 

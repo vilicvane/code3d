@@ -8,8 +8,7 @@ sourceReview:
       sha256: 8f5784bccbc2f8a47139a71af3c3fbfe0c1e767dc9dcd61902fa06413dd40f54
       commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
     - path: packages/core/src/tooling/index.ts
-      sha256: 540fe0cf5f3ba5f389da9f2a6441b722aac1b7de24530540eedee37eef8765dc
-      commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
+      sha256: 60d91eaa40d822c84dca66e7792af9072bccc8e8c6a9c738f18011bf2174bf73
     - path: packages/core/src/library/replicad.ts
       sha256: 937b1c0bcdd8389e9c3724bb8bf867c3703509400a6bebfcfbcc84c8683e17fe
       commit: 5058f1bbd8f9289ad89f0cf6cb19f7b5fa143eae
@@ -21,6 +20,7 @@ sourceReview:
       commit: 5c8979f384280b644263a2d6ba3abacb69697c24
     - path: packages/core/package.json
       sha256: 08eda9195ce21309b89fd6c2389dbfa90ec202a872ab727df62dadc8736dd986
+      commit: ee4042753e83baed2a25f681ef7ad657291ac60a
 sidebar:
   hidden: true
 head:

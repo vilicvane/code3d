@@ -76,6 +76,8 @@ export type ProjectEditorChange =
       path: string;
       source: string;
       origin: ContentChangeOrigin;
+      /** Monaco positions restored by undo/redo, including grouped tool edits. */
+      history: Readonly<{before: number; after: number}>;
       /** A tool edit and its deferred formatting share the same transaction. */
       undoGroup?: string;
     }>
@@ -1556,6 +1558,10 @@ export class CodeEditor {
     }
   }
 
+  sourceHistoryVersion(file: string): number {
+    return this.requireDocument(file).model.getAlternativeVersionId();
+  }
+
   cursorSource(): EditorCursor | undefined {
     const position = this.editor.getPosition();
     return this.cursorAt(position);
@@ -2015,6 +2021,7 @@ export class CodeEditor {
       monaco.editor.createModel(source, languageForPath(normalized), uri);
     this.refreshAnnotationDecorations(normalized, model);
     let previousSource = model.getValue();
+    let previousHistoryVersion = model.getAlternativeVersionId();
     const document: ProjectDocument = {
       path: normalized,
       model,
@@ -2048,6 +2055,11 @@ export class CodeEditor {
           previousSource,
         );
         previousSource = model.getValue();
+        const history = {
+          before: previousHistoryVersion,
+          after: model.getAlternativeVersionId(),
+        };
+        previousHistoryVersion = history.after;
         this.refreshAnnotationDecorations(normalized, model);
         this.revision += 1;
         this.emitChange({
@@ -2055,6 +2067,7 @@ export class CodeEditor {
           path: normalized,
           source: model.getValue(),
           origin,
+          history,
           ...(origin === 'tool' && this.contentChangeUndoGroup !== undefined
             ? {undoGroup: this.contentChangeUndoGroup}
             : {}),

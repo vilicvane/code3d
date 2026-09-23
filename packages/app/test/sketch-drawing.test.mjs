@@ -17,7 +17,13 @@ before(async () => {
 });
 after(async () => server?.close());
 
-const context = {points: [], scale: 10, gridStep: 10, enabled: true};
+const context = {
+  points: [],
+  features: [],
+  scale: 10,
+  gridStep: 10,
+  enabled: true,
+};
 const free = {kind: 'cartesian'};
 const position = result =>
   result.endpoint.point?.position ?? result.endpoint.position;

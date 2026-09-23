@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import {LineSegments2} from 'three/addons/lines/LineSegments2.js';
+import type {LineMaterial} from 'three/addons/lines/LineMaterial.js';
 
 export type SourceEmphasis = 'primary' | 'secondary' | 'context';
 
@@ -107,9 +109,14 @@ export function applySketchEmphasis(
   emphasis: SourceEmphasis,
 ): void {
   object.traverse(child => {
-    if (!(child instanceof THREE.Line || child instanceof THREE.Points)) return;
+    if (!(
+      child instanceof THREE.Line ||
+      child instanceof THREE.Points ||
+      child instanceof LineSegments2
+    ))
+      return;
     const material = child.material as
-      THREE.LineBasicMaterial | THREE.PointsMaterial;
+      THREE.LineBasicMaterial | THREE.PointsMaterial | LineMaterial;
     material.color.set(sketchAppearance.color);
     material.toneMapped = false;
     material.transparent = true;

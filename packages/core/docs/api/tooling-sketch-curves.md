@@ -2,7 +2,7 @@
 title: Sketch curves and regions
 description: Evaluate analytic sketch curves, find intersections and extract finite closed regions from snapshot layers.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/sketch-curve-intersections.ts
       sha256: f61343b0b2e0e7a5917f21f6846b8a639136bedbd369919226406350701c3aa6
@@ -14,8 +14,7 @@ sourceReview:
       sha256: 6c86bbf71f337099519045cc68944247c009da4e9887abdf8a9af6712f486144
       commit: 81c6e51b8e207da937338763e45f27d3469ae097
     - path: packages/core/src/library/sketch-regions.ts
-      sha256: 62233d8c0216d2c4106b4b62a46b7a161f3a7da842f55ec130697869989c9d90
-      commit: 05622140a97db31781700f6cb55e6ac7a36029ad
+      sha256: 3519e575f6eaccc71b549176e937e86d3dd077df100829a9b3d5928e6a163c01
 sidebar:
   hidden: true
 head:
@@ -88,16 +87,19 @@ instruction to split the authored curves or assign new stable IDs.
 ## Regions
 
 `sketchRegions(layers)` reads complete snapshot lineage and returns connected
-material regions. Each `SketchRegion` has one ordered `outer` boundary and zero
+material regions, ignoring snapshot curves marked `construction: true` in every
+layer. Analytic curve and intersection helpers still include those curves for
+editing and snapping. Each `SketchRegion` has one ordered `outer` boundary and zero
 or more `holes`, all arrays of analytic curves. Nested closed loops alternate
 material and holes; separate islands become separate regions.
 
-Only closed, non-intersecting, non-branching contours form regions. Degenerate,
-open, overlapping, crossing or ambiguous boundaries throw diagnostics; point-only
-sketches yield no regions. Region order and kernel wires are not persistent
-entity identities. Use public [face / faces](sketch-faces.md) to construct CAD
-models, and [sketch snapshots](tooling-sketches.md) to obtain correctly resolved
-layer data.
+Analytic intersections split finite boundaries for region extraction. Directed
+edge traversal retains bounded cells and discards open tails and bridges; authored
+entities and IDs stay unchanged. Nested contours still alternate holes and islands.
+Duplicate or partially overlapping boundaries throw diagnostics. Open-only and
+point-only sketches yield no regions. Region order and kernel wires are not
+persistent entity identities. Use public [face / faces](sketch-faces.md) to construct
+CAD models and [sketch snapshots](tooling-sketches.md) for resolved layer data.
 
 ## API contracts
 

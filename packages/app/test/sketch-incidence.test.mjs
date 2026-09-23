@@ -81,6 +81,68 @@ const online = (s, id = 4) => {
 const entries =
   "[['point', 1, [0, 0]], ['point', 2, [20, 0]], ['line', 3, [1, 2]], ['point', 4, [10, 0]]]";
 
+test('constraint editing preserves authored expressions and replays circle contacts in a fresh runtime', async () => {
+  const args = `[
+    ['point', 1, [0, 0]], ['circle', 2, [1, radius]],
+    ['aux:line', 4, [1, 5]],
+    ['point', 5, [-5.65685424949, diagonal]],
+    ['point', 6, [0, 8]], ['point', 7, [-7.5, 8]], ['line', 8, [6, 7]],
+    ['point', 9, [-3.75, 8]], ['line', 10, [5, 9]],
+  ], {constraints: [['fixed', 1], ['radius', 2, radius], ['angle', 4, 135], ['horizontal', 8]]}`;
+  const prefix =
+    'const radius = 8; const diagonal = 5.65685424949; const angle = -90;\n';
+  const [reference] = await compile(prefix + 'const s = sketch(' + args + ');');
+  const nextArgs = args.replace(
+    "['horizontal', 8]",
+    "['horizontal', 8], ['angle', [4, 10], angle]",
+  );
+  const layers = await compile(prefix + 'const s = sketch(' + nextArgs + ');');
+  const preview = compiler.executor.previewSketchConstraintEdit(layers, {
+    reference,
+    data: layers.at(-1).data,
+    editable: analyzeSketchSource(nextArgs).editable,
+  });
+  assert.deepEqual(position(preview.snapshot, 5), position(reference, 5));
+  assert.ok(
+    Math.abs(position(preview.snapshot, 9)[0] - (8 - 8 * Math.SQRT2)) < 1e-7,
+  );
+  const written = apply(layers.at(-1), nextArgs, preview);
+  assert.match(written, /\[1, radius\]/);
+  assert.match(written, /diagonal/);
+  assert.match(written, /'angle', \[4, 10\], angle/);
+  assert.match(written, /aux:line/);
+  const fresh = await createTestModelPipeline(server);
+  try {
+    const [replay] = await compile(
+      prefix + 'const s = sketch(' + written + ');',
+      fresh,
+    );
+    assert.deepEqual(replay.entities, preview.snapshot.entities);
+    assert.equal(replay.constraints.length, 5);
+  } finally {
+    fresh.dispose();
+  }
+});
+
+test('constraint repair rejects a connection that would require overwriting expression coordinates', async () => {
+  const args =
+    "[['point',1,[0,0]],['circle',2,[1,10]],['point',3,[x,y]]], {constraints:[['fixed',1],['radius',2,10]]}";
+  const prefix = 'const x = 6; const y = 8;\n';
+  const [reference] = await compile(prefix + 'const s = sketch(' + args + ');');
+  const nextArgs = args.replace("['radius',2,10]", "['radius',2,20]");
+  const layers = await compile(prefix + 'const s = sketch(' + nextArgs + ');');
+  assert.throws(
+    () =>
+      compiler.executor.previewSketchConstraintEdit(layers, {
+        reference,
+        data: layers.at(-1).data,
+        editable: analyzeSketchSource(nextArgs).editable,
+      }),
+    /constraint/i,
+  );
+  assert.deepEqual(position(reference, 3), [6, 8]);
+});
+
 test('fixed-neighbor center dragging keeps exact coordinates through staged preview and fresh source replay', async () => {
   const args = trimmedArcSketchArguments(10, 5, 4);
   const [local] = await compile('const s=sketch(' + args + ');');

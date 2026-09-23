@@ -2,6 +2,7 @@ import {
   solveSketchProblem,
   type SketchSolveProblem,
   type SketchSolveConstraint,
+  type SketchSolveObjective,
 } from './sketch-solver.js';
 import {solveSketchDrag} from './sketch-drag-rules.js';
 import {sketchRegions} from './sketch-regions.js';
@@ -21,6 +22,8 @@ import {
   sketchIncidencePoints,
   sketchIncidenceCurve,
   isPointOnSketchCurve,
+  sketchIncidenceConstraints,
+  solveSketchIncidenceBounds,
   type SketchIncidenceGeometry,
 } from './sketch-incidence.js';
 
@@ -35,17 +38,17 @@ export type SketchEntry =
       data: SketchPosition | number | SketchPoint,
     ]
   | readonly [
-      kind: 'line',
+      kind: 'line' | 'aux:line',
       id: number,
       points: readonly [start: number | SketchPoint, end: number | SketchPoint],
     ]
   | readonly [
-      kind: 'circle',
+      kind: 'circle' | 'aux:circle',
       id: number,
       data: readonly [center: number | SketchPoint, radius: number],
     ]
   | readonly [
-      kind: 'arc',
+      kind: 'arc' | 'aux:arc',
       id: number,
       data: readonly [
         center: number | SketchPoint,
@@ -153,6 +156,10 @@ class SketchValue implements Sketch {
     const ids = new Set<number>();
     const points = new Map<number, SketchPosition>();
     const copied = (entries ?? []).map<SketchEntry>(entry => {
+      if (entry.length !== 3)
+        throw new Error(
+          'Sketch entries require [kind, ID, data]; use aux:line, aux:circle or aux:arc for construction geometry.',
+        );
       const [kind, id, data] = entry;
       if (!Number.isSafeInteger(id) || id < 1)
         throw new Error('Sketch entity IDs must be positive safe integers.');
@@ -168,27 +175,32 @@ class SketchValue implements Sketch {
         points.set(id, position);
         return ['point', id, position];
       }
-      if (kind === 'circle' || kind === 'arc') {
+      if (
+        kind === 'circle' ||
+        kind === 'aux:circle' ||
+        kind === 'arc' ||
+        kind === 'aux:arc'
+      ) {
         if (!Number.isFinite(data[1]) || data[1] <= 0)
           throw new Error(
             `Sketch ${kind} ${id} requires a positive finite radius.`,
           );
       }
-      if (kind === 'circle') {
+      if (kind === 'circle' || kind === 'aux:circle') {
         if (data.length !== 2)
           throw new Error(`Sketch circle ${id} requires center and radius.`);
-        return ['circle', id, [data[0], data[1]]];
+        return [kind, id, [data[0], data[1]]];
       }
-      if (kind === 'arc') {
+      if (kind === 'arc' || kind === 'aux:arc') {
         if (data.length !== 5 || (data[4] !== 'cw' && data[4] !== 'ccw'))
           throw new Error(
             `Sketch arc ${id} requires center, radius, start, end and cw/ccw direction.`,
           );
-        return ['arc', id, [data[0], data[1], data[2], data[3], data[4]]];
+        return [kind, id, [data[0], data[1], data[2], data[3], data[4]]];
       }
-      if (kind !== 'line' || data.length !== 2)
+      if ((kind !== 'line' && kind !== 'aux:line') || data.length !== 2)
         throw new Error(`Invalid sketch entity ${id}.`);
-      return ['line', id, [data[0], data[1]]];
+      return [kind, id, [data[0], data[1]]];
     });
     const ancestors = new Set<Sketch>();
     for (
@@ -206,11 +218,11 @@ class SketchValue implements Sketch {
       const refs =
         kind === 'point'
           ? [data as number | SketchPoint]
-          : kind === 'circle'
+          : kind === 'circle' || kind === 'aux:circle'
             ? [data[0]]
-            : kind === 'arc'
+            : kind === 'arc' || kind === 'aux:arc'
               ? [data[0], data[2], data[3]]
-              : data;
+              : [data[0], data[1]];
       for (const ref of refs) {
         if (typeof ref === 'number') {
           if (!copied.some(e => e[0] === 'point' && e[1] === ref))
@@ -257,8 +269,11 @@ class SketchValue implements Sketch {
         !copied.some(
           e =>
             (kind === 'circular curve'
-              ? e[0] === 'circle' || e[0] === 'arc'
-              : e[0] === kind) && e[1] === id,
+              ? e[0] === 'circle' ||
+                e[0] === 'aux:circle' ||
+                e[0] === 'arc' ||
+                e[0] === 'aux:arc'
+              : e[0] === kind || e[0] === `aux:${kind}`) && e[1] === id,
         )
       )
         throw new Error(
@@ -502,6 +517,8 @@ export type SketchLineSnapshot = Readonly<{
   kind: 'line';
   id: number;
   points: readonly [SketchPointAddress, SketchPointAddress];
+  /** Auxiliary curve, excluded from face boundaries. */
+  construction?: boolean;
 }>;
 
 export type SketchCircleSnapshot = Readonly<{
@@ -509,6 +526,8 @@ export type SketchCircleSnapshot = Readonly<{
   id: number;
   center: SketchPointAddress;
   radius: number;
+  /** Auxiliary curve, excluded from face boundaries. */
+  construction?: boolean;
 }>;
 
 export type SketchArcSnapshot = Readonly<{
@@ -518,6 +537,8 @@ export type SketchArcSnapshot = Readonly<{
   radius: number;
   points: readonly [SketchPointAddress, SketchPointAddress];
   direction: SketchArcDirection;
+  /** Auxiliary curve, excluded from face boundaries. */
+  construction?: boolean;
 }>;
 
 export type SketchEntitySnapshot =
@@ -636,18 +657,30 @@ function snapshotEntries(
             position: positions.get(entityId)!,
             alias: point(data as number | SketchPoint),
           }
-      : kind === 'circle'
-        ? {kind, id: entityId, center: point(data[0]), radius: data[1]}
-        : kind === 'arc'
+      : kind === 'circle' || kind === 'aux:circle'
+        ? {
+            kind: 'circle',
+            id: entityId,
+            center: point(data[0]),
+            radius: data[1],
+            ...(kind.startsWith('aux:') ? {construction: true} : {}),
+          }
+        : kind === 'arc' || kind === 'aux:arc'
           ? {
-              kind,
+              kind: 'arc',
               id: entityId,
               center: point(data[0]),
               radius: data[1],
               points: [point(data[2]), point(data[3])],
               direction: data[4],
+              ...(kind.startsWith('aux:') ? {construction: true} : {}),
             }
-          : {kind, id: entityId, points: [point(data[0]), point(data[1])]},
+          : {
+              kind: 'line',
+              id: entityId,
+              points: [point(data[0]), point(data[1])],
+              ...(kind.startsWith('aux:') ? {construction: true} : {}),
+            },
   );
 }
 
@@ -783,11 +816,11 @@ export function sketchDragRequiresSolver(
   );
 }
 
-/** Source replay must retain every gesture-start incidence, including aliases. */
-export function assertSketchDragConnections(
+/** Source replay must retain every edit-start incidence, including aliases. */
+export function sketchConnectionsPreserved(
   layers: readonly SketchSnapshot[],
   reference: SketchSnapshot,
-): void {
+): boolean {
   const original = sketchGeometry([...layers.slice(0, -1), reference]);
   const current = sketchGeometry(layers);
   for (const contact of sketchIncidences(original.geometry)) {
@@ -800,24 +833,27 @@ export function assertSketchDragConnections(
         sketchIncidenceCurve(current.geometry, contact),
       )
     )
-      throw new Error(
-        'The source replay could not retain a point on its curve. No changes were applied.',
-      );
+      return false;
   }
+  return true;
 }
 
-/** The same solver and snapshot contract serve evaluation and interactive dragging. */
+/** Evaluation and GUI edits share one solver. An edit without a pointer target
+ * retains the reference geometry's connections while applying new constraints. */
 export function solveSketchSnapshot(
   layers: readonly SketchSnapshot[],
-  drag?: Readonly<{
-    id: number;
-    position: SketchPosition;
-    /** Gesture-start geometry; previous-frame geometry remains the numeric seed. */
+  edit?: Readonly<{
+    /** Edit-start geometry; previous-frame geometry remains the numeric seed. */
     reference?: SketchSnapshot;
-    /** Numeric, gesture-only parameter locks; never author constraints. */
+    /** Numeric, edit-only parameter locks; never author constraints. */
     locks?: readonly Readonly<{id: number; parameter: number; value: number}>[];
-  }>,
+  }> &
+    (
+      | Readonly<{id: number; position: SketchPosition}>
+      | Readonly<{reference: SketchSnapshot}>
+    ),
 ): SketchSnapshot {
+  const drag = edit && 'id' in edit ? edit : undefined;
   const local = layers.at(-1)!;
   const {points, pointIndex, lines, circles, arcs, geometry} =
     sketchGeometry(layers);
@@ -903,7 +939,7 @@ export function solveSketchSnapshot(
       const upstream = p.layer !== local.id;
       const locked: [boolean, boolean] = [upstream, upstream];
       if (!upstream)
-        for (const lock of drag?.locks ?? [])
+        for (const lock of edit?.locks ?? [])
           if (
             local.entities.some(e => e.kind === 'point' && e.id === lock.id) &&
             pointIndex({layer: local.id, id: lock.id}) === pointIndex(p)
@@ -916,7 +952,7 @@ export function solveSketchSnapshot(
     lines,
     circles: circles.map(c => {
       const upstream = c.layer !== local.id;
-      const lock = !upstream && drag?.locks?.find(lock => lock.id === c.id);
+      const lock = !upstream && edit?.locks?.find(lock => lock.id === c.id);
       return {
         center: pointIndex(c.center),
         radius: lock ? lock.value : c.radius,
@@ -925,7 +961,7 @@ export function solveSketchSnapshot(
     }),
     arcs: arcs.map(a => {
       const upstream = a.layer !== local.id;
-      const lock = !upstream && drag?.locks?.find(lock => lock.id === a.id);
+      const lock = !upstream && edit?.locks?.find(lock => lock.id === a.id);
       return {
         center: pointIndex(a.center),
         radius: lock ? lock.value : a.radius,
@@ -1016,7 +1052,12 @@ export function solveSketchSnapshot(
           ? sketchGeometry([...layers.slice(0, -1), drag.reference]).geometry
           : geometry,
       )
-    : solveSketchProblem(prepared);
+    : edit?.reference
+      ? solveSketchConstraintEdit(
+          prepared,
+          sketchGeometry([...layers.slice(0, -1), edit.reference]).geometry,
+        )
+      : solveSketchProblem(prepared);
   const entities = local.entities.map(e =>
     e.kind === 'point'
       ? {
@@ -1057,9 +1098,58 @@ export function solveSketchSnapshot(
   return {
     ...local,
     entities,
-    degreesOfFreedom: drag ? local.degreesOfFreedom : result.degreesOfFreedom,
-    redundant: drag ? local.redundant : result.redundant,
+    degreesOfFreedom: edit ? local.degreesOfFreedom : result.degreesOfFreedom,
+    redundant: edit ? local.redundant : result.redundant,
   };
+}
+
+function solveSketchConstraintEdit(
+  problem: SketchSolveProblem,
+  reference: SketchIncidenceGeometry,
+) {
+  const contacts = sketchIncidences(reference);
+  const connected = {
+    ...problem,
+    constraints: [
+      ...problem.constraints,
+      ...sketchIncidenceConstraints(reference, contacts),
+    ],
+  };
+  const objectives: SketchSolveObjective[] = [
+    ...problem.points.flatMap((point, index): SketchSolveObjective[] =>
+      point.locked.every(Boolean)
+        ? []
+        : [
+            {
+              kind: 'point',
+              point: index,
+              position: reference.points[index],
+              weight: 1,
+            },
+          ],
+    ),
+    ...(['circle', 'arc'] as const).flatMap(curve =>
+      (curve === 'circle' ? problem.circles : problem.arcs).flatMap(
+        (value, index): SketchSolveObjective[] =>
+          value.locked
+            ? []
+            : [
+                {
+                  kind: 'radius',
+                  curve,
+                  index,
+                  value: (curve === 'circle'
+                    ? reference.circles
+                    : reference.arcs)[index].radius,
+                  weight: 1,
+                },
+              ],
+      ),
+    ),
+  ];
+  return solveSketchIncidenceBounds(connected, contacts, current =>
+    solveSketchProblem(current, objectives, connected),
+  );
 }
 
 function solvedProblem(problem: SketchSolveProblem): SketchSolveProblem {

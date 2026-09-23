@@ -2,11 +2,10 @@
 title: Sketch entities
 description: Author points, lines, circles and directed circular arcs with layer-local IDs.
 sourceReview:
-  packageVersion: 0.0.1-alpha.14
+  packageVersion: 0.0.1-alpha.16
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: d50769e828b4ab70584e1a217c6022d3a1c254a825bcc24bd5444039ef0e6488
-      commit: e29dfd1ac9d22a728186d68bdd9129b60c908091
+      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
     - path: packages/core/src/library/sketch-solver.ts
       sha256: 176f9f8a38507100328aaba71a2ef226b6e914e5718cf3a00b2bc018a7bab565
       commit: 63b63837410721d7f9c44db1e721e5c52250f8d4
@@ -52,13 +51,17 @@ type SketchArcDirection = 'cw' | 'ccw';
 type SketchEntry =
   | readonly ['point', number, SketchPosition | number | SketchPoint]
   | readonly [
-      'line',
+      'line' | 'aux:line',
       number,
       readonly [number | SketchPoint, number | SketchPoint],
     ]
-  | readonly ['circle', number, readonly [number | SketchPoint, number]]
   | readonly [
-      'arc',
+      'circle' | 'aux:circle',
+      number,
+      readonly [number | SketchPoint, number],
+    ]
+  | readonly [
+      'arc' | 'aux:arc',
       number,
       readonly [
         number | SketchPoint,
@@ -120,6 +123,23 @@ Starting coordinates and radius can be adjusted to satisfy them and any authored
 constraints. Center-coincident or identical endpoints are degenerate; use
 `circle` for a full turn. Direction selects which traversal connects the endpoints;
 a persistent `sweep` constraint sets its magnitude in degrees.
+
+## Construction geometry
+
+Use the `aux:` type prefix for reference geometry:
+`['aux:line', id, [start, end]]`, `['aux:circle', id, [center, radius]]`, or
+`['aux:arc', id, [center, radius, start, end, 'cw']]`. All entries remain three-item
+tuples; the geometry parameters, IDs, point references and constraints are unchanged.
+These curves remain available for snapping and editing, but are excluded from
+[face boundaries](sketch-faces.md). Auxiliary circles do not create holes or islands.
+Points never contribute boundaries and have no auxiliary variant.
+
+Remove `aux:` to restore an ordinary boundary. Derived layers preserve upstream
+construction roles. In the App, select local curves and use **Construction** to
+add or remove the prefix. Curves appear dashed in both the sketch editor and 3D
+view. A displayed interval selects the entire authored curve. Trimming keeps the
+prefix on surviving pieces; Undo/Redo restores the source and display. Computed
+type names remain controlled by code and cannot be replaced by visual edits.
 
 ## Data versus constraints
 

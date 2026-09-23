@@ -236,6 +236,8 @@ restores the original expression.
 [point and derive](api/sketch-derive.md) for upstream references and local layers;
 and [face and faces](api/sketch-faces.md) for closed regions, holes and islands.
 The [editor workflow](sketches.md) explains selection and drag behavior.
+Mark reference curves as [construction geometry](api/sketch-entities.md#construction-geometry)
+to retain their constraints and snap targets while excluding them from face boundaries.
 
 ### Sketch placement and model context
 
