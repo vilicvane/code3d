@@ -138,20 +138,21 @@ Read [project and runtime](../../.agents/docs/architecture/runtime.md),
 [sketch architecture](../../.agents/docs/architecture/sketch.md) for the relevant
 contracts before following the implementation links below.
 
-| Responsibility                                        | Start here                                                              |
-| ----------------------------------------------------- | ----------------------------------------------------------------------- |
-| Application composition                               | [main.ts](src/main.ts)                                                  |
-| Editor and source selection                           | [editor.ts](src/editor.ts), [source edits](src/source-edit-diff.ts)     |
-| Project files and package installation                | [Project services](src/project/)                                        |
-| Browser project names and lifecycle                   | [Browser projects](src/project/browser-projects.ts)                     |
-| Compilation, execution and observations               | [Model runtime](src/model/)                                             |
-| 3D rendering and viewport interaction                 | [viewport.ts](src/viewport.ts), [rendering](src/rendering/)             |
-| Sketch and source editing tools                       | [Tools](src/tools/)                                                     |
-| Agent grants, requests, cursors, following and images | [Agent integration](src/agent/)                                         |
-| App prompts and modal lifecycle                       | [Dialog API](src/ui/dialog.ts)                                          |
-| App performance preferences                           | [State](src/app-settings.ts), [settings dialog](src/ui/app-settings.ts) |
-| UI components                                         | [UI](src/ui/)                                                           |
-| Executable models and website samples                 | [Examples](examples/), [sample catalog](render-samples/catalog.ts)      |
+| Responsibility                                        | Start here                                                                                    |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Application composition                               | [main.ts](src/main.ts)                                                                        |
+| Editor and source selection                           | [editor.ts](src/editor.ts), [source edits](src/source-edit-diff.ts)                           |
+| Project files and package installation                | [Project services](src/project/)                                                              |
+| Browser project names and lifecycle                   | [Browser projects](src/project/browser-projects.ts)                                           |
+| Compilation, execution and observations               | [Model runtime](src/model/)                                                                   |
+| 3D rendering and viewport interaction                 | [viewport.ts](src/viewport.ts), [rendering](src/rendering/)                                   |
+| Sketch and source editing tools                       | [Tools](src/tools/)                                                                           |
+| Sketch drag input, snapping and asynchronous previews | [Move session](src/tools/sketch-move-session.ts), [snap candidates](src/tools/sketch-snap.ts) |
+| Agent grants, requests, cursors, following and images | [Agent integration](src/agent/)                                                               |
+| App prompts and modal lifecycle                       | [Dialog API](src/ui/dialog.ts)                                                                |
+| App performance preferences                           | [State](src/app-settings.ts), [settings dialog](src/ui/app-settings.ts)                       |
+| UI components                                         | [UI](src/ui/)                                                                                 |
+| Executable models and website samples                 | [Examples](examples/), [sample catalog](render-samples/catalog.ts)                            |
 
 Public model authoring belongs to [Core](../core/README.md). Shared connection,
 encryption, and request receipts belong to [Agent](../agent/README.md); the local

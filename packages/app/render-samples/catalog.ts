@@ -26,6 +26,17 @@ export const renderSamples = [
     tags: ['sketch', 'constraints', 'derive', 'regions', 'plane'],
   },
   {
+    id: 'sketch-persistent-constraints',
+    title: 'Persistent sketch relationships',
+    description:
+      'Keep equal sides, matching holes and tangent contact when dimensions change.',
+    category: 'Profiles and solids',
+    file: 'sketches/persistent-constraints.ts',
+    focus: {context: 'profile.face().extrude(3)', token: 'extrude'},
+    view: {direction: [1, 3, 1], up: [0, 1, 0]},
+    tags: ['sketch', 'constraints', 'tangent', 'equal', 'pointOn'],
+  },
+  {
     id: 'topology-api',
     title: 'Topology and references',
     description: 'Select finite topology and compare reference directions.',
@@ -1352,6 +1363,7 @@ export const exampleEntries = [
   {
     file: 'sketches/constraints.ts',
   },
+  {file: 'sketches/persistent-constraints.ts'},
   {
     file: 'sketches/mounting-plate.ts',
   },

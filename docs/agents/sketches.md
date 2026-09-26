@@ -10,6 +10,19 @@ expression with `"type": true` before choosing operations. Keep useful intermedi
 profiles named, use constraints to express design intent, and build faces or solids
 from those profiles with the core API.
 
+Author persistent relationships in `constraints`: `['equalLength', [lineA, lineB]]`,
+`['equalRadius', [circleOrArcA, circleOrArcB]]`, `['pointOn', [point, curve]]`, and
+`['tangent', [curveA, curveB], mode?]`. Curve IDs are local; point targets can also
+be upstream `SketchPoint` values. Point-on and tangent contact must lie on the
+finite segment or arc. Circle/arc pairs default to external tangency and accept
+`'internal'`; omit mode for line–circle/arc tangency. Two lines are not tangent
+targets. These relations run during normal source evaluation. An incidental
+coordinate match does not create one; accepting a geometric snap in the App writes
+the indicated relationship into source. Read the
+[constraint reference](../../packages/core/docs/api/sketch-constraints.md) before
+choosing targets or diagnosing a failed solve, and try the
+[persistent relationships example](../../packages/app/examples/sketches/persistent-constraints.ts).
+
 Reference curves use the `aux:` type prefix, such as
 `['aux:line', 5, [1, 2]]`. `aux:line`, `aux:circle` and `aux:arc`
 still solve and remain observable, but `face()` and `faces()` exclude them in all
@@ -47,11 +60,12 @@ evaluations.
 When a user changes or adds dimensions or geometric constraints in the sketch
 editor, the App automatically applies that safe synchronization after a successful
 solve. The constraint change and synchronized geometry share one Undo or Redo.
-The edit also retains existing point-on-line, point-on-circle and finite
-point-on-arc connections, including construction curves, in the resulting
-coordinates. It does not persist extra constraint tuples. Direct source edits
-still solve only the authored constraints. An incompatible connection or a repair
-that would replace an expression reports an error and retains the previous view.
+Both GUI edits and direct source edits solve the authored constraints. Coordinates
+that happen to touch a curve do not imply a relationship. Use `pointOn` or `tangent`
+to preserve that intent through parameter changes. Accepted geometric snaps write
+their relationships into source alongside the geometry; existing point snaps
+reuse point identity. Removing a relationship releases it even while its geometry
+still happens to satisfy the old condition.
 An unsafe synchronization leaves the warning in place; a failed solve retains
 diagnostics and the last successful sketch, when available, as a read-only reference
 in the editor.

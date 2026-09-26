@@ -2,19 +2,19 @@
 title: Sketch curves and regions
 description: Evaluate analytic sketch curves, find intersections and extract finite closed regions from snapshot layers.
 sourceReview:
-  packageVersion: 0.0.1-alpha.16
+  packageVersion: 0.0.1-alpha.17
   sources:
     - path: packages/core/src/library/sketch-curve-intersections.ts
       sha256: f61343b0b2e0e7a5917f21f6846b8a639136bedbd369919226406350701c3aa6
       commit: 9c1b6ae059ec9b0c1c9be31d6f9fad3749a5732b
     - path: packages/core/src/library/sketch-curves.ts
-      sha256: 943169600e554a0f24d2b9dc14aef5d201538199fdffa3d0463b93d7f257ce64
-      commit: 81c6e51b8e207da937338763e45f27d3469ae097
+      sha256: 3943da8b380dd4392022e35a0a4352bafe6b5b4a1cb5ebf9a67410690de12929
+      commit: 42b6cba5ec1ea173ce1f4eadc331e5d760b809c5
     - path: packages/core/src/library/sketch-precision.ts
-      sha256: 6c86bbf71f337099519045cc68944247c009da4e9887abdf8a9af6712f486144
-      commit: 81c6e51b8e207da937338763e45f27d3469ae097
+      sha256: b20f4bfc82b4b6a6df8425bed1a059ade0824a4a300179d562582e518c692b6e
     - path: packages/core/src/library/sketch-regions.ts
       sha256: 3519e575f6eaccc71b549176e937e86d3dd077df100829a9b3d5928e6a163c01
+      commit: dd17cbc45ffbf2222e6bb6b22b24e0a1609b8bb7
 sidebar:
   hidden: true
 head:
@@ -66,16 +66,17 @@ segment (`points`), a circle (`center`, `radius`), or an arc (`center`, `radius`
 public authored sketch sweep constraint's degrees. Curve parameters are local
 calculation values, never authored IDs.
 
-| Function                                           | Behavior                                                                                                                                              |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sketchPositiveAngle(angle)`                       | Wrap radians into `[0, 2π)`.                                                                                                                          |
-| `sketchArcGeometry(center, start, end, direction)` | Build an arc from points and cw/ccw sense; radius comes from the center-to-start distance. Supply valid consistent endpoints.                         |
-| `sketchCurveGeometry(entity, point)`               | Resolve snapshot addresses through the supplied coordinate function; point entities return `undefined`. Arc radius uses the snapshot's solved radius. |
-| `sketchCurvePosition(curve, t)`                    | Evaluate line interpolation, a full circle turn, or an arc fraction. The usual finite domain is `0 ≤ t ≤ 1`; this function does not clamp inputs.     |
-| `sketchCurveClosestParameter(curve, position)`     | Nearest finite parameter, including arc endpoints rather than its full circle.                                                                        |
-| `sketchCurveBounds(curve)`                         | Return extreme candidate points sufficient for 2D bounds; this is not a `{minimum, maximum}` record.                                                  |
-| `sketchCurveTolerance(curve)`                      | Geometry-relative tolerance including floating-point coordinate scale.                                                                                |
-| `sketchCurveIntersections(first, second)`          | Finite contacts with coordinates and parameters ordered `[first, second]`.                                                                            |
+| Function                                           | Behavior                                                                                                                                                             |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sketchPositiveAngle(angle)`                       | Wrap radians into `[0, 2π)`.                                                                                                                                         |
+| `sketchArcGeometry(center, start, end, direction)` | Build an arc from points and cw/ccw sense; radius comes from the center-to-start distance. Supply valid consistent endpoints.                                        |
+| `sketchCurveGeometry(entity, point)`               | Resolve snapshot addresses through the supplied coordinate function; point entities return `undefined`. Arc radius uses the snapshot's solved radius.                |
+| `sketchCurvePosition(curve, t)`                    | Evaluate line interpolation, a full circle turn, or an arc fraction. The usual finite domain is `0 ≤ t ≤ 1`; this function does not clamp inputs.                    |
+| `sketchCurveClosestParameter(curve, position)`     | Nearest finite parameter, including arc endpoints rather than its full circle.                                                                                       |
+| `sketchCurveBounds(curve)`                         | Return extreme candidate points sufficient for 2D bounds; this is not a `{minimum, maximum}` record.                                                                 |
+| `sketchCurveTolerance(curve)`                      | Geometry-relative tolerance including floating-point coordinate scale.                                                                                               |
+| `sketchCurveIntersections(first, second)`          | Finite contacts with coordinates and parameters ordered `[first, second]`.                                                                                           |
+| `sketchCurveTangencyPoint(first, second, mode?)`   | Shared finite tangent contact, or `undefined` when the curves do not satisfy that tangency. Mode defaults to `'external'`; `'internal'` applies to circle/arc pairs. |
 
 Inputs should already describe valid, solved geometry; low-level helpers do not
 repeat all authoring validation. Intersections are ordered along the first curve and include finite overlap
@@ -83,6 +84,10 @@ boundaries. Coincident full circles have no isolated boundaries and return no
 contacts; an empty result alone is not proof of disjoint geometry.
 Intersections are geometric contacts, not an
 instruction to split the authored curves or assign new stable IDs.
+
+`sketchCurveTangencyPoint` checks existing geometry; it does not solve or add a
+constraint. It returns no point for two lines, coincident supporting circles,
+internal line–circle tangency, or contact outside a finite segment or arc.
 
 ## Regions
 
@@ -185,6 +190,16 @@ function sketchCurvePosition(curve: SketchCurve, t: number): SketchPosition;
 
 ```ts
 function sketchCurveTolerance(curve: SketchCurve): number;
+```
+
+### sketchCurveTangencyPoint
+
+```ts
+function sketchCurveTangencyPoint(
+  first: SketchCurve,
+  second: SketchCurve,
+  mode?: 'external' | 'internal',
+): SketchPosition | undefined;
 ```
 
 ### sketchPositiveAngle

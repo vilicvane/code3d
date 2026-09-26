@@ -1,15 +1,18 @@
-import {deletedSketchConstraints} from './sketch-topology';
+import {
+  deletedSketchConstraints,
+  sketchConstraintIdentity,
+} from './sketch-topology';
 import type * as CoreTooling from '@code3d/core/tooling';
 import type {
   SketchPosition,
   SketchSnapshot,
   SketchPointAddress,
+  SketchConstraint,
 } from '@code3d/core/tooling';
 import {
   sketchEntityParameters,
   withSketchEntityParameters,
   sketchPointResolver,
-  sketchConnectionsPreserved,
 } from '@code3d/core/tooling';
 
 /** Evaluated author parameters, distinct from the constrained display. */
@@ -35,6 +38,8 @@ export type SketchDrag = Readonly<{
   reference?: SketchSnapshot;
   /** A snapped point previews the complete merge; only release persists it. */
   mergeTarget?: SketchPointAddress;
+  /** Relations accepted by the current snap; persisted only on release. */
+  constraints?: readonly SketchConstraint<SketchPointAddress>[];
 }>;
 
 /** Preview and commit share these exact, losslessly serialized author data. */
@@ -43,44 +48,13 @@ export type SketchDragPreview = Readonly<{
   data: readonly SketchGeometryData[];
   reference: SketchSnapshot;
   merge?: SketchPointMerge;
+  constraints?: readonly SketchConstraint<SketchPointAddress>[];
   /** A topology preview is never the numeric seed for the next pointer position. */
   continuation?: Readonly<{
     snapshot: SketchSnapshot;
     data: readonly SketchGeometryData[];
   }>;
 }>;
-
-export type SketchConstraintEdit = Readonly<{
-  editable: SketchEditableParameters;
-  data: readonly SketchGeometryData[];
-  reference: SketchSnapshot;
-}>;
-export type SketchConstraintEditPreview = Pick<
-  SketchDragPreview,
-  'snapshot' | 'data'
->;
-
-/** Constraint values have already been evaluated by the project's runtime.
- * Repair geometry from the edit-start display, then replay only authored data. */
-export function previewSketchConstraintEdit(
-  runtime: Pick<typeof CoreTooling, 'solveSketchSnapshot'>,
-  layers: readonly SketchSnapshot[],
-  edit: SketchConstraintEdit,
-): SketchConstraintEditPreview {
-  const local = layers.at(-1)!;
-  const seed = {...local, entities: edit.reference.entities};
-  const solved = runtime.solveSketchSnapshot([...layers.slice(0, -1), seed], {
-    reference: edit.reference,
-    locks: sketchParameterLocks(edit),
-  });
-  const data = solvedSketchData(solved, edit);
-  const snapshot = runtime.solveSketchSnapshot([
-    ...layers.slice(0, -1),
-    withSketchData(local, data),
-  ]);
-  assertConnections([...layers.slice(0, -1), snapshot], edit.reference);
-  return {snapshot, data};
-}
 
 function sketchParameterLocks(edit: Pick<SketchDrag, 'data' | 'editable'>) {
   return edit.data.flatMap(entity =>
@@ -90,14 +64,6 @@ function sketchParameterLocks(edit: Pick<SketchDrag, 'data' | 'editable'>) {
         : [{id: entity.id, parameter, value}],
     ),
   );
-}
-
-function assertConnections(
-  layers: readonly SketchSnapshot[],
-  reference: SketchSnapshot,
-) {
-  if (!sketchConnectionsPreserved(layers, reference))
-    throw new Error('The source replay could not retain a point on its curve.');
 }
 
 export function previewSketchDrag(
@@ -111,22 +77,40 @@ export function previewSketchDrag(
     const preview = previewPointMerge(runtime, layers, drag, locks);
     if (preview) return preview;
   }
-  const data = movedSketchData(runtime, layers, drag, locks);
-  const authored = withSketchData(local, data);
+  const resolve = sketchPointResolver(layers);
+  const known = new Set(
+    local.constraints.map(c => sketchConstraintIdentity(c, resolve)),
+  );
+  const constraints = drag.constraints?.filter(c => {
+    const identity = sketchConstraintIdentity(c, resolve);
+    if (known.has(identity)) return false;
+    known.add(identity);
+    return true;
+  });
+  const constrained = constraints?.length
+    ? {...local, constraints: [...local.constraints, ...constraints]}
+    : local;
+  const data = movedSketchData(
+    runtime,
+    [...layers.slice(0, -1), constrained],
+    drag,
+    locks,
+  );
+  const authored = withSketchData(constrained, data);
   const snapshot = runtime.solveSketchSnapshot([
     ...layers.slice(0, -1),
     authored,
   ]);
-  assertConnections(
-    [...layers.slice(0, -1), snapshot],
-    drag.reference ?? local,
-  );
   // This is the same forward solve performed after the data are written to
   // source. Neither the mouse objective nor gesture-only locks escape here.
   return {
     data,
     reference: drag.reference ?? local,
     snapshot,
+    constraints,
+    continuation: constraints?.length
+      ? {snapshot: local, data: drag.data}
+      : undefined,
   };
 }
 
@@ -171,8 +155,7 @@ function previewPointMerge(
     ),
   };
   const reference = drag.reference ?? local;
-  // Deleted curves no longer own incidences; both solve and replay use the
-  // surviving gesture-start topology, including attached points on other curves.
+  // Both solve and replay use the surviving authored topology and relations.
   const remainingReference = {
     ...reference,
     entities: reference.entities.filter(e => !ids.includes(e.id)),
@@ -202,7 +185,6 @@ function previewPointMerge(
       ),
     },
   ]);
-  assertConnections([...layers.slice(0, -1), snapshot], remainingReference);
   // Identity changes must not silently redefine fixed points or consume
   // expression-driven coordinates. Reject the entire transaction if needed.
   const positions = new Map(

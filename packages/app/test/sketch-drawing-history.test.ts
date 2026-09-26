@@ -116,3 +116,30 @@ test('starting a replacement draft discards its old source redo without creating
   assert.deepEqual(line.start, {position: [20, 0]});
   assert.equal(version, 1);
 });
+
+test('undo and redo restore an accepted start relation before its source transaction', () => {
+  const line = new drawing.SketchLineDrawing();
+  const steps = new history.SketchDrawingHistory();
+  const endpoint = {
+    position: [2, 3] as const,
+    relations: [['pointOn', 8] as const],
+  };
+  const source = {version: () => 1, checkpoint: () => () => {}};
+  steps.place(line, source, () =>
+    line.place(endpoint, 'local', 10, () => assert.fail()),
+  );
+  assert.equal(steps.run('undo'), true);
+  assert.equal(line.start, undefined);
+  assert.equal(steps.run('redo'), true);
+  assert.deepEqual(line.start, endpoint);
+  let result: import('../src/tools/sketch-source.ts').SketchChange | undefined;
+  line.place(
+    {position: [12, 7]},
+    'local',
+    10,
+    change => ((result = change), true),
+  );
+  assert.deepEqual(result?.kind === 'append' && result.constraints, [
+    ['pointOn', [{layer: 'local', id: 10}, 8]],
+  ]);
+});

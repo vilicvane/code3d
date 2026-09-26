@@ -1,5 +1,6 @@
 import type {
   SketchConstraint,
+  SketchEntitySnapshot,
   SketchPointAddress,
   SketchPosition,
   SketchSnapshot,
@@ -20,20 +21,27 @@ export function sketchConstraintTargets(
   if (
     kind === 'parallel' ||
     kind === 'perpendicular' ||
+    kind === 'equalLength' ||
+    kind === 'equalRadius' ||
+    kind === 'tangent' ||
     (kind === 'angle' && typeof target !== 'number')
   )
     return (target as readonly number[]).map(id => ({layer, id}));
+  if (kind === 'pointOn') return [target[0], {layer, id: target[1]}];
   if (typeof target === 'number') return [{layer, id: target}];
   if (kind === 'coincident' || kind === 'midpoint') return target;
   return [target as SketchPointAddress];
 }
 
-/** One source kind has two target-dependent tools: orientation and line-to-line angle. */
-export type SketchConstraintTool = SketchConstraint[0] | 'orientation';
+/** Tools distinguish line orientation from relative angle and internal from external tangency. */
+export type SketchConstraintTool =
+  SketchConstraint[0] | 'orientation' | 'internalTangent';
 export function sketchConstraintTool([
   kind,
   target,
+  value,
 ]: SketchConstraint<SketchPointAddress>): SketchConstraintTool {
+  if (kind === 'tangent' && value === 'internal') return 'internalTangent';
   return kind === 'angle' && typeof target === 'number' ? 'orientation' : kind;
 }
 
@@ -48,6 +56,11 @@ export const sketchConstraintNames = {
   angle: 'Angle between lines',
   parallel: 'Parallel',
   perpendicular: 'Perpendicular',
+  equalLength: 'Equal length',
+  equalRadius: 'Equal radius',
+  pointOn: 'Point on curve',
+  tangent: 'Tangent',
+  internalTangent: 'Internal tangent',
   radius: 'Radius',
   sweep: 'Sweep',
   x: 'X coordinate',
@@ -119,6 +132,15 @@ export function sketchConstraintDisplays(
   const point = (address: SketchPointAddress) =>
     points.find(p => sameSketchPoint(p, address))!;
   const number = (value: number) => String(Number(value.toPrecision(6)));
+  const curvePoints = (
+    entity: Exclude<SketchEntitySnapshot, {kind: 'point'}>,
+  ) =>
+    entity.kind === 'line'
+      ? entity.points.map(point)
+      : [
+          point(entity.center),
+          ...(entity.kind === 'arc' ? entity.points.map(point) : []),
+        ];
   return layers.flatMap(layer =>
     layer.constraints.map((constraint, index): SketchConstraintDisplay => {
       const [kind, data, value] = constraint;
@@ -134,6 +156,7 @@ export function sketchConstraintDisplays(
       if (
         kind === 'parallel' ||
         kind === 'perpendicular' ||
+        kind === 'equalLength' ||
         (kind === 'angle' && typeof data !== 'number')
       ) {
         const ids = data as readonly [number, number];
@@ -145,7 +168,7 @@ export function sketchConstraintDisplays(
         const shared = lines[0].points.find(a =>
           lines[1].points.some(b => sameSketchPoint(resolve(a), resolve(b))),
         );
-        if (kind !== 'parallel' && shared) {
+        if ((kind === 'perpendicular' || kind === 'angle') && shared) {
           const opposite = (line: (typeof lines)[number]) =>
             point(
               line.points.find(
@@ -176,11 +199,58 @@ export function sketchConstraintDisplays(
         guides = [];
         title = `${sketchConstraintNames[tool]} · line ${ids[0]} → line ${ids[1]}`;
         if (kind === 'angle') {
-          label = `${number(value!)}°`;
+          label = `${number(value as number)}°`;
           title += ` · ${value}° · authored start → end directions; positive CCW`;
         }
       } else {
         switch (kind) {
+          case 'equalRadius':
+          case 'tangent': {
+            const entities = data.map(id =>
+              layer.entities
+                .filter(e => e.kind !== 'point')
+                .find(e => e.id === id)!,
+            );
+            related = entities.flatMap(curvePoints);
+            curves = data.map(id => ({layer: layer.id, id}));
+            markers = entities.map((entity, i) => {
+              const geometry = sketchCurveGeometry(
+                entity,
+                ref => point(ref).position,
+              )!;
+              return geometry.kind === 'line'
+                ? {kind: 'line', curve: curves[i], points: geometry.points}
+                : {
+                    kind: 'curve',
+                    curve: curves[i],
+                    position: sketchCurvePosition(
+                      geometry,
+                      geometry.kind === 'circle' ? 1 / 8 : 1 / 2,
+                    ),
+                  };
+            });
+            guides = [];
+            title = `${sketchConstraintNames[tool]}${kind === 'tangent' && value !== 'internal' && entities.every(e => e.kind !== 'line') ? ' (external)' : ''} · ${entities.map(e => `${e.kind} ${e.id}`).join(' ↔ ')}`;
+            break;
+          }
+          case 'pointOn': {
+            const entity = layer.entities
+              .filter(e => e.kind !== 'point')
+              .find(e => e.id === data[1])!;
+            const target = point(data[0]);
+            related = [target, ...curvePoints(entity)];
+            curves = [{layer: layer.id, id: entity.id}];
+            markers = [
+              {
+                kind: 'point',
+                point: resolve(data[0]),
+                position: target.position,
+              },
+            ];
+            guides = [];
+            title = `Point on ${entity.kind} ${entity.id}`;
+            break;
+          }
           case 'fixed':
             related = [point(data)];
             title = 'Fixed';

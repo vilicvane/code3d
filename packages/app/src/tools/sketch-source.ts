@@ -9,6 +9,7 @@ import type {
 } from '@code3d/core/tooling';
 import {formatSourceNumber, sourceExpressionError} from './source-expression';
 import {sameSketchPoint} from './sketch-snap';
+import {sketchConstraintDimensions} from './sketch-constraints';
 import type {
   SketchEditableParameters,
   SketchGeometryData,
@@ -113,6 +114,7 @@ export type SketchChange =
       kind: 'move';
       data: readonly SketchGeometryData[];
       merge?: SketchPointMerge;
+      constraints?: readonly SketchConstraint<SketchPointAddress>[];
     }>
   | Readonly<{
       kind: 'delete';
@@ -130,7 +132,11 @@ export type SketchChange =
       entries: readonly SketchDraftEntry[];
       constraintReplacements: readonly Readonly<{
         index: number;
-        targets: readonly (number | readonly [number, number])[];
+        targets: readonly (
+          | number
+          | readonly [number, number]
+          | readonly [SketchPointAddress, number]
+        )[];
       }>[];
     }>;
 
@@ -277,13 +283,25 @@ export function analyzeSketchSource(source: string): {
     constraints,
     constraintValues: new Map(
       constraints?.elements.flatMap((node, index) => {
-        const value = ts.isArrayLiteralExpression(node) && node.elements[2];
+        const value = dimensionExpression(node);
         return value && !ts.isSpreadElement(value)
           ? [[index, value.getText()] as const]
           : [];
       }),
     ),
   };
+}
+
+function dimensionExpression(node: ts.Node): ts.Expression | undefined {
+  if (!ts.isArrayLiteralExpression(node)) return;
+  const kind = node.elements[0];
+  if (
+    !kind ||
+    !ts.isStringLiteral(kind) ||
+    !(kind.text in sketchConstraintDimensions)
+  )
+    return;
+  return node.elements[2];
 }
 
 function numeric(node: ts.Expression): number | undefined {
@@ -443,8 +461,7 @@ export class SketchEditResolver implements ToolIntentResolver {
     }
     if (change.kind === 'dimension') {
       const node = parsed.constraints?.elements[change.index];
-      const value =
-        node && ts.isArrayLiteralExpression(node) && node.elements[2];
+      const value = node && dimensionExpression(node);
       if (!value || ts.isSpreadElement(value))
         return {
           status: 'unsupported',
@@ -627,6 +644,9 @@ export class SketchEditResolver implements ToolIntentResolver {
               'radius',
               'parallel',
               'perpendicular',
+              'equalRadius',
+              'tangent',
+              'pointOn',
             ].includes(kind.text)
           )
             throw new Error('Splitting requires explicit constraint targets.');
@@ -636,20 +656,20 @@ export class SketchEditResolver implements ToolIntentResolver {
               ts.isNumericLiteral(target) ||
               (ts.isArrayLiteralExpression(target) &&
                 target.elements.length === 2 &&
-                target.elements.every(ts.isNumericLiteral))
+                (kind.text === 'pointOn'
+                  ? ts.isNumericLiteral(target.elements[1])
+                  : target.elements.every(ts.isNumericLiteral)))
             )
           )
             throw new Error('Splitting requires explicit constraint targets.');
-          const targetText = (
-            replacement: number | readonly [number, number],
-          ) => {
+          const targetText = (replacement: (typeof targets)[number]) => {
             if (typeof replacement === 'number') return String(replacement);
             if (!ts.isArrayLiteralExpression(target))
               throw new Error(
                 'Splitting requires explicit constraint targets.',
               );
             let text = raw(target);
-            for (let i = 1; i >= 0; i--) {
+            for (let i = 1; i >= (kind.text === 'pointOn' ? 1 : 0); i--) {
               const element = target.elements[i];
               const start = element.getStart() - target.getStart();
               const end = element.end - target.getStart();
@@ -679,7 +699,11 @@ export class SketchEditResolver implements ToolIntentResolver {
       } catch (error) {
         return {status: 'conflict', reason: (error as Error).message};
       }
-    } else if (change.kind === 'append' || change.kind === 'constrain') {
+    } else if (
+      change.kind === 'append' ||
+      change.kind === 'constrain' ||
+      change.kind === 'move'
+    ) {
       const ids = new Set(parsed.entries.keys());
       let entries: string[];
       let constraints: string[];
@@ -703,6 +727,14 @@ export class SketchEditResolver implements ToolIntentResolver {
             case 'vertical':
               content = String(data);
               break;
+            case 'pointOn':
+              content = `[${point(data[0])}, ${data[1]}]`;
+              break;
+            case 'tangent':
+              content = `[${data.join(', ')}]${value === undefined ? '' : `, '${value}'`}`;
+              break;
+            case 'equalLength':
+            case 'equalRadius':
             case 'parallel':
             case 'perpendicular':
               content = `[${data.join(', ')}]`;

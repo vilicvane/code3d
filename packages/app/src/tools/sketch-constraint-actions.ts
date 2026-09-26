@@ -7,6 +7,7 @@ import {
   type SketchSnapshot,
 } from '@code3d/core/tooling';
 import type {DrawingDimension} from './drawing-dimensions';
+import {sketchConstraintIdentity} from '../model/sketch-topology';
 import type {
   SketchEditableParameters,
   SketchGeometryData,
@@ -78,25 +79,20 @@ export function sketchConstraintActions(
       ? [{c, index}]
       : [],
   );
-  const identity = ([kind, data]: Constraint): string => {
-    const key = (p: SketchPointAddress) => JSON.stringify(resolve(p));
-    if (kind === 'fixed') return `${kind}:${key(data)}`;
-    if (kind === 'coincident')
-      return `${kind}:${data.map(key).sort().join(':')}`;
-    if (kind === 'midpoint')
-      return `${kind}:${key(data[0])}:${data.slice(1).map(key).sort().join(':')}`;
-    if (kind === 'x' || kind === 'y') return `${kind}:${key(data)}`;
-    if (kind === 'parallel' || kind === 'perpendicular')
-      return `${kind}:${[...data].sort((a, b) => a - b).join(':')}`;
-    return `${kind}:${data}`;
-  };
+  const identity = (constraint: Constraint) =>
+    sketchConstraintIdentity(constraint, resolve);
   const existing = new Set(local.constraints.map(identity));
   const add = (
     kind: SketchConstraintTool,
     constraints: (value: number) => Constraint[],
     value = 0,
   ) => {
-    const name = sketchConstraintNames[kind];
+    const name =
+      kind === 'tangent' &&
+      curves.length === 2 &&
+      curves.every(p => entity(p).kind !== 'line')
+        ? 'External tangent'
+        : sketchConstraintNames[kind];
     const dimension = constraints(value).length
       ? sketchConstraintDimensions[kind]
       : undefined;
@@ -185,7 +181,7 @@ export function sketchConstraintActions(
         return {
           kind: 'constrain',
           constraints: additions.map(constraint =>
-            constraint.length === 3
+            dimension
               ? ([
                   constraint[0],
                   constraint[1],
@@ -201,7 +197,11 @@ export function sketchConstraintActions(
   const finish = () => {
     for (const {c} of removals)
       if (!actions.some(a => a.kind === sketchConstraintTool(c)))
-        add(sketchConstraintTool(c), () => [], c[2] ?? 0);
+        add(
+          sketchConstraintTool(c),
+          () => [],
+          typeof c[2] === 'number' ? c[2] : 0,
+        );
     return actions;
   };
   if (
@@ -237,7 +237,22 @@ export function sketchConstraintActions(
     )
       add('midpoint', () => [['midpoint', [points[0], ...line.points]]]);
   }
+  if (points.length === 1 && curves.length === 1) {
+    const curve = entity(curves[0]);
+    if (
+      (curve.kind !== 'line' && curve.kind !== 'arc') ||
+      !curve.points.some(p => sameSketchPoint(resolve(p), points[0]))
+    )
+      add('pointOn', () => [['pointOn', [points[0], curve.id]]]);
+  }
   if (points.length || !curves.length) return finish();
+  const pair = [...curves].sort((a, b) => a.id - b.id);
+  if (pair.length === 2 && lines.length < 2) {
+    const targets = [pair[0].id, pair[1].id] as const;
+    add('tangent', () => [['tangent', targets]]);
+    if (!lines.length)
+      add('internalTangent', () => [['tangent', targets, 'internal']]);
+  }
   if (lines.length === curves.length) {
     for (const kind of ['horizontal', 'vertical'] as const)
       add(kind, () => lines.map(p => [kind, p.id]));
@@ -257,6 +272,9 @@ export function sketchConstraintActions(
     }
     const sorted = [...lines].sort((a, b) => a.id - b.id);
     if (sorted.length >= 2) {
+      add('equalLength', () =>
+        sorted.slice(1).map(line => ['equalLength', [sorted[0].id, line.id]]),
+      );
       add('parallel', () =>
         sorted.slice(1).map(line => ['parallel', [sorted[0].id, line.id]]),
       );
@@ -278,6 +296,10 @@ export function sketchConstraintActions(
       );
     }
   } else if (!lines.length) {
+    if (pair.length >= 2)
+      add('equalRadius', () =>
+        pair.slice(1).map(curve => ['equalRadius', [pair[0].id, curve.id]]),
+      );
     const first = entity(curves[0]);
     if (first.kind === 'circle' || first.kind === 'arc')
       add(

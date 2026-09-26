@@ -38,7 +38,7 @@ const near = (actual, expected) =>
 test('direction snapping also aligns the free axis to the grid', () => {
   const result = snapSketchPointer(
     [10.2, 3.2],
-    {kind: 'polar', origin: [1, 3]},
+    {kind: 'polar', origin: [1, 3], line: true},
     {
       ...context,
       gridStep: 1,
@@ -173,6 +173,7 @@ test('entered coordinates are never replaced by nearby points, even far from the
 test('length and angle project the pointer before considering compatible snaps', () => {
   const geometry = {
     kind: 'polar',
+    line: true,
     origin: [4, 5],
     length: 10,
     direction: {kind: 'angle', degrees: 90},
@@ -467,4 +468,64 @@ test('only the final explicit axis or angle becomes a constraint and cancellatio
     draft.reset();
     assert.equal(edits.length, 1);
   }
+});
+
+test('accepted curve contacts and direction hints persist with the line in one transaction', () => {
+  const draft = new SketchLineDrawing();
+  const changes = [];
+  const accept = change => (changes.push(change), true);
+  draft.place(
+    {position: [2, 3], relations: [['pointOn', 8]]},
+    'local',
+    10,
+    accept,
+  );
+  draft.pointer = [11, 3.2];
+  const end = draft.resolve({...context, gridStep: 1});
+  assert.equal(end.hint, 'Horizontal');
+  draft.place(end.endpoint, 'local', 10, accept);
+  assert.deepEqual(changes[0].constraints, [
+    ['pointOn', [{layer: 'local', id: 10}, 8]],
+    ['horizontal', 12],
+  ]);
+  assert.equal(changes.length, 1);
+  assert.deepEqual(draft.start, {
+    point: {layer: 'local', id: 11, position: [11, 3]},
+  });
+
+  // Coordinates alone carry no relationship, even if they happen to be horizontal.
+  draft.place({position: [20, 3]}, 'local', 13, accept);
+  assert.deepEqual(changes[1].constraints, []);
+});
+
+test('a rejected tangent placement and checkpoint retain the accepted relationship intent', () => {
+  const draft = new SketchLineDrawing();
+  draft.place({position: [10, 0]}, 'local', 10, () => true);
+  const restore = draft.checkpoint();
+  const endpoint = {
+    position: [2.5, Math.sqrt(18.75)],
+    relations: [
+      ['tangent', 2],
+      ['pointOn', 2],
+    ],
+  };
+  const attempts = [];
+  assert.match(
+    draft.place(
+      endpoint,
+      'local',
+      10,
+      change => (attempts.push(change), false),
+    ),
+    /not applied/,
+  );
+  draft.place(endpoint, 'local', 10, change => (attempts.push(change), true));
+  assert.deepEqual(attempts[0], attempts[1]);
+  assert.deepEqual(attempts[1].constraints, [
+    ['pointOn', [{layer: 'local', id: 11}, 2]],
+    ['tangent', [12, 2]],
+  ]);
+  restore();
+  draft.place(endpoint, 'local', 10, change => (attempts.push(change), true));
+  assert.deepEqual(attempts[2], attempts[1]);
 });

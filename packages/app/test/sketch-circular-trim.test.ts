@@ -362,3 +362,35 @@ test('interior arc splits copy radius source and dimension expressions, remove s
     }
   }
 });
+
+test('split arcs retain equal radii and finite point-on only on the containing survivor', async () => {
+  const args = `[
+    ['point',1,[0,0]],['point',2,[10,0]],['point',3,[0,10]],
+    ['point',4,[-10,0]],['point',5,[0,-10]],
+    ['arc',6,[1,10,2,5,'ccw']],['point',7,[30,0]],['circle',8,[7,10]]
+  ], {constraints:[['equalRadius',[6,8]],['pointOn',[4,6]]]}`;
+  const view = await compile(args);
+  const middle = segments(view).find(
+    s => s.id === 6 && s.start.t > 0 && s.end.t < 1,
+  )!;
+  const change = geometry.trimSketchSegment([view], middle);
+  const [a, b] = change.replacements[0].ids;
+  assert.deepEqual(
+    change.constraintReplacements.find(c => c.index === 0)?.targets,
+    [
+      [a, 8],
+      [b, 8],
+    ],
+  );
+  const pointOn = change.constraintReplacements.find(c => c.index === 1)!;
+  assert.equal(pointOn.targets.length, 1);
+  assert.equal((pointOn.targets[0] as readonly [unknown, number])[1], b);
+  const written = edit(args, change, view.id);
+  assert.equal((written.match(/equalRadius/g) ?? []).length, 2);
+  const replay = await compile(written);
+  assert.equal(
+    replay.constraints.filter(c => c[0] === 'equalRadius').length,
+    2,
+  );
+  assert.equal(replay.constraints.filter(c => c[0] === 'pointOn').length, 1);
+});

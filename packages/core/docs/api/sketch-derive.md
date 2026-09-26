@@ -2,15 +2,15 @@
 title: Sketch point and derive
 description: Reference defining-layer points and add immutable local geometry over an upstream sketch.
 sourceReview:
-  packageVersion: 0.0.1-alpha.16
+  packageVersion: 0.0.1-alpha.17
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
+      sha256: 805a2f412703c50b2c9cd30ade43b682f5085155795d038efd00cd1aaaf2b018
     - path: packages/core/src/library/sketch-regions.ts
       sha256: 3519e575f6eaccc71b549176e937e86d3dd077df100829a9b3d5928e6a163c01
+      commit: dd17cbc45ffbf2222e6bb6b22b24e0a1609b8bb7
     - path: packages/core/src/library/sketch-solver.ts
-      sha256: 176f9f8a38507100328aaba71a2ef226b6e914e5718cf3a00b2bc018a7bab565
-      commit: 63b63837410721d7f9c44db1e721e5c52250f8d4
+      sha256: ff7805f44d03438cf20333d56aa33a41ca829cf94b3ead98d6bac20303ed8ded
 sidebar:
   hidden: true
 head:

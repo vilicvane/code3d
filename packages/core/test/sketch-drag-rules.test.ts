@@ -15,10 +15,8 @@ import {
   solveSketchDrag,
   solveSketchDragPlan,
 } from '../bld/library/sketch-drag-rules.js';
-import {
-  solveSketchProblem,
-  type SketchSolveProblem,
-} from '../bld/library/sketch-solver.js';
+import {solveSketchProblem} from '../bld/library/sketch-solver.js';
+import type {SketchSolveProblem} from '../bld/library/sketch-solve-model.js';
 
 const snapshot = (
   entries: readonly SketchEntry[],
@@ -276,7 +274,15 @@ test('dragging circle and arc centers preserves their radii before following the
           : ['circle', 4, [1, 10]],
         ['circle', 5, [1, 3]],
       ],
-      [['fixed', 2]],
+      [
+        ['fixed', 2],
+        ...(kind === 'circle'
+          ? ([
+              ['pointOn', [2, 4]],
+              ['pointOn', [3, 4]],
+            ] as const)
+          : []),
+      ],
     );
     let moved = before;
     for (const [target, expected] of [
@@ -607,7 +613,7 @@ test('a connected arc center carries an on-arc point before minimizing exterior 
       ['point', 30, [0, 35]],
       ['line', 31, [20, 30]],
     ],
-    [...connectedConstraints, ['vertical', 31]],
+    [...connectedConstraints, ['vertical', 31], ['pointOn', [20, 11]]],
   );
   const moved = solveSketchSnapshot([before], {
     id: 10,

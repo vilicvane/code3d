@@ -1,4 +1,8 @@
-import type {SketchSnapshot, SketchPointAddress} from '@code3d/core/tooling';
+import type {
+  SketchSnapshot,
+  SketchPointAddress,
+  SketchConstraint,
+} from '@code3d/core/tooling';
 
 export function deletedSketchConstraints(
   local: SketchSnapshot,
@@ -29,6 +33,12 @@ export function deletedSketchConstraints(
       case 'sweep':
         deleted = ids.includes(data);
         break;
+      case 'pointOn':
+        deleted = pointDeleted(data[0]) || ids.includes(data[1]);
+        break;
+      case 'equalLength':
+      case 'equalRadius':
+      case 'tangent':
       case 'parallel':
       case 'perpendicular':
         deleted = data.some(id => ids.includes(id));
@@ -42,4 +52,29 @@ export function deletedSketchConstraints(
     }
     return deleted ? [index] : [];
   });
+}
+
+/** Relation identity uses canonical point addresses and symmetric curve pairs.
+ * Dimension values are edited in place and do not create a second relation. */
+export function sketchConstraintIdentity(
+  [kind, data, value]: SketchConstraint<SketchPointAddress>,
+  resolvePoint: (point: SketchPointAddress) => SketchPointAddress,
+): string {
+  const key = (p: SketchPointAddress) => JSON.stringify(resolvePoint(p));
+  if (kind === 'fixed') return `${kind}:${key(data)}`;
+  if (kind === 'coincident') return `${kind}:${data.map(key).sort().join(':')}`;
+  if (kind === 'midpoint')
+    return `${kind}:${key(data[0])}:${data.slice(1).map(key).sort().join(':')}`;
+  if (kind === 'x' || kind === 'y') return `${kind}:${key(data)}`;
+  if (kind === 'pointOn') return `${kind}:${key(data[0])}:${data[1]}`;
+  if (kind === 'tangent')
+    return `${kind}:${value ?? 'external'}:${[...data].sort((a, b) => a - b).join(':')}`;
+  if (
+    kind === 'parallel' ||
+    kind === 'perpendicular' ||
+    kind === 'equalLength' ||
+    kind === 'equalRadius'
+  )
+    return `${kind}:${[...data].sort((a, b) => a - b).join(':')}`;
+  return `${kind}:${data}`;
 }

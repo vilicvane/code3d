@@ -22,12 +22,9 @@ export {
 } from '../library/kernel-cache.js';
 export type {KernelArtifactStore} from '../library/kernel-cache.js';
 
+export {SketchConstraintError} from '../library/sketch-solve-model.js';
+export {installSketchSolver} from '../library/sketch-solver.js';
 export {
-  SketchConstraintError,
-  installSketchSolver,
-} from '../library/sketch-solver.js';
-export {
-  sketchConnectionsPreserved,
   isSketch,
   sketchDefinition,
   sketchDragRequiresSolver,
@@ -64,6 +61,7 @@ export {
   sketchCurveGeometry,
   sketchCurvePosition,
   sketchCurveTolerance,
+  sketchCurveTangencyPoint,
   sketchPositiveAngle,
 } from '../library/sketch-curves.js';
 export type {SketchCurve} from '../library/sketch-curves.js';

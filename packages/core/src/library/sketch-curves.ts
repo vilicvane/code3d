@@ -123,6 +123,80 @@ export function sketchCurveClosestParameter(
   return distance - sweep < tau - distance ? 1 : 0;
 }
 
+/** The shared contact of two finite tangent curves, including their endpoints. */
+export function sketchCurveTangencyPoint(
+  first: SketchCurve,
+  second: SketchCurve,
+  mode: 'external' | 'internal' = 'external',
+): SketchPosition | undefined {
+  if (first.kind === 'line' && second.kind === 'line') return;
+  let contact: SketchPosition;
+  const tolerance = Math.min(
+    sketchCurveTolerance(first),
+    sketchCurveTolerance(second),
+  );
+  if (first.kind === 'line' || second.kind === 'line') {
+    if (mode === 'internal') return;
+    const line =
+      first.kind === 'line'
+        ? first
+        : (second as Extract<SketchCurve, {kind: 'line'}>);
+    const circle =
+      first.kind !== 'line'
+        ? first
+        : (second as Exclude<SketchCurve, {kind: 'line'}>);
+    const [a, b] = line.points;
+    const dx = b[0] - a[0],
+      dy = b[1] - a[1];
+    const squared = dx * dx + dy * dy;
+    if (!squared) return;
+    const t =
+      ((circle.center[0] - a[0]) * dx + (circle.center[1] - a[1]) * dy) /
+      squared;
+    contact = [a[0] + t * dx, a[1] + t * dy];
+    if (
+      Math.abs(
+        Math.hypot(
+          contact[0] - circle.center[0],
+          contact[1] - circle.center[1],
+        ) - circle.radius,
+      ) > tolerance
+    )
+      return;
+  } else {
+    const dx = second.center[0] - first.center[0],
+      dy = second.center[1] - first.center[1];
+    const distance = Math.hypot(dx, dy);
+    if (
+      !distance ||
+      Math.abs(
+        distance -
+          (mode === 'external'
+            ? first.radius + second.radius
+            : Math.abs(first.radius - second.radius)),
+      ) > tolerance
+    )
+      return;
+    const sign = mode === 'internal' && first.radius < second.radius ? -1 : 1;
+    contact = [
+      first.center[0] + (sign * first.radius * dx) / distance,
+      first.center[1] + (sign * first.radius * dy) / distance,
+    ];
+  }
+  return [first, second].every(curve => {
+    const nearest = sketchCurvePosition(
+      curve,
+      sketchCurveClosestParameter(curve, contact),
+    );
+    return (
+      Math.hypot(nearest[0] - contact[0], nearest[1] - contact[1]) <=
+      sketchCurveTolerance(curve)
+    );
+  })
+    ? contact
+    : undefined;
+}
+
 export function sketchCurveBounds(
   curve: SketchCurve,
 ): readonly SketchPosition[] {

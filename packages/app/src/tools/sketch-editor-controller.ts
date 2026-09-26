@@ -10,15 +10,12 @@ import {
   solveSketchSnapshot,
   sketchDragRequiresSolver,
   withSketchEntityParameters,
-  sketchConnectionsPreserved,
 } from '@code3d/core/tooling';
 import {
   previewSketchDrag,
   type SketchDrag,
   type SketchDragPreview,
   type SketchGeometryData,
-  type SketchConstraintEdit,
-  type SketchConstraintEditPreview,
 } from '../model/sketch-drag';
 import type {CompiledSketch} from '../model/sketch-trace';
 import type {ModelDiagnostic} from '../model/diagnostic';
@@ -53,7 +50,6 @@ export class SketchEditorController {
     layer: string;
     sourceRef: SourceRef;
     undoGroup: string;
-    reference?: SketchSnapshot;
   };
   private readonly stopView: () => void;
 
@@ -72,10 +68,6 @@ export class SketchEditorController {
         layers: readonly SketchSnapshot[],
         drag: SketchDrag,
       ): Promise<SketchDragPreview>;
-      solveConstraints(
-        layers: readonly SketchSnapshot[],
-        edit: SketchConstraintEdit,
-      ): Promise<SketchConstraintEditPreview>;
     },
   ) {
     makeObservable<
@@ -118,8 +110,8 @@ export class SketchEditorController {
     this.editor = new SketchEditor(
       container,
       (change, preview) => this.commit(change, preview),
-      (id, position, previous, mergeTarget) =>
-        this.preview(id, position, previous, mergeTarget),
+      (id, position, previous, mergeTarget, constraints) =>
+        this.preview(id, position, previous, mergeTarget, constraints),
       error => this.host.reportResult('move', error),
       {
         version: () =>
@@ -316,13 +308,10 @@ export class SketchEditorController {
     else this.cancelSynchronization();
   }
 
-  /** Retain edit-start connections and synchronize safe source data before
-   * publishing a GUI edit. Ordinary source edits still require an explicit Fix.
+  /** Synchronize safe source data before publishing a GUI constraint edit.
+   * Ordinary source edits still require an explicit Fix.
    */
-  async synchronizeSource(
-    diagnostics: readonly ModelDiagnostic[],
-    sketches: ReadonlyMap<string, CompiledSketch>,
-  ): Promise<boolean> {
+  synchronizeSource(diagnostics: readonly ModelDiagnostic[]): boolean {
     const pending = this.pendingSynchronization;
     if (!pending) return false;
     // The source editor retains committed groups until its deferred formatter
@@ -340,70 +329,7 @@ export class SketchEditorController {
     const fix = diagnostic?.actions?.find(
       action => action.intent.kind === 'sketch.edit',
     )?.intent;
-    let intent: SketchEditIntent | undefined =
-      fix?.kind === 'sketch.edit' ? fix : undefined;
-    let restoredConnections = false;
-    const next = sketches.get(pending.layer);
-    if (next && pending.reference) {
-      const layers: CompiledSketch[] = [next];
-      for (let base = next.base; base; base = sketches.get(base)!.base)
-        layers.unshift(sketches.get(base)!);
-      if (!sketchConnectionsPreserved(layers, pending.reference)) {
-        const version = this.host.sourceVersion();
-        const sourceRef = this.host.resolveSourceRef(pending.sourceRef);
-        const expectedText = this.host.readSource(pending.sourceRef);
-        if (!sourceRef || expectedText === undefined)
-          throw new Error(
-            'The sketch source is no longer available for retaining its connections.',
-          );
-        const instances = [...sketches.values()].filter(value => {
-          const ref = value.definitionRef ?? value.callRef;
-          return (
-            ref?.file === sourceRef.file &&
-            ref.start === sourceRef.start &&
-            ref.end === sourceRef.end
-          );
-        });
-        if (new Set(instances.map(value => value.geometryId)).size > 1)
-          throw new Error(
-            'Keeping sketch connections requires source data that belongs to one geometry instance.',
-          );
-        const {editable} = analyzeSketchSource(expectedText);
-        const preview = await this.host.solveConstraints(layers, {
-          reference: pending.reference,
-          editable,
-          data: next.data,
-        });
-        // Formatting or a newer source edit may have started another compilation.
-        // Only its own result can complete the pending source transaction.
-        if (
-          this.pendingSynchronization !== pending ||
-          this.host.sourceVersion() !== version
-        )
-          return false;
-        restoredConnections = true;
-        const previous = new Map(
-          next.data.map(entity => [entity.id, entity.parameters]),
-        );
-        intent = {
-          kind: 'sketch.edit',
-          sourceRef,
-          expectedText,
-          layer: next.id,
-          references: next.references,
-          change: {
-            kind: 'move',
-            data: preview.data.filter(
-              entity =>
-                editable.get(entity.id)?.some(Boolean) &&
-                entity.parameters.some(
-                  (value, index) => value !== previous.get(entity.id)![index],
-                ),
-            ),
-          },
-        };
-      }
-    }
+    const intent = fix?.kind === 'sketch.edit' ? fix : undefined;
     this.pendingSynchronization = undefined;
     if (!intent) return false;
     const current = this.host.resolveSourceRef(pending.sourceRef);
@@ -413,25 +339,15 @@ export class SketchEditorController {
       current.file !== target.file ||
       current.start !== target.start ||
       current.end !== target.end
-    ) {
-      if (restoredConnections)
-        throw new Error(
-          'The sketch source changed before its connections could be retained.',
-        );
+    )
       return false;
-    }
     // The new compilation has not published its source refs yet. Resolve the
     // original edit's tracked ref, whose range already follows that edit.
     this.host.resumeEditGroup(pending.sourceRef.file, pending.undoGroup);
-    const committed = this.host.commit(
+    return this.host.commit(
       {...intent, sourceRef: pending.sourceRef},
       pending.undoGroup,
     );
-    if (restoredConnections && !committed)
-      throw new Error(
-        'The geometry that retains sketch connections could not be written to source.',
-      );
-    return committed;
   }
 
   private cancelSynchronization(): void {
@@ -446,6 +362,7 @@ export class SketchEditorController {
     position: SketchPosition,
     previous?: SketchDragPreview,
     mergeTarget?: SketchPointAddress,
+    constraints?: readonly SketchConstraint<SketchPointAddress>[],
   ): Promise<SketchDragPreview> {
     const revision = this.revision;
     const source =
@@ -465,16 +382,14 @@ export class SketchEditorController {
       data: continuation?.data ?? this.data,
       reference: previous?.reference,
       mergeTarget,
+      constraints,
     };
     // The zero-equation case is kernel-independent. Use the same numeric and
     // source-replay logic without waiting for the preceding edit's compilation.
-    const solved = sketchDragRequiresSolver(
-      previous?.reference
-        ? [...layers.slice(0, -1), previous.reference]
-        : layers,
-    )
-      ? await this.host.solve(layers, drag)
-      : previewSketchDrag({solveSketchSnapshot}, layers, drag);
+    const solved =
+      constraints?.length || sketchDragRequiresSolver(layers)
+        ? await this.host.solve(layers, drag)
+        : previewSketchDrag({solveSketchSnapshot}, layers, drag);
     if (revision !== this.revision)
       throw new Error('The sketch changed during this gesture.');
     return solved;
@@ -548,10 +463,6 @@ export class SketchEditorController {
         layer: active.id,
         sourceRef: active.definitionRef,
         undoGroup,
-        reference:
-          change.kind === 'dimension' || change.kind === 'constrain'
-            ? local
-            : undefined,
       };
     if (change.kind === 'dimension' || change.kind === 'constrain') {
       // Both literals and expressions use the project's actual solve. Keep the
@@ -560,7 +471,9 @@ export class SketchEditorController {
       return true;
     }
     const addedConstraints =
-      change.kind === 'append' ? (change.constraints ?? []) : [];
+      change.kind === 'append' || change.kind === 'move'
+        ? (change.constraints ?? [])
+        : [];
     const removed =
       change.kind === 'delete' || change.kind === 'trim' ? change.ids : [];
     const entries =

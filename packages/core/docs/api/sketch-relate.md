@@ -2,12 +2,13 @@
 title: Sketch plane and relate
 description: Position an immutable sketch plane against model geometry before extracting faces.
 sourceReview:
-  packageVersion: 0.0.1-alpha.16
+  packageVersion: 0.0.1-alpha.17
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
+      sha256: 805a2f412703c50b2c9cd30ade43b682f5085155795d038efd00cd1aaaf2b018
     - path: packages/core/src/library/runtime.ts
       sha256: dcee3d2388a9b7b3819bb4897edd894463daa0e5b519e832a3349fac98c3bff8
+      commit: 0b8152b86fcf6531ae26905b2460211db578bebf
     - path: packages/core/src/library/alignment-geometry.ts
       sha256: 5d0a2bee2c0254805edb71643a44b33149a92d2d6253b3a6eb437cd6720156fc
       commit: 7f67264a5c862cdb95c408bcaedff43a3f8f46dd

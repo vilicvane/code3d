@@ -1,15 +1,29 @@
 import {
   sketchCurveGeometry,
+  sketchCurveClosestParameter,
   sketchCurveIntersections,
   sketchCurvePosition,
+  sketchCurveTolerance,
   sketchPointResolver,
   type SketchPointAddress,
+  type SketchConstraint,
+  type SketchCurve,
   type SketchPosition,
   type SketchSnapshot,
 } from '@code3d/core/tooling';
 
 export type SketchPoint = SketchPointAddress & {position: SketchPosition};
-export type SketchEndpoint = {point: SketchPoint} | {position: SketchPosition};
+/** An accepted hint carries intent until its point/line gets an authored identity. */
+export type SketchSnapRelation =
+  | readonly [kind: 'pointOn' | 'tangent', curve: number]
+  | readonly [
+      kind: 'midpoint',
+      points: readonly [SketchPointAddress, SketchPointAddress],
+    ]
+  | readonly [kind: 'horizontal' | 'vertical'];
+export type SketchEndpoint = (
+  {point: SketchPoint} | {position: SketchPosition}
+) & {relations?: readonly SketchSnapRelation[]};
 export type SketchAxis = 'x' | 'y';
 export type SketchDirection =
   {kind: 'angle'; degrees: number} | {kind: 'axis'; axis: SketchAxis};
@@ -20,6 +34,8 @@ export type SketchInputGeometry =
       origin: SketchPosition;
       length?: number;
       direction?: SketchDirection;
+      /** Only a real line creates direction and tangency relations. */
+      line?: boolean;
     };
 export type SketchSnap = {
   endpoint: SketchEndpoint;
@@ -29,15 +45,19 @@ export type SketchSnap = {
     | 'Horizontal'
     | 'Vertical'
     | 'Grid'
+    | 'On curve'
+    | 'Tangent'
     | SketchSnapFeature['hint'];
 };
 export type SketchSnapFeature = {
   position: SketchPosition;
-  hint: 'Intersection' | 'Midpoint' | 'Quadrant';
+  hint: 'Intersection' | 'Midpoint' | 'On curve';
+  relations?: readonly SketchSnapRelation[];
 };
 export type SketchSnapContext = {
   points: readonly SketchPoint[];
   features: readonly SketchSnapFeature[];
+  curves?: readonly {id: number; curve: SketchCurve}[];
   scale: number;
   gridStep: number;
   enabled: boolean;
@@ -47,7 +67,8 @@ export type SketchSnapContext = {
 export function sketchSnapTargets(
   layers: readonly SketchSnapshot[],
   excluded?: SketchPointAddress,
-): Pick<SketchSnapContext, 'points' | 'features'> {
+  referenceable?: ReadonlySet<string>,
+): Pick<SketchSnapContext, 'points' | 'features' | 'curves'> {
   const allPoints = layers.flatMap(layer =>
     layer.entities.flatMap(entity =>
       entity.kind === 'point'
@@ -77,36 +98,98 @@ export function sketchSnapTargets(
         entity,
         ref => allPoints.find(point => sameSketchPoint(point, ref))!.position,
       );
-      return curve ? [curve] : [];
+      return curve ? [{id: entity.id, layer: layer.id, entity, curve}] : [];
     }),
   );
+  const local = layers.at(-1)?.id;
+  const localCurves = curves.filter(curve => curve.layer === local);
   const features: SketchSnapFeature[] = [];
-  curves.forEach((curve, index) => {
-    for (const other of curves.slice(index + 1))
-      for (const contact of sketchCurveIntersections(curve, other))
-        features.push({position: contact.position, hint: 'Intersection'});
+  localCurves.forEach(({id, curve}, index) => {
+    for (const other of localCurves.slice(index + 1))
+      for (const contact of sketchCurveIntersections(curve, other.curve))
+        features.push({
+          position: contact.position,
+          hint: 'Intersection',
+          relations: [
+            ['pointOn', id],
+            ['pointOn', other.id],
+          ],
+        });
   });
-  for (const curve of curves) {
-    if (curve.kind === 'circle') {
-      const [x, y] = curve.center;
-      for (const position of [
-        [x + curve.radius, y],
-        [x, y + curve.radius],
-        [x - curve.radius, y],
-        [x, y - curve.radius],
-      ] as const)
-        features.push({position, hint: 'Quadrant'});
-    } else
+  for (const {id, layer, entity, curve} of curves) {
+    if (entity.kind === 'line') {
       features.push({
         position: sketchCurvePosition(curve, 0.5),
         hint: 'Midpoint',
+        relations: [['midpoint', entity.points]],
       });
+    } else if (layer === local) {
+      // These are convenient locations on a curve, not unrepresentable
+      // quadrant/arc-midpoint promises. The visible hint names what persists.
+      const positions: SketchPosition[] =
+        curve.kind === 'circle'
+          ? [
+              [curve.center[0] + curve.radius, curve.center[1]],
+              [curve.center[0], curve.center[1] + curve.radius],
+              [curve.center[0] - curve.radius, curve.center[1]],
+              [curve.center[0], curve.center[1] - curve.radius],
+            ]
+          : [sketchCurvePosition(curve, 0.5)];
+      for (const position of positions)
+        features.push({
+          position,
+          hint: 'On curve',
+          relations: [['pointOn', id]],
+        });
+    }
   }
+  const canReference = (point: SketchPointAddress) =>
+    referenceable === undefined ||
+    point.layer === local ||
+    referenceable.has(point.layer);
   // Actual point identities (including curve endpoints and centers) win ties.
   return {
-    points: allPoints.filter(point => !excludes(point)).reverse(),
-    features,
+    points: allPoints
+      .filter(point => !excludes(point) && canReference(point))
+      .reverse(),
+    features: features.filter(
+      feature =>
+        feature.relations?.every(
+          relation =>
+            relation[0] !== 'midpoint' || relation[1].every(canReference),
+        ) ?? true,
+    ),
+    curves: localCurves.map(({id, curve}) => ({id, curve})),
   };
+}
+
+/** Bind only the relationships the user actually accepted, never coordinate coincidences. */
+export function sketchSnapPointConstraints(
+  endpoint: SketchEndpoint,
+  point: SketchPointAddress,
+): SketchConstraint<SketchPointAddress>[] {
+  return (endpoint.relations ?? []).flatMap<
+    SketchConstraint<SketchPointAddress>
+  >(relation => {
+    if (relation[0] === 'pointOn') return [['pointOn', [point, relation[1]]]];
+    if (relation[0] === 'midpoint')
+      return [['midpoint', [point, ...relation[1]]]];
+    return [];
+  });
+}
+
+export function sketchSnapLineConstraints(
+  endpoint: SketchEndpoint,
+  line: number,
+): SketchConstraint<SketchPointAddress>[] {
+  return (endpoint.relations ?? []).flatMap<
+    SketchConstraint<SketchPointAddress>
+  >(relation => {
+    if (relation[0] === 'tangent') return [['tangent', [line, relation[1]]]];
+    if (relation[0] === 'horizontal' || relation[0] === 'vertical')
+      return [[relation[0], line]];
+    return [];
+  });
 }
 
 export const endpointPosition = (endpoint: SketchEndpoint): SketchPosition =>
@@ -194,31 +277,135 @@ export function snapSketchPointer(
     );
   };
 
-  // Caller orders coincident points local-first. Never manufacture an upstream
-  // reference from a coordinate match after projecting incompatible input.
-  const point = context.points
-    .filter(point => close(point.position) && compatible(point.position))
-    .sort(
-      (a, b) =>
-        sketchDistance(position, a.position) -
-        sketchDistance(position, b.position),
-    )[0];
-  if (point) return {endpoint: {point}, hint: 'Point'};
-  const feature = context.features
-    .filter(feature => close(feature.position) && compatible(feature.position))
-    .sort(
-      (a, b) =>
-        sketchDistance(position, a.position) -
-        sketchDistance(position, b.position),
-    )[0];
-  if (feature)
-    return {endpoint: {position: feature.position}, hint: feature.hint};
-  if (close([0, 0]) && compatible([0, 0]))
-    return {endpoint: {position: [0, 0]}, hint: 'Origin'};
+  // Priority is product policy, independent of each geometric construction.
+  // Stable ordering retains local-first point identities and feature tie order.
+  const priority = {
+    point: 0,
+    tangent: 1,
+    feature: 2,
+    curve: 3,
+    origin: 4,
+    direction: 5,
+    grid: 6,
+  };
+  const candidates: {
+    priority: number;
+    screenDistance: number;
+    snap: SketchSnap;
+  }[] = [];
+  const offer = (
+    endpoint: SketchEndpoint,
+    hint: SketchSnap['hint'],
+    rank: number,
+    proximity = endpointPosition(endpoint),
+  ) => {
+    const at = endpointPosition(endpoint);
+    if (!close(at) || !compatible(at)) return;
+    candidates.push({
+      priority: rank,
+      screenDistance: sketchDistance(position, proximity) * context.scale,
+      snap: {endpoint, hint},
+    });
+  };
+  const endpointAt = (
+    candidate: SketchPosition,
+    relations?: readonly SketchSnapRelation[],
+  ): SketchEndpoint => ({
+    position: candidate,
+    ...(relations?.length ? {relations} : {}),
+  });
 
-  if (geometry.kind === 'polar' && geometry.direction === undefined) {
+  for (const point of context.points) offer({point}, 'Point', priority.point);
+  if (geometry.kind === 'polar' && geometry.line) {
+    for (const {id, curve} of context.curves ?? []) {
+      if (curve.kind === 'line') continue;
+      const [ox, oy] = geometry.origin;
+      const dx = ox - curve.center[0],
+        dy = oy - curve.center[1];
+      const squared = dx * dx + dy * dy;
+      const radiusSquared = curve.radius * curve.radius;
+      const radialDistance = Math.sqrt(squared);
+      const curveTolerance = sketchCurveTolerance(curve);
+      if (radialDistance < curve.radius - curveTolerance || squared === 0)
+        continue;
+      const onCircle =
+        Math.abs(radialDistance - curve.radius) <= curveTolerance;
+      const root = Math.sqrt(Math.max(0, squared - radiusSquared));
+      for (const sign of onCircle ? [1] : [-1, 1]) {
+        const contact: SketchPosition = onCircle
+          ? geometry.origin
+          : [
+              curve.center[0] +
+                (radiusSquared * dx - sign * curve.radius * dy * root) /
+                  squared,
+              curve.center[1] +
+                (radiusSquared * dy + sign * curve.radius * dx * root) /
+                  squared,
+            ];
+        if (
+          sketchDistance(
+            contact,
+            sketchCurvePosition(
+              curve,
+              sketchCurveClosestParameter(curve, contact),
+            ),
+          ) > curveTolerance
+        )
+          continue;
+        const vx = onCircle ? -dy : contact[0] - ox;
+        const vy = onCircle ? dx : contact[1] - oy;
+        const denominator = vx * vx + vy * vy;
+        const projected =
+          ((position[0] - ox) * vx + (position[1] - oy) * vy) / denominator;
+        const t =
+          geometry.length === undefined
+            ? projected
+            : (Math.sign(projected || 1) * geometry.length) /
+              Math.sqrt(denominator);
+        const atContact = !onCircle && close(contact) && compatible(contact);
+        if (!onCircle && t < 1 && !atContact) continue;
+        const candidate: SketchPosition = atContact
+          ? contact
+          : [ox + t * vx, oy + t * vy];
+        if (sketchDistance(candidate, geometry.origin) === 0) continue;
+        offer(
+          endpointAt(candidate, [
+            ['tangent', id],
+            ...(atContact ? [['pointOn', id] as const] : []),
+          ]),
+          'Tangent',
+          priority.tangent,
+        );
+      }
+    }
+  }
+  for (const feature of context.features)
+    offer(
+      endpointAt(feature.position, feature.relations),
+      feature.hint,
+      priority.feature,
+    );
+  for (const {id, curve} of context.curves ?? [])
+    offer(
+      endpointAt(
+        sketchCurvePosition(
+          curve,
+          sketchCurveClosestParameter(curve, position),
+        ),
+        [['pointOn', id]],
+      ),
+      'On curve',
+      priority.curve,
+    );
+  offer(endpointAt([0, 0]), 'Origin', priority.origin);
+
+  if (
+    geometry.kind === 'polar' &&
+    geometry.direction === undefined &&
+    geometry.line
+  ) {
     const {origin, length} = geometry;
-    const candidates = [
+    const directions = [
       {
         position: [
           length === undefined
@@ -237,15 +424,10 @@ export function snapSketchPointer(
         ] as SketchPosition,
         hint: 'Vertical' as const,
       },
-    ]
-      .filter(candidate => close(candidate.position))
-      .sort(
-        (a, b) =>
-          sketchDistance(position, a.position) -
-          sketchDistance(position, b.position),
-      );
-    if (candidates[0]) {
-      const candidate = candidates[0];
+    ];
+    for (const candidate of directions) {
+      // Grid refinement does not change which direction was closest.
+      const proximity = candidate.position;
       if (length === undefined) {
         const axis = candidate.hint === 'Horizontal' ? 0 : 1;
         const grid: [number, number] = [...candidate.position];
@@ -253,12 +435,17 @@ export function snapSketchPointer(
           Math.round(grid[axis] / context.gridStep) * context.gridStep;
         if (close(grid)) candidate.position = grid;
       }
-      return {
-        endpoint: {position: candidate.position},
-        hint: candidate.hint,
-      };
+      offer(
+        endpointAt(candidate.position, [
+          [candidate.hint === 'Horizontal' ? 'horizontal' : 'vertical'],
+        ]),
+        candidate.hint,
+        priority.direction,
+        proximity,
+      );
     }
   }
+
   // Snap the free coordinate of an axis lock, but never move off an entered
   // radius/arbitrary angle merely to display a grid snap indicator.
   if (
@@ -269,7 +456,11 @@ export function snapSketchPointer(
       Math.round(position[0] / context.gridStep) * context.gridStep,
       Math.round(position[1] / context.gridStep) * context.gridStep,
     ]);
-    if (close(grid)) return {endpoint: {position: grid}, hint: 'Grid'};
+    offer(endpointAt(grid), 'Grid', priority.grid);
   }
-  return raw;
+  return (
+    candidates.sort(
+      (a, b) => a.priority - b.priority || a.screenDistance - b.screenDistance,
+    )[0]?.snap ?? raw
+  );
 }

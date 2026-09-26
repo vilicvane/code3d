@@ -1,9 +1,12 @@
 import type {SketchPosition} from './sketch.js';
-import type {
-  SketchSolveConstraint,
-  SketchSolveProblem,
-  SketchSolveResult,
-} from './sketch-solver.js';
+import {
+  SketchConstraintError,
+  type SketchContact,
+  type SketchContactBoundary,
+  type SketchSolveCurve,
+  type SketchSolveProblem,
+  type SketchSolveResult,
+} from './sketch-solve-model.js';
 import {
   sketchCurveTolerance,
   sketchArcGeometry,
@@ -21,66 +24,125 @@ export type SketchIncidenceGeometry = Readonly<{
   >[];
   arcs: readonly Omit<SketchSolveProblem['arcs'][number], 'locked'>[];
 }>;
-export type SketchIncidence = Readonly<{
-  point: number;
-  kind: 'line' | 'circle' | 'arc';
-  index: number;
-}>;
-
-/** Connections are scoped to one GUI edit and never become author constraints. */
-export function sketchIncidenceConstraints(
-  geometry: SketchIncidenceGeometry,
-  contacts: readonly SketchIncidence[],
-): SketchSolveConstraint[] {
-  return contacts.map(contact =>
-    contact.kind === 'line'
-      ? {
-          kind: 'pointOnLine',
-          points: [contact.point, ...geometry.lines[contact.index]],
-        }
-      : {
-          kind: 'pointOnCircle',
-          points: [
-            contact.point,
-            (contact.kind === 'circle' ? geometry.circles : geometry.arcs)[
-              contact.index
-            ].center,
-          ],
-          curve: contact.kind,
-          index: contact.index,
-        },
-  );
-}
-
-/** Clamp a solved contact to the finite segment or arc it started on. */
+/** Solve finite domains with revisable endpoint equalities. The native kernel
+ * supplies local equality solves, not inequality multipliers: failed active sets
+ * branch on implicated boundaries, never on authored constraints. Every state
+ * starts from the same geometry, so memoization does not discard another seed.
+ * The normal path adds one bound per solve. Search is finite (three states per
+ * contact), with a quadratic work budget before reporting local nonconvergence. */
 export function solveSketchIncidenceBounds(
   original: SketchSolveProblem,
-  contacts: readonly SketchIncidence[],
-  solve: (problem: SketchSolveProblem) => SketchSolveResult,
+  contacts: readonly SketchContact[],
+  solve: (bounds: readonly SketchContactBoundary[]) => SketchSolveResult,
 ): SketchSolveResult {
-  const bounds = new Map<SketchIncidence, number>();
-  for (;;) {
-    const problem = {
-      ...original,
-      constraints: [
-        ...original.constraints,
-        ...[...bounds].map(([contact, endpoint]) => ({
-          kind: 'coincident' as const,
-          points: [contact.point, endpoint] as const,
-        })),
-      ],
-    };
-    const result = solve(problem);
-    const solved = sketchIncidenceGeometry(problem, result);
-    const outside = contacts.flatMap(contact => {
-      const endpoint = bounds.has(contact)
-        ? undefined
-        : sketchIncidenceBoundary(solved, contact);
-      return endpoint === undefined ? [] : [{contact, endpoint}];
-    })[0];
-    if (!outside) return result;
-    bounds.set(outside.contact, outside.endpoint);
+  const domains = contacts.filter(
+    contact => !contact.structural && contact.curve.kind !== 'circle',
+  );
+  type ActiveSet = ReadonlyMap<number, 0 | 1>;
+  // Generators retain a parent state and materialize one child at a time.
+  // Budget state width as well as visits, bounding queued maps and memo keys,
+  // rather than allocating a combinatorial frontier before the next solve.
+  const pending: Iterator<ActiveSet>[] = [[new Map<number, 0 | 1>()].values()];
+  const visited = new Set<string>();
+  const endpoints = (contact: SketchContact) =>
+    contact.curve.kind === 'line'
+      ? original.lines[contact.curve.index]
+      : original.arcs[contact.curve.index].points;
+  let failure: SketchConstraintError | undefined;
+  const sources = new Set<number>();
+  const budget = 4 * (domains.length + 1) ** 2;
+  let work = 0;
+  let exhausted = false;
+  while (pending.length) {
+    const candidate = pending.at(-1)!.next();
+    if (candidate.done) {
+      pending.pop();
+      continue;
+    }
+    const active = candidate.value;
+    work += 1 + active.size;
+    if (work > budget) {
+      exhausted = true;
+      break;
+    }
+    const key = [...active]
+      .sort(([a], [b]) => a - b)
+      .map(([index, end]) => `${index}:${end}`)
+      .join(',');
+    if (visited.has(key)) continue;
+    visited.add(key);
+    const bounds = [...active].map(([index, end]) => ({
+      contact: domains[index],
+      endpoint: endpoints(domains[index])[end],
+    }));
+    let result: SketchSolveResult;
+    try {
+      result = solve(bounds);
+    } catch (error) {
+      if (!(error instanceof SketchConstraintError) || !active.size)
+        throw error;
+      failure = error;
+      error.constraints.forEach(source => sources.add(source));
+      const implicated = [...active.keys()].filter(index =>
+        domains[index].sources.some(source =>
+          error.constraints.includes(source),
+        ),
+      );
+      // Author diagnostics prioritize candidates; they are not a complete
+      // conflict core. Other boundaries remain searchable, and author equations
+      // are never removed.
+      const competing = [
+        ...implicated,
+        ...[...active.keys()].filter(index => !implicated.includes(index)),
+      ];
+      pending.push(
+        (function* () {
+          for (const index of competing) {
+            const released = new Map(active);
+            released.delete(index);
+            yield released;
+          }
+          for (const index of competing) {
+            const replaced = new Map(active);
+            replaced.set(index, active.get(index) === 0 ? 1 : 0);
+            yield replaced;
+          }
+        })(),
+      );
+      continue;
+    }
+    const geometry = sketchIncidenceGeometry(original, result);
+    const outside = domains.flatMap((contact, index) => {
+      const endpoint = sketchIncidenceBoundary(geometry, contact);
+      return endpoint === undefined
+        ? []
+        : [{index, end: endpoints(contact).indexOf(endpoint) as 0 | 1}];
+    });
+    if (!outside.length) return result;
+    for (const {index} of outside)
+      domains[index].sources.forEach(source => sources.add(source));
+    pending.push(
+      (function* () {
+        for (const {index, end} of outside) {
+          const nearest = new Map(active);
+          nearest.set(index, end);
+          yield nearest;
+        }
+        for (const {index, end} of outside) {
+          const alternate = new Map(active);
+          alternate.set(index, end === 0 ? 1 : 0);
+          yield alternate;
+        }
+      })(),
+    );
   }
+  const constraints = [...sources].sort((a, b) => a - b);
+  throw new SketchConstraintError(
+    constraints.length ? constraints : (failure?.constraints ?? []),
+    exhausted
+      ? 'Sketch finite curve boundaries did not converge within the active-set work budget.'
+      : 'Sketch constraints did not converge within their finite curve boundaries.',
+  );
 }
 
 export function sketchIncidenceGeometry(
@@ -103,23 +165,23 @@ export function sketchIncidenceGeometry(
 
 export function sketchIncidenceCurve(
   geometry: SketchIncidenceGeometry,
-  contact: SketchIncidence,
+  curveRef: SketchSolveCurve,
 ): SketchCurve {
-  if (contact.kind === 'line')
+  if (curveRef.kind === 'line')
     return {
       kind: 'line',
-      points: geometry.lines[contact.index].map(i => geometry.points[i]) as [
+      points: geometry.lines[curveRef.index].map(i => geometry.points[i]) as [
         SketchPosition,
         SketchPosition,
       ],
     };
-  const curve = (contact.kind === 'circle' ? geometry.circles : geometry.arcs)[
-    contact.index
+  const curve = (curveRef.kind === 'circle' ? geometry.circles : geometry.arcs)[
+    curveRef.index
   ];
   const center = geometry.points[curve.center];
-  if (contact.kind === 'circle')
+  if (curveRef.kind === 'circle')
     return {kind: 'circle', center, radius: curve.radius};
-  const arc = geometry.arcs[contact.index];
+  const arc = geometry.arcs[curveRef.index];
   return {
     ...sketchArcGeometry(
       center,
@@ -129,23 +191,6 @@ export function sketchIncidenceCurve(
     ),
     radius: arc.radius,
   };
-}
-
-export function sketchIncidencePoints(
-  geometry: SketchIncidenceGeometry,
-  contact: SketchIncidence,
-): readonly number[] {
-  return [
-    contact.point,
-    ...(contact.kind === 'line'
-      ? geometry.lines[contact.index]
-      : contact.kind === 'circle'
-        ? [geometry.circles[contact.index].center]
-        : [
-            geometry.arcs[contact.index].center,
-            ...geometry.arcs[contact.index].points,
-          ]),
-  ];
 }
 
 export function isPointOnSketchCurve(
@@ -167,57 +212,19 @@ export function isPointOnSketchCurve(
 /** Finite boundary violated by a solution on the underlying unbounded curve. */
 export function sketchIncidenceBoundary(
   geometry: SketchIncidenceGeometry,
-  contact: SketchIncidence,
+  contact: SketchContact,
 ): number | undefined {
-  if (contact.kind === 'circle') return;
-  const curve = sketchIncidenceCurve(geometry, contact);
+  if (contact.curve.kind === 'circle') return;
+  const curve = sketchIncidenceCurve(geometry, contact.curve);
   const point = geometry.points[contact.point];
   if (isPointOnSketchCurve(point, curve)) return;
   const endpoints =
-    contact.kind === 'line'
-      ? geometry.lines[contact.index]
-      : geometry.arcs[contact.index].points;
+    contact.curve.kind === 'line'
+      ? geometry.lines[contact.curve.index]
+      : geometry.arcs[contact.curve.index].points;
   const t = sketchCurveClosestParameter(curve, point);
   if (t === 0 || t === 1) return endpoints[t];
   return;
-}
-
-/** Recognition is edit-local and shares finite geometry/tolerance with trimming. */
-export function sketchIncidences(
-  geometry: SketchIncidenceGeometry,
-): readonly SketchIncidence[] {
-  const seen = new Set<string>();
-  return (['line', 'circle', 'arc'] as const).flatMap(kind => {
-    const curves =
-      kind === 'line'
-        ? geometry.lines
-        : kind === 'circle'
-          ? geometry.circles
-          : geometry.arcs;
-    return curves.flatMap((_, index) =>
-      geometry.points.flatMap((position, point): SketchIncidence[] => {
-        const contact = {point, kind, index};
-        if (sketchIncidencePoints(geometry, contact).slice(1).includes(point))
-          return [];
-        if (
-          !isPointOnSketchCurve(
-            position,
-            sketchIncidenceCurve(geometry, contact),
-          )
-        )
-          return [];
-        const key =
-          kind === 'line'
-            ? [point, ...[...geometry.lines[index]].sort((a, b) => a - b)].join(
-                ':',
-              )
-            : kind + ':' + point + ':' + index;
-        if (seen.has(key)) return [];
-        seen.add(key);
-        return [contact];
-      }),
-    );
-  });
 }
 
 export function lineParameter(

@@ -2,16 +2,15 @@
 title: Sketch entities
 description: Author points, lines, circles and directed circular arcs with layer-local IDs.
 sourceReview:
-  packageVersion: 0.0.1-alpha.16
+  packageVersion: 0.0.1-alpha.17
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
+      sha256: 805a2f412703c50b2c9cd30ade43b682f5085155795d038efd00cd1aaaf2b018
     - path: packages/core/src/library/sketch-solver.ts
-      sha256: 176f9f8a38507100328aaba71a2ef226b6e914e5718cf3a00b2bc018a7bab565
-      commit: 63b63837410721d7f9c44db1e721e5c52250f8d4
+      sha256: ff7805f44d03438cf20333d56aa33a41ca829cf94b3ead98d6bac20303ed8ded
     - path: packages/core/src/library/sketch-curves.ts
-      sha256: 943169600e554a0f24d2b9dc14aef5d201538199fdffa3d0463b93d7f257ce64
-      commit: 81c6e51b8e207da937338763e45f27d3469ae097
+      sha256: 3943da8b380dd4392022e35a0a4352bafe6b5b4a1cb5ebf9a67410690de12929
+      commit: 42b6cba5ec1ea173ce1f4eadc331e5d760b809c5
 sidebar:
   hidden: true
 head:

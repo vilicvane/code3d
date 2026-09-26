@@ -172,6 +172,7 @@ export class SketchRectangleDrawing implements SketchDrawing {
     const top = geometry.line(c, d),
       left = geometry.line(d, a);
     const constraints: SketchConstraint<SketchPointAddress>[] = [
+      ...geometry.constraints,
       ...this.startCoordinates.map(
         ({axis, value}): SketchConstraint<SketchPointAddress> => [
           axis,

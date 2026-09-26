@@ -40,12 +40,28 @@ for complete API rules.
 ### Drawing and snapping in the App
 
 Select a sketch to draw continuous lines, rectangles, circles and arcs. **Snap**
-includes existing points (endpoints and centers), intersections of lines, circles
-and arcs, line and arc midpoints, and the four quadrant points of a circle.
+includes existing points (endpoints and centers), local curves and their
+intersections, line midpoints, and horizontal or vertical line directions.
+When drawing a line toward a local circle or arc, **Tangent** offers a tangent
+endpoint within the finite curve.
 Geometry features take priority over the grid. Hold **Alt** to bypass snapping,
 or turn **Snap** off. Entered dimensions and X/Y direction locks remain in effect.
-Computed snap positions do not add persistent constraints; snapping to an existing
-point reuses that point's identity.
+Accepting a geometric snap writes the indicated relationship into source in the
+same operation: `pointOn`, `midpoint`, `horizontal`, `vertical`, or `tangent`.
+An intersection adds membership on both curves. Snapping to an existing point
+reuses that point's identity. Grid and origin snaps only position geometry.
+Arc midpoint and circle quadrant candidates use **On curve**: they preserve
+curve membership, not a particular fraction or angle along the curve.
+
+Upstream points and line midpoints can be referenced. Other upstream curve snaps
+are unavailable because curve relationships currently target local curves.
+Coordinates that happen to touch or be tangent do not create constraints during
+recalculation or at the start of a drag. Delete a relation's marker to release it;
+hold **Alt** when moving away to bypass new snaps.
+
+When a circle's radius is placed on a snapped point or curve, the contact point
+is retained with a `pointOn` constraint on the new circle. A free or grid radius
+placement only creates the circle and its center.
 
 With focus on the drawing canvas, **Undo** returns to the previous drawing step.
 Undoing a line segment restores its starting point so you can draw a replacement
@@ -83,23 +99,45 @@ islands. Overlapping duplicate boundaries require trimming.
 
 ### Editing dimensions and constraints in the App
 
+Use Ctrl or Shift to select the participating geometry, then choose a tool:
+
+| Selection                                   | Persistent relationship                      |
+| ------------------------------------------- | -------------------------------------------- |
+| Two or more local lines                     | **Equal length**                             |
+| Two or more local circles or arcs           | **Equal radius**                             |
+| One point and one local line, circle or arc | **Point on curve**                           |
+| One local line and one local circle or arc  | **Tangent**                                  |
+| Two local circles or arcs                   | **External tangent** or **Internal tangent** |
+
+These tools write `equalLength`, `equalRadius`, `pointOn` and `tangent` tuples
+to `constraints`. Their conditions remain active after source parameter changes
+and ordinary re-evaluation. Point-on-curve and tangent contact respect finite
+line segments and arc extents. The constraint markers identify their participants;
+click an active tool to remove that relationship. Undo restores both the relation
+and its geometry. See the [tuple reference](api/sketch-constraints.md#persistent-geometric-relationships)
+for target types and tangent modes.
+
+Try [persistent-constraints.ts](../../app/examples/sketches/persistent-constraints.ts)
+and change `holeRadius` from `8` to `6`. Both holes shrink together, their centers
+stay on the construction median, and the lower hole stays tangent to its guide.
+
 Click a dimension label, such as a circle's **R** label, to edit its value or
 TypeScript expression. After you change or add a dimension or geometric
 constraint in the sketch editor, a successful solve also synchronizes safely
 writable local geometry inputs. One Undo or Redo restores both the constraint
 and those geometry inputs.
 
-Existing points on lines, circles and finite arcs stay connected during these
-edits, including construction geometry. For example, making a line perpendicular
-to a construction radius keeps their shared endpoint on the circle and moves
-other free points as needed. These connections are preserved in the written
-coordinates; the operation does not add extra constraint tuples.
+Shared point identities and authored relationships remain connected during
+these edits, including construction geometry. Use **Point on curve** to bind an
+existing point to a line, circle or finite arc. Accepted curve snaps create this
+same persistent relation. A coordinate match alone does not imply a connection,
+whether editing in the GUI or changing source parameters.
 
 Synchronization preserves expressions and upstream geometry. It does not choose
 between independent evaluations of the same source definition. When the source
 cannot be safely synchronized, the App keeps the source mismatch warning.
-If keeping a connection conflicts with the new constraint or requires replacing
-an expression, the edit reports an error and retains the last successful view.
+If the authored constraints conflict, the edit reports an error and retains the
+last successful view.
 Direct source edits also retain this warning and an explicit **Fix** action
 where safe. A failed solve shows diagnostics and keeps the last successful
 sketch, when available, as a read-only reference.

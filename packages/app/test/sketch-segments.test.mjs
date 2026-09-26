@@ -791,3 +791,107 @@ test('vertex deletion also prunes points that geometrically subdivided its remov
   ]);
   assert.deepEqual(deleteSketchEntity([value], 1).ids, [1, 3, 2, 4]);
 });
+
+test('trim maps finite point-on relations to their surviving piece and drops whole-line equal lengths', () => {
+  const local = snapshot(
+    [
+      point(1, 0, 0),
+      point(2, 30, 0),
+      line(3, 1, 2),
+      point(4, 5, 0),
+      point(5, 10, 0),
+      point(6, 20, 0),
+      point(7, 25, 0),
+      point(8, 0, 10),
+      point(9, 30, 10),
+      line(10, 8, 9),
+    ],
+    [
+      ['pointOn', [ref(4), 3]],
+      ['pointOn', [ref(7), 3]],
+      ['equalLength', [3, 10]],
+    ],
+  );
+  const change = trimSketchSegment(
+    [local],
+    segments(local).find(s => s.id === 3 && s.start.t === 1 / 3),
+  );
+  const [left, right] = change.replacements[0].ids;
+  assert.deepEqual(change.constraintReplacements, [
+    {index: 0, targets: [[ref(4), left]]},
+    {index: 1, targets: [[ref(7), right]]},
+    {index: 2, targets: []},
+  ]);
+  assert.deepEqual(deleteSketchEntity([local], 3).constraints, [0, 1, 2]);
+  assert.deepEqual(deleteSketchEntity([local], 4).constraints, [0]);
+});
+
+test('trim keeps tangency only on pieces containing the contact point', () => {
+  const local = snapshot(
+    [
+      point(1, -10, 0),
+      point(2, 10, 0),
+      line(3, 1, 2),
+      point(4, -5, 0),
+      point(5, 5, 0),
+      point(6, 0, 5),
+      {kind: 'circle', id: 7, center: ref(6), radius: 5},
+    ],
+    [['tangent', [3, 7]]],
+  );
+  const middle = segments(local).filter(
+    s => s.id === 3 && s.start.t >= 0.25 && s.end.t <= 0.75,
+  );
+  const removedContact = trimSketchSegment([local], middle);
+  assert.deepEqual(removedContact.constraintReplacements, [
+    {index: 0, targets: []},
+  ]);
+  const end = segments(local).find(s => s.id === 3 && s.start.t === 0);
+  const retained = trimSketchSegment([local], end);
+  assert.deepEqual(retained.constraintReplacements, [
+    {index: 0, targets: [[3, 7]]},
+  ]);
+  assert.deepEqual(deleteSketchEntity([local], 7).constraints, [0]);
+});
+
+test('point-on orphan cleanup removes one source constraint exactly once', () => {
+  const local = snapshot(
+    [
+      point(1, 0, 0),
+      point(2, 30, 0),
+      line(3, 1, 2),
+      point(4, 10, 0),
+      point(5, 15, 0),
+      point(6, 20, 0),
+    ],
+    [['pointOn', [ref(5), 3]]],
+  );
+  const selected = segments(local).filter(
+    s => s.start.t >= 1 / 3 && s.end.t <= 2 / 3,
+  );
+  const change = trimSketchSegment([local], selected);
+  assert.ok(change.ids.includes(5));
+  assert.deepEqual(change.constraints, [0]);
+  assert.deepEqual(change.constraintReplacements, []);
+  const source =
+    "[['point',1,[0,0]],['point',2,[30,0]],['line',3,[1,2]],['point',4,[10,0]],['point',5,[15,0]],['point',6,[20,0]]], {constraints:[['pointOn',[5,3]]]}";
+  const sourceRef = {file: '/model.ts', start: 0, end: source.length};
+  const result = new SketchEditResolver().resolve(
+    {
+      kind: 'sketch.edit',
+      sourceRef,
+      expectedText: source,
+      layer: 'local',
+      references: {},
+      change,
+    },
+    {
+      toolId: 'trim',
+      baseVersion: 1,
+      resolveSourceRef: r => r,
+      readSource: r => source.slice(r.start, r.end),
+    },
+  );
+  assert.equal(result.status, 'ready');
+  assert.doesNotMatch(result.plan.edits[0].text, /pointOn/);
+});

@@ -2,10 +2,10 @@
 title: Tooling integration API
 description: Browse every Core host integration API for evaluation, resources, snapshots, geometry, inspection and cache ownership.
 sourceReview:
-  packageVersion: 0.0.1-alpha.16
+  packageVersion: 0.0.1-alpha.17
   sources:
     - path: packages/core/src/tooling/index.ts
-      sha256: 60d91eaa40d822c84dca66e7792af9072bccc8e8c6a9c738f18011bf2174bf73
+      sha256: 5319f644b07656578cf0b48e2bb1241651150e2e8ab6a767127ed113a1e9e3a1
     - path: packages/core/src/node/index.ts
       sha256: 2c314699c2b47768bc4ae14b7713dc9eceb1111a3de7417820bdf4347bda3104
       commit: 5c8979f384280b644263a2d6ba3abacb69697c24
@@ -77,7 +77,7 @@ Import host APIs from `@code3d/core/tooling`; author constructors remain in `@co
 Each topic lists all its exported functions/types, inherited host members,
 configuration fields and result branches. Shared authoring types link back to
 their primary modeling reference. The public declaration inventory currently has
-83 values and 73 types; implementation-only exports absent from this subpath
+84 values and 73 types; implementation-only exports absent from this subpath
 are not additional host APIs.
 
 ## Entry points

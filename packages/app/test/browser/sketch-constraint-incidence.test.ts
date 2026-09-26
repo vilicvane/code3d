@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import type {Page} from './browser-connection.ts';
-import {clickSegment, open} from './sketch-test.ts';
+import {open} from './sketch-test.ts';
 
 const source = `import {sketch} from '@code3d/core';
 const rightAngle = 90;
@@ -11,18 +11,43 @@ const value = sketch([
   ['point', 5, [-5.65685424949, 5.65685424949]],
   ['point', 6, [0, 8]], ['point', 7, [-7.5, 8]], ['line', 8, [6, 7]],
   ['point', 9, [-3.75, 8]], ['line', 10, [5, 9]],
-], {constraints: [['fixed', 1], ['radius', 2, 8], ['angle', 4, 135], ['horizontal', 8]]});`;
+], {constraints: [['fixed', 1], ['fixed', 6], ['radius', 2, 8], ['angle', 4, 135], ['horizontal', 8], ['pointOn', [5, 2]], ['pointOn', [9, 8]]]});`;
+
+async function clickLine(page: Page, id: number) {
+  const line = page.locator(`.sketch-canvas line.local[data-id="${id}"]`);
+  const position = await line.evaluate(element => {
+    const line = element as SVGLineElement;
+    const transform = line.getScreenCTM()!;
+    // Relation badges may cover the geometric midpoint. Pick a visible part
+    // of the actual line and still exercise the normal pointer selection path.
+    for (const fraction of [0.3, 0.7, 0.2, 0.8, 0.4, 0.6]) {
+      const position = new DOMPoint(
+        line.x1.baseVal.value +
+          (line.x2.baseVal.value - line.x1.baseVal.value) * fraction,
+        line.y1.baseVal.value +
+          (line.y2.baseVal.value - line.y1.baseVal.value) * fraction,
+      ).matrixTransform(transform);
+      if (
+        !document
+          .elementFromPoint(position.x, position.y)
+          ?.closest('.constraint-badge')
+      )
+        return {x: position.x, y: position.y};
+    }
+    return undefined;
+  });
+  assert.ok(position, `Line ${id} must have a visible selectable part.`);
+  await page.mouse.click(position.x, position.y);
+  await page
+    .locator(`.sketch-canvas line.local.selected[data-id="${id}"]`)
+    .waitFor();
+}
 
 async function selectLines(page: Page) {
-  await clickSegment(
-    page,
-    page.locator('.sketch-canvas line.local[data-id="4"]'),
-  );
+  await settled(page);
+  await clickLine(page, 4);
   await page.keyboard.down('Shift');
-  await clickSegment(
-    page,
-    page.locator('.sketch-canvas line.local[data-id="10"]'),
-  );
+  await clickLine(page, 10);
   await page.keyboard.up('Shift');
 }
 
@@ -76,7 +101,7 @@ async function assertContacts(page: Page) {
 }
 
 for (const expression of [false, true])
-  test(`${expression ? 'expression angle' : 'perpendicular'} editing keeps the circular junction and supports one-step undo, redo and fresh replay`, async t => {
+  test(`${expression ? 'expression angle' : 'perpendicular'} editing keeps the authored circular junction and supports one-step undo, redo and fresh replay`, async t => {
     const page = await open(t, source);
     const before = await page.evaluate(() =>
       window.sketchTestEditor.getValue(),
@@ -119,12 +144,12 @@ for (const expression of [false, true])
     await assertContacts(fresh);
   });
 
-test('editing a radius expression carries a point already on the circle', async t => {
+test('editing a radius expression carries a point constrained to the circle', async t => {
   const page = await open(
     t,
     `import {sketch} from '@code3d/core';
 const diameter = 40;
-const value = sketch([['point', 1, [0, 0]], ['circle', 2, [1, 10]], ['point', 3, [10, 0]]], {constraints: [['fixed', 1], ['radius', 2, 10]]});`,
+const value = sketch([['point', 1, [0, 0]], ['circle', 2, [1, 10]], ['point', 3, [10, 0]]], {constraints: [['fixed', 1], ['radius', 2, 10], ['pointOn', [3, 2]]]});`,
   );
   await page.locator('.constraint-badge[data-kind="radius"]').click();
   await page
@@ -154,49 +179,5 @@ const value = sketch([['point', 1, [0, 0]], ['circle', 2, [1, 10]], ['point', 3,
   assert.match(
     await page.evaluate(() => window.sketchTestEditor.getValue()),
     /'point',\s*3,\s*\[10,\s*0\]/,
-  );
-});
-
-test('undo while connection repair is pending prevents a late coordinate write', async t => {
-  const page = await open(t, source);
-  const before = await page.evaluate(() => window.sketchTestEditor.getValue());
-  await page.evaluate(() => {
-    const host = window.sketchTestRuntime.sketchEditor['host'];
-    const solve = host.solveConstraints;
-    host.solveConstraints = async (layers, edit) => {
-      const result = await solve(layers, edit);
-      document.documentElement.dataset.connectionRepair = 'waiting';
-      await new Promise<void>(resolve =>
-        document.addEventListener(
-          'release-connection-repair',
-          () => resolve(),
-          {once: true},
-        ),
-      );
-      document.documentElement.dataset.connectionRepair = 'released';
-      return result;
-    };
-  });
-  await selectLines(page);
-  await page.getByRole('button', {name: 'Perpendicular', exact: true}).click();
-  await page.waitForFunction(
-    () => document.documentElement.dataset.connectionRepair === 'waiting',
-  );
-  await page.keyboard.press('Control+z');
-  await settled(page);
-  await page.evaluate(() =>
-    document.dispatchEvent(new Event('release-connection-repair')),
-  );
-  await page.waitForFunction(
-    () => document.documentElement.dataset.connectionRepair === 'released',
-  );
-  await settled(page);
-  assert.equal(
-    await page.evaluate(() => window.sketchTestEditor.getValue()),
-    before,
-  );
-  assert.equal(
-    await page.locator('.constraint-badge[data-kind="perpendicular"]').count(),
-    0,
   );
 });

@@ -221,6 +221,13 @@ sketch(
       ['angle', 3, 0],
       ['x', 1, 0],
       ['coincident', [1, 2]],
+      ['equalLength', [3, 4]],
+      ['equalRadius', [5, 6]],
+      ['pointOn', [1, 3]],
+      ['pointOn', [sketchValue.point(1), 5]],
+      ['tangent', [3, 5]],
+      ['tangent', [5, 6], 'external'],
+      ['tangent', [5, 6], 'internal'],
     ],
   },
 );
@@ -228,6 +235,12 @@ sketch(
 sketch([], {constraints: [['horizontal', 10, 3]]});
 // @ts-expect-error Single-target constraints take a scalar reference, not an array.
 sketch([], {constraints: [['fixed', [1]]]});
+// @ts-expect-error Equal lengths require two curve IDs.
+sketch([], {constraints: [['equalLength', [1]]]});
+// @ts-expect-error The curve in pointOn is a local entity ID.
+sketch([], {constraints: [['pointOn', [1, sketchValue.point(1)]]]});
+// @ts-expect-error Tangency exposes only the external/internal circular branches.
+sketch([], {constraints: [['tangent', [1, 2], 'auto']]});
 sketchValue.derive([
   ['point', 1, [0, 5]],
   ['line', 2, [sketchValue.point(2), 1]],

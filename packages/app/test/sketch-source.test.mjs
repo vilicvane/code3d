@@ -956,3 +956,114 @@ test('computed options and constraints never get silently replaced by generated 
     assert.equal(host.source(), source);
   }
 });
+
+test('persistent relations serialize in one transaction, preserve upstream points, and keep tangency modes out of dimensions', () => {
+  const original =
+    "[['point',1,[width,0]]], {constraints: [['length',3,span]]}";
+  const model = setup(original);
+  assert.equal(
+    model.edit({
+      kind: 'constrain',
+      data: [],
+      constraints: [
+        ['equalLength', [3, 4]],
+        ['equalRadius', [5, 6]],
+        ['pointOn', [address(2, 'base'), 3]],
+        ['tangent', [3, 5]],
+        ['tangent', [5, 6], 'external'],
+        ['tangent', [5, 6], 'internal'],
+      ],
+    }).status,
+    'committed',
+  );
+  assert.match(model.source(), /'equalLength', \[3, 4\]/);
+  assert.match(model.source(), /'equalRadius', \[5, 6\]/);
+  assert.match(model.source(), /'pointOn', \[sketch1.point\(2\), 3\]/);
+  assert.match(model.source(), /'tangent', \[3, 5\]\]/);
+  assert.match(model.source(), /'tangent', \[5, 6\], 'external'/);
+  assert.match(model.source(), /'tangent', \[5, 6\], 'internal'/);
+  assert.deepEqual(
+    [...analyzeSketchSource(model.source()).constraintValues],
+    [[0, 'span']],
+  );
+  assert.deepEqual(model.undo, [original]);
+  assert.equal(
+    model.edit({kind: 'dimension', index: 6, value: 10}).status,
+    'unsupported',
+  );
+});
+
+test('trim remaps persistent curve targets while preserving point expressions and tangent mode', () => {
+  const original =
+    "[['point',1,[0,0]],['point',2,[10,0]],['point',7,[0,10]],['circle',5,[1,radius]]], {constraints: [['pointOn',[sketch1.point(2) /* anchor */,5]],['tangent',[5,6],'internal']]}";
+  const model = setup(original);
+  const change = {
+    kind: 'trim',
+    replacements: [
+      {
+        original: {kind: 'circle', id: 5, center: address(1), radius: 10},
+        ids: [8],
+      },
+    ],
+    ids: [5],
+    constraints: [],
+    entries: [['arc', 8, [address(1), 10, address(2), address(7), 'cw']]],
+    constraintReplacements: [
+      {index: 0, targets: [[address(2, 'base'), 8]]},
+      {index: 1, targets: [[8, 6]]},
+    ],
+  };
+  assert.equal(model.edit(change).status, 'committed');
+  assert.match(model.source(), /sketch1.point\(2\) \/\* anchor \*\/,8/);
+  assert.match(model.source(), /'tangent',\[8,6\],'internal'/);
+  assert.match(model.source(), /'arc',8,\[1,radius/);
+  assert.deepEqual(model.undo, [original]);
+});
+
+test('dragging onto a curve writes solved coordinates and the accepted relation in one undo transaction', () => {
+  for (const options of ['', ", {constraints: [['fixed', 1]]}"]) {
+    const source =
+      "[['point',1,[0,0]],['point',2,[20,0]],['line',3,[1,2]],['point',4,[10,6]]]" +
+      options;
+    const model = setup(source);
+    assert.equal(
+      model.edit({
+        kind: 'move',
+        data: [{id: 4, parameters: [8, 0]}],
+        constraints: [['pointOn', [address(4), 3]]],
+      }).status,
+      'committed',
+    );
+    const [entries, result] = Function(`return [${model.source()}]`)();
+    assert.deepEqual(
+      entries.find(entry => entry[1] === 4),
+      ['point', 4, [8, 0]],
+    );
+    assert.deepEqual(result.constraints, [
+      ...(options ? [['fixed', 1]] : []),
+      ['pointOn', [4, 3]],
+    ]);
+    assert.deepEqual(model.undo, [source]);
+  }
+});
+
+test('a drag snap preserves expression coordinates and named upstream point references', () => {
+  const source = "[['point',1,[x,6]]]";
+  const model = setup(source);
+  assert.equal(
+    model.edit({
+      kind: 'move',
+      data: [{id: 1, parameters: [12, 0]}],
+      constraints: [
+        ['midpoint', [address(1), address(2, 'base'), address(3, 'base')]],
+      ],
+    }).status,
+    'committed',
+  );
+  assert.match(model.source(), /\['point',1,\[x,0\]\]/);
+  assert.match(
+    model.source(),
+    /\['midpoint', \[1, sketch1\.point\(2\), sketch1\.point\(3\)\]\]/,
+  );
+  assert.deepEqual(model.undo, [source]);
+});
