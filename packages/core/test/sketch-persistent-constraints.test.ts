@@ -685,3 +685,177 @@ test('a fixed shared tangent contact rejects a nonperpendicular radius with auth
     );
   }
 });
+
+test('finite contacts release an earlier endpoint when a coupled segment needs its interior', () => {
+  for (const reverse of [false, true])
+    for (const initial of [-1, 1, 12]) {
+      const entries: readonly SketchEntry[] = [
+        ['point', 1, [0, 0]],
+        ['point', 2, [10, 0]],
+        ['point', 3, [1, 1]],
+        ['point', 4, [9, 1]],
+        ['point', 5, [initial, 0]],
+        ['point', 6, [initial, 1]],
+        ['line', 10, [1, 2]],
+        ['line', 11, [3, 4]],
+        ['line', 12, [5, 6]],
+      ];
+      const contacts: SketchConstraint[] = [
+        ['pointOn', [5, 10]],
+        ['pointOn', [6, 11]],
+      ];
+      const constraints: SketchConstraint[] = [
+        ...[1, 2, 3, 4].map((id): SketchConstraint => ['fixed', id]),
+        ['vertical', 12],
+        ...(reverse ? contacts.reverse() : contacts),
+      ];
+      const solved = snapshot(entries, constraints);
+      const x = initial < 1 ? 1 : initial > 9 ? 9 : initial;
+      close(point(solved, 5)[0], x);
+      close(point(solved, 6)[0], x);
+      assert.equal(solved.degreesOfFreedom, 1);
+      assert.deepEqual(solved.redundant, []);
+      const moved = solveSketchSnapshot([solved], {id: 5, position: [5, 0]});
+      close(point(moved, 5)[0], 5);
+      close(point(moved, 6)[0], 5);
+      assert.deepEqual(
+        replay(moved, entries, constraints).entities,
+        moved.entities,
+      );
+    }
+});
+
+test('explicit coincident endpoints share the tangent contact without becoming point aliases', () => {
+  const entries: readonly SketchEntry[] = [
+    ['point', 1, [0, 0]],
+    ['circle', 2, [1, 10]],
+    ['point', 3, [20, 0]],
+    ['point', 4, [5, Math.sqrt(75)]],
+    ['point', 6, [5, Math.sqrt(75)]],
+    ['line', 5, [3, 6]],
+  ];
+  const constraints: SketchConstraint[] = [
+    ['fixed', 1],
+    ['fixed', 3],
+    ['radius', 2, 12],
+    ['pointOn', [4, 2]],
+    ['coincident', [4, 6]],
+    ['tangent', [5, 2]],
+  ];
+  const solved = snapshot(entries, constraints);
+  for (const id of [4, 6]) {
+    assert.ok(Math.abs(point(solved, id)[0] - 7.2) < 1e-9);
+    assert.ok(Math.abs(point(solved, id)[1] - 9.6) < 1e-9);
+  }
+  assert.deepEqual(
+    solved.constraints,
+    constraints.map(c =>
+      c[0] === 'fixed'
+        ? [c[0], {layer: 'local', id: c[1]}]
+        : c[0] === 'pointOn'
+          ? [c[0], [{layer: 'local', id: c[1][0]}, c[1][1]]]
+          : c[0] === 'coincident'
+            ? [c[0], c[1].map(id => ({layer: 'local', id}))]
+            : c,
+    ),
+  );
+  assert.equal(solved.entities.length, entries.length);
+});
+
+test('two arcs reuse their shared endpoint as the external tangent contact after a radius edit', () => {
+  const entries: readonly SketchEntry[] = [
+    ['point', 1, [0, 0]],
+    ['point', 2, [8, 0]],
+    ['point', 3, [5, 0]],
+    ['point', 4, [0, 5]],
+    ['point', 5, [8, -3]],
+    ['arc', 10, [1, 5, 3, 4, 'ccw']],
+    ['arc', 11, [2, 3, 5, 3, 'cw']],
+  ];
+  const constraints: SketchConstraint[] = [
+    ['fixed', 1],
+    ['y', 2, 0],
+    ['x', 4, 0],
+    ['radius', 10, 6],
+    ['radius', 11, 3],
+    ['tangent', [10, 11]],
+  ];
+  const solved = snapshot(entries, constraints);
+  assert.ok(Math.abs(point(solved, 3)[0] - 6) < 1e-9);
+  assert.ok(Math.abs(point(solved, 3)[1]) < 1e-9);
+  close(point(solved, 2)[0], 9);
+  assert.equal(solved.entities.length, entries.length);
+  assert.deepEqual(
+    replay(solved, entries, constraints).entities,
+    solved.entities,
+  );
+});
+
+test('finite arcs choose the other endpoint when the nearest one contradicts an authored coordinate', () => {
+  for (const clockwise of [false, true])
+    for (const reverse of [false, true]) {
+      const sign = clockwise ? -1 : 1;
+      const entries: readonly SketchEntry[] = [
+        ['point', 1, [0, 0]],
+        ['point', 2, [1, 0]],
+        ['point', 3, [0, sign]],
+        ['point', 4, [0, -sign]],
+        [
+          'arc',
+          10,
+          [
+            1,
+            1,
+            reverse ? 3 : 2,
+            reverse ? 2 : 3,
+            clockwise !== reverse ? 'cw' : 'ccw',
+          ],
+        ],
+      ];
+      const constraints: SketchConstraint[] = [
+        ['fixed', 1],
+        ['fixed', 2],
+        ['fixed', 3],
+        ['x', 4, 0],
+        ['pointOn', [4, 10]],
+      ];
+      const solved = snapshot(entries, constraints);
+      assert.deepEqual(point(solved, 4), [0, sign]);
+      assert.equal(solved.degreesOfFreedom, 0);
+      assert.deepEqual(
+        replay(solved, entries, constraints).entities,
+        solved.entities,
+      );
+    }
+});
+
+test('circular authored contacts retain internal and external tangency in either curve order', () => {
+  for (const mode of ['internal', 'external'] as const)
+    for (const reverse of [false, true]) {
+      const entries: readonly SketchEntry[] = [
+        ['point', 1, [0, 0]],
+        ['circle', 10, [1, 10]],
+        ['point', 2, [mode === 'internal' ? 6 : 14, 0]],
+        ['circle', 11, [2, 4]],
+        ['point', 3, [10, 0]],
+      ];
+      const constraints: SketchConstraint[] = [
+        ['fixed', 1],
+        ['y', 2, 0],
+        ['radius', 10, 12],
+        ['radius', 11, 3],
+        ['pointOn', [3, 10]],
+        ['pointOn', [3, 11]],
+        ['tangent', reverse ? [11, 10] : [10, 11], mode],
+      ];
+      const solved = snapshot(entries, constraints);
+      assert.ok(Math.abs(point(solved, 3)[0] - 12) < 1e-9);
+      assert.ok(Math.abs(point(solved, 3)[1]) < 1e-9);
+      close(point(solved, 2)[0], mode === 'internal' ? 9 : 15);
+      assert.equal(solved.degreesOfFreedom, 0);
+      assert.deepEqual(
+        replay(solved, entries, constraints).entities,
+        solved.entities,
+      );
+    }
+});

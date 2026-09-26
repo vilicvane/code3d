@@ -1,4 +1,4 @@
-import type {SketchSolveProblem} from './sketch-solver.js';
+import type {SketchSolveProblem} from './sketch-solve-model.js';
 
 export const sketchRelativePrecision = 1e-9;
 

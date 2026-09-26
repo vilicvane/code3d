@@ -25,7 +25,10 @@ async function resize(page: Page, id: number, delta: number) {
 test('the constraints example updates its hole from radius four to six', async t => {
   const page = await openPage(t);
   await page.goto(
-    `${process.env.CODE3D_TEST_URL}/#/file/examples/sketches/constraints.ts`,
+    new URL(
+      '#/file/examples/sketches/constraints.ts',
+      process.env.CODE3D_TEST_URL,
+    ).href,
   );
   await page.waitForFunction(() =>
     window.sketchTestEditor?.getValue().includes('movable hole'),

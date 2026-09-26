@@ -147,6 +147,27 @@ test('pressing Alt before release discards the snap without requiring another po
   assert.ok(Math.abs((await position(page, 4))[1] - 10) < 1e-5);
 });
 
+test('releasing Alt without moving the pointer accepts the current curve snap', async t => {
+  const page = await open(t, guide);
+  const before = await source(page);
+  const box = (await point(page, 4).boundingBox())!;
+  await page.keyboard.down('Alt');
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(...(await screen(page, 21, 10)), {steps: 5});
+  await page.locator('.snap-label').waitFor({state: 'hidden'});
+  await page.keyboard.up('Alt');
+  await page.locator('.snap-label').filter({hasText: 'On curve'}).waitFor();
+  await page.mouse.up();
+  await page.waitForFunction(
+    before => window.sketchTestEditor.getValue() !== before,
+    before,
+  );
+  await settled(page);
+  assert.match(await source(page), /'pointOn',\s*\[4,\s*3\]/);
+  assert.ok(Math.abs((await position(page, 4))[1] - 10) < 1e-5);
+});
+
 test('accepting a tangent while drawing a line persists it through a radius change', async t => {
   const page = await open(
     t,

@@ -1,169 +1,35 @@
+import {
+  SketchConstraintError,
+  sketchConstraintPoints,
+  type SketchSolveConstraint,
+  type SketchSolveCurve,
+  type SketchSolveProblem,
+  type SketchSolveResult,
+  type SketchSolveObjective,
+  type SketchTangentContact,
+  type SketchContact,
+  type SketchContactBoundary,
+} from './sketch-solve-model.js';
 import type {GcsSystem} from '@salusoft89/planegcs/dist/planegcs_dist/gcs_system.js';
 // Upstream ships this declaration alongside sources, but omits it from dist.
 import type {ModuleStatic} from '@salusoft89/planegcs/planegcs_dist/planegcs.js';
-import type {SketchArcDirection, SketchPosition} from './sketch.js';
+import type {SketchPosition} from './sketch.js';
 import {sketchArcGeometry} from './sketch-curves.js';
 import {
   pointLineDistance,
   solveSketchIncidenceBounds,
   sketchIncidenceGeometry,
   sketchIncidenceCurve,
-  type SketchIncidence,
 } from './sketch-incidence.js';
 import {SketchPrecision} from './sketch-precision.js';
-
-/** Evaluation-local numeric indices, never author entity or constraint IDs. */
-export type SketchSolveConstraint =
-  | Readonly<{
-      kind: 'equalLength';
-      points: readonly [number, number, number, number];
-    }>
-  | Readonly<{
-      kind: 'equalRadius';
-      curves: readonly [SketchSolveCurve, SketchSolveCurve];
-      points: readonly number[];
-    }>
-  | Readonly<{
-      kind: 'tangent';
-      curves: readonly [SketchSolveCurve, SketchSolveCurve];
-      points: readonly number[];
-      mode: 'external' | 'internal';
-    }>
-  | Readonly<{
-      kind: 'parallel';
-      points: readonly [number, number, number, number];
-    }>
-  | Readonly<{
-      kind: 'perpendicular';
-      points: readonly [number, number, number, number];
-    }>
-  | Readonly<{
-      kind: 'lineAngle';
-      points: readonly [number, number, number, number];
-      value: number;
-    }>
-  | Readonly<{
-      kind: 'pointOnCircle';
-      points: readonly [point: number, center: number];
-      curve: 'circle' | 'arc';
-      index: number;
-      bound?: SketchSolveCurve;
-    }>
-  | Readonly<{
-      kind: 'pointOnLine';
-      points: readonly [point: number, start: number, end: number];
-      bound?: SketchSolveCurve;
-    }>
-  | Readonly<{kind: 'sweep'; index: number; value: number}>
-  | Readonly<{
-      kind: 'radius';
-      curve: 'circle' | 'arc';
-      index: number;
-      value: number;
-    }>
-  | Readonly<{kind: 'fixed'; point: number; position: SketchPosition}>
-  | Readonly<{kind: 'x' | 'y'; point: number; value: number}>
-  | Readonly<{kind: 'midpoint'; points: readonly [number, number, number]}>
-  | Readonly<{
-      kind: 'horizontal' | 'vertical' | 'coincident';
-      points: readonly [number, number];
-    }>
-  | Readonly<{
-      kind: 'length' | 'angle';
-      points: readonly [number, number];
-      value: number;
-    }>;
-
-export type SketchSolveCurve = Readonly<{
-  kind: 'line' | 'circle' | 'arc';
-  index: number;
-}>;
-
-export type SketchSolveProblem = Readonly<{
-  points: readonly Readonly<{
-    position: SketchPosition;
-    locked: readonly [boolean, boolean];
-  }>[];
-  lines: readonly (readonly [number, number])[];
-  circles: readonly Readonly<{
-    center: number;
-    radius: number;
-    locked: boolean;
-  }>[];
-  arcs: readonly Readonly<{
-    center: number;
-    radius: number;
-    locked: boolean;
-    points: readonly [number, number];
-    direction: SketchArcDirection;
-  }>[];
-  constraints: readonly SketchSolveConstraint[];
-}>;
-
-export type SketchSolveResult = Readonly<{
-  positions: readonly SketchPosition[];
-  radii: readonly number[];
-  arcRadii: readonly number[];
-  degreesOfFreedom: number;
-  redundant: readonly number[];
-}>;
-
-export class SketchConstraintError extends Error {
-  constructor(
-    readonly constraints: readonly number[],
-    message: string,
-  ) {
-    super(message);
-    this.name = 'SketchConstraintError';
-  }
-}
+import {
+  SketchContactAnalysis,
+  SketchParameterAnalysis,
+} from './sketch-solve-analysis.js';
 
 let module: ModuleStatic;
 export function installSketchSolver(instance: ModuleStatic): void {
   module = instance;
-}
-
-export type SketchSolveTarget =
-  | Readonly<{kind: 'point'; point: number; position: SketchPosition}>
-  | Readonly<{
-      kind: 'radius';
-      curve: 'circle' | 'arc';
-      index: number;
-      value: number;
-    }>;
-
-export type SketchSolveObjective = SketchSolveTarget &
-  Readonly<{weight: number}>;
-
-type SketchTangentContact = Readonly<{point: number; shared: boolean}>;
-
-/** Membership follows authored references, never a geometric coincidence. */
-function sharedLineTangentContact(
-  problem: SketchSolveProblem,
-  curves: readonly [SketchSolveCurve, SketchSolveCurve],
-): number | undefined {
-  if (!curves.some(curve => curve.kind === 'line')) return;
-  const members = curves.map(curve => {
-    const points = new Set(
-      curve.kind === 'line'
-        ? problem.lines[curve.index]
-        : curve.kind === 'arc'
-          ? problem.arcs[curve.index].points
-          : [],
-    );
-    for (const constraint of problem.constraints)
-      if (
-        (constraint.kind === 'pointOnLine' ||
-          constraint.kind === 'pointOnCircle') &&
-        constraint.bound?.kind === curve.kind &&
-        constraint.bound.index === curve.index
-      )
-        points.add(constraint.points[0]);
-    return points;
-  });
-  return [...members[0]]
-    .sort((a, b) => a - b)
-    .find(point => members[1].has(point));
 }
 
 /** A fresh native system per solve: no previous solution or native handles escape. */
@@ -174,24 +40,28 @@ export function solveSketchProblem(
 ): SketchSolveResult {
   problem = initializeTangencyGeometry(problem);
   const tangencies = new Map<SketchSolveConstraint, SketchTangentContact>();
-  const contacts: SketchIncidence[] = [];
+  const relations = new SketchContactAnalysis(problem);
+  const contacts: SketchContact[] = [...relations.contacts];
   const points = [...problem.points];
   const geometry = sketchIncidenceGeometry(problem);
   for (const [constraintIndex, c] of problem.constraints.entries()) {
-    if ((c.kind === 'pointOnCircle' || c.kind === 'pointOnLine') && c.bound)
-      contacts.push({point: c.points[0], ...c.bound, constraintIndex});
     if (c.kind !== 'tangent') continue;
-    const shared = sharedLineTangentContact(problem, c.curves);
+    const shared = relations.sharedPoint(c.curves);
     if (shared !== undefined) {
       tangencies.set(c, {point: shared, shared: true});
       contacts.push(
-        ...c.curves.map(curve => ({...curve, point: shared, constraintIndex})),
+        ...c.curves.map(curve => ({
+          curve,
+          point: shared,
+          sources: [constraintIndex],
+          structural: false,
+        })),
       );
       continue;
     }
     const point = points.length;
     const [first, second] = c.curves.map(curve =>
-      sketchIncidenceCurve(geometry, {...curve, point: 0}),
+      sketchIncidenceCurve(geometry, curve),
     );
     let position: SketchPosition;
     if (first.kind === 'line' || second.kind === 'line') {
@@ -229,7 +99,12 @@ export function solveSketchProblem(
     points.push({position, locked: [false, false]});
     tangencies.set(c, {point, shared: false});
     contacts.push(
-      ...c.curves.map(curve => ({...curve, point, constraintIndex})),
+      ...c.curves.map(curve => ({
+        curve,
+        point,
+        sources: [constraintIndex],
+        structural: false,
+      })),
     );
   }
   const prepared = {...problem, points};
@@ -240,22 +115,26 @@ export function solveSketchProblem(
       ...points.slice(problem.points.length),
     ],
   };
-  let unconstrainedFreedom: number | undefined;
-  const result = solveSketchIncidenceBounds(prepared, contacts, current => {
+  let authoredMetadata:
+    Pick<SketchSolveResult, 'degreesOfFreedom' | 'redundant'> | undefined;
+  const result = solveSketchIncidenceBounds(prepared, contacts, bounds => {
     const solved = solveSketchNative(
-      current,
+      prepared,
       objectives,
       preferred,
       tangencies,
+      bounds,
     );
-    unconstrainedFreedom ??= solved.degreesOfFreedom;
+    authoredMetadata ??= {
+      degreesOfFreedom: solved.degreesOfFreedom,
+      redundant: solved.redundant,
+    };
     return solved;
   });
   return {
     ...result,
     positions: result.positions.slice(0, problem.points.length),
-    degreesOfFreedom: unconstrainedFreedom!,
-    redundant: result.redundant.filter(i => i < problem.constraints.length),
+    ...authoredMetadata!,
   };
 }
 
@@ -265,6 +144,7 @@ function solveSketchNative(
   objectives: readonly SketchSolveObjective[],
   preferredGeometry: SketchSolveProblem,
   tangencies: ReadonlyMap<SketchSolveConstraint, SketchTangentContact>,
+  bounds: readonly SketchContactBoundary[],
 ): SketchSolveResult {
   const authored = preferredGeometry;
   const precision = new SketchPrecision(problem);
@@ -401,14 +281,19 @@ function solveSketchNative(
       (curve.kind === 'circle' ? problem.circles : problem.arcs)[curve.index];
     const constantTags = new Set<number>();
     const activeTags = new Set<number>();
-    const auxiliarySources = new Map<number, number>();
-    const auxiliaryTag = (source: number) => {
+    const auxiliarySources = new Map<number, readonly number[]>();
+    const auxiliaryTag = (source: number | readonly number[]) => {
       const tag = constraints.length + auxiliarySources.size + 1;
-      auxiliarySources.set(tag - 1, source - 1);
+      auxiliarySources.set(
+        tag - 1,
+        typeof source === 'number' ? [source - 1] : source,
+      );
       return tag;
     };
     const sourceIndices = (indices: readonly number[]) => [
-      ...new Set(indices.map(index => auxiliarySources.get(index) ?? index)),
+      ...new Set(
+        indices.flatMap(index => auxiliarySources.get(index) ?? [index]),
+      ),
     ];
     // A locked parameter equation has no unknowns. Check it directly instead
     // of passing a zero-Jacobian row to native redundancy analysis: that
@@ -434,40 +319,12 @@ function solveSketchNative(
     // dimensions are constant equations just like a locked circle radius;
     // sending them again to native redundancy analysis can falsely conflict
     // with an unreachable mouse target even though all hard equations hold.
-    const knownCoordinate = (
-      index: number,
-      axis: number,
-    ): number | undefined => {
-      if (points[index].locked[axis]) return points[index].position[axis];
-      const fixed = constraints.find(
-        c => c.kind === 'fixed' && c.point === index,
-      );
-      if (fixed?.kind === 'fixed') return fixed.position[axis];
-      const coordinate = constraints.find(
-        c => c.kind === (axis === 0 ? 'x' : 'y') && c.point === index,
-      );
-      return coordinate && 'value' in coordinate ? coordinate.value : undefined;
-    };
-    const knownPosition = (index: number): SketchPosition | undefined => {
-      const x = knownCoordinate(index, 0),
-        y = knownCoordinate(index, 1);
-      return x !== undefined && y !== undefined ? [x, y] : undefined;
-    };
-    const knownRadius = (
-      kind: 'circle' | 'arc',
-      index: number,
-    ): number | undefined => {
-      const curve = (kind === 'circle' ? problem.circles : problem.arcs)[index];
-      if (curve.locked) return curve.radius;
-      if (kind === 'circle') return undefined;
-      const arc = problem.arcs[index];
-      const center = knownPosition(arc.center);
-      const endpoint =
-        knownPosition(arc.points[0]) ?? knownPosition(arc.points[1]);
-      return center && endpoint
-        ? Math.hypot(endpoint[0] - center[0], endpoint[1] - center[1])
-        : undefined;
-    };
+    const parameters = new SketchParameterAnalysis(problem);
+    const knownCoordinate = (index: number, axis: number) =>
+      parameters.coordinate(index, axis)?.value;
+    const knownPosition = (index: number) => parameters.position(index);
+    const knownRadius = (kind: 'circle' | 'arc', index: number) =>
+      parameters.structuralRadius({kind, index})?.value;
     const coordinate = (
       point: number,
       axis: number,
@@ -562,6 +419,35 @@ function solveSketchNative(
             b = circularGeometry(second);
           const r1 = curveRadiusIndex(first),
             r2 = curveRadiusIndex(second);
+          if (contact.shared) {
+            // Both radial lengths already follow from authored membership.
+            // Match oriented radii directly; a center-distance equation would
+            // recreate their double root at tangency. Opposite radial directions
+            // encode external contact, equal directions encode internal contact.
+            const center = points[a.center].position,
+              position = points[contact.point].position;
+            const angle = gcs.push_p_param(
+              Math.atan2(position[1] - center[1], position[0] - center[0]),
+              false,
+            );
+            gcs.add_constraint_p2p_angle(
+              nativePoints[a.center],
+              p,
+              angle,
+              auxiliaryTag(tag),
+              true,
+              1,
+            );
+            gcs.add_constraint_p2p_angle(
+              constraint.mode === 'external' ? p : nativePoints[b.center],
+              constraint.mode === 'external' ? nativePoints[b.center] : p,
+              angle,
+              tag,
+              true,
+              1,
+            );
+            return;
+          }
           const distance = gcs.push_p_param(
             (constraint.mode === 'external'
               ? a.radius + b.radius
@@ -687,44 +573,45 @@ function solveSketchNative(
           constraint.value,
           tag,
         );
-      } else if (constraint.kind === 'pointOnCircle') {
-        const [p, center] = constraint.points;
-        const a = knownPosition(p),
-          b = knownPosition(center);
-        const radius = knownRadius(constraint.curve, constraint.index);
-        if (a && b && radius !== undefined) {
-          checkConstant(Math.hypot(a[0] - b[0], a[1] - b[1]), radius, tag);
-          return;
-        }
-        gcs.add_constraint_p2p_distance(
-          nativePoints[p],
-          nativePoints[center],
-          (constraint.curve === 'circle' ? radiusIndices : arcRadiusIndices)[
-            constraint.index
-          ],
-          tag,
-          true,
-          1,
-        );
-      } else if (constraint.kind === 'pointOnLine') {
-        const [p, a, b] = constraint.points;
-        const known = constraint.points.map(knownPosition);
-        if (known.every(p => p !== undefined)) {
-          checkConstant(
-            pointLineDistance(known[0], known[1], known[2]),
-            0,
+      } else if (constraint.kind === 'pointOn') {
+        const {point, curve} = constraint;
+        if (curve.kind === 'line') {
+          const [a, b] = problem.lines[curve.index];
+          const known = [point, a, b].map(knownPosition);
+          if (known.every(p => p !== undefined)) {
+            checkConstant(
+              pointLineDistance(known[0], known[1], known[2]),
+              0,
+              tag,
+            );
+            return;
+          }
+          gcs.add_constraint_point_on_line_ppp(
+            nativePoints[point],
+            nativePoints[a],
+            nativePoints[b],
             tag,
+            true,
+            1,
           );
-          return;
+        } else {
+          const center = circularGeometry(curve).center;
+          const a = knownPosition(point),
+            b = knownPosition(center);
+          const radius = knownRadius(curve.kind, curve.index);
+          if (a && b && radius !== undefined) {
+            checkConstant(Math.hypot(a[0] - b[0], a[1] - b[1]), radius, tag);
+            return;
+          }
+          gcs.add_constraint_p2p_distance(
+            nativePoints[point],
+            nativePoints[center],
+            curveRadiusIndex(curve),
+            tag,
+            true,
+            1,
+          );
         }
-        gcs.add_constraint_point_on_line_ppp(
-          nativePoints[p],
-          nativePoints[a],
-          nativePoints[b],
-          tag,
-          true,
-          1,
-        );
       } else if (constraint.kind === 'midpoint') {
         const [m, a, b] = constraint.points;
         // M - A = B - M, independently on each axis. Shared free difference
@@ -835,6 +722,14 @@ function solveSketchNative(
         }
       }
     });
+    for (const {contact, endpoint} of bounds)
+      gcs.add_constraint_p2p_coincident(
+        nativePoints[contact.point],
+        nativePoints[endpoint],
+        auxiliaryTag(contact.sources),
+        true,
+        1,
+      );
     // ArcRules introduce an underdetermined radius/angle system. PlaneGCS
     // sorts its parameters by native address; DogLeg's FullPivLU step then
     // chooses free variables based on allocation history. BFGS initializes
@@ -944,6 +839,17 @@ function solveSketchNative(
         ? []
         : [i],
     );
+    for (const {contact, endpoint} of bounds)
+      if (
+        Math.hypot(
+          ...positions[contact.point].map(
+            (v, axis) => v - positions[endpoint][axis],
+          ),
+        ) /
+          scale >
+        precision.nativeAcceptance
+      )
+        unsatisfied.push(...contact.sources);
     for (const [i, arc] of problem.arcs.entries()) {
       const center = positions[arc.center];
       if (
@@ -978,6 +884,7 @@ function solveSketchNative(
         objectives,
         precision,
         tangencies,
+        bounds,
       ),
       degreesOfFreedom: gcs.dof(),
       redundant: [
@@ -1013,17 +920,14 @@ function cleanSolution(
   objectives: readonly SketchSolveObjective[],
   precision: SketchPrecision,
   tangencies: ReadonlyMap<SketchSolveConstraint, SketchTangentContact>,
+  bounds: readonly SketchContactBoundary[],
 ): Geometry {
   const {pointScales} = precision;
+  const parameters = new SketchParameterAnalysis(problem);
   const coordinate = (index: number, axis: number, value: number) => {
     if (problem.points[index].locked[axis]) return value;
-    const fixed = problem.constraints.find(
-      c =>
-        (c.kind === 'fixed' || c.kind === (axis === 0 ? 'x' : 'y')) &&
-        c.point === index,
-    );
-    if (fixed?.kind === 'fixed') return fixed.position[axis];
-    if (fixed?.kind === 'x' || fixed?.kind === 'y') return fixed.value;
+    const exact = parameters.coordinate(index, axis);
+    if (exact) return exact.value;
     return precision.clean(value, pointScales[index], [
       ...objectives
         .filter(o => o.kind === 'point')
@@ -1035,10 +939,8 @@ function cleanSolution(
   const radius = (curve: 'circle' | 'arc', index: number, value: number) => {
     const entities = curve === 'circle' ? problem.circles : problem.arcs;
     if (entities[index].locked) return value;
-    const dimension = problem.constraints.find(
-      c => c.kind === 'radius' && c.curve === curve && c.index === index,
-    );
-    if (dimension?.kind === 'radius') return dimension.value;
+    const known = parameters.seedRadius({kind: curve, index});
+    if (known) return known.value;
     return precision.clean(value, value, [
       (curve === 'circle' ? authored.circles : authored.arcs)[index].radius,
     ]);
@@ -1060,9 +962,9 @@ function cleanSolution(
           ? c.value
           : c.kind === 'sweep'
             ? problem.arcs[c.index].radius
-            : 'point' in c
-              ? pointScales[c.point]
-              : Math.min(...c.points.map(i => pointScales[i]));
+            : Math.min(
+                ...sketchConstraintPoints(problem, c).map(i => pointScales[i]),
+              );
       return (
         residual(
           c,
@@ -1075,6 +977,17 @@ function cleanSolution(
         ) <= precision.relative
       );
     }) &&
+    bounds.every(
+      ({contact, endpoint}) =>
+        Math.hypot(
+          ...candidate.positions[contact.point].map(
+            (v, axis) => v - candidate.positions[endpoint][axis],
+          ),
+        ) <=
+        precision.tolerance(
+          Math.min(pointScales[contact.point], pointScales[endpoint]),
+        ),
+    ) &&
     problem.arcs.every(
       (arc, i) =>
         candidate.positions[arc.points[0]].some(
@@ -1111,17 +1024,14 @@ function initializeArcEndpoints(
   precision: SketchPrecision,
 ): SketchSolveProblem {
   if (!problem.arcs.length) return problem;
+  const parameters = new SketchParameterAnalysis(problem);
   // An explicit radius already determines this scalar. Start there rather than
   // projecting satisfied endpoints to conflicting data and asking an
   // underconstrained solve to shrink them again (which can translate the arc).
   // Keep locked values and all equations: contradictory dimensions still fail.
   const arcs = problem.arcs.map((arc, index) => {
-    const dimension = problem.constraints.find(
-      c => c.kind === 'radius' && c.curve === 'arc' && c.index === index,
-    );
-    return !arc.locked && dimension?.kind === 'radius'
-      ? {...arc, radius: dimension.value}
-      : arc;
+    const radius = parameters.seedRadius({kind: 'arc', index});
+    return !arc.locked && radius ? {...arc, radius: radius.value} : arc;
   });
   const proposals = problem.points.map(() => [] as SketchPosition[]);
   for (const arc of arcs) {
@@ -1152,16 +1062,7 @@ function initializeArcEndpoints(
       const coordinate = (axis: 0 | 1) => {
         const value = point.position[axis];
         const targets = proposals[index];
-        if (
-          !targets.length ||
-          point.locked[axis] ||
-          problem.constraints.some(
-            c =>
-              (c.kind === 'fixed' || c.kind === 'x' || c.kind === 'y') &&
-              c.point === index &&
-              (c.kind === 'fixed' || c.kind === (axis === 0 ? 'x' : 'y')),
-          )
-        )
+        if (!targets.length || parameters.coordinate(index, axis) !== undefined)
           return value;
         return targets.reduce(
           (sum, p) => sum + (p[axis] - value) / targets.length,
@@ -1180,64 +1081,9 @@ function initializeTangencyGeometry(
   problem: SketchSolveProblem,
 ): SketchSolveProblem {
   if (!problem.constraints.some(c => c.kind === 'tangent')) return problem;
-  const knownCoordinate = (index: number, axis: number): number | undefined => {
-    const point = problem.points[index];
-    if (point.locked[axis]) return point.position[axis];
-    const fixed = problem.constraints.find(
-      c => c.kind === 'fixed' && c.point === index,
-    );
-    if (fixed?.kind === 'fixed') return fixed.position[axis];
-    const coordinate = problem.constraints.find(
-      c => c.kind === (axis === 0 ? 'x' : 'y') && c.point === index,
-    );
-    return coordinate && 'value' in coordinate ? coordinate.value : undefined;
-  };
-  const knownPosition = (index: number): SketchPosition | undefined => {
-    const x = knownCoordinate(index, 0),
-      y = knownCoordinate(index, 1);
-    return x === undefined || y === undefined ? undefined : [x, y];
-  };
-  const knownRadii = new Map<string, number>();
-  const key = (curve: SketchSolveCurve) => `${curve.kind}:${curve.index}`;
-  for (const kind of ['circle', 'arc'] as const)
-    for (const [index, curve] of (kind === 'circle'
-      ? problem.circles
-      : problem.arcs
-    ).entries()) {
-      const dimension = problem.constraints.find(
-        c => c.kind === 'radius' && c.curve === kind && c.index === index,
-      );
-      let radius = curve.locked
-        ? curve.radius
-        : dimension?.kind === 'radius'
-          ? dimension.value
-          : undefined;
-      if (radius === undefined && kind === 'arc') {
-        const arc = problem.arcs[index];
-        const center = knownPosition(arc.center),
-          endpoint =
-            knownPosition(arc.points[0]) ?? knownPosition(arc.points[1]);
-        if (center && endpoint)
-          radius = Math.hypot(endpoint[0] - center[0], endpoint[1] - center[1]);
-      }
-      if (radius !== undefined) knownRadii.set(key({kind, index}), radius);
-    }
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const c of problem.constraints) {
-      if (c.kind !== 'equalRadius') continue;
-      const [a, b] = c.curves.map(key),
-        first = knownRadii.get(a),
-        second = knownRadii.get(b);
-      if (first !== undefined && second === undefined) {
-        knownRadii.set(b, first);
-        changed = true;
-      } else if (second !== undefined && first === undefined) {
-        knownRadii.set(a, second);
-        changed = true;
-      }
-    }
-  }
+  const parameters = new SketchParameterAnalysis(problem);
+  const knownCoordinate = (index: number, axis: number) =>
+    parameters.coordinate(index, axis)?.value;
   const points = problem.points.map((p, index) => ({
     ...p,
     position: p.position.map(
@@ -1246,11 +1092,11 @@ function initializeTangencyGeometry(
   }));
   const circles = problem.circles.map((c, index) => ({
     ...c,
-    radius: knownRadii.get(key({kind: 'circle', index})) ?? c.radius,
+    radius: parameters.seedRadius({kind: 'circle', index})?.value ?? c.radius,
   }));
   const arcs = problem.arcs.map((c, index) => ({
     ...c,
-    radius: knownRadii.get(key({kind: 'arc', index})) ?? c.radius,
+    radius: parameters.seedRadius({kind: 'arc', index})?.value ?? c.radius,
   }));
   const circular = (curve: SketchSolveCurve) =>
     (curve.kind === 'circle' ? circles : arcs)[curve.index];
@@ -1312,7 +1158,7 @@ function initializeTangencyGeometry(
         ? a.radius + b.radius
         : Math.abs(a.radius - b.radius);
     if (!distance) {
-      const free = c.curves.find(curve => !knownRadii.has(key(curve)));
+      const free = c.curves.find(curve => !parameters.seedRadius(curve));
       if (free) {
         circular(free).radius *= 1.25;
         distance = Math.abs(a.radius - b.radius);
@@ -1436,17 +1282,23 @@ function residual(
         Math.atan2(y2, x2) - Math.atan2(y1, x1) - (c.value * Math.PI) / 180;
       return Math.abs(Math.atan2(Math.sin(difference), Math.cos(difference)));
     }
-    case 'pointOnCircle': {
-      const [p, center] = c.points.map(i => positions[i]);
-      const radius = (c.curve === 'circle' ? radii : arcRadii)[c.index];
+    case 'pointOn': {
+      const p = positions[c.point];
+      if (c.curve.kind === 'line') {
+        const [a, b] = problem.lines[c.curve.index].map(i => positions[i]);
+        return pointLineDistance(p, a, b) / scale;
+      }
+      const curve = (
+        c.curve.kind === 'circle' ? problem.circles : problem.arcs
+      )[c.curve.index];
+      const center = positions[curve.center];
+      const radius = (c.curve.kind === 'circle' ? radii : arcRadii)[
+        c.curve.index
+      ];
       return (
         Math.abs(Math.hypot(p[0] - center[0], p[1] - center[1]) - radius) /
         scale
       );
-    }
-    case 'pointOnLine': {
-      const [p, a, b] = c.points.map(i => positions[i]);
-      return pointLineDistance(p, a, b) / scale;
     }
     case 'sweep': {
       const arc = problem.arcs[c.index];

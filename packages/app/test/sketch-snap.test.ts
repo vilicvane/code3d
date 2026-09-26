@@ -477,3 +477,57 @@ test('an entered line length snaps its direction to tangency without shortening 
   assert.ok(Math.abs(snap.sketchDistance([10, 0], endpoint) - 10) < 1e-10);
   assert.deepEqual(result.endpoint.relations, [['tangent', 2]]);
 });
+
+test('one candidate arbitration preserves identity, tangent and feature priority over proximity', () => {
+  const contact = [2.5, Math.sqrt(18.75)] as const;
+  const options = {
+    scale: 100,
+    gridStep: 1,
+    enabled: true,
+    points: [
+      {...ref(8), position: [contact[0] + 0.04, contact[1]] as SketchPosition},
+    ],
+    features: [
+      {
+        position: contact,
+        hint: 'Intersection' as const,
+        relations: [['pointOn', 2] as const, ['pointOn', 3] as const],
+      },
+    ],
+    curves: [
+      {
+        id: 2,
+        curve: {kind: 'circle' as const, center: [0, 0] as const, radius: 5},
+      },
+    ],
+  };
+  const geometry = {
+    kind: 'polar' as const,
+    origin: [10, 0] as const,
+    line: true,
+  };
+  assert.equal(
+    snap.snapSketchPointer(contact, geometry, options).hint,
+    'Point',
+  );
+  assert.equal(
+    snap.snapSketchPointer(contact, geometry, {...options, points: []}).hint,
+    'Tangent',
+  );
+  assert.equal(
+    snap.snapSketchPointer(
+      contact,
+      {kind: 'cartesian'},
+      {...options, points: []},
+    ).hint,
+    'Intersection',
+  );
+  assert.equal(
+    snap.snapSketchPointer(
+      contact,
+      {kind: 'cartesian'},
+      {...options, points: [], features: []},
+    ).hint,
+    'On curve',
+  );
+});

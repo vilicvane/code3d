@@ -15,7 +15,6 @@ import type {
   SketchPointAddress,
   SketchPosition,
   SketchSnapshot,
-  SketchConstraint,
 } from '@code3d/core/tooling';
 import {
   sketchCurveGeometry,
@@ -29,7 +28,6 @@ import {
 import {Maximize, Magnet, MousePointer2, Scissors, Shapes} from 'lucide';
 import type {SketchChange} from '../tools/sketch-source';
 import type {
-  SketchDragPreview,
   SketchGeometryData,
   SketchEditableParameters,
 } from '../model/sketch-drag';
@@ -54,13 +52,14 @@ import {
   endpointPosition,
   sameSketchPoint as same,
   sketchDistance as distance,
-  snapSketchPointer,
   sketchSnapTargets,
-  sketchSnapPointConstraints,
-  sketchSnapLineConstraints,
   type SketchSnap,
   type SketchPoint as Point,
 } from '../tools/sketch-snap';
+import {
+  SketchMoveSession,
+  type SketchMoveSolve,
+} from '../tools/sketch-move-session';
 import {DrawingInputs} from './drawing-inputs';
 import {Toolbar, type ToolbarAction} from './toolbar';
 import {
@@ -114,19 +113,7 @@ export type SketchEditorView = Readonly<{
 }>;
 
 type Gesture =
-  | {
-      kind: 'move';
-      target: Point;
-      parameter: 'point' | 'radius';
-      start: SketchPosition;
-      pointer: SketchPosition;
-      snap?: SketchSnap;
-      preview?: SketchDragPreview;
-      pending?: Promise<void>;
-      released: boolean;
-      version: number;
-      error?: string;
-    }
+  | SketchMoveSession
   | {kind: 'pan'; start: SketchPosition; center: SketchPosition}
   | {
       kind: 'box';
@@ -264,13 +251,7 @@ export class SketchEditor {
       change: SketchChange,
       preview?: SketchSnapshot,
     ) => boolean,
-    private readonly solve: (
-      id: number,
-      position: SketchPosition,
-      previous?: SketchDragPreview,
-      mergeTarget?: SketchPointAddress,
-      constraints?: readonly SketchConstraint<SketchPointAddress>[],
-    ) => Promise<SketchDragPreview>,
+    private readonly solve: SketchMoveSolve,
     private readonly reportMove: (error?: string) => void,
     private readonly sourceHistory: SketchDrawingSourceHistory,
   ) {
@@ -360,8 +341,6 @@ export class SketchEditor {
         if (event.code === 'Space') this.space = false;
         if (event.key === 'Alt') {
           this.bypassSnap = false;
-          if (this.gesture?.kind === 'move' && this.gesture.snap)
-            this.updateMove(this.gesture);
         }
       }),
     );
@@ -421,6 +400,15 @@ export class SketchEditor {
         this.tool,
         this.snapping,
         this.selection,
+        this.gesture,
+        ...(this.gesture?.kind === 'move'
+          ? [
+              this.gesture.preview,
+              this.gesture.pending,
+              this.gesture.error,
+              this.gesture.released,
+            ]
+          : []),
       ],
       () => this.draw(),
     );
@@ -555,6 +543,7 @@ export class SketchEditor {
     if (this.drawingInputs.root.contains(document.activeElement))
       this.svg.focus();
     if (this.gesture?.kind === 'box') this.selection = this.gesture.before;
+    if (this.gesture?.kind === 'move') this.gesture.dispose();
     this.gesture = undefined;
     this.trimPointer = undefined;
     this.drawing?.reset();
@@ -595,8 +584,6 @@ export class SketchEditor {
     if (event.ctrlKey || event.metaKey) return;
     if (event.key === 'Alt') {
       this.bypassSnap = true;
-      if (this.gesture?.kind === 'move' && this.gesture.snap)
-        this.updateMove(this.gesture);
     }
     const canvas = event.target === this.svg;
     const input =
@@ -659,24 +646,11 @@ export class SketchEditor {
   }
 
   private get snapTargets() {
-    const targets = sketchSnapTargets(
+    return sketchSnapTargets(
       this.view?.layers ?? [],
-      this.gesture?.kind === 'move' ? this.gesture.target : undefined,
+      undefined,
+      this.view?.referenceable,
     );
-    const referenceable = (point: SketchPointAddress) =>
-      point.layer === this.view?.id ||
-      !!this.view?.referenceable.has(point.layer);
-    return {
-      ...targets,
-      points: targets.points.filter(referenceable),
-      features: targets.features.filter(
-        feature =>
-          feature.relations?.every(
-            relation =>
-              relation[0] !== 'midpoint' || relation[1].every(referenceable),
-          ) ?? true,
-      ),
-    };
   }
 
   private get constructionSelection() {
@@ -1006,22 +980,19 @@ export class SketchEditor {
         point.layer === this.view.id &&
         this.view.editable.get(point.id)?.some(Boolean)
       ) {
-        this.gesture = {
-          kind: 'move',
-          target: point,
-          parameter: vertex ? 'point' : 'radius',
-          start: position,
-          pointer: position,
-          released: false,
-          preview: undefined,
-          snap: undefined,
-          version: 0,
-        };
-        makeObservable(this.gesture, {
-          preview: observableRef,
-          snap: observableRef,
-          released: observableRef,
-        });
+        this.gesture = new SketchMoveSession(
+          point,
+          vertex ? 'point' : 'radius',
+          position,
+          this.view.layers,
+          this.view.referenceable,
+          () => ({
+            scale: this.scale,
+            gridStep: gridStep(this.scale),
+            enabled: this.snapping && !this.bypassSnap,
+          }),
+          this.solve,
+        );
         this.svg.setPointerCapture(event.pointerId);
       }
     }
@@ -1086,127 +1057,29 @@ export class SketchEditor {
       if (this.drawing) this.drawing.pointer = pointer;
       const gesture = this.gesture;
       if (gesture?.kind === 'move' && !gesture.released) {
-        this.updateMove(gesture, pointer);
+        gesture.move(pointer);
       }
     }
-    if (this.gesture || this.mode === 'Trim') this.draw();
-  }
-
-  private updateMove(
-    gesture: Extract<Gesture, {kind: 'move'}>,
-    pointer = gesture.pointer,
-  ): void {
-    // Release freezes the accepted intent while its final solve is pending.
-    // A later modifier keyup belongs to the next gesture.
-    if (gesture.released) return;
-    gesture.pointer = pointer;
-    const line = this.movingLine(gesture);
-    const resolve = sketchPointResolver(this.view!.layers);
-    const other = line?.points.find(
-      point => !same(resolve(point), resolve(gesture.target)),
-    );
-    const origin =
-      other &&
-      this.points().find(point => same(resolve(point), resolve(other)))
-        ?.position;
-    const snap = snapSketchPointer(
-      [
-        gesture.target.position[0] + pointer[0] - gesture.start[0],
-        gesture.target.position[1] + pointer[1] - gesture.start[1],
-      ],
-      origin ? {kind: 'polar', origin, line: true} : {kind: 'cartesian'},
-      gesture.parameter === 'point'
-        ? this.snapContext()
-        : {...this.snapContext(), points: [], features: [], curves: []},
-    );
-    gesture.snap = snap;
-    gesture.version++;
-    this.previewMove(gesture);
-  }
-
-  private movingLine(gesture: Extract<Gesture, {kind: 'move'}>) {
-    const resolve = sketchPointResolver(this.view!.layers);
-    const incident =
-      gesture.parameter === 'point'
-        ? this.view!.layers.at(-1)!.entities.filter(
-            entity =>
-              entity.kind === 'line' &&
-              entity.points.some(point =>
-                same(resolve(point), resolve(gesture.target)),
-              ),
-          )
-        : [];
-    return incident.length === 1 && incident[0].kind === 'line'
-      ? incident[0]
-      : undefined;
-  }
-
-  private previewMove(gesture: Extract<Gesture, {kind: 'move'}>): void {
-    if (gesture.pending) return;
-    gesture.pending = (async () => {
-      while (this.gesture === gesture) {
-        const version = gesture.version;
-        try {
-          const line = this.movingLine(gesture);
-          const preview = await this.solve(
-            gesture.target.id,
-            endpointPosition(gesture.snap!.endpoint),
-            gesture.preview,
-            gesture.parameter === 'point' && 'point' in gesture.snap!.endpoint
-              ? gesture.snap!.endpoint.point
-              : undefined,
-            gesture.snap && gesture.parameter === 'point'
-              ? [
-                  ...sketchSnapPointConstraints(
-                    gesture.snap.endpoint,
-                    gesture.target,
-                  ),
-                  ...(line
-                    ? sketchSnapLineConstraints(gesture.snap.endpoint, line.id)
-                    : []),
-                ]
-              : [],
-          );
-          if (this.gesture !== gesture) return;
-          runInAction(() => {
-            gesture.preview = preview;
-          });
-          gesture.error = undefined;
-        } catch (error) {
-          if (this.gesture !== gesture) return;
-          gesture.error = (error as Error).message;
-        }
-        this.draw();
-        if (version === gesture.version) return;
-      }
-    })().finally(() => {
-      gesture.pending = undefined;
-      this.draw();
-    });
+    if (this.gesture?.kind === 'box' || this.mode === 'Trim') this.draw();
   }
 
   private async pointerUp(event: PointerEvent): Promise<void> {
     const gesture = this.gesture;
-    if (gesture?.kind === 'move' && gesture.snap) {
-      const pointer = this.coordinates(event);
-      const changed =
-        this.bypassSnap !== event.altKey ||
-        pointer.some(
-          (coordinate, axis) => coordinate !== gesture.pointer[axis],
-        );
-      this.bypassSnap = event.altKey;
-      if (changed) this.updateMove(gesture, pointer);
-    }
+    this.bypassSnap = event.altKey;
+    const completion =
+      gesture?.kind === 'move'
+        ? gesture.release(this.coordinates(event))
+        : undefined;
     if (gesture?.kind === 'box' && !gesture.dragging)
       this.selection = updateSketchSelection(gesture.before, [], gesture.mode);
-    if (gesture?.kind === 'move') gesture.released = true;
-    else this.gesture = undefined;
+    if (gesture?.kind !== 'move') this.gesture = undefined;
     if (this.svg.hasPointerCapture(event.pointerId))
       this.svg.releasePointerCapture(event.pointerId);
     if (gesture?.kind === 'move') {
-      await gesture.pending;
+      await completion;
       if (this.gesture !== gesture) return;
       runInAction(() => {
+        gesture.dispose();
         this.gesture = undefined;
       });
       this.reportMove(gesture.error);
@@ -1236,7 +1109,6 @@ export class SketchEditor {
           );
       }
     }
-    this.draw();
   }
 
   private nextId(): number {

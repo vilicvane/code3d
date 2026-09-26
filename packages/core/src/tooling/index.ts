@@ -22,10 +22,8 @@ export {
 } from '../library/kernel-cache.js';
 export type {KernelArtifactStore} from '../library/kernel-cache.js';
 
-export {
-  SketchConstraintError,
-  installSketchSolver,
-} from '../library/sketch-solver.js';
+export {SketchConstraintError} from '../library/sketch-solve-model.js';
+export {installSketchSolver} from '../library/sketch-solver.js';
 export {
   isSketch,
   sketchDefinition,

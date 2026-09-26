@@ -9,9 +9,9 @@ sourceReview:
       commit: 9c1b6ae059ec9b0c1c9be31d6f9fad3749a5732b
     - path: packages/core/src/library/sketch-curves.ts
       sha256: 3943da8b380dd4392022e35a0a4352bafe6b5b4a1cb5ebf9a67410690de12929
+      commit: 42b6cba5ec1ea173ce1f4eadc331e5d760b809c5
     - path: packages/core/src/library/sketch-precision.ts
-      sha256: 6c86bbf71f337099519045cc68944247c009da4e9887abdf8a9af6712f486144
-      commit: 81c6e51b8e207da937338763e45f27d3469ae097
+      sha256: b20f4bfc82b4b6a6df8425bed1a059ade0824a4a300179d562582e518c692b6e
     - path: packages/core/src/library/sketch-regions.ts
       sha256: 3519e575f6eaccc71b549176e937e86d3dd077df100829a9b3d5928e6a163c01
       commit: dd17cbc45ffbf2222e6bb6b22b24e0a1609b8bb7

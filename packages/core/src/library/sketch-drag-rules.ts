@@ -1,21 +1,25 @@
+import {solveSketchProblem} from './sketch-solver.js';
 import {
-  solveSketchProblem,
+  sketchCurvePoints,
+  sketchConstraintPoints,
   type SketchSolveObjective,
   type SketchSolveProblem,
   type SketchSolveTarget,
   type SketchSolveResult,
-} from './sketch-solver.js';
+} from './sketch-solve-model.js';
 import type {SketchPosition} from './sketch.js';
 import {
   sketchIncidenceGeometry,
-  sketchIncidencePoints,
   sketchIncidenceCurve,
-  type SketchIncidence,
 } from './sketch-incidence.js';
 import {
   sketchCurveClosestParameter,
   sketchCurvePosition,
 } from './sketch-curves.js';
+import {
+  SketchContactAnalysis,
+  SketchParameterAnalysis,
+} from './sketch-solve-analysis.js';
 
 export type SketchDragContext = Readonly<{
   reference: SketchSolveProblem;
@@ -137,21 +141,17 @@ type PointPolicy = Readonly<
 
 const radiusRule: SketchDragRule = ({reference, target}) => {
   if (target.kind !== 'radius') return;
+  const relations = new SketchContactAnalysis(reference);
+  const parameters = new SketchParameterAnalysis(reference);
   const curve = (target.curve === 'arc' ? reference.arcs : reference.circles)[
     target.index
   ];
   return (current, updated) => {
     const next = updated as typeof target;
     const suggestions = new Map<number, SketchPosition[]>();
-    const dimension = reference.constraints.find(
-      c =>
-        c.kind === 'radius' && c.curve === next.curve && c.index === next.index,
-    );
-    const radius = curve.locked
-      ? curve.radius
-      : dimension?.kind === 'radius'
-        ? dimension.value
-        : next.value;
+    const radius =
+      parameters.seedRadius({kind: next.curve, index: next.index})?.value ??
+      next.value;
     const center = reference.points[curve.center].position;
     if (next.curve === 'arc') {
       const arc = reference.arcs[next.index];
@@ -162,18 +162,17 @@ const radiusRule: SketchDragRule = ({reference, target}) => {
           radialPosition(center, reference.points[point].position, radius),
         );
     }
-    for (const c of reference.constraints)
+    for (const contact of relations.pointOn)
       if (
-        c.kind === 'pointOnCircle' &&
-        c.curve === next.curve &&
-        c.index === next.index
+        contact.curve.kind === next.curve &&
+        contact.curve.index === next.index
       )
         suggest(
           suggestions,
-          c.points[0],
+          contact.point,
           radialPosition(
             center,
-            reference.points[c.points[0]].position,
+            reference.points[contact.point].position,
             radius,
           ),
         );
@@ -222,8 +221,11 @@ const junctionRule: SketchDragRule = context => {
   if (
     reference.constraints.some(
       c =>
-        !(c.kind === 'pointOnCircle' && c.points[1] === target.point) &&
-        constraintPoints(reference, c).includes(target.point),
+        !(
+          c.kind === 'pointOn' &&
+          c.curve.kind !== 'line' &&
+          sketchCurvePoints(reference, c.curve)[0] === target.point
+        ) && sketchConstraintPoints(reference, c).includes(target.point),
     )
   )
     return;
@@ -266,14 +268,7 @@ const motionRules: readonly SketchDragRule[] = [
 /** Authored point-on relations supply polar seeds and soft follower positions. */
 const pointOnRule: SketchDragRule = ({reference, target}) => {
   const original = sketchIncidenceGeometry(reference);
-  const contacts = reference.constraints.flatMap(
-    (constraint): SketchIncidence[] =>
-      (constraint.kind === 'pointOnLine' ||
-        constraint.kind === 'pointOnCircle') &&
-      constraint.bound
-        ? [{point: constraint.points[0], ...constraint.bound}]
-        : [],
-  );
+  const contacts = new SketchContactAnalysis(reference).pointOn;
   if (!contacts.length) return;
   const session = createSketchDragSession({reference, target}, motionRules);
   return (current, updated) => {
@@ -283,12 +278,12 @@ const pointOnRule: SketchDragRule = ({reference, target}) => {
     const currentGeometry = sketchIncidenceGeometry(current);
     for (const contact of contacts) {
       if (
-        contact.kind === 'line' ||
+        contact.curve.kind === 'line' ||
         updated.kind !== 'point' ||
         contact.point !== updated.point
       )
         continue;
-      const curve = sketchIncidenceCurve(currentGeometry, contact);
+      const curve = sketchIncidenceCurve(currentGeometry, contact.curve);
       if (
         curve.kind !== 'line' &&
         updated.position.every((v, i) => v === curve.center[i])
@@ -298,9 +293,9 @@ const pointOnRule: SketchDragRule = ({reference, target}) => {
       // Finite endpoints already have authoritative coordinates. Re-evaluating
       // sin/cos would introduce a new seed such as cos(pi/2) instead of exact 0.
       const position =
-        contact.kind === 'arc' && (t === 0 || t === 1)
+        contact.curve.kind === 'arc' && (t === 0 || t === 1)
           ? currentGeometry.points[
-              currentGeometry.arcs[contact.index].points[t]
+              currentGeometry.arcs[contact.curve.index].points[t]
             ]
           : sketchCurvePosition(curve, t);
       suggest(suggestions, contact.point, position);
@@ -313,7 +308,7 @@ const pointOnRule: SketchDragRule = ({reference, target}) => {
         ? new Set(
             contacts
               .filter(c => c.point === updated.point)
-              .flatMap(c => sketchIncidencePoints(original, c).slice(1)),
+              .flatMap(c => sketchCurvePoints(original, c.curve)),
           )
         : new Set<number>();
     // Point-on relations leave a tangential freedom. Keep followers near their
@@ -353,6 +348,7 @@ function pointSession(
   policies: readonly PointPolicy[],
 ): SketchDragSession {
   const {reference} = context;
+  const parameters = new SketchParameterAnalysis(reference);
   const translations = policies.filter(p => p.kind === 'translation');
   const endpoints = policies.filter(p => p.kind === 'endpoint');
   // An endpoint can also be another curve's center. Its incident arcs retain
@@ -376,17 +372,12 @@ function pointSession(
     for (const index of arcs) {
       const arc = reference.arcs[index];
       const center = reference.points[arc.center].position;
-      const dimension = reference.constraints.find(
-        c => c.kind === 'radius' && c.curve === 'arc' && c.index === index,
-      );
-      const radius = arc.locked
-        ? arc.radius
-        : dimension?.kind === 'radius'
-          ? dimension.value
-          : Math.hypot(
-              target.position[0] - center[0],
-              target.position[1] - center[1],
-            );
+      const radius =
+        parameters.seedRadius({kind: 'arc', index})?.value ??
+        Math.hypot(
+          target.position[0] - center[0],
+          target.position[1] - center[1],
+        );
       if (radius === 0) continue;
       radii.set(index, radius);
       const sweep = reference.constraints.some(
@@ -485,9 +476,12 @@ function translationPolicy(
     a => a.center === point && a.points.every(p => scope.has(p)),
   );
   const owned = new Set([point, ...curves.flatMap(a => [...a.points])]);
-  for (const c of problem.constraints)
-    if (c.kind === 'pointOnCircle' && c.points[1] === point)
-      owned.add(c.points[0]);
+  for (const contact of new SketchContactAnalysis(problem).pointOn)
+    if (
+      contact.curve.kind !== 'line' &&
+      sketchCurvePoints(problem, contact.curve)[0] === point
+    )
+      owned.add(contact.point);
   const rectangle = rectanglePoints(problem, point, scope);
   const isCenter =
     curves.length > 0 ||
@@ -529,9 +523,9 @@ function endpointPolicy(
       : [],
   );
   const controls = new Set(arcs.map(i => problem.arcs[i].center));
-  for (const c of problem.constraints)
-    if (c.kind === 'pointOnCircle' && c.points[0] === point)
-      controls.add(c.points[1]);
+  for (const contact of new SketchContactAnalysis(problem).pointOn)
+    if (contact.curve.kind !== 'line' && contact.point === point)
+      controls.add(sketchCurvePoints(problem, contact.curve)[0]);
   for (const c of problem.constraints)
     if (
       c.kind === 'midpoint' &&
@@ -593,19 +587,6 @@ function rectanglePoints(
   return [...corners];
 }
 
-function constraintPoints(
-  problem: SketchSolveProblem,
-  c: SketchSolveProblem['constraints'][number],
-): readonly number[] {
-  if ('points' in c) return c.points;
-  if ('point' in c) return [c.point];
-  if (c.kind === 'sweep' || c.curve === 'arc') {
-    const arc = problem.arcs[c.index];
-    return [arc.center, ...arc.points];
-  }
-  return [problem.circles[c.index].center];
-}
-
 function neighbors(problem: SketchSolveProblem, excluded = -1): Set<number>[] {
   const graph = problem.points.map(() => new Set<number>());
   const connect = (vertices: readonly number[]) => {
@@ -615,7 +596,7 @@ function neighbors(problem: SketchSolveProblem, excluded = -1): Set<number>[] {
   };
   problem.lines.forEach(connect);
   problem.arcs.forEach(a => connect([a.center, ...a.points]));
-  problem.constraints.forEach(c => connect(constraintPoints(problem, c)));
+  problem.constraints.forEach(c => connect(sketchConstraintPoints(problem, c)));
   return graph;
 }
 
@@ -671,6 +652,7 @@ function seed(
   suggestions: ReadonlyMap<number, readonly SketchPosition[]>,
   radii: ReadonlyMap<number, number>,
 ): SketchSolveProblem {
+  const parameters = new SketchParameterAnalysis(problem);
   return {
     ...problem,
     points: problem.points.map((p, index) => {
@@ -680,15 +662,7 @@ function seed(
       return {
         ...p,
         position: p.position.map((v, axis) =>
-          p.locked[axis] ||
-          problem.constraints.some(
-            c =>
-              'point' in c &&
-              c.point === index &&
-              (c.kind === 'fixed' || c.kind === (axis === 0 ? 'x' : 'y')),
-          )
-            ? v
-            : position[axis],
+          parameters.coordinate(index, axis) !== undefined ? v : position[axis],
         ) as [number, number],
       };
     }),

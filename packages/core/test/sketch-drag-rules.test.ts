@@ -15,10 +15,8 @@ import {
   solveSketchDrag,
   solveSketchDragPlan,
 } from '../bld/library/sketch-drag-rules.js';
-import {
-  solveSketchProblem,
-  type SketchSolveProblem,
-} from '../bld/library/sketch-solver.js';
+import {solveSketchProblem} from '../bld/library/sketch-solver.js';
+import type {SketchSolveProblem} from '../bld/library/sketch-solve-model.js';
 
 const snapshot = (
   entries: readonly SketchEntry[],

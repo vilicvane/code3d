@@ -4,12 +4,16 @@ description: Snapshot sketch layers, retain point identities and run the same co
 sourceReview:
   packageVersion: 0.0.1-alpha.17
   sources:
+    - path: packages/core/src/library/sketch-solve-model.ts
+      sha256: fbcc49233a2e3242abb2eeaf232f8c731deeb0857cdb975ad77f05e690c6bf29
+    - path: packages/core/src/library/sketch-solve-analysis.ts
+      sha256: 2b54edc7f5bf1a1ddd34215b784f66866601bd8cda34095b088fe23bcc32c272
     - path: packages/core/src/library/sketch-solver.ts
-      sha256: 97b4d256936244aa519248fe203128da5c04445e2f7565e152fb68158a221fb7
+      sha256: ff7805f44d03438cf20333d56aa33a41ca829cf94b3ead98d6bac20303ed8ded
     - path: packages/core/src/library/sketch.ts
-      sha256: 522fe845cba4107cd39b4a72a87f3483b34ff4906c2248a326680b31b950e922
+      sha256: 805a2f412703c50b2c9cd30ade43b682f5085155795d038efd00cd1aaaf2b018
     - path: packages/core/src/library/sketch-incidence.ts
-      sha256: f8baaf550cff43dd9dd0b9f773228578ae01b9e7fb50a92bf3fefcda16ca3754
+      sha256: 1fb5fe3e23476131948fb6491cd78004ca69d20e872aa43df595ea479514b270
 sidebar:
   hidden: true
 head:

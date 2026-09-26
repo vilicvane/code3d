@@ -1,9 +1,9 @@
+import {solveSketchProblem} from './sketch-solver.js';
 import {
-  solveSketchProblem,
   type SketchSolveProblem,
   type SketchSolveConstraint,
   type SketchSolveCurve,
-} from './sketch-solver.js';
+} from './sketch-solve-model.js';
 import {solveSketchDrag} from './sketch-drag-rules.js';
 import {sketchRegions} from './sketch-regions.js';
 import {
@@ -17,10 +17,7 @@ import {
 } from './runtime.js';
 import {retainInspectionIdentity} from './inspect.js';
 import type {RigidTransform} from './spatial.js';
-import {
-  sketchIncidenceConstraints,
-  type SketchIncidenceGeometry,
-} from './sketch-incidence.js';
+import type {SketchIncidenceGeometry} from './sketch-incidence.js';
 
 /** Current coordinates in a sketch's local two-dimensional plane. */
 export type SketchPosition = readonly [x: number, y: number];
@@ -907,15 +904,6 @@ export function solveSketchSnapshot(
       ? {kind: 'arc', index: arcIndex(id)}
       : {kind: 'circle', index: circleIndex(id)};
   };
-  const curvePoints = (curve: SketchSolveCurve) =>
-    curve.kind === 'line'
-      ? lines[curve.index]
-      : curve.kind === 'circle'
-        ? [geometry.circles[curve.index].center]
-        : [
-            geometry.arcs[curve.index].center,
-            ...geometry.arcs[curve.index].points,
-          ];
   const constraints = local.constraints.map<SketchSolveConstraint>(
     ([kind, data, value]) => {
       switch (kind) {
@@ -942,17 +930,11 @@ export function solveSketchSnapshot(
           return {
             kind,
             curves,
-            points: curves.flatMap(curvePoints),
             ...(kind === 'tangent' ? {mode: value ?? 'external'} : {}),
           } as SketchSolveConstraint;
         }
         case 'pointOn': {
-          const curve = curveIndex(data[1]);
-          const contact = {point: pointIndex(data[0]), ...curve};
-          return {
-            ...sketchIncidenceConstraints(geometry, [contact])[0],
-            bound: curve,
-          };
+          return {kind, point: pointIndex(data[0]), curve: curveIndex(data[1])};
         }
         case 'coincident':
           return {kind, points: [pointIndex(data[0]), pointIndex(data[1])]};

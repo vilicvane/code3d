@@ -5,11 +5,12 @@ sourceReview:
   packageVersion: 0.0.1-alpha.17
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: 522fe845cba4107cd39b4a72a87f3483b34ff4906c2248a326680b31b950e922
+      sha256: 805a2f412703c50b2c9cd30ade43b682f5085155795d038efd00cd1aaaf2b018
     - path: packages/core/src/library/sketch-solver.ts
-      sha256: 97b4d256936244aa519248fe203128da5c04445e2f7565e152fb68158a221fb7
+      sha256: ff7805f44d03438cf20333d56aa33a41ca829cf94b3ead98d6bac20303ed8ded
     - path: packages/core/src/library/sketch-curves.ts
       sha256: 3943da8b380dd4392022e35a0a4352bafe6b5b4a1cb5ebf9a67410690de12929
+      commit: 42b6cba5ec1ea173ce1f4eadc331e5d760b809c5
 sidebar:
   hidden: true
 head:
