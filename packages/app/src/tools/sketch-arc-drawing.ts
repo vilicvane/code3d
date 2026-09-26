@@ -211,8 +211,16 @@ export class SketchArcDrawing implements SketchDrawing {
       a = geometry.point(this.arcStart),
       b = geometry.point(endpoint);
     const arc = geometry.arc(c, radius, a, b, this.direction);
-    const constraints: SketchConstraint<SketchPointAddress>[] =
-      this.centerCoordinates.map(({axis, value}) => [axis, c, value]);
+    const constraints: SketchConstraint<SketchPointAddress>[] = [
+      ...geometry.constraints,
+      ...this.centerCoordinates.map(
+        ({axis, value}): SketchConstraint<SketchPointAddress> => [
+          axis,
+          c,
+          value,
+        ],
+      ),
+    ];
     if (this.radius !== undefined)
       constraints.push(['radius', arc, this.radius]);
     const sweep = this.dimensions.value('sweep');

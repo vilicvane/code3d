@@ -648,3 +648,59 @@ test('preview positions move glyphs and midpoint guides without inventing drag l
     [],
   );
 });
+
+test('persistent equality, tangency and point-on display all owners without treating tangent mode as a dimension', () => {
+  const points = [
+    point(1, [0, 0]),
+    point(2, [20, 0]),
+    point(3, [0, 10]),
+    point(4, [20, 10]),
+    point(7, [10, 5]),
+    point(8, [10, 0]),
+  ];
+  const local = layer(
+    'local',
+    [
+      ...points.map(p => ({kind: 'point', ...p})),
+      line(5, ref(1), ref(2)),
+      line(6, ref(3), ref(4)),
+      {kind: 'circle', id: 9, center: ref(7), radius: 5},
+      {kind: 'circle', id: 10, center: ref(7), radius: 10},
+    ],
+    [
+      ['equalLength', [5, 6]],
+      ['equalRadius', [9, 10]],
+      ['tangent', [5, 9]],
+      ['tangent', [9, 10], 'internal'],
+      ['pointOn', [ref(8), 5]],
+    ],
+  );
+  const displays = sketchConstraintDisplays([local], points);
+  assert.deepEqual(
+    displays.map(d => d.tool),
+    ['equalLength', 'equalRadius', 'tangent', 'internalTangent', 'pointOn'],
+  );
+  for (const d of displays) {
+    assert.equal(d.label, '');
+    assert.deepEqual(d.guides, []);
+    assert.ok(d.points.length);
+    assert.ok(d.curves.length);
+  }
+  assert.deepEqual(
+    displays[0].markers.map(m => m.kind),
+    ['line', 'line'],
+  );
+  assert.deepEqual(
+    displays[1].markers.map(m => m.kind),
+    ['curve', 'curve'],
+  );
+  assert.deepEqual(
+    displays[2].markers.map(m => m.kind),
+    ['line', 'curve'],
+  );
+  assert.match(displays[3].title, /Internal tangent/);
+  assert.deepEqual(displays[4].markers, [
+    {kind: 'point', point: ref(8), position: [10, 0]},
+  ]);
+  assert.deepEqual(displays[4].curves, [ref(5)]);
+});

@@ -7,14 +7,10 @@ import {
 } from './sketch-solver.js';
 import type {SketchPosition} from './sketch.js';
 import {
-  sketchIncidences,
   sketchIncidenceGeometry,
   sketchIncidencePoints,
   sketchIncidenceCurve,
-  sketchIncidenceConstraints,
-  solveSketchIncidenceBounds,
   type SketchIncidence,
-  type SketchIncidenceGeometry,
 } from './sketch-incidence.js';
 import {
   sketchCurveClosestParameter,
@@ -24,13 +20,10 @@ import {
 export type SketchDragContext = Readonly<{
   reference: SketchSolveProblem;
   target: SketchSolveTarget;
-  /** Displayed gesture-start geometry, before applying AST coordinate locks. */
-  geometry?: SketchIncidenceGeometry;
 }>;
 export type SketchDragPlan = Readonly<{
   problem: SketchSolveProblem;
   stages: readonly [SketchDragStage, ...SketchDragStage[]];
-  incidences?: readonly SketchIncidence[];
 }>;
 /** A rule may prepare a stage's seed from the preceding feasible geometry.
  * The seed is only an initial guess; all accumulated locks still apply. */
@@ -65,12 +58,8 @@ export function solveSketchDrag(
   current: SketchSolveProblem,
   target: SketchSolveTarget,
   reference: SketchSolveProblem,
-  geometry?: SketchDragContext['geometry'],
 ) {
-  const plan = createSketchDragSession({reference, target, geometry})(
-    current,
-    target,
-  );
+  const plan = createSketchDragSession({reference, target})(current, target);
   // Resolve remaining freedom only after every gesture-specific preference.
   // Earlier stages' achieved positions stay fixed; references never follow
   // the iterative seed. Solver points are canonical, so aliases add no weight.
@@ -86,11 +75,7 @@ export function solveSketchDrag(
         ),
     },
   ];
-  return solveSketchIncidenceBounds(
-    plan.problem,
-    plan.incidences ?? [],
-    problem => solveSketchDragPlan({...plan, problem, stages}),
-  );
+  return solveSketchDragPlan({...plan, stages});
 }
 
 /** Each stage keeps the preceding stage's chosen parameter values, not all
@@ -278,22 +263,19 @@ const motionRules: readonly SketchDragRule[] = [
   endpointRule,
 ];
 
-/** This rule supplies geometric connections; the dispatcher still knows no roles. */
-const incidenceRule: SketchDragRule = ({reference, target, geometry}) => {
-  const original = geometry ?? sketchIncidenceGeometry(reference);
-  const contacts = sketchIncidences(original);
-  if (!contacts.length) return;
-  const constraints = sketchIncidenceConstraints(original, contacts);
-  const session = createSketchDragSession(
-    {
-      reference: {
-        ...reference,
-        constraints: [...reference.constraints, ...constraints],
-      },
-      target,
-    },
-    motionRules,
+/** Authored point-on relations supply polar seeds and soft follower positions. */
+const pointOnRule: SketchDragRule = ({reference, target}) => {
+  const original = sketchIncidenceGeometry(reference);
+  const contacts = reference.constraints.flatMap(
+    (constraint): SketchIncidence[] =>
+      (constraint.kind === 'pointOnLine' ||
+        constraint.kind === 'pointOnCircle') &&
+      constraint.bound
+        ? [{point: constraint.points[0], ...constraint.bound}]
+        : [],
   );
+  if (!contacts.length) return;
+  const session = createSketchDragSession({reference, target}, motionRules);
   return (current, updated) => {
     // A polar seed follows the requested angle, including an exact half-turn,
     // where a distance equation's local derivative alone cannot pick a branch.
@@ -323,13 +305,7 @@ const incidenceRule: SketchDragRule = ({reference, target, geometry}) => {
           : sketchCurvePosition(curve, t);
       suggest(suggestions, contact.point, position);
     }
-    const plan = session(
-      {
-        ...seed(current, suggestions, new Map()),
-        constraints: [...current.constraints, ...constraints],
-      },
-      updated,
-    );
+    const plan = session(seed(current, suggestions, new Map()), updated);
     // An interior point can slide without moving either end. Both endpoints
     // are soft references, so they can yield when the point moves off the line.
     const preferences =
@@ -340,7 +316,7 @@ const incidenceRule: SketchDragRule = ({reference, target, geometry}) => {
               .flatMap(c => sketchIncidencePoints(original, c).slice(1)),
           )
         : new Set<number>();
-    // Incidence leaves a tangential freedom. Keep followers near their
+    // Point-on relations leave a tangential freedom. Keep followers near their
     // gesture-start positions instead of accepting an arbitrary slide.
     for (const {point} of contacts) preferences.add(point);
     const stages: [SketchDragStage, ...SketchDragStage[]] = [...plan.stages];
@@ -365,13 +341,12 @@ const incidenceRule: SketchDragRule = ({reference, target, geometry}) => {
     };
     return {
       ...plan,
-      incidences: contacts,
       stages,
     };
   };
 };
 
-const dragRules: readonly SketchDragRule[] = [incidenceRule, ...motionRules];
+const dragRules: readonly SketchDragRule[] = [pointOnRule, ...motionRules];
 
 function pointSession(
   context: SketchDragContext,

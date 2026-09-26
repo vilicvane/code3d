@@ -25,8 +25,11 @@ context; it is not a snapping or external-constraint source. Select `mountingPla
 to inspect the cut, or return to the sketch and move an endpoint. Undo restores
 the same source geometry. Selecting a face does not automatically create a sketch.
 
-When drawing, **Snap** finds endpoints, centers, intersections and midpoints as
-well as the grid. **Undo** restores the previous construction step, so a line or
+When drawing, **Snap** finds endpoints, centers, curves, intersections, line
+midpoints and tangent endpoints as well as the grid. Accepted geometric snap
+relationships are saved as constraints and survive parameter changes. Remove a
+constraint to release that relationship; simply touching a curve does not bind
+geometry. **Undo** restores the previous construction step, so a line or
 arc can continue from its earlier anchor. See [drawing and snapping](../../../../../../core/docs/sketches.md#drawing-and-snapping-in-the-app)
 for the full snap targets, keyboard controls and step-by-step undo behavior.
 
@@ -37,9 +40,21 @@ removes the `aux:` prefix. Closed regions are detected at intersections, and ope
 line tails do not prevent face creation. See
 [construction geometry](../../../../../../core/docs/sketches.md#construction-geometry).
 
-Adding or editing sketch constraints keeps existing points connected to their
-lines, circles and arcs, including construction curves. The constraint and the
+Adding or editing sketch constraints preserves authored relationships and shared
+point identities, including construction curves. The constraint and the
 updated coordinates share one Undo step. See [editing constraints](../../../../../../core/docs/sketches.md#editing-dimensions-and-constraints-in-the-app).
+
+For relationships that must survive later parameter changes, select the geometry
+and use **Equal length**, **Equal radius**, **Point on curve**, **Tangent**,
+**External tangent** or **Internal tangent**. These tools write persistent constraints to the source.
+Point-on and tangent contact stay within the selected finite segments or arcs.
+Accepted geometric snaps also write their indicated relationships into source.
+
+<ModelExample id="sketch-persistent-constraints" />
+
+Change `holeRadius` from `8` to `6`. Both holes shrink together, their centers
+stay on the construction median, and the lower hole remains tangent to its
+horizontal guide. Select `profile` to see these relationships in the sketch editor.
 
 The companion `sketches/constraints.ts` shows one rectangular plate with a hole.
 Horizontal and vertical constraints preserve its shape while its height and hole

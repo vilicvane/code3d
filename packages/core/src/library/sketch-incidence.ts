@@ -1,8 +1,9 @@
 import type {SketchPosition} from './sketch.js';
-import type {
-  SketchSolveConstraint,
-  SketchSolveProblem,
-  SketchSolveResult,
+import {
+  SketchConstraintError,
+  type SketchSolveConstraint,
+  type SketchSolveProblem,
+  type SketchSolveResult,
 } from './sketch-solver.js';
 import {
   sketchCurveTolerance,
@@ -25,9 +26,11 @@ export type SketchIncidence = Readonly<{
   point: number;
   kind: 'line' | 'circle' | 'arc';
   index: number;
+  /** Original author constraint for diagnostics from an active finite boundary. */
+  constraintIndex?: number;
 }>;
 
-/** Connections are scoped to one GUI edit and never become author constraints. */
+/** Support equations for authored point-on relations. */
 export function sketchIncidenceConstraints(
   geometry: SketchIncidenceGeometry,
   contacts: readonly SketchIncidence[],
@@ -52,7 +55,7 @@ export function sketchIncidenceConstraints(
   );
 }
 
-/** Clamp a solved contact to the finite segment or arc it started on. */
+/** Keep solved contacts on finite segments and directed arcs. */
 export function solveSketchIncidenceBounds(
   original: SketchSolveProblem,
   contacts: readonly SketchIncidence[],
@@ -70,7 +73,33 @@ export function solveSketchIncidenceBounds(
         })),
       ],
     };
-    const result = solve(problem);
+    let result: SketchSolveResult;
+    try {
+      result = solve(problem);
+    } catch (error) {
+      // Boundary equations belong to the original relation; no auxiliary
+      // constraint index may escape into source diagnostics.
+      if (error instanceof SketchConstraintError && bounds.size) {
+        const active = [...bounds.keys()];
+        const constraints = [
+          ...new Set(
+            error.constraints
+              .map((index: number) =>
+                index < original.constraints.length
+                  ? index
+                  : active[index - original.constraints.length]
+                      ?.constraintIndex,
+              )
+              .filter((index): index is number => index !== undefined),
+          ),
+        ];
+        throw new SketchConstraintError(
+          constraints,
+          `Could not satisfy sketch constraints${constraints.length ? ` (${constraints.map(index => index + 1).join(', ')})` : ''} within their finite curve boundaries.`,
+        );
+      }
+      throw error;
+    }
     const solved = sketchIncidenceGeometry(problem, result);
     const outside = contacts.flatMap(contact => {
       const endpoint = bounds.has(contact)
@@ -180,44 +209,6 @@ export function sketchIncidenceBoundary(
   const t = sketchCurveClosestParameter(curve, point);
   if (t === 0 || t === 1) return endpoints[t];
   return;
-}
-
-/** Recognition is edit-local and shares finite geometry/tolerance with trimming. */
-export function sketchIncidences(
-  geometry: SketchIncidenceGeometry,
-): readonly SketchIncidence[] {
-  const seen = new Set<string>();
-  return (['line', 'circle', 'arc'] as const).flatMap(kind => {
-    const curves =
-      kind === 'line'
-        ? geometry.lines
-        : kind === 'circle'
-          ? geometry.circles
-          : geometry.arcs;
-    return curves.flatMap((_, index) =>
-      geometry.points.flatMap((position, point): SketchIncidence[] => {
-        const contact = {point, kind, index};
-        if (sketchIncidencePoints(geometry, contact).slice(1).includes(point))
-          return [];
-        if (
-          !isPointOnSketchCurve(
-            position,
-            sketchIncidenceCurve(geometry, contact),
-          )
-        )
-          return [];
-        const key =
-          kind === 'line'
-            ? [point, ...[...geometry.lines[index]].sort((a, b) => a - b)].join(
-                ':',
-              )
-            : kind + ':' + point + ':' + index;
-        if (seen.has(key)) return [];
-        seen.add(key);
-        return [contact];
-      }),
-    );
-  });
 }
 
 export function lineParameter(

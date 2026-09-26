@@ -12,6 +12,8 @@ import {
   endpointPosition,
   sketchDistance,
   snapSketchPointer,
+  sketchSnapPointConstraints,
+  sketchSnapLineConstraints,
   type SketchAxis,
   type SketchEndpoint,
   type SketchSnapContext,
@@ -60,17 +62,21 @@ export const enteredSketchCoordinates = (dimensions: DrawingDimensions) =>
 /** Allocate identities only in an atomic draft, reusing actual snapped references. */
 export class SketchDrawingGeometry {
   readonly entries: SketchDraftEntry[] = [];
+  readonly constraints: SketchConstraint<SketchPointAddress>[] = [];
   constructor(
     private readonly layer: string,
     private nextId: number,
   ) {}
 
   point(endpoint: SketchEndpoint): SketchPointAddress {
-    if ('point' in endpoint)
-      return {layer: endpoint.point.layer, id: endpoint.point.id};
-    const id = this.nextId++;
-    this.entries.push(['point', id, endpoint.position]);
-    return {layer: this.layer, id};
+    const point =
+      'point' in endpoint
+        ? {layer: endpoint.point.layer, id: endpoint.point.id}
+        : {layer: this.layer, id: this.nextId++};
+    if ('position' in endpoint)
+      this.entries.push(['point', point.id, endpoint.position]);
+    this.constraints.push(...sketchSnapPointConstraints(endpoint, point));
+    return point;
   }
 
   line(a: SketchPointAddress, b: SketchPointAddress): number {
@@ -155,6 +161,7 @@ export class SketchLineDrawing implements SketchDrawing {
       this.start
         ? {
             kind: 'polar',
+            line: true,
             origin: endpointPosition(this.start),
             length: this.dimensions.value('length'),
             direction: this.axis
@@ -239,8 +246,17 @@ export class SketchLineDrawing implements SketchDrawing {
     const start = geometry.point(this.start),
       end = geometry.point(endpoint);
     const segment = geometry.line(start, end);
-    const constraints: SketchConstraint<SketchPointAddress>[] =
-      this.startCoordinates.map(({axis, value}) => [axis, start, value]);
+    const constraints: SketchConstraint<SketchPointAddress>[] = [
+      ...geometry.constraints,
+      ...this.startCoordinates.map(
+        ({axis, value}): SketchConstraint<SketchPointAddress> => [
+          axis,
+          start,
+          value,
+        ],
+      ),
+      ...sketchSnapLineConstraints(endpoint, segment),
+    ];
     const length = this.dimensions.value('length');
     const angle = this.dimensions.value('angle');
     if (length !== undefined) constraints.push(['length', segment, length]);

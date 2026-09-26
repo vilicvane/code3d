@@ -58,14 +58,23 @@ test('finite line intersections and authored midpoints beat the grid without inv
     options,
   );
   assert.equal(intersection.hint, 'Intersection');
-  assert.deepEqual(intersection.endpoint, {position: [7, 11]});
+  assert.deepEqual(intersection.endpoint, {
+    position: [7, 11],
+    relations: [
+      ['pointOn', 3],
+      ['pointOn', 6],
+    ],
+  });
   const midpoint = snap.snapSketchPointer(
     [10.02, 11.01],
     {kind: 'cartesian'},
     options,
   );
   assert.equal(midpoint.hint, 'Midpoint');
-  assert.deepEqual(midpoint.endpoint, {position: [10, 11]});
+  assert.deepEqual(midpoint.endpoint, {
+    position: [10, 11],
+    relations: [['midpoint', [ref(1), ref(2)]]],
+  });
   const disjoint = layer(
     ...value.entities.slice(0, 3),
     point(4, [7, 12]),
@@ -131,7 +140,7 @@ test('line-circle, circle-circle, tangent and finite arc contacts use analytic c
     arcFeatures.filter(feature => feature.hint === 'Intersection').length,
     1,
   );
-  near(arcFeatures.find(feature => feature.hint === 'Midpoint')!.position, [
+  near(arcFeatures.find(feature => feature.hint === 'On curve')!.position, [
     Math.SQRT1_2 * 5,
     Math.SQRT1_2 * 5,
   ]);
@@ -169,7 +178,10 @@ test('endpoints and centers retain identity, with local ownership preferred and 
   );
   assert.deepEqual(
     snap.snapSketchPointer([0.01, -5.02], {kind: 'cartesian'}, options),
-    {endpoint: {position: [0, -5]}, hint: 'Quadrant'},
+    {
+      endpoint: {position: [0, -5], relations: [['pointOn', 2]]},
+      hint: 'On curve',
+    },
   );
 });
 
@@ -244,10 +256,224 @@ test('drag candidates exclude aliases and curves owned by the dragged point', ()
     targets.points.map(point => point.id),
     [7, 6, 3],
   );
-  assert.deepEqual(targets.features, [{position: [15, 10], hint: 'Midpoint'}]);
+  assert.deepEqual(targets.features, [
+    {
+      position: [15, 10],
+      hint: 'Midpoint',
+      relations: [['midpoint', [ref(6), ref(7)]]],
+    },
+  ]);
   const radiusTargets = snap.sketchSnapTargets([value], ref(5));
   assert.equal(radiusTargets.points.length, 5);
   assert.ok(
-    !radiusTargets.features.some(feature => feature.hint === 'Quadrant'),
+    !radiusTargets.features.some(feature => feature.hint === 'On curve'),
   );
+});
+
+test('arbitrary finite curve snaps carry pointOn intent and bypass leaves it absent', () => {
+  const value = layer(point(1, [2, 3]), point(2, [12, 3]), line(3, 1, 2));
+  const options = context(value);
+  const result = snap.snapSketchPointer(
+    [4.21, 3.02],
+    {kind: 'cartesian'},
+    options,
+  );
+  assert.equal(result.hint, 'On curve');
+  assert.deepEqual(snap.sketchSnapPointConstraints(result.endpoint, ref(9)), [
+    ['pointOn', [ref(9), 3]],
+  ]);
+  assert.equal(
+    snap.snapSketchPointer(
+      [4.21, 3.02],
+      {kind: 'cartesian'},
+      {...options, enabled: false},
+    ).endpoint.relations,
+    undefined,
+  );
+  const outside = snap.snapSketchPointer(
+    [14.21, 3.02],
+    {kind: 'cartesian'},
+    options,
+  );
+  assert.equal(outside.endpoint.relations, undefined);
+});
+
+test('only representable upstream references offer relationship snaps', () => {
+  const base = {
+    ...layer(
+      point(1, [2, 3]),
+      point(2, [12, 3]),
+      {
+        ...line(3, 1, 2),
+        points: [ref(1, 'base'), ref(2, 'base')],
+      } as SketchEntitySnapshot,
+      {
+        kind: 'circle',
+        id: 4,
+        center: ref(1, 'base'),
+        radius: 5,
+      },
+    ),
+    id: 'base',
+  };
+  const options = {
+    ...context(layer()),
+    ...snap.sketchSnapTargets([base, layer()]),
+  };
+  assert.deepEqual(options.curves, []);
+  assert.equal(
+    snap.snapSketchPointer([4.21, 3.02], {kind: 'cartesian'}, options).endpoint
+      .relations,
+    undefined,
+  );
+  const midpoint = snap.snapSketchPointer(
+    [7.01, 3.02],
+    {kind: 'cartesian'},
+    options,
+  );
+  assert.equal(midpoint.hint, 'Midpoint');
+  assert.deepEqual(snap.sketchSnapPointConstraints(midpoint.endpoint, ref(9)), [
+    ['midpoint', [ref(9), ref(1, 'base'), ref(2, 'base')]],
+  ]);
+});
+
+test('line tangency is an accepted finite-curve hint, with contact intent at the endpoint', () => {
+  const circle = layer(point(1, [0, 0]), {
+    kind: 'circle',
+    id: 2,
+    center: ref(1),
+    radius: 5,
+  });
+  const options = context(circle);
+  const geometry = {
+    kind: 'polar' as const,
+    origin: [10, 0] as const,
+    line: true,
+  };
+  const contact = [2.5, Math.sqrt(18.75)] as const;
+  const result = snap.snapSketchPointer(
+    [contact[0] + 0.01, contact[1] + 0.02],
+    geometry,
+    options,
+  );
+  assert.equal(result.hint, 'Tangent');
+  near(snap.endpointPosition(result.endpoint), contact);
+  assert.deepEqual(snap.sketchSnapLineConstraints(result.endpoint, 7), [
+    ['tangent', [7, 2]],
+  ]);
+  assert.deepEqual(snap.sketchSnapPointConstraints(result.endpoint, ref(6)), [
+    ['pointOn', [ref(6), 2]],
+  ]);
+  const extended = snap.snapSketchPointer(
+    [-5, 2 * contact[1]],
+    geometry,
+    options,
+  );
+  assert.equal(extended.hint, 'Tangent');
+  assert.deepEqual(
+    snap.sketchSnapPointConstraints(extended.endpoint, ref(6)),
+    [],
+  );
+  const onCircle = snap.snapSketchPointer(
+    [5.01, 7.02],
+    {...geometry, origin: [5, 0]},
+    options,
+  );
+  assert.equal(onCircle.hint, 'Tangent');
+  near(snap.endpointPosition(onCircle.endpoint), [5, 7.02]);
+  assert.notEqual(
+    snap.snapSketchPointer(
+      [contact[0], contact[1]],
+      {...geometry, line: false},
+      options,
+    ).hint,
+    'Tangent',
+  );
+
+  const arc = layer(point(1, [0, 0]), point(2, [5, 0]), point(3, [0, 5]), {
+    kind: 'arc',
+    id: 4,
+    center: ref(1),
+    radius: 5,
+    points: [ref(2), ref(3)],
+    direction: 'ccw',
+  });
+  assert.equal(
+    snap.snapSketchPointer(contact, geometry, context(arc)).hint,
+    'Tangent',
+  );
+  assert.notEqual(
+    snap.snapSketchPointer([contact[0], -contact[1]], geometry, context(arc))
+      .hint,
+    'Tangent',
+  );
+  assert.notEqual(
+    snap.snapSketchPointer(
+      [contact[0], contact[1]],
+      {...geometry, length: 6},
+      options,
+    ).hint,
+    'Tangent',
+  );
+});
+
+test('tangency candidates use curve-relative precision across model scales', () => {
+  for (const factor of [1e-9, 1, 1e8]) {
+    const value = layer(point(1, [0, 0]), {
+      kind: 'circle',
+      id: 2,
+      center: ref(1),
+      radius: 5 * factor,
+    });
+    const options = {...context(value), scale: 100 / factor, gridStep: factor};
+    const expected = [2.5 * factor, Math.sqrt(18.75) * factor] as const;
+    const geometry = {
+      kind: 'polar' as const,
+      origin: [10 * factor, 0] as const,
+      line: true,
+    };
+    const result = snap.snapSketchPointer(expected, geometry, options);
+    assert.equal(result.hint, 'Tangent');
+    const [x, y] = snap.endpointPosition(result.endpoint);
+    near([x / factor, y / factor], [2.5, Math.sqrt(18.75)]);
+    assert.notEqual(
+      snap.snapSketchPointer([10 * factor, 8 * factor], geometry, options).hint,
+      'Tangent',
+    );
+  }
+});
+
+test('actual points take priority over a nearby tangent candidate', () => {
+  const value = layer(
+    point(1, [0, 0]),
+    {kind: 'circle', id: 2, center: ref(1), radius: 5},
+    point(3, [2.52, Math.sqrt(18.75) + 0.02]),
+  );
+  const result = snap.snapSketchPointer(
+    [2.5, Math.sqrt(18.75)],
+    {kind: 'polar', origin: [10, 0], line: true},
+    context(value),
+  );
+  assert.equal(result.hint, 'Point');
+  assert.ok('point' in result.endpoint && result.endpoint.point.id === 3);
+  assert.equal(result.endpoint.relations, undefined);
+});
+
+test('an entered line length snaps its direction to tangency without shortening the line', () => {
+  const value = layer(point(1, [0, 0]), {
+    kind: 'circle',
+    id: 2,
+    center: ref(1),
+    radius: 5,
+  });
+  const result = snap.snapSketchPointer(
+    [1.34, 5.02],
+    {kind: 'polar', origin: [10, 0], length: 10, line: true},
+    context(value),
+  );
+  assert.equal(result.hint, 'Tangent');
+  const endpoint = snap.endpointPosition(result.endpoint);
+  near(endpoint, [10 - Math.sqrt(75), 5]);
+  assert.ok(Math.abs(snap.sketchDistance([10, 0], endpoint) - 10) < 1e-10);
+  assert.deepEqual(result.endpoint.relations, [['tangent', 2]]);
 });

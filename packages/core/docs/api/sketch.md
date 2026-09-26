@@ -2,13 +2,12 @@
 title: sketch
 description: Define immutable two-dimensional sketch geometry and constraints before building faces.
 sourceReview:
-  packageVersion: 0.0.1-alpha.16
+  packageVersion: 0.0.1-alpha.17
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
+      sha256: 522fe845cba4107cd39b4a72a87f3483b34ff4906c2248a326680b31b950e922
     - path: packages/core/src/library/sketch-solver.ts
-      sha256: 176f9f8a38507100328aaba71a2ef226b6e914e5718cf3a00b2bc018a7bab565
-      commit: 63b63837410721d7f9c44db1e721e5c52250f8d4
+      sha256: 97b4d256936244aa519248fe203128da5c04445e2f7565e152fb68158a221fb7
 sidebar:
   hidden: true
 head:

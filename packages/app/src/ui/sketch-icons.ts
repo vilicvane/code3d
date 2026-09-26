@@ -66,6 +66,19 @@ export const sketchConstraintIcons: Record<SketchConstraintTool, IconNode> = {
     ['path', {d: 'M5 12h4m6 0h4M3 9v6m18-6v6'}],
     ['circle', {cx: '12', cy: '12', r: '3'}],
   ],
+  equalLength: [['path', {d: 'M4 6h16M4 18h16M9 10h6m-6 4h6'}]],
+  equalRadius: [
+    ['path', {d: 'M10 4a7 7 0 1 0 0 16M14 4a7 7 0 1 1 0 16M9 10h6m-6 4h6'}],
+  ],
+  pointOn: [['path', {d: 'M3 18 9 12m6-6 6-6'}], ...points([12, 9])],
+  tangent: [
+    ['circle', {cx: '12', cy: '10', r: '7'}],
+    ['path', {d: 'M3 17h18'}],
+  ],
+  internalTangent: [
+    ['circle', {cx: '12', cy: '12', r: '9'}],
+    ['circle', {cx: '12', cy: '17', r: '4'}],
+  ],
   length: Ruler,
   orientation: Protractor,
   parallel: [['path', {d: 'm4 19 7-14m2 14 7-14'}]],

@@ -305,3 +305,42 @@ test('deleting circles cleans only newly disconnected centers and affected const
     constraints: [0, 1],
   });
 });
+
+test('accepting a circumference reference persists its contact with the new circle', () => {
+  const tool = new drawing.SketchCircleDrawing();
+  tool.place({position: [0, 0]}, 'local', 10, () => assert.fail());
+  let change: SketchChange | undefined;
+  tool.place(
+    {position: [5, 0], relations: [['pointOn', 3]]},
+    'local',
+    10,
+    value => ((change = value), true),
+  );
+  assert.deepEqual(change, {
+    kind: 'append',
+    entries: [
+      ['point', 10, [0, 0]],
+      ['circle', 11, [ref(10), 5]],
+      ['point', 12, [5, 0]],
+    ],
+    constraints: [
+      ['pointOn', [ref(12), 3]],
+      ['pointOn', [ref(12), 11]],
+    ],
+  });
+  tool.place({position: [0, 0]}, 'local', 10, () => assert.fail());
+  tool.place(
+    {point: {...ref(9, 'base'), position: [5, 0]}},
+    'local',
+    10,
+    value => ((change = value), true),
+  );
+  assert.deepEqual(change?.kind === 'append' && change.constraints, [
+    ['pointOn', [ref(9, 'base'), 11]],
+  ]);
+  assert.equal(
+    change?.kind === 'append' && change.entries.length,
+    2,
+    'upstream point identity is reused',
+  );
+});

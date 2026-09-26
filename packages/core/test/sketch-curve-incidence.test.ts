@@ -9,7 +9,6 @@ import {
   snapshotSketch,
   solveSketchSnapshot,
   sketchDragRequiresSolver,
-  sketchConnectionsPreserved,
   type SketchSnapshot,
 } from '../bld/tooling/index.js';
 import {
@@ -72,19 +71,17 @@ test('perpendicular editing retains circular and linear contacts on construction
       ['radius', 2, 8],
       ['angle', 4, 135],
       ['horizontal', 8],
+      ['pointOn', [5, 2]],
+      ['pointOn', [6, 2]],
+      ['pointOn', [9, 8]],
     ],
   );
   const constrained: SketchSnapshot = {
     ...initial,
     constraints: [...initial.constraints, ['perpendicular', [4, 10]]],
   };
-  assert.equal(
-    sketchConnectionsPreserved([solveSketchSnapshot([constrained])], initial),
-    false,
-  );
-  const solved = solveSketchSnapshot([constrained], {reference: initial});
+  const solved = solveSketchSnapshot([constrained]);
   near(point(solved, 5), point(initial, 5));
-  near(point(solved, 9), [8 - 8 * Math.SQRT2, 8]);
   online(solved, 5, 2);
   online(solved, 6, 2);
   online(solved, 9, 8);
@@ -92,7 +89,6 @@ test('perpendicular editing retains circular and linear contacts on construction
   assert.equal(solved.entities.find(e => e.id === 4)?.kind, 'line');
   const replay = solveSketchSnapshot([solved]);
   assert.deepEqual(replay.entities, solved.entities);
-  assert.equal(sketchConnectionsPreserved([replay], initial), true);
 });
 
 test('constraint edits retain finite arc contacts and reject incompatible coordinates', () => {
@@ -101,30 +97,25 @@ test('constraint edits retain finite arc contacts and reject incompatible coordi
     ['fixed', 2],
     ['fixed', 3],
     ['radius', 4, 10],
+    ['pointOn', [5, 4]],
   ]);
   const constrained: SketchSnapshot = {
     ...initial,
     constraints: [...initial.constraints, ['x', {layer: 's', id: 5}, 8]],
   };
-  const solved = solveSketchSnapshot([constrained], {reference: initial});
+  const solved = solveSketchSnapshot([constrained]);
   near(point(solved, 5), [8, 6]);
   online(solved, 5, 4);
-  assert.equal(
-    sketchConnectionsPreserved([solveSketchSnapshot([solved])], initial),
-    true,
-  );
   const outside: SketchSnapshot = {
     ...initial,
     constraints: [...initial.constraints, ['x', {layer: 's', id: 5}, -5]],
   };
-  assert.throws(
-    () => solveSketchSnapshot([outside], {reference: initial}),
-    /constraint/i,
-  );
+  assert.throws(() => solveSketchSnapshot([outside]), /constraint/i);
   assert.throws(
     () =>
       solveSketchSnapshot([constrained], {
-        reference: initial,
+        id: 5,
+        position: [8, 8],
         locks: [{id: 5, parameter: 1, value: 8}],
       }),
     /constraint/i,
@@ -134,32 +125,35 @@ test('constraint edits retain finite arc contacts and reject incompatible coordi
 
 test('constraint edits respect read-only upstream contacts and canonical point aliases', () => {
   const base = sketch(circle.slice(0, 2));
-  const local = base.derive([
-    ['point', 3, [6, 8]],
-    ['point', 4, 3],
-  ]);
+  const local = base.derive(
+    [
+      ['point', 3, [6, 8]],
+      ['point', 4, 3],
+      ['aux:circle', 5, [base.point(1), 10]],
+    ],
+    {
+      constraints: [
+        ['radius', 5, 10],
+        ['pointOn', [4, 5]],
+      ],
+    },
+  );
   const layers = [base, local].map(value =>
     snapshotSketch(value, s => (s === base ? 'base' : 'local')),
   );
   const initial = layers[1];
   const constrained: SketchSnapshot = {
     ...initial,
-    constraints: [['x', {layer: 'local', id: 4}, 8]],
+    constraints: [...initial.constraints, ['x', {layer: 'local', id: 4}, 8]],
   };
-  const solved = solveSketchSnapshot([layers[0], constrained], {
-    reference: initial,
-  });
+  const solved = solveSketchSnapshot([layers[0], constrained]);
   near(point(solved, 3), [8, 6]);
   near(point(solved, 4), [8, 6]);
-  assert.equal(sketchConnectionsPreserved([layers[0], solved], initial), true);
   const outside: SketchSnapshot = {
     ...initial,
-    constraints: [['x', {layer: 'local', id: 3}, 12]],
+    constraints: [...initial.constraints, ['x', {layer: 'local', id: 3}, 12]],
   };
-  assert.throws(
-    () => solveSketchSnapshot([layers[0], outside], {reference: initial}),
-    /constraint/i,
-  );
+  assert.throws(() => solveSketchSnapshot([layers[0], outside]), /constraint/i);
   near(point(layers[0], 1), [0, 0]);
 });
 
@@ -167,6 +161,7 @@ test('a point slides on a fixed circle through half turns and a full turn withou
   const initial = make(circle, [
     ['fixed', 1],
     ['radius', 2, 10],
+    ['pointOn', [3, 2]],
   ]);
   assert.equal(sketchDragRequiresSolver([initial]), true);
   let moved = initial;
@@ -191,7 +186,7 @@ test('a point slides on a fixed circle through half turns and a full turn withou
 });
 
 test('free circle center translation and radius resizing carry its contacting points', () => {
-  const initial = make(circle);
+  const initial = make(circle, [['pointOn', [3, 2]]]);
   const translated = solveSketchSnapshot([initial], {id: 1, position: [5, 6]});
   near(point(translated, 3), [15, 6]);
   assert.equal(curve(translated, 2).kind, 'circle');
@@ -203,7 +198,7 @@ test('free circle center translation and radius resizing carry its contacting po
 });
 
 test('free arc center and radius gestures preserve the polar pose of additional points', () => {
-  const initial = make(arc);
+  const initial = make(arc, [['pointOn', [5, 4]]]);
   const translated = solveSketchSnapshot([initial], {id: 1, position: [5, 6]});
   for (const id of [1, 2, 3, 5])
     near(
@@ -229,6 +224,7 @@ test('fixed finite arcs clamp to endpoints and release bounds on later frames fo
         ['fixed', 1],
         ['fixed', 2],
         ['fixed', 3],
+        ['pointOn', [5, 4]],
       ],
     );
     let moved = initial;
@@ -255,6 +251,7 @@ test('moving an arc endpoint retains additional points within the resulting fini
     ['fixed', 1],
     ['fixed', 2],
     ['radius', 4, 10],
+    ['pointOn', [5, 4]],
   ]);
   const end = [Math.sqrt(75), 5] as const;
   const moved = solveSketchSnapshot([initial], {id: 3, position: end});
@@ -288,13 +285,29 @@ test('points in an arc gap or merely passing a circle do not gain a connection',
   near(point(end, 3), [5, 0]);
 });
 
-test('upstream circles and finite arcs guide a local alias without sharing layer IDs', () => {
+test('local reference curves constrain aliases while upstream geometry stays read-only', () => {
   for (const entries of [circle.slice(0, 2), arc.slice(0, 4)]) {
     const base = sketch(entries);
-    const local = base.derive([
-      ['point', 1, [6, 8]],
-      ['point', 2, 1],
-    ]);
+    const curved = entries.some(e => e[0] === 'arc');
+    const local = base.derive(
+      [
+        ['point', 1, [6, 8]],
+        ['point', 2, 1],
+        curved
+          ? [
+              'aux:arc',
+              3,
+              [base.point(1), 10, base.point(2), base.point(3), 'ccw'],
+            ]
+          : ['aux:circle', 3, [base.point(1), 10]],
+      ],
+      {
+        constraints: [
+          ['radius', 3, 10],
+          ['pointOn', [2, 3]],
+        ],
+      },
+    );
     const layers = [base, local].map(value =>
       snapshotSketch(value, v => (v === base ? 'base' : 'local')),
     );
@@ -303,7 +316,7 @@ test('upstream circles and finite arcs guide a local alias without sharing layer
     near(point(moved, 1), [0, 10]);
     near(point(moved, 2), [0, 10]);
     assert.deepEqual(layers[0], original);
-    if (entries.some(e => e[0] === 'arc')) {
+    if (curved) {
       const bounded = solveSketchSnapshot(layers, {id: 2, position: [-4, 12]});
       assert.deepEqual(point(bounded, 1), [0, 10]);
       assert.deepEqual(point(bounded, 2), [0, 10]);
@@ -311,7 +324,7 @@ test('upstream circles and finite arcs guide a local alias without sharing layer
   }
 });
 
-test('circle incidence detection and solving scale with geometry and respect coordinate locks', () => {
+test('explicit circular relations scale with geometry and respect coordinate locks', () => {
   for (const scale of [1e-8, 1, 1e8]) {
     const initial = make(
       [
@@ -322,6 +335,7 @@ test('circle incidence detection and solving scale with geometry and respect coo
       [
         ['fixed', 1],
         ['radius', 2, 10 * scale],
+        ['pointOn', [3, 2]],
       ],
     );
     const moved = solveSketchSnapshot([initial], {
@@ -345,6 +359,7 @@ test('a constrained line attached to a circle follows it continuously without lo
     [
       ['fixed', 1],
       ['radius', 2, 10],
+      ['pointOn', [3, 2]],
       ['horizontal', 5],
       ['length', 5, 10],
     ],
@@ -366,7 +381,9 @@ test('duplicate circular geometry remains redundant and genuine expression confl
     [
       ['fixed', 1],
       ['radius', 2, 10],
+      ['pointOn', [3, 2]],
       ['radius', 4, 10],
+      ['pointOn', [3, 4]],
     ],
   );
   const moved = solveSketchSnapshot([initial], {id: 3, position: [0, 20]});
@@ -410,6 +427,7 @@ test('upstream arc IDs do not capture local radius constraints or result indices
         constraints: [
           ['fixed', 1],
           ['radius', 4, 5],
+          ['pointOn', [5, 4]],
         ],
       },
     );
@@ -420,5 +438,42 @@ test('upstream arc IDs do not capture local radius constraints or result indices
     near(point(moved, 5), [30, 5]);
     online(moved, 5, 4);
     assert.equal(layers[0].entities.find(e => e.kind === 'arc')!.radius, 10);
+  }
+});
+
+test('points initially on circles and arcs are free without an authored relation', () => {
+  for (const [entries, id] of [
+    [circle, 3],
+    [arc, 5],
+  ] as const) {
+    const initial = make(entries);
+    const original = structuredClone(initial);
+    const moved = solveSketchSnapshot([initial], {id, position: [15, 12]});
+    near(point(moved, id), [15, 12]);
+    for (const entity of initial.entities)
+      if (entity.id !== id)
+        assert.deepEqual(
+          moved.entities.find(e => e.id === entity.id),
+          entity,
+        );
+    assert.deepEqual(moved.constraints, []);
+    assert.deepEqual(initial, original);
+  }
+});
+
+test('deleting pointOn releases circular contact even when the starting point remains on the curve', () => {
+  for (const [entries, id, curveId] of [
+    [circle, 3, 2],
+    [arc, 5, 4],
+  ] as const) {
+    const initial = make(entries, [['pointOn', [id, curveId]]]);
+    const removed: SketchSnapshot = {...initial, constraints: []};
+    const moved = solveSketchSnapshot([removed], {
+      id,
+      position: [15, 12],
+      reference: removed,
+    });
+    near(point(moved, id), [15, 12]);
+    assert.deepEqual(moved.constraints, []);
   }
 });

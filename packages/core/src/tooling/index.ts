@@ -27,7 +27,6 @@ export {
   installSketchSolver,
 } from '../library/sketch-solver.js';
 export {
-  sketchConnectionsPreserved,
   isSketch,
   sketchDefinition,
   sketchDragRequiresSolver,
@@ -64,6 +63,7 @@ export {
   sketchCurveGeometry,
   sketchCurvePosition,
   sketchCurveTolerance,
+  sketchCurveTangencyPoint,
   sketchPositiveAngle,
 } from '../library/sketch-curves.js';
 export type {SketchCurve} from '../library/sketch-curves.js';

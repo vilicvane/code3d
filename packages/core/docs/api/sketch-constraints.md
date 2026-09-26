@@ -2,15 +2,16 @@
 title: Sketch constraints
 description: Constrain sketch points and curves while preserving explicit geometric freedom.
 sourceReview:
-  packageVersion: 0.0.1-alpha.16
+  packageVersion: 0.0.1-alpha.17
   sources:
     - path: packages/core/src/library/sketch.ts
-      sha256: a10941c6a1bba4b92ab8c7d84a3ec1a09758c41aa72dfd754ffb08402db42832
+      sha256: 522fe845cba4107cd39b4a72a87f3483b34ff4906c2248a326680b31b950e922
     - path: packages/core/src/library/sketch-solver.ts
-      sha256: 176f9f8a38507100328aaba71a2ef226b6e914e5718cf3a00b2bc018a7bab565
-      commit: 63b63837410721d7f9c44db1e721e5c52250f8d4
+      sha256: 97b4d256936244aa519248fe203128da5c04445e2f7565e152fb68158a221fb7
     - path: packages/core/src/library/sketch-drag-rules.ts
-      sha256: 457db01f4c7812790d57687d6e033f9a683c03258c6f53023338f541404dd80f
+      sha256: 1d65317ccae47cf1a7d570752e7db896a699b6b8a17cae07a5ffa212d2806683
+    - path: packages/core/src/library/sketch-incidence.ts
+      sha256: f8baaf550cff43dd9dd0b9f773228578ae01b9e7fb50a92bf3fefcda16ca3754
 sidebar:
   hidden: true
 head:
@@ -63,6 +64,9 @@ type SketchConstraint<P = number | SketchPoint> =
   | readonly ['fixed', P]
   | readonly ['horizontal' | 'vertical', number]
   | readonly ['parallel' | 'perpendicular', readonly [number, number]]
+  | readonly ['equalLength' | 'equalRadius', readonly [number, number]]
+  | readonly ['pointOn', readonly [P, number]]
+  | readonly ['tangent', readonly [number, number], ('external' | 'internal')?]
   | readonly ['angle', readonly [number, number], number]
   | readonly ['coincident', readonly [P, P]]
   | readonly ['midpoint', readonly [P, P, P]]
@@ -82,27 +86,56 @@ curve targets must be local curves of the required kind. Construction curves
 participate in the same constraint solve; the auxiliary type prefix only excludes
 them from face boundaries.
 
-| Tuple                                | Condition and allowed targets                                |
-| ------------------------------------ | ------------------------------------------------------------ |
-| `['fixed', point]`                   | Keep both current coordinates of one point                   |
-| `['x', point, value]`                | Set the point's sketch X coordinate to a finite value        |
-| `['y', point, value]`                | Set sketch Y, which maps toward model -Z                     |
-| `['coincident', [a, b]]`             | Make two point positions equal without merging authored IDs  |
-| `['midpoint', [middle, start, end]]` | Place middle at the arithmetic midpoint of start/end         |
-| `['horizontal', line]`               | Equal endpoint Y coordinates for a local line                |
-| `['vertical', line]`                 | Equal endpoint X coordinates for a local line                |
-| `['length', line, value]`            | Positive finite local line length in model units             |
-| `['angle', line, degrees]`           | Directed local line orientation relative to +X               |
-| `['parallel', [a, b]]`               | Parallel directions for two distinct local lines             |
-| `['perpendicular', [a, b]]`          | Perpendicular directions for two distinct local lines        |
-| `['angle', [a, b], degrees]`         | Signed rotation from first authored line direction to second |
-| `['radius', curve, value]`           | Positive finite radius of a local circle or arc              |
-| `['sweep', arc, degrees]`            | Local arc sweep magnitude, strictly between 0 and 360        |
+| Tuple                                | Condition and allowed targets                                      |
+| ------------------------------------ | ------------------------------------------------------------------ |
+| `['fixed', point]`                   | Keep both current coordinates of one point                         |
+| `['x', point, value]`                | Set the point's sketch X coordinate to a finite value              |
+| `['y', point, value]`                | Set sketch Y, which maps toward model -Z                           |
+| `['coincident', [a, b]]`             | Make two point positions equal without merging authored IDs        |
+| `['midpoint', [middle, start, end]]` | Place middle at the arithmetic midpoint of start/end               |
+| `['horizontal', line]`               | Equal endpoint Y coordinates for a local line                      |
+| `['vertical', line]`                 | Equal endpoint X coordinates for a local line                      |
+| `['length', line, value]`            | Positive finite local line length in model units                   |
+| `['angle', line, degrees]`           | Directed local line orientation relative to +X                     |
+| `['parallel', [a, b]]`               | Parallel directions for two distinct local lines                   |
+| `['perpendicular', [a, b]]`          | Perpendicular directions for two distinct local lines              |
+| `['equalLength', [a, b]]`            | Equal lengths for two distinct local line segments                 |
+| `['equalRadius', [a, b]]`            | Equal radii for two distinct local circles or arcs                 |
+| `['pointOn', [point, curve]]`        | Point on a local finite line segment, circle or finite arc         |
+| `['tangent', [a, b], mode?]`         | Tangent contact between a line and circle/arc, or two circles/arcs |
+| `['angle', [a, b], degrees]`         | Signed rotation from first authored line direction to second       |
+| `['radius', curve, value]`           | Positive finite radius of a local circle or arc                    |
+| `['sweep', arc, degrees]`            | Local arc sweep magnitude, strictly between 0 and 360              |
 
 Midpoint does not require a line entity between its endpoint references. Parallel
 and perpendicular constrain directions even when the finite segments do not
 intersect. `length` here is a line constraint, distinct from a B-Rep edge's
 [readonly length measurement](length.md).
+
+## Persistent geometric relationships
+
+These conditions run whenever the source evaluates, including after changing a
+dimension or recomputing a derived layer. Equal length compares line segments,
+not arc lengths. Equal radius accepts circle–circle, circle–arc and arc–arc pairs.
+Both preserve remaining position and direction freedom.
+
+`pointOn` leaves the point free to slide along the curve, within its finite
+extent. A point on a line's extension or the unused part of an arc's supporting
+circle does not satisfy the condition. Curve endpoints are included. A point
+may refer to an upstream `SketchPoint`, but the target curve must be local and
+the upstream point remains read-only.
+
+`tangent` also requires the contact point to belong to both finite curves.
+For two circles or arcs, omitted mode means `'external'`; use `'internal'` for
+one circle touching the other from inside. The mode refers to their supporting
+circles. For a line and circle/arc, omit mode. Two lines are not valid tangent
+targets. The relation does not create an authored contact point or merge point
+identities. Incompatible fixed positions, radii or finite extents fail the solve.
+
+Try the [persistent relationships example](../../../app/examples/sketches/persistent-constraints.ts).
+Change `holeRadius` from `8` to `6`: both holes shrink, the lower hole stays
+tangent to its construction guide, and both centers stay on the plate's median.
+The two sloping edges retain equal length.
 
 ## Angles and orientation
 
@@ -132,7 +165,7 @@ report redundant constraint indices and remaining degrees of freedom.
 
 ## Failures and editor gestures
 
-Missing targets, wrong curve kinds, repeated line IDs in a two-line condition,
+Missing targets, wrong curve kinds, repeated curve IDs in a pair condition,
 nonfinite values and invalid positive dimensions throw. Inconsistent or
 numerically unsolved systems throw `SketchConstraintError` from the tooling
 entry when the solver can identify the failure. Its constraint indices are
@@ -144,7 +177,8 @@ does not silently add `fixed` or `radius` tuples. Read-only upstream geometry an
 hard constraints take precedence over the pointer. See the [editor workflow](../sketches.md)
 for selection, dimension tools and drag behavior.
 
-GUI constraint edits also preserve existing point-on-curve connections, including
-construction geometry, by synchronizing the solved editable coordinates in the
-same undo step. Ordinary source evaluation applies only the authored constraints;
-coordinates that happen to lie on a circle do not define a persistent relation.
+GUI constraint edits synchronize solved editable coordinates in the same undo
+step. Drawing and dragging can add visible snap relationships as authored
+constraints. Both GUI edits and ordinary source evaluation use those constraints;
+coordinates that happen to lie on a curve or form a tangent do not imply a
+relationship. After removing a constraint, the old contact is free to separate.

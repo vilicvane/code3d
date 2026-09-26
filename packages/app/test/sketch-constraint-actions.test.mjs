@@ -150,7 +150,7 @@ test('point, line, mixed and circular selections expose only applicable existing
   );
   assert.deepEqual(
     actions([local], [ref(7), picks[0]]).map(a => a.kind),
-    ['midpoint'],
+    ['midpoint', 'pointOn'],
   );
   assert.deepEqual(actions([local], [ref(1), picks[0]]), []);
   const circle = snapshot([
@@ -386,5 +386,121 @@ test('unselected relation partners and unrelated selected upstream elements do n
   assert.deepEqual(
     named.map(a => a.kind),
     ['coincident'],
+  );
+});
+
+test('equal length and radius actions use entity identity and canonical pair order', () => {
+  const local = lines();
+  const selected = actions([local], segments([local]).reverse());
+  assert.deepEqual(
+    selected.find(a => a.kind === 'equalLength').create().constraints,
+    [['equalLength', [5, 6]]],
+  );
+  local.constraints = [['equalLength', [6, 5]]];
+  const remove = actions([local], [segments([local])[0]]).find(
+    a => a.kind === 'equalLength',
+  );
+  assert.equal(remove.active, true);
+  assert.deepEqual(remove.create().removedConstraints, [0]);
+  const circular = snapshot([
+    point(1, [0, 0]),
+    point(2, [20, 0]),
+    point(3, [24, 0]),
+    point(4, [20, 4]),
+    {kind: 'circle', id: 5, center: ref(1), radius: 4},
+    {
+      kind: 'arc',
+      id: 6,
+      center: ref(2),
+      radius: 4,
+      points: [ref(3), ref(4)],
+      direction: 'ccw',
+    },
+  ]);
+  const tools = actions([circular], segments([circular]).reverse());
+  assert.deepEqual(
+    tools.find(a => a.kind === 'equalRadius').create().constraints,
+    [['equalRadius', [5, 6]]],
+  );
+  assert.deepEqual(tools.find(a => a.kind === 'tangent').create().constraints, [
+    ['tangent', [5, 6]],
+  ]);
+  assert.deepEqual(
+    tools.find(a => a.kind === 'internalTangent').create().constraints,
+    [['tangent', [5, 6], 'internal']],
+  );
+  circular.constraints = [['tangent', [6, 5], 'external']];
+  const external = actions([circular], segments([circular])).find(
+    a => a.kind === 'tangent',
+  );
+  assert.equal(external.active, true);
+  assert.equal(external.dimension, undefined);
+  assert.deepEqual(external.create().removedConstraints, [0]);
+  circular.constraints = [['tangent', [6, 5], 'internal']];
+  const internal = actions([circular], segments([circular])).find(
+    a => a.kind === 'internalTangent',
+  );
+  assert.equal(internal.active, true);
+  assert.equal(internal.dimension, undefined);
+  assert.deepEqual(internal.create().removedConstraints, [0]);
+});
+
+test('point-on accepts accessible upstream and canonical alias points, without exposing upstream curve edits', () => {
+  const base = snapshot([point(1, [10, 0])], [], 'base');
+  const local = lines();
+  local.entities.push({...point(8, [10, 0]), alias: ref(7)});
+  const pick = segments([base, local]).find(p => p.id === 5);
+  const action = actions([base, local], [ref(8), pick]).find(
+    a => a.kind === 'pointOn',
+  );
+  assert.deepEqual(action.create().constraints, [['pointOn', [ref(7), 5]]]);
+  assert.ok(
+    !actions([base, local], [ref(1, 'base'), pick]).some(
+      a => a.kind === 'pointOn',
+    ),
+  );
+  const upstream = actions(
+    [base, local],
+    [ref(1, 'base'), pick],
+    new Map(),
+    new Set(['base']),
+  );
+  assert.deepEqual(
+    upstream.find(a => a.kind === 'pointOn').create().constraints,
+    [['pointOn', [ref(1, 'base'), 5]]],
+  );
+  const derived = snapshot([], [], 'derived');
+  assert.deepEqual(
+    actions(
+      [local, derived],
+      [pick, ref(7, 'local')],
+      new Map(),
+      new Set(['local']),
+    ),
+    [],
+  );
+  const mixed = {
+    ...local,
+    entities: [
+      ...local.entities,
+      point(9, [10, 10]),
+      {kind: 'circle', id: 10, center: ref(9), radius: 5},
+    ],
+  };
+  const mixedTools = actions(
+    [mixed],
+    [
+      segments([mixed]).find(s => s.id === 5),
+      segments([mixed]).find(s => s.id === 10),
+    ],
+  );
+  assert.ok(mixedTools.some(a => a.kind === 'tangent'));
+  assert.ok(
+    !mixedTools.some(
+      a =>
+        a.kind === 'internalTangent' ||
+        a.kind === 'equalRadius' ||
+        a.kind === 'equalLength',
+    ),
   );
 });

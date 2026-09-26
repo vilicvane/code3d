@@ -83,6 +83,7 @@ const expectedSolids: Record<string, readonly [string, number]> = {
   'sketches/mounting-plate.ts': ['default', 1],
   'sketches/regions.ts': ['default', 1],
   'sketches/constraints.ts': ['default', 1],
+  'sketches/persistent-constraints.ts': ['default', 1],
 };
 const volume = (model: Parameters<typeof modelGeometry>[0]) =>
   replicad.measureVolume(modelGeometry(model).value.shape.asShape3D());
@@ -201,6 +202,17 @@ for (const entry of exampleEntries) {
     try {
       const snapshot = createModelSnapshotter();
       for (const value of values) validateGeometry(snapshot(value));
+      if (entry.file === 'sketches/persistent-constraints.ts') {
+        assert.ok(
+          Math.abs(volume(exports.default) - (1800 - 128 * Math.PI) * 3) < 1e-6,
+        );
+        const profile = snapshotSketch(exports.profile, () => 'profile');
+        assert.equal(profile.degreesOfFreedom, 0);
+        assert.deepEqual(
+          profile.entities.filter(e => e.kind === 'circle').map(e => e.radius),
+          [8, 8],
+        );
+      }
       if (entry.file === 'operations/distance.ts') {
         for (const [gap, depth] of [
           [60, 32],

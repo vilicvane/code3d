@@ -276,12 +276,12 @@ for (const upstream of [false, true]) {
   });
 }
 
-test('removing a collapsed line keeps gesture-start incidences on subsequent surviving curves', async () => {
+test('removing a collapsed line keeps authored point-on relations on surviving curves', async () => {
   const args = `[
     ['point',1,[0,0]], ['point',2,[10,0]], ['line',3,[1,2]],
     ['point',4,[0,10]], ['point',5,[20,10]], ['line',6,[4,5]],
     ['point',7,[10,10]],
-  ]`;
+  ], {constraints: [['pointOn', [7, 6]]]}`;
   const [local] = await compile(`const s = sketch(${args});`);
   const preview = drag([local], args, 2, [0, 0], {layer: local.id, id: 1});
   assert.deepEqual(preview.merge.deleted.ids, [3]);
@@ -291,11 +291,11 @@ test('removing a collapsed line keeps gesture-start incidences on subsequent sur
   assert.deepEqual(replay.entities.find(e => e.id === 7).position, [10, 10]);
 });
 
-test('snapping a circle center carries its attached points before establishing the alias', async () => {
+test('snapping a circle center carries its constrained points before establishing the alias', async () => {
   const args = `[
     ['point',1,[7,5]], ['point',2,[0,0]], ['circle',3,[2,10]],
     ['point',4,[10,0]],
-  ]`;
+  ], {constraints: [['pointOn', [4, 3]]]}`;
   const [local] = await compile(`const s = sketch(${args});`);
   const preview = drag([local], args, 2, [7, 5], {layer: local.id, id: 1});
   assert.deepEqual(

@@ -21,7 +21,7 @@ import {
 } from './sketch-snap';
 import type {SketchChange} from './sketch-source';
 
-/** A center/radius tool; a clicked circumference point does not create a point entity. */
+/** A center/radius tool; accepted circumference relationships persist a contact point. */
 export class SketchCircleDrawing implements SketchDrawing {
   readonly name = 'Circle';
   start?: SketchEndpoint;
@@ -119,8 +119,22 @@ export class SketchCircleDrawing implements SketchDrawing {
     const geometry = new SketchDrawingGeometry(layer, nextId);
     const center = geometry.point(this.start);
     const circle = geometry.circle(center, radius);
-    const constraints: SketchConstraint<SketchPointAddress>[] =
-      this.centerCoordinates.map(({axis, value}) => [axis, center, value]);
+    // A radius placement on an accepted reference is itself a persistent
+    // contact. Free/grid radius picks need no additional authored point.
+    if ('point' in endpoint || endpoint.relations?.length) {
+      const contact = geometry.point(endpoint);
+      geometry.constraints.push(['pointOn', [contact, circle]]);
+    }
+    const constraints: SketchConstraint<SketchPointAddress>[] = [
+      ...geometry.constraints,
+      ...this.centerCoordinates.map(
+        ({axis, value}): SketchConstraint<SketchPointAddress> => [
+          axis,
+          center,
+          value,
+        ],
+      ),
+    ];
     const enteredRadius = this.dimensions.value('radius');
     if (enteredRadius !== undefined)
       constraints.push(['radius', circle, enteredRadius]);

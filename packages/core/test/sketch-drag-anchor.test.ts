@@ -151,9 +151,9 @@ test('shared endpoints and constraint-only connections preserve constraints whil
     close(point(moved, 2).position, [60, 20]);
     close([point(moved, 1).position[1]], [20]);
     if (connection === 'lines')
-      // Point 8 also lies on line 3: its contact now follows the horizontal
-      // line instead of treating its coincident starting position as unrelated.
-      close([point(moved, 8).position[1]], [20]);
+      // Sharing a chain of endpoints does not constrain point 8 to line 3.
+      // Its coincident initial coordinates do not add another relation.
+      close(point(moved, 8).position, point(initial, 8).position);
     else if (connection === 'coincident')
       close(point(moved, 8).position, point(moved, 1).position);
     else

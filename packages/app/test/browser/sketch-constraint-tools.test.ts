@@ -169,7 +169,7 @@ const value = sketch([['point',1,[0,0]],['point',2,[20,0]],['point',7,[5,10]],['
   );
   await point(page, 7).click();
   await click(page, line(page, 3), true);
-  assert.deepEqual(await names(page), ['Midpoint']);
+  assert.deepEqual(await names(page), ['Midpoint', 'Point on curve']);
   await toolbar(page)
     .getByRole('button', {name: 'Midpoint', exact: true})
     .click();

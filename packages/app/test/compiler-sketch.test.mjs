@@ -554,3 +554,47 @@ const profile = sketch([
       .every(e => e.construction && e.radius === 5),
   );
 });
+
+test('persistent constraints survive traced upstream references, parameter edits and fresh evaluation', async () => {
+  for (const span of [20, 30]) {
+    const source = `const span = ${span};
+const base = sketch([['point',1,[0,0]]]);
+const value = base.derive([
+  ['point',1,[-10,0]],['point',2,[10,0]],['line',3,[1,2]],
+  ['point',4,[-10,20]],['point',5,[10,20]],['line',6,[4,5]],
+  ['point',7,[0,5]],['circle',8,[7,5]],
+  ['point',9,[10,5]],['circle',10,[9,5]]
+], {constraints:[
+  ['fixed',1],['fixed',4],['fixed',7],['fixed',9],
+  ['horizontal',3],['horizontal',6],['length',3,span],['radius',8,5],
+  ['equalLength',[3,6]],['equalRadius',[8,10]],
+  ['pointOn',[base.point(1),3]],['tangent',[3,8]],['tangent',[8,10],'external']
+]});`;
+    const module = await compile(source);
+    const [base, value] = [...module.sketches.values()];
+    const positions = new Map(
+      value.entities
+        .filter(e => e.kind === 'point')
+        .map(e => [e.id, e.position]),
+    );
+    assert.ok(
+      Math.abs(positions.get(2)[0] - positions.get(1)[0] - span) < 1e-6,
+    );
+    assert.ok(
+      Math.abs(positions.get(5)[0] - positions.get(4)[0] - span) < 1e-6,
+    );
+    assert.deepEqual(value.constraints.slice(-5), [
+      ['equalLength', [3, 6]],
+      ['equalRadius', [8, 10]],
+      ['pointOn', [{layer: base.id, id: 1}, 3]],
+      ['tangent', [3, 8]],
+      ['tangent', [8, 10], 'external'],
+    ]);
+    assert.equal(value.references[base.id], 'base');
+    assert.deepEqual(base.entities[0].position, [0, 0]);
+    const parsed = analyzeSketchSource(`[
+      ['point',1,[-10,0]],['point',2,[10,0]],['line',3,[1,2]]
+    ], {constraints:[['length',3,span],['tangent',[3,8]],['tangent',[8,10],'external']]}`);
+    assert.deepEqual([...parsed.constraintValues], [[0, 'span']]);
+  }
+});

@@ -14,7 +14,6 @@ import {
 import {
   lineParameter,
   pointLineDistance,
-  sketchIncidences,
 } from '../bld/library/sketch-incidence.js';
 
 const make = (
@@ -42,6 +41,7 @@ test('a point on a fixed finite line slides without leaving it or changing IDs/c
   const initial = make(base, [
     ['fixed', 1],
     ['fixed', 2],
+    ['pointOn', [4, 3]],
   ]);
   for (const [x, expected] of [
     [7, 7],
@@ -59,7 +59,7 @@ test('a point on a fixed finite line slides without leaving it or changing IDs/c
 });
 
 test('moving a line endpoint retains interior points, while an interior point can move its free line', () => {
-  const initial = make(base);
+  const initial = make(base, [['pointOn', [4, 3]]]);
   assert.equal(sketchDragRequiresSolver([initial]), true);
   for (const id of [2, 4]) {
     const moved = solveSketchSnapshot([initial], {id, position: [15, 8]});
@@ -73,6 +73,7 @@ test('T-junction motion retains the line incidence together with the connected l
   const initial = make(
     [...base, ['point', 5, [10, 10]], ['line', 6, [4, 5]]],
     [
+      ['pointOn', [4, 3]],
       ['horizontal', 3],
       ['vertical', 6],
       ['length', 6, 10],
@@ -95,10 +96,14 @@ test('T-junction motion retains the line incidence together with the connected l
 
 test('local points and aliases can slide on a read-only upstream line', () => {
   const parent = sketch(base.slice(0, 3));
-  const child = parent.derive([
-    ['point', 1, [10, 0]],
-    ['point', 2, 1],
-  ]);
+  const child = parent.derive(
+    [
+      ['point', 1, [10, 0]],
+      ['point', 2, 1],
+      ['aux:line', 3, [parent.point(1), parent.point(2)]],
+    ],
+    {constraints: [['pointOn', [2, 3]]]},
+  );
   const layers = [parent, child].map(value =>
     snapshotSketch(value, v => (v === parent ? 'base' : 'local')),
   );
@@ -108,27 +113,13 @@ test('local points and aliases can slide on a read-only upstream line', () => {
   assert.deepEqual(point(layers[0], 1), [0, 0]);
 });
 
-test('incidence detection ignores extensions and near misses, deduplicates reverse lines and is scale independent', () => {
+test('explicit point-on relations remain scale independent', () => {
   for (const scale of [1e-8, 1, 1e8]) {
     const p = [
       [0, 0],
       [20, 0],
       [10, 0],
-      [30, 0],
-      [10, 0.001],
     ].map(v => v.map(n => n * scale) as [number, number]);
-    assert.deepEqual(
-      sketchIncidences({
-        points: p,
-        circles: [],
-        arcs: [],
-        lines: [
-          [0, 1],
-          [1, 0],
-        ],
-      }),
-      [{point: 2, kind: 'line', index: 0}],
-    );
     const initial = make(
       [
         ['point', 1, p[0]],
@@ -139,6 +130,7 @@ test('incidence detection ignores extensions and near misses, deduplicates rever
       [
         ['fixed', 1],
         ['fixed', 2],
+        ['pointOn', [4, 3]],
       ],
     );
     const moved = solveSketchSnapshot([initial], {
@@ -149,8 +141,8 @@ test('incidence detection ignores extensions and near misses, deduplicates rever
   }
 });
 
-test('incidence uses gesture-start geometry and preserves real coordinate locks', () => {
-  const initial = make(base);
+test('explicit point-on relations preserve coordinate locks and crossing never creates a relation', () => {
+  const initial = make(base, [['pointOn', [4, 3]]]);
   const moved = solveSketchSnapshot([initial], {
     id: 4,
     position: [12, 8],
@@ -184,8 +176,11 @@ test('finite endpoint bounds release on the next frame and multiple coincident l
     [
       ['fixed', 1],
       ['fixed', 2],
+      ['pointOn', [4, 3]],
       ['fixed', 6],
       ['fixed', 7],
+      ['pointOn', [4, 5]],
+      ['pointOn', [4, 8]],
     ],
   );
   // P lies at the intersection of two fixed lines; a reverse duplicate adds
@@ -195,6 +190,7 @@ test('finite endpoint bounds release on the next frame and multiple coincident l
   const slider = make(base, [
     ['fixed', 1],
     ['fixed', 2],
+    ['pointOn', [4, 3]],
   ]);
   const end = solveSketchSnapshot([slider], {id: 4, position: [30, 8]});
   assert.deepEqual(point(end, 4), [20, 0]);
@@ -206,10 +202,11 @@ test('finite endpoint bounds release on the next frame and multiple coincident l
   assert.deepEqual(point(back, 4), [7, 0]);
 });
 
-test('AST locks cannot erase a displayed incidence before the drag rule sees it', () => {
+test('AST locks conflicting with an authored point-on relation reject the drag', () => {
   const initial = make(base, [
     ['fixed', 1],
     ['fixed', 2],
+    ['pointOn', [4, 3]],
   ]);
   const original = structuredClone(initial);
   assert.throws(
@@ -222,4 +219,33 @@ test('AST locks cannot erase a displayed incidence before the drag rule sees it'
     /constraint/i,
   );
   assert.deepEqual(initial, original);
+});
+
+test('initial geometric coincidence creates no line relation and deleting pointOn releases the point', () => {
+  const initial = make(base);
+  assert.equal(sketchDragRequiresSolver([initial]), false);
+  const moved = solveSketchSnapshot([initial], {id: 4, position: [12, 5]});
+  assert.deepEqual(point(moved, 4), [12, 5]);
+  assert.deepEqual(point(moved, 1), [0, 0]);
+  assert.deepEqual(point(moved, 2), [20, 0]);
+  assert.deepEqual(moved.constraints, []);
+
+  const constrained = make(base, [
+    ['fixed', 1],
+    ['fixed', 2],
+    ['pointOn', [4, 3]],
+  ]);
+  const removed: SketchSnapshot = {
+    ...constrained,
+    constraints: constrained.constraints.filter(([kind]) => kind !== 'pointOn'),
+  };
+  const released = solveSketchSnapshot([removed], {
+    id: 4,
+    position: [12, 5],
+    reference: removed,
+  });
+  assert.deepEqual(point(released, 4), [12, 5]);
+  assert.deepEqual(point(released, 1), [0, 0]);
+  assert.deepEqual(point(released, 2), [20, 0]);
+  assert.deepEqual(released.constraints, removed.constraints);
 });

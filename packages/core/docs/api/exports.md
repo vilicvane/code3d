@@ -2,13 +2,13 @@
 title: Core API export index
 description: Find the primary reference for every Core function, type, model member and integration entry point.
 sourceReview:
-  packageVersion: 0.0.1-alpha.16
+  packageVersion: 0.0.1-alpha.17
   sources:
     - path: packages/core/src/library/index.ts
       sha256: 8f5784bccbc2f8a47139a71af3c3fbfe0c1e767dc9dcd61902fa06413dd40f54
       commit: b4fe7de02f59acbd2614a592a4b8ce0586243b22
     - path: packages/core/src/tooling/index.ts
-      sha256: 60d91eaa40d822c84dca66e7792af9072bccc8e8c6a9c738f18011bf2174bf73
+      sha256: ddadf81904b8fb58264b23259e3e5a82aef81e148be1d20e3e012a12e4975054
     - path: packages/core/src/library/replicad.ts
       sha256: 937b1c0bcdd8389e9c3724bb8bf867c3703509400a6bebfcfbcc84c8683e17fe
       commit: 5058f1bbd8f9289ad89f0cf6cb19f7b5fa143eae
@@ -20,6 +20,7 @@ sourceReview:
       commit: 5c8979f384280b644263a2d6ba3abacb69697c24
     - path: packages/core/package.json
       sha256: ce0a5db65405e7e592d2e75a7cccb181c0f40f2063b0d638dd94feb4e6661029
+      commit: 05ceff0d73ebfd17bcfd4cbddc4508f07e794ad2
 sidebar:
   hidden: true
 head:
@@ -236,7 +237,7 @@ has no aggregate solid topology or area/volume properties.
 
 ## Host and interoperability entries
 
-- [Tooling integration](tooling.md) covers all 83 values and 73 type exports of
+- [Tooling integration](tooling.md) covers all 84 values and 73 type exports of
   `@code3d/core/tooling`, including host-only members, lifecycle exits, snapshots
   and every discriminated result branch. Shared author types link to their
   primary references above.

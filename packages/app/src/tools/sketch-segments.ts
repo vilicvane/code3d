@@ -12,6 +12,7 @@ import {
   sketchCurvePosition,
   sketchCurveTolerance,
   sketchCurveIntersections,
+  sketchCurveTangencyPoint,
 } from '@code3d/core/tooling';
 import {formatSourceNumber} from './source-expression';
 import {
@@ -396,12 +397,55 @@ export function trimSketchSegment(
       add(endpoints);
     }
   });
+  const originalPoints = snapshotPoints(layers);
+  const position = (ref: SketchPointAddress): SketchPosition => {
+    const added = generated.find(p => sameSketchPoint(p.address, ref));
+    return (
+      added?.position ??
+      originalPoints.find(p => sameSketchPoint(p, ref))!.position
+    );
+  };
+  const retainedCurve = (id: number): SketchCurve => {
+    const added = entries.find(entry => entry[1] === id);
+    const entity = added
+      ? sketchDraftEntity(added)
+      : local.entities.find(e => e.id === id)!;
+    return sketchCurveGeometry(entity, position)!;
+  };
   const constraintReplacements = local.constraints.flatMap<
     Extract<SketchChange, {kind: 'trim'}>['constraintReplacements'][number]
-  >(([kind, data], index) => {
+  >(([kind, data, value], index) => {
+    if (kind === 'pointOn') {
+      const ids = replacements.get(data[1]);
+      if (!ids) return [];
+      const target = position(data[0]);
+      const retained = ids.find(id => {
+        const curve = retainedCurve(id);
+        return (
+          sketchDistance(
+            target,
+            sketchCurvePosition(
+              curve,
+              sketchCurveClosestParameter(curve, target),
+            ),
+          ) <= sketchCurveTolerance(curve)
+        );
+      });
+      if (retained === data[1]) return [];
+      return [
+        {
+          index,
+          targets: retained === undefined ? [] : [[data[0], retained] as const],
+        },
+      ];
+    }
+    if (kind === 'equalLength' && data.some(id => replacements.has(id)))
+      return [{index, targets: []}];
     if (
       kind === 'parallel' ||
       kind === 'perpendicular' ||
+      kind === 'equalRadius' ||
+      kind === 'tangent' ||
       (kind === 'angle' && typeof data !== 'number')
     ) {
       const pair = data as readonly [number, number];
@@ -413,6 +457,7 @@ export function trimSketchSegment(
       const first = replacements.get(pair[0]) ?? [pair[0]];
       const second = replacements.get(pair[1]) ?? [pair[1]];
       if (
+        kind !== 'tangent' &&
         first.length === 1 &&
         first[0] === pair[0] &&
         second.length === 1 &&
@@ -420,7 +465,21 @@ export function trimSketchSegment(
       )
         return [];
       return [
-        {index, targets: first.flatMap(a => second.map(b => [a, b] as const))},
+        {
+          index,
+          targets: first.flatMap(a =>
+            second.flatMap(b =>
+              kind !== 'tangent' ||
+              sketchCurveTangencyPoint(
+                retainedCurve(a),
+                retainedCurve(b),
+                value as 'external' | 'internal' | undefined,
+              )
+                ? [[a, b] as const]
+                : [],
+            ),
+          ),
+        },
       ];
     }
     const id =
@@ -447,6 +506,10 @@ export function trimSketchSegment(
   });
   const ids = [...new Set([...removed, ...curves.map(curve => curve.id)])];
   const orphaned = disconnectedPoints(layers, ids, entries);
+  const constraints = deletedSketchConstraints(local, [
+    ...removed,
+    ...orphaned,
+  ]);
   return {
     kind: 'trim',
     replacements: curves.map(original => ({
@@ -454,8 +517,10 @@ export function trimSketchSegment(
       ids: replacements.get(original.id)!,
     })),
     entries,
-    constraintReplacements,
+    constraintReplacements: constraintReplacements.filter(
+      replacement => !constraints.includes(replacement.index),
+    ),
     ids: [...ids, ...orphaned],
-    constraints: deletedSketchConstraints(local, [...removed, ...orphaned]),
+    constraints,
   };
 }

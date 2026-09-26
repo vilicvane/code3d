@@ -2,7 +2,7 @@ import {
   solveSketchProblem,
   type SketchSolveProblem,
   type SketchSolveConstraint,
-  type SketchSolveObjective,
+  type SketchSolveCurve,
 } from './sketch-solver.js';
 import {solveSketchDrag} from './sketch-drag-rules.js';
 import {sketchRegions} from './sketch-regions.js';
@@ -18,12 +18,7 @@ import {
 import {retainInspectionIdentity} from './inspect.js';
 import type {RigidTransform} from './spatial.js';
 import {
-  sketchIncidences,
-  sketchIncidencePoints,
-  sketchIncidenceCurve,
-  isPointOnSketchCurve,
   sketchIncidenceConstraints,
-  solveSketchIncidenceBounds,
   type SketchIncidenceGeometry,
 } from './sketch-incidence.js';
 
@@ -70,9 +65,17 @@ export type SketchConstraint<P = number | SketchPoint> =
   | readonly [kind: 'fixed', point: P]
   | readonly [kind: 'horizontal' | 'vertical', line: number]
   | readonly [
-      kind: 'parallel' | 'perpendicular',
+      kind: 'parallel' | 'perpendicular' | 'equalLength' | 'equalRadius',
       lines: readonly [number, number],
     ]
+  /** Tangency occurs on the finite curves. Circular pairs default to external. */
+  | readonly [
+      kind: 'tangent',
+      curves: readonly [number, number],
+      mode?: 'external' | 'internal',
+    ]
+  /** A point on the finite segment, circle, or directed arc. */
+  | readonly [kind: 'pointOn', targets: readonly [point: P, curve: number]]
   /** Signed rotation from the first line's authored direction to the second, in degrees. */
   | readonly [kind: 'angle', lines: readonly [number, number], value: number]
   | readonly [kind: 'coincident', points: readonly [P, P]]
@@ -264,16 +267,21 @@ class SketchValue implements Sketch {
           'Sketch constraints must reference a local or upstream point.',
         );
     };
-    const curveRef = (id: number, kind: 'line' | 'arc' | 'circular curve') => {
+    const curveRef = (
+      id: number,
+      kind: 'line' | 'arc' | 'circular curve' | 'curve',
+    ) => {
       if (
         !copied.some(
           e =>
-            (kind === 'circular curve'
-              ? e[0] === 'circle' ||
-                e[0] === 'aux:circle' ||
-                e[0] === 'arc' ||
-                e[0] === 'aux:arc'
-              : e[0] === kind || e[0] === `aux:${kind}`) && e[1] === id,
+            (kind === 'curve'
+              ? e[0] !== 'point'
+              : kind === 'circular curve'
+                ? e[0] === 'circle' ||
+                  e[0] === 'aux:circle' ||
+                  e[0] === 'arc' ||
+                  e[0] === 'aux:arc'
+                : e[0] === kind || e[0] === `aux:${kind}`) && e[1] === id,
         )
       )
         throw new Error(
@@ -293,13 +301,45 @@ class SketchValue implements Sketch {
         if (
           kind === 'parallel' ||
           kind === 'perpendicular' ||
+          kind === 'equalLength' ||
+          kind === 'equalRadius' ||
+          kind === 'tangent' ||
           (kind === 'angle' && typeof data !== 'number')
         ) {
           if (!Array.isArray(data) || data.length !== 2 || data[0] === data[1])
             throw new Error(
-              `Sketch ${kind} constraint requires two distinct local lines.`,
+              `Sketch ${kind} constraint requires two distinct local curves.`,
             );
-          data.forEach(id => curveRef(id, 'line'));
+          data.forEach(id =>
+            curveRef(
+              id,
+              kind === 'equalRadius'
+                ? 'circular curve'
+                : kind === 'tangent'
+                  ? 'curve'
+                  : 'line',
+            ),
+          );
+          if (kind === 'tangent') {
+            const lineCount = data.filter(id =>
+              copied.some(
+                e => e[1] === id && (e[0] === 'line' || e[0] === 'aux:line'),
+              ),
+            ).length;
+            if (
+              lineCount === 2 ||
+              (lineCount === 1 && value !== undefined) ||
+              (value !== undefined &&
+                value !== 'external' &&
+                value !== 'internal')
+            )
+              throw new Error(
+                'Sketch tangent requires a line and a circular curve without a mode, or two circular curves with external/internal mode.',
+              );
+            return value === undefined
+              ? [kind, [data[0], data[1]]]
+              : [kind, [data[0], data[1]], value];
+          }
           if (kind === 'angle') {
             if (!Number.isFinite(value))
               throw new Error(
@@ -307,6 +347,15 @@ class SketchValue implements Sketch {
               );
             return [kind, [data[0], data[1]], value];
           }
+          return [kind, [data[0], data[1]]];
+        }
+        if (kind === 'pointOn') {
+          if (!Array.isArray(data) || data.length !== 2)
+            throw new Error(
+              'Sketch pointOn constraint requires a point and a local curve.',
+            );
+          pointRef(data[0]);
+          curveRef(data[1], 'curve');
           return [kind, [data[0], data[1]]];
         }
         if (kind === 'coincident') {
@@ -744,7 +793,15 @@ function snapshotConstraints(
         return [kind, data];
       case 'parallel':
       case 'perpendicular':
+      case 'equalLength':
+      case 'equalRadius':
         return [kind, [data[0], data[1]]];
+      case 'tangent':
+        return value === undefined
+          ? [kind, [data[0], data[1]]]
+          : [kind, [data[0], data[1]], value];
+      case 'pointOn':
+        return [kind, [point(data[0]), data[1]]];
       case 'length':
       case 'radius':
       case 'sweep':
@@ -798,62 +855,28 @@ function sketchGeometry(layers: readonly SketchSnapshot[]) {
   return {points, pointIndex, lines, circles, arcs, geometry};
 }
 
-/** Includes gesture-only equations, not merely authored constraints. */
+/** Authored constraints and arc structure require solver-backed dragging. */
 export function sketchDragRequiresSolver(
   layers: readonly SketchSnapshot[],
 ): boolean {
-  const local = layers.at(-1)!;
-  if (
-    local.constraints.length ||
-    layers.some(layer => layer.entities.some(e => e.kind === 'arc'))
-  )
-    return true;
-  const {points, geometry} = sketchGeometry(layers);
-  return sketchIncidences(geometry).some(contact =>
-    sketchIncidencePoints(geometry, contact).some(
-      i => points[i].layer === local.id,
-    ),
+  return Boolean(
+    layers.at(-1)!.constraints.length ||
+    layers.some(layer => layer.entities.some(e => e.kind === 'arc')),
   );
 }
 
-/** Source replay must retain every edit-start incidence, including aliases. */
-export function sketchConnectionsPreserved(
-  layers: readonly SketchSnapshot[],
-  reference: SketchSnapshot,
-): boolean {
-  const original = sketchGeometry([...layers.slice(0, -1), reference]);
-  const current = sketchGeometry(layers);
-  for (const contact of sketchIncidences(original.geometry)) {
-    const point =
-      current.points[current.pointIndex(original.points[contact.point])]
-        .position;
-    if (
-      !isPointOnSketchCurve(
-        point,
-        sketchIncidenceCurve(current.geometry, contact),
-      )
-    )
-      return false;
-  }
-  return true;
-}
-
-/** Evaluation and GUI edits share one solver. An edit without a pointer target
- * retains the reference geometry's connections while applying new constraints. */
+/** Evaluation and pointer edits share the same authored relations. */
 export function solveSketchSnapshot(
   layers: readonly SketchSnapshot[],
-  edit?: Readonly<{
-    /** Edit-start geometry; previous-frame geometry remains the numeric seed. */
+  drag?: Readonly<{
+    id: number;
+    position: SketchPosition;
+    /** Gesture-start soft references; previous-frame geometry is only a seed. */
     reference?: SketchSnapshot;
-    /** Numeric, edit-only parameter locks; never author constraints. */
+    /** Numeric, gesture-only parameter locks; never author constraints. */
     locks?: readonly Readonly<{id: number; parameter: number; value: number}>[];
-  }> &
-    (
-      | Readonly<{id: number; position: SketchPosition}>
-      | Readonly<{reference: SketchSnapshot}>
-    ),
+  }>,
 ): SketchSnapshot {
-  const drag = edit && 'id' in edit ? edit : undefined;
   const local = layers.at(-1)!;
   const {points, pointIndex, lines, circles, arcs, geometry} =
     sketchGeometry(layers);
@@ -870,6 +893,29 @@ export function solveSketchSnapshot(
   };
   const arcIndex = (id: number) =>
     arcs.findIndex(a => a.id === id && a.layer === local.id);
+  const curveIndex = (id: number): SketchSolveCurve => {
+    const entity = local.entities.find(e => e.id === id && e.kind !== 'point');
+    if (!entity) throw new Error(`Missing sketch curve ${id}.`);
+    if (entity.kind === 'line') {
+      const [a, b] = linePoints(id);
+      return {
+        kind: 'line',
+        index: lines.findIndex(line => line[0] === a && line[1] === b),
+      };
+    }
+    return entity.kind === 'arc'
+      ? {kind: 'arc', index: arcIndex(id)}
+      : {kind: 'circle', index: circleIndex(id)};
+  };
+  const curvePoints = (curve: SketchSolveCurve) =>
+    curve.kind === 'line'
+      ? lines[curve.index]
+      : curve.kind === 'circle'
+        ? [geometry.circles[curve.index].center]
+        : [
+            geometry.arcs[curve.index].center,
+            ...geometry.arcs[curve.index].points,
+          ];
   const constraints = local.constraints.map<SketchSolveConstraint>(
     ([kind, data, value]) => {
       switch (kind) {
@@ -885,10 +931,29 @@ export function solveSketchSnapshot(
           return {kind, points: linePoints(data)};
         case 'parallel':
         case 'perpendicular':
+        case 'equalLength':
           return {
             kind,
             points: [...linePoints(data[0]), ...linePoints(data[1])],
           };
+        case 'equalRadius':
+        case 'tangent': {
+          const curves = [curveIndex(data[0]), curveIndex(data[1])] as const;
+          return {
+            kind,
+            curves,
+            points: curves.flatMap(curvePoints),
+            ...(kind === 'tangent' ? {mode: value ?? 'external'} : {}),
+          } as SketchSolveConstraint;
+        }
+        case 'pointOn': {
+          const curve = curveIndex(data[1]);
+          const contact = {point: pointIndex(data[0]), ...curve};
+          return {
+            ...sketchIncidenceConstraints(geometry, [contact])[0],
+            bound: curve,
+          };
+        }
         case 'coincident':
           return {kind, points: [pointIndex(data[0]), pointIndex(data[1])]};
         case 'midpoint':
@@ -939,7 +1004,7 @@ export function solveSketchSnapshot(
       const upstream = p.layer !== local.id;
       const locked: [boolean, boolean] = [upstream, upstream];
       if (!upstream)
-        for (const lock of edit?.locks ?? [])
+        for (const lock of drag?.locks ?? [])
           if (
             local.entities.some(e => e.kind === 'point' && e.id === lock.id) &&
             pointIndex({layer: local.id, id: lock.id}) === pointIndex(p)
@@ -952,7 +1017,7 @@ export function solveSketchSnapshot(
     lines,
     circles: circles.map(c => {
       const upstream = c.layer !== local.id;
-      const lock = !upstream && edit?.locks?.find(lock => lock.id === c.id);
+      const lock = !upstream && drag?.locks?.find(lock => lock.id === c.id);
       return {
         center: pointIndex(c.center),
         radius: lock ? lock.value : c.radius,
@@ -961,7 +1026,7 @@ export function solveSketchSnapshot(
     }),
     arcs: arcs.map(a => {
       const upstream = a.layer !== local.id;
-      const lock = !upstream && edit?.locks?.find(lock => lock.id === a.id);
+      const lock = !upstream && drag?.locks?.find(lock => lock.id === a.id);
       return {
         center: pointIndex(a.center),
         radius: lock ? lock.value : a.radius,
@@ -1044,20 +1109,8 @@ export function solveSketchSnapshot(
       })
     : prepared;
   const result = objective
-    ? solveSketchDrag(
-        prepared,
-        objective,
-        reference,
-        drag?.reference
-          ? sketchGeometry([...layers.slice(0, -1), drag.reference]).geometry
-          : geometry,
-      )
-    : edit?.reference
-      ? solveSketchConstraintEdit(
-          prepared,
-          sketchGeometry([...layers.slice(0, -1), edit.reference]).geometry,
-        )
-      : solveSketchProblem(prepared);
+    ? solveSketchDrag(prepared, objective, reference)
+    : solveSketchProblem(prepared);
   const entities = local.entities.map(e =>
     e.kind === 'point'
       ? {
@@ -1098,58 +1151,9 @@ export function solveSketchSnapshot(
   return {
     ...local,
     entities,
-    degreesOfFreedom: edit ? local.degreesOfFreedom : result.degreesOfFreedom,
-    redundant: edit ? local.redundant : result.redundant,
+    degreesOfFreedom: drag ? local.degreesOfFreedom : result.degreesOfFreedom,
+    redundant: drag ? local.redundant : result.redundant,
   };
-}
-
-function solveSketchConstraintEdit(
-  problem: SketchSolveProblem,
-  reference: SketchIncidenceGeometry,
-) {
-  const contacts = sketchIncidences(reference);
-  const connected = {
-    ...problem,
-    constraints: [
-      ...problem.constraints,
-      ...sketchIncidenceConstraints(reference, contacts),
-    ],
-  };
-  const objectives: SketchSolveObjective[] = [
-    ...problem.points.flatMap((point, index): SketchSolveObjective[] =>
-      point.locked.every(Boolean)
-        ? []
-        : [
-            {
-              kind: 'point',
-              point: index,
-              position: reference.points[index],
-              weight: 1,
-            },
-          ],
-    ),
-    ...(['circle', 'arc'] as const).flatMap(curve =>
-      (curve === 'circle' ? problem.circles : problem.arcs).flatMap(
-        (value, index): SketchSolveObjective[] =>
-          value.locked
-            ? []
-            : [
-                {
-                  kind: 'radius',
-                  curve,
-                  index,
-                  value: (curve === 'circle'
-                    ? reference.circles
-                    : reference.arcs)[index].radius,
-                  weight: 1,
-                },
-              ],
-      ),
-    ),
-  ];
-  return solveSketchIncidenceBounds(connected, contacts, current =>
-    solveSketchProblem(current, objectives, connected),
-  );
 }
 
 function solvedProblem(problem: SketchSolveProblem): SketchSolveProblem {
